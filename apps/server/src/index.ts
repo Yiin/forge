@@ -11,6 +11,7 @@ import { projectFileRoutes } from './http/projectFiles.js'
 import { statusRoutes } from './http/status.js'
 import { migrate } from './db/migrate.js'
 import { EventBus } from './events/bus.js'
+import { searchRoutes } from './http/search.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -27,6 +28,7 @@ export function createApp(
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
+    app.route('/', searchRoutes(uploadStore.database))
   }
 
   return app
