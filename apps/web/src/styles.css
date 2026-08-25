@@ -164,6 +164,97 @@ body {
   min-width: 0;
   flex: 1;
 }
+
+.file-browser {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.file-browser-header {
+  align-items: center;
+  display: flex;
+  gap: 0.6rem;
+  min-height: 3.25rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.file-browser-back,
+.file-browser-breadcrumb button {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.35rem;
+}
+.file-browser-breadcrumb {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+}
+.file-browser-breadcrumb span {
+  align-items: center;
+  display: inline-flex;
+}
+.file-browser-content {
+  display: grid;
+  grid-template-columns: minmax(220px, 32%) 1fr;
+  flex: 1;
+  min-height: 0;
+}
+.file-browser-tree {
+  border-right: 1px solid var(--border);
+  min-height: 0;
+  overflow: auto;
+  padding: 0.5rem;
+}
+.file-browser-viewer {
+  min-width: 0;
+  overflow: auto;
+  padding: 1rem;
+}
+.file-browser-empty {
+  align-items: center;
+  color: var(--muted-foreground);
+  display: flex;
+  justify-content: center;
+}
+.file-tree-context-menu {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: 0 8px 30px #0005;
+  display: grid;
+  padding: 0.25rem;
+}
+.file-tree-context-menu button,
+.file-tree-context-menu a {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  text-decoration: none;
+}
+@media (max-width: 767px) {
+  .file-browser-content {
+    display: block;
+  }
+  .file-browser-selected .file-browser-tree {
+    display: none;
+  }
+  .file-browser-tree {
+    border: 0;
+    height: 100%;
+  }
+  .file-browser-viewer {
+    height: calc(100% - 3.25rem);
+    padding: 0.75rem;
+  }
+}
 .empty-panel {
   display: grid;
   place-content: center;

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { messageContentTypes } from '@forge/protocol/message'
+import type { EventBus } from '../events/bus.js'
 
 // The wire schema in @forge/protocol carries a committed seq and an ISO
 // createdAt. Rows are validated before insert, when neither exists yet, so the
@@ -26,15 +27,18 @@ export type AppendMessage = {
   type: string
   content: unknown
   createdAt?: number
+  eventBus?: EventBus
 }
 
 export function appendMessage(db: Db, input: AppendMessage) {
+  const eventBus = input.eventBus
   const parsed = messageRowSchema.parse({
     ...input,
     createdAt: input.createdAt ?? Date.now(),
   })
   // Messages are strictly append-only. No mutation SQL is allowed for this table.
   db.exec('BEGIN')
+  let saved: ReturnType<typeof messageRowSchema.parse> & { seq: number }
   try {
     const result = db
       .prepare(
@@ -86,11 +90,26 @@ export function appendMessage(db: Db, input: AppendMessage) {
         )
     }
     db.exec('COMMIT')
-    return { ...parsed, seq }
+    saved = { ...parsed, seq }
   } catch (error) {
     db.exec('ROLLBACK')
     throw error
   }
+  eventBus?.publishMessage({
+    seq: saved.seq,
+    sessionId: saved.sessionId,
+    msg: {
+      seq: saved.seq,
+      sessionId: saved.sessionId,
+      turnId: saved.turnId,
+      itemId: saved.itemId,
+      role: saved.role,
+      type: saved.type,
+      content: saved.content as never,
+      createdAt: new Date(saved.createdAt).toISOString(),
+    },
+  })
+  return saved
 }
 
 export function replaySince(

@@ -10,6 +10,12 @@ export type ServerEvent = z.infer<typeof ServerEvent>
 // Ephemeral events are never replayed. Durable UI state must reconstruct from message rows alone.
 export const Ephemeral = z.discriminatedUnion('type', [
   z.object({
+    type: z.literal('availableCommands'),
+    seq: z.null(),
+    sessionId: z.string(),
+    commands: z.array(z.unknown()),
+  }),
+  z.object({
     type: z.literal('uploadProgress'),
     seq: z.null(),
     attachmentId: z.string(),

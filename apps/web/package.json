@@ -9,15 +9,18 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@pierre/trees": "1.0.0-beta.6",
     "@tanstack/react-router": "^1.120.5",
     "@vitejs/plugin-react": "^4.4.1",
     "cmdk": "^1.1.1",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-pdf": "^9.2.1",
     "sonner": "^2.0.3",
     "vaul": "^1.1.2",
     "vite": "^6.3.5",
+    "yet-another-react-lightbox": "^3.21.7",
     "zustand": "^5.0.3"
   },
   "devDependencies": {

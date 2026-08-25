@@ -1,0 +1,73 @@
+.file-viewer-image-button {
+  display: block;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: zoom-in;
+  max-width: 100%;
+}
+.file-viewer-image-button img {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.file-viewer-media {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+}
+.file-viewer-code {
+  overflow: auto;
+  max-height: 70vh;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  font:
+    13px/1.55 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.file-viewer-download,
+.file-viewer-download-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.file-viewer-download div {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+.file-viewer-download span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-viewer-download-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+}
+.file-viewer-download-bar {
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  font-size: 13px;
+}
+.file-viewer-close {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+}
