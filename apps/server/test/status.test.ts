@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { EventBus } from '../src/events/bus.js'
 import { statusRoutes } from '../src/http/status.js'
-import { statusResponseSchema } from '@forge/protocol/status'
+import { StatusResponse } from '@forge/protocol/status'
 
 function fixture() {
   const db = new DatabaseSync(':memory:')
@@ -29,7 +29,7 @@ describe('dashboard status routes', () => {
     expect(health.status).toBe(200)
     expect(await health.json()).toEqual({ ok: true, version: 'dev', db: 'ok' })
     const response = await app.request('/api/status')
-    const status = statusResponseSchema.parse(await response.json())
+    const status = StatusResponse.parse(await response.json())
     expect(status.projects).toBe(1)
     expect(status.sessions).toEqual({ idle: 1, running: 1, errored: 1 })
     expect(status.epicRuns).toEqual({ running: 1, paused: 1 })

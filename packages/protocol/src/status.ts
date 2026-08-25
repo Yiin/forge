@@ -1,16 +1,13 @@
 import { z } from 'zod'
-
-export const healthResponseSchema = z.object({
+export const HealthResponse = z.object({
   ok: z.boolean(),
   version: z.string(),
   db: z.enum(['ok', 'error']),
 })
-export type HealthResponse = z.infer<typeof healthResponseSchema>
-
-export const statusResponseSchema = z.object({
+export const StatusResponse = z.object({
   version: z.string(),
   bootId: z.string(),
-  uptimeSec: z.number().int().nonnegative(),
+  uptimeSec: z.number().nonnegative(),
   projects: z.number().int().nonnegative(),
   sessions: z.object({
     idle: z.number().int().nonnegative(),
@@ -30,10 +27,8 @@ export const statusResponseSchema = z.object({
   ),
   dataDirBytes: z.number().int().nonnegative(),
 })
-export type StatusResponse = z.infer<typeof statusResponseSchema>
-
-export const statusEventSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('snapshot'), status: statusResponseSchema }),
+export const StatusEvent = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('snapshot'), status: StatusResponse }),
   z.object({
     type: z.literal('session'),
     sessionId: z.string(),
@@ -44,9 +39,8 @@ export const statusEventSchema = z.discriminatedUnion('type', [
     runId: z.string(),
     status: z.string(),
   }),
-  z.object({
-    type: z.literal('heartbeat'),
-    ts: z.number().int().nonnegative(),
-  }),
+  z.object({ type: z.literal('heartbeat'), ts: z.string() }),
 ])
-export type StatusEvent = z.infer<typeof statusEventSchema>
+export type HealthResponse = z.infer<typeof HealthResponse>
+export type StatusResponse = z.infer<typeof StatusResponse>
+export type StatusEvent = z.infer<typeof StatusEvent>

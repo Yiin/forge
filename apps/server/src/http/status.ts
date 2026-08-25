@@ -4,10 +4,9 @@ import type { DatabaseSync } from 'node:sqlite'
 import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
-  healthResponseSchema,
-  statusEventSchema,
-  statusResponseSchema,
-  type StatusEvent,
+  HealthResponse,
+  StatusEvent,
+  StatusResponse,
 } from '@forge/protocol/status'
 import { EventBus } from '../events/bus.js'
 
@@ -55,7 +54,7 @@ export function statusRoutes(options: StatusOptions) {
   const startedAt = options.startedAt ?? Date.now()
   const bootId = options.bootId ?? crypto.randomUUID()
   const snapshot = async () =>
-    statusResponseSchema.parse({
+    StatusResponse.parse({
       version: options.version,
       bootId,
       uptimeSec: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
@@ -78,7 +77,7 @@ export function statusRoutes(options: StatusOptions) {
     try {
       options.db.prepare('SELECT 1').get()
       return c.json(
-        healthResponseSchema.parse({
+        HealthResponse.parse({
           ok: true,
           version: options.version,
           db: 'ok',
@@ -87,7 +86,7 @@ export function statusRoutes(options: StatusOptions) {
       )
     } catch {
       return c.json(
-        healthResponseSchema.parse({
+        HealthResponse.parse({
           ok: false,
           version: options.version,
           db: 'error',
@@ -102,7 +101,7 @@ export function statusRoutes(options: StatusOptions) {
       let closed = false
       const send = async (event: StatusEvent) => {
         if (closed) return
-        const valid = statusEventSchema.parse(event)
+        const valid = StatusEvent.parse(event)
         await stream.writeSSE({
           event: valid.type,
           data: JSON.stringify(valid),
@@ -123,7 +122,7 @@ export function statusRoutes(options: StatusOptions) {
           })
       })
       const heartbeat = setInterval(
-        () => void send({ type: 'heartbeat', ts: Date.now() }),
+        () => void send({ type: 'heartbeat', ts: new Date().toISOString() }),
         25_000,
       )
       stream.onAbort(() => {

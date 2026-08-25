@@ -1,32 +1,39 @@
 import { z } from 'zod'
+import { Message } from './message.js'
 
-const uploadProgressSchema = z.object({
-  seq: z.null(),
-  type: z.literal('uploadProgress'),
-  attachmentId: z.string(),
+export const ServerEvent = z.object({
+  seq: z.number().int().nonnegative(),
   sessionId: z.string(),
-  bytesReceived: z.number().int().nonnegative(),
-  sizeBytes: z.number().int().nonnegative(),
+  msg: Message,
 })
-
-const sessionStatusSchema = z.object({
-  seq: z.null(),
-  type: z.literal('sessionStatus'),
-  sessionId: z.string(),
-  status: z.string(),
-})
-
-const epicRunStatusSchema = z.object({
-  seq: z.null(),
-  type: z.literal('epicRunStatus'),
-  runId: z.string(),
-  status: z.string(),
-})
-
-// Ephemeral events are never replayed. Durable UI state comes from message rows.
-export const ephemeralSchema = z.discriminatedUnion('type', [
-  uploadProgressSchema,
-  sessionStatusSchema,
-  epicRunStatusSchema,
+export type ServerEvent = z.infer<typeof ServerEvent>
+// Ephemeral events are never replayed. Durable UI state must reconstruct from message rows alone.
+export const Ephemeral = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('uploadProgress'),
+    seq: z.null(),
+    attachmentId: z.string(),
+    sessionId: z.string(),
+    bytesReceived: z.number().int().nonnegative(),
+    sizeBytes: z.number().int().nonnegative(),
+  }),
+  z.object({
+    type: z.literal('sessionStatus'),
+    seq: z.null(),
+    sessionId: z.string(),
+    status: z.enum(['idle', 'running', 'errored', 'archived']),
+  }),
+  z.object({
+    type: z.literal('epicRunStatus'),
+    seq: z.null(),
+    runId: z.string(),
+    status: z.enum(['running', 'paused', 'completed', 'failed', 'cancelled']),
+  }),
+  z.object({
+    type: z.literal('presence'),
+    seq: z.null(),
+    sessionId: z.string(),
+    connected: z.boolean(),
+  }),
 ])
-export type Ephemeral = z.infer<typeof ephemeralSchema>
+export type Ephemeral = z.infer<typeof Ephemeral>
