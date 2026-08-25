@@ -1,0 +1,137 @@
+import { DatabaseSync } from 'node:sqlite'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import * as acp from '@zed-industries/agent-client-protocol'
+import { createProject, createSession, replaySince } from '../db/queries.js'
+import { AcpNormalizer } from './normalize.js'
+
+const databases: DatabaseSync[] = []
+afterEach(() => {
+  for (const db of databases.splice(0)) db.close()
+})
+
+function fixture() {
+  const db = new DatabaseSync(':memory:')
+  databases.push(db)
+  db.exec(`
+    CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, path TEXT, created_at INTEGER);
+    CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT, harness TEXT, title TEXT, cwd TEXT, kind TEXT, parent_session_id TEXT, status TEXT, auto_resume INTEGER, created_at INTEGER, last_activity_at INTEGER);
+    CREATE TABLE messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, turn_id TEXT, item_id TEXT, role TEXT, type TEXT, content TEXT, created_at INTEGER);
+    CREATE VIRTUAL TABLE messages_fts USING fts5(text, item_id UNINDEXED, seq UNINDEXED);
+  `)
+  const project = createProject(db, { name: 'Forge', path: '/tmp' })
+  const session = createSession(db, {
+    projectId: project.id,
+    harness: 'mock',
+    title: 'Chat',
+    cwd: '/tmp',
+  })
+  return { db, session }
+}
+
+const notification = (sessionId: string, update: unknown) =>
+  ({ sessionId, update }) as acp.SessionNotification
+
+describe('ACP update normalization', () => {
+  it('frames and coalesces text deltas into an exact replay', async () => {
+    const { db, session } = fixture()
+    const normalizer = new AcpNormalizer({ db, now: () => 1 })
+    const turnId = normalizer.beginTurn(session.id, 'turn-1')
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'hel' },
+      }),
+    )
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'lo' },
+      }),
+    )
+    normalizer.endTurn(session.id, { stopReason: 'end_turn' })
+    const rows = replaySince(db, 0, [session.id]) as Array<{
+      type: string
+      turn_id: string
+      content: string
+    }>
+    expect(
+      rows
+        .filter((row) => row.type === 'text_delta')
+        .map((row) => JSON.parse(row.content).text)
+        .join(''),
+    ).toBe('hello')
+    expect(rows[0]?.type).toBe('turn_start')
+    expect(rows.at(-1)?.type).toBe('turn_end')
+    expect(rows.every((row) => row.turn_id === turnId)).toBe(true)
+  })
+
+  it('persists folded tool rows and drops unknown updates after interruption', async () => {
+    const { db, session } = fixture()
+    const logger = { warn: vi.fn() }
+    const normalizer = new AcpNormalizer({ db, logger })
+    normalizer.beginTurn(session.id, 'turn-2')
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool-1',
+        title: 'Read',
+        rawInput: { path: 'x' },
+      }),
+    )
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool-1',
+        status: 'completed',
+        content: [],
+      }),
+    )
+    await normalizer.handle(
+      notification(session.id, { sessionUpdate: 'future_update' }),
+    )
+    normalizer.interrupt(session.id)
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'late' },
+      }),
+    )
+    const rows = replaySince(db, 0, [session.id]) as Array<{
+      type: string
+      item_id: string
+    }>
+    expect(
+      rows.filter((row) => row.item_id === 'tool-1').map((row) => row.type),
+    ).toEqual(['tool_call', 'tool_update', 'tool_result'])
+    expect(rows.at(-1)?.type).toBe('turn_interrupted')
+    expect(rows.some((row) => row.type === 'text_delta')).toBe(false)
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Unknown ACP session update: future_update',
+    )
+  })
+
+  it('splits a large chunk at the flush limit without changing its item', async () => {
+    const { db, session } = fixture()
+    const normalizer = new AcpNormalizer({ db })
+    normalizer.beginTurn(session.id, 'turn-large')
+    const text = 'x'.repeat(10_000)
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text },
+      }),
+    )
+    normalizer.flush(session.id, 'turn-large')
+    const rows = replaySince(db, 0, [session.id]) as Array<{
+      type: string
+      item_id: string
+      content: string
+    }>
+    const deltas = rows.filter((row) => row.type === 'text_delta')
+    expect(deltas.length).toBe(5)
+    expect(deltas.map((row) => JSON.parse(row.content).text).join('')).toBe(
+      text,
+    )
+    expect(new Set(deltas.map((row) => row.item_id)).size).toBe(1)
+  })
+})
