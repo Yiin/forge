@@ -9,6 +9,7 @@ import { uploadRoutes } from './http/uploads.js'
 import { attachmentRoutes } from './http/attachments.js'
 import { projectFileRoutes } from './http/projectFiles.js'
 import { statusRoutes } from './http/status.js'
+import { migrate } from './db/migrate.js'
 import { EventBus } from './events/bus.js'
 
 const require = createRequire(import.meta.url)
@@ -40,6 +41,7 @@ export function startServer(
     DatabaseSync: new (path: string) => DatabaseSync
   }
   const db = new DatabaseSync(process.env.FORGE_DB ?? ':memory:')
+  migrate(db)
   const dataDir = process.env.FORGE_DATA_DIR ?? 'data'
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
