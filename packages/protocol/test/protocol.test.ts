@@ -49,8 +49,9 @@ describe('protocol schemas', () => {
         type: 'uploadProgress',
         seq: null,
         attachmentId: 'att-1',
-        receivedBytes: 5,
-        totalBytes: 10,
+        sessionId: 'ses-1',
+        bytesReceived: 5,
+        sizeBytes: 10,
       },
       {
         type: 'sessionStatus',

@@ -38,16 +38,18 @@ export const answerQuestion = z.object({
   questionId: id,
   answer: z.string(),
 })
-export const uploadInit = z
-  .object({
-    sessionId: id,
-    filename: z.string().min(1),
-    mime: z.string().min(1),
-    sizeBytes: z.number().int().nonnegative(),
-  })
-  .refine((v) => v.sizeBytes <= 1_000_000_000, {
-    message: 'sizeBytes must be at most 1GB',
-  })
+// HTTP body for POST /api/sessions/:id/uploads. The 1 GiB ceiling is enforced
+// by the upload store so an oversize init answers 413, not a validation error.
+export const uploadInitSchema = z.object({
+  filename: z.string().min(1).max(1024),
+  mime: z.string().min(1).max(255),
+  sizeBytes: z.number().int().nonnegative(),
+})
+export const uploadInitResponseSchema = z.object({
+  attachmentId: z.string(),
+  putUrl: z.string(),
+})
+export const uploadInit = uploadInitSchema.extend({ sessionId: id })
 export const epicStart = z.object({
   projectId: id,
   epicBeadId: id,
@@ -89,7 +91,9 @@ export type Interrupt = z.infer<typeof interrupt>
 export type Fork = z.infer<typeof fork>
 export type Btw = z.infer<typeof btw>
 export type AnswerQuestion = z.infer<typeof answerQuestion>
-export type UploadInit = z.infer<typeof uploadInit>
+export type UploadInit = z.infer<typeof uploadInitSchema>
+export type UploadInitResponse = z.infer<typeof uploadInitResponseSchema>
+export type UploadInitCommand = z.infer<typeof uploadInit>
 export type EpicStart = z.infer<typeof epicStart>
 export type EpicPause = z.infer<typeof epicPause>
 export type EpicResume = z.infer<typeof epicResume>

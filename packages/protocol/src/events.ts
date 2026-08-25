@@ -13,8 +13,9 @@ export const Ephemeral = z.discriminatedUnion('type', [
     type: z.literal('uploadProgress'),
     seq: z.null(),
     attachmentId: z.string(),
-    receivedBytes: z.number().int().nonnegative(),
-    totalBytes: z.number().int().positive().optional(),
+    sessionId: z.string(),
+    bytesReceived: z.number().int().nonnegative(),
+    sizeBytes: z.number().int().nonnegative(),
   }),
   z.object({
     type: z.literal('sessionStatus'),
