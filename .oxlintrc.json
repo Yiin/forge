@@ -1,0 +1,4 @@
+{
+  "env": { "es2022": true, "node": true },
+  "ignorePatterns": ["spike/**", "**/drizzle/**", "dist/**"]
+}

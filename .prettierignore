@@ -1,0 +1,10 @@
+spike/
+**/drizzle/
+dist/
+node_modules/
+.beads/
+AGENTS.md
+CLAUDE.md
+docs/
+.agents/
+.claude/
