@@ -9,7 +9,8 @@
     "./events": "./src/events.ts",
     "./commands": "./src/commands.ts",
     "./ws": "./src/ws.ts",
-    "./status": "./src/status.ts"
+    "./status": "./src/status.ts",
+    "./config": "./src/config.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
