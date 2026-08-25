@@ -79,6 +79,14 @@ export class UploadStore {
     return this.bus
   }
 
+  get dataDir() {
+    return this.options.dataDir
+  }
+
+  get database() {
+    return this.db
+  }
+
   init(
     sessionId: string,
     input: { filename: string; mime: string; sizeBytes: number },
