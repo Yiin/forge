@@ -6,6 +6,8 @@ import { resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { UploadStore } from './uploads/store.js'
 import { uploadRoutes } from './http/uploads.js'
+import { attachmentRoutes } from './http/attachments.js'
+import { projectFileRoutes } from './http/projectFiles.js'
 import { statusRoutes } from './http/status.js'
 import { EventBus } from './events/bus.js'
 
@@ -20,7 +22,11 @@ export function createApp(
 
   if (status) app.route('/', statusRoutes(status))
   else app.get('/api/health', (c) => c.json({ ok: true, version }))
-  if (uploadStore) app.route('/', uploadRoutes(uploadStore))
+  if (uploadStore) {
+    app.route('/', uploadRoutes(uploadStore))
+    app.route('/', attachmentRoutes(uploadStore))
+    app.route('/', projectFileRoutes(uploadStore.database))
+  }
 
   return app
 }
