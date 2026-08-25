@@ -1,0 +1,11 @@
+{
+  "gate": {
+    "command": "bash scripts/epic-gate.sh"
+  },
+  "vcs": {
+    "noPush": true
+  },
+  "limits": {
+    "maxIterations": 250
+  }
+}
