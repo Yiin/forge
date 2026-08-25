@@ -5,6 +5,7 @@ import {
   redirect,
 } from '@tanstack/react-router'
 import { AppShell } from './components/AppShell'
+import { FileBrowser } from './components/files/FileBrowser'
 import { readLastSession } from './lib/shell-storage'
 const root = createRootRoute({ component: AppShell })
 const empty =
@@ -45,7 +46,7 @@ const run = createRoute({
 const files = createRoute({
   getParentRoute: () => root,
   path: '/files/$projectId/$',
-  component: empty('Project files'),
+  component: FileBrowser,
 })
 const search = createRoute({
   getParentRoute: () => root,
