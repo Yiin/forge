@@ -11,3 +11,4 @@ state/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+e2e/test-results/
