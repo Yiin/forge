@@ -1,0 +1,201 @@
+import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from '@tanstack/react-router'
+import {
+  Check,
+  Copy,
+  File,
+  FolderPlus,
+  Moon,
+  Play,
+  Search,
+  Settings,
+  Sun,
+  Plus,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import { useShellStore } from '../../stores/shell'
+import { useSessionsStore } from '../../stores/sessions'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from '../ui/command'
+import { Dialog } from '../ui/dialog'
+import { messageHitUrl, runHitUrl, searchUrl } from './palette-logic'
+type SearchResult = {
+  sessions: Array<{ sessionId: string; title: string; snippet: string }>
+  messages: Array<{
+    sessionId: string
+    seq: number
+    snippet: string
+    sessionTitle: string
+  }>
+  runs: Array<{ runId: string; title: string; snippet: string; status: string }>
+}
+export function CommandPalette() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [changedAt, setChangedAt] = useState(0)
+  const [results, setResults] = useState<SearchResult>({
+    sessions: [],
+    messages: [],
+    runs: [],
+  })
+  const sessions = useSessionsStore((state) => state.sessions)
+  const projects = useMemo(
+    () => new Set(sessions.map((session) => session.projectId).filter(Boolean)),
+    [sessions],
+  )
+  const sessionId = location.pathname.match(/^\/s\/([^/]+)/)?.[1]
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        if (!window.matchMedia('(pointer: coarse)').matches) setOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+  useEffect(() => {
+    if (!query.trim()) return
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/search?scope=all&limit=5&q=${encodeURIComponent(query.trim())}`,
+        )
+        if (response.ok) setResults((await response.json()) as SearchResult)
+      } catch {
+        /* Offline search must not break command navigation. */
+      }
+    }, 150)
+    return () => window.clearTimeout(timer)
+  }, [query, changedAt])
+  const close = () => {
+    setOpen(false)
+    setQuery('')
+    setResults({ sessions: [], messages: [], runs: [] })
+  }
+  const go = (to: string) => {
+    close()
+    void navigate({ to: to as never })
+  }
+  const copySession = async () => {
+    if (!sessionId) return
+    await navigator.clipboard.writeText(sessionId)
+    toast.success('Session ID copied')
+    close()
+  }
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Command
+        loop
+        shouldFilter={!results.messages.length && !results.runs.length}
+      >
+        <CommandInput
+          value={query}
+          onValueChange={(value: string) => {
+            setQuery(value)
+            setChangedAt(Date.now())
+          }}
+          placeholder="Search actions, sessions, and messages…"
+          autoFocus
+        />
+        <CommandList>
+          <CommandEmpty>No matching commands.</CommandEmpty>
+          <CommandGroup heading="Actions">
+            <CommandItem onSelect={() => go('/')}>
+              <Plus />
+              New session{projects.size > 1 ? ' in a project' : ''}
+            </CommandItem>
+            <CommandItem onSelect={() => go('/settings/projects')}>
+              <FolderPlus />
+              New project
+            </CommandItem>
+            <CommandItem onSelect={() => go('/runs')}>
+              <Play />
+              Go to Runs
+            </CommandItem>
+            <CommandItem onSelect={() => go('/files')}>
+              <File />
+              Go to Files
+            </CommandItem>
+            <CommandItem onSelect={() => go('/settings')}>
+              <Settings />
+              Go to Settings
+            </CommandItem>
+            <CommandItem
+              onSelect={() => {
+                useShellStore.getState().toggleTheme()
+                close()
+              }}
+            >
+              {useShellStore.getState().theme === 'dark' ? <Sun /> : <Moon />}
+              Toggle theme
+            </CommandItem>
+            {sessionId && (
+              <CommandItem onSelect={() => void copySession()}>
+                <Copy />
+                Copy current session id
+              </CommandItem>
+            )}
+          </CommandGroup>
+          <CommandGroup heading="Sessions">
+            {sessions.map((session) => (
+              <CommandItem
+                key={session.id}
+                value={`${session.title} ${session.id}`}
+                onSelect={() => go(`/s/${session.id}`)}
+              >
+                <Search />
+                {session.title || 'Untitled session'}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+          {(results.messages.length > 0 || results.runs.length > 0) && (
+            <CommandGroup heading="Search results" forceMount>
+              {results.messages.map((hit) => (
+                <CommandItem
+                  key={`message-${hit.sessionId}-${hit.seq}`}
+                  value={hit.snippet}
+                  onSelect={() => go(messageHitUrl(hit.sessionId, hit.seq))}
+                >
+                  <Search />
+                  <span dangerouslySetInnerHTML={{ __html: hit.snippet }} />
+                </CommandItem>
+              ))}
+              {results.runs.map((hit) => (
+                <CommandItem
+                  key={`run-${hit.runId}`}
+                  value={hit.title}
+                  onSelect={() => go(runHitUrl(hit.runId))}
+                >
+                  <Play />
+                  {hit.title}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+          {query.trim() && (
+            <>
+              <CommandSeparator />
+              <CommandItem
+                value="search everywhere"
+                onSelect={() => go(searchUrl(query.trim()))}
+              >
+                <Check />
+                Search everywhere for “{query.trim()}”
+              </CommandItem>
+            </>
+          )}
+        </CommandList>
+      </Command>
+    </Dialog>
+  )
+}
