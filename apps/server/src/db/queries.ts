@@ -1,4 +1,18 @@
-import { messageSchema } from '@forge/protocol/message'
+import { z } from 'zod'
+import { messageContentTypes } from '@forge/protocol/message'
+
+// The wire schema in @forge/protocol carries a committed seq and an ISO
+// createdAt. Rows are validated before insert, when neither exists yet, so the
+// row shape is validated here and the type enum stays shared.
+const messageRowSchema = z.object({
+  sessionId: z.string().min(1),
+  turnId: z.string().min(1),
+  itemId: z.string().min(1),
+  role: z.enum(['user', 'agent', 'system']),
+  type: z.enum(messageContentTypes),
+  content: z.unknown(),
+  createdAt: z.number().int(),
+})
 type Db = { exec(sql: string): unknown; prepare(sql: string): any }
 const id = (prefix: string) =>
   `${prefix}${Date.now().toString(36)}${crypto.randomUUID().replaceAll('-', '')}`
@@ -15,7 +29,7 @@ export type AppendMessage = {
 }
 
 export function appendMessage(db: Db, input: AppendMessage) {
-  const parsed = messageSchema.parse({
+  const parsed = messageRowSchema.parse({
     ...input,
     createdAt: input.createdAt ?? Date.now(),
   })

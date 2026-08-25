@@ -4,14 +4,19 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./ids": "./src/ids.ts",
     "./message": "./src/message.ts",
     "./events": "./src/events.ts",
-    "./commands": "./src/commands.ts"
+    "./commands": "./src/commands.ts",
+    "./ws": "./src/ws.ts",
+    "./status": "./src/status.ts",
+    "./config": "./src/config.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "ulid": "^3.0.1",
     "zod": "^4.0.0"
   }
 }
