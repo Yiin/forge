@@ -27,7 +27,7 @@ tailnet. The web client is the only UI. Phones are first-class.
 - Web: React, Vite, TanStack Router, Zustand, shadcn/ui (heavily), xterm-free.
 - Schemas: zod, in a shared `packages/protocol` package that dashboards import.
 - Search: SQLite FTS5 over sessions, messages, epic runs.
-- Tooling: pnpm workspace, oxlint, prettier, vitest. Integration tests against
+- Tooling: bun workspaces (isolated linker), oxlint, prettier, vitest. Integration tests against
   a real server with a fake ACP agent.
 - Reuse open-source libraries wherever one exists (chat rendering, pdf.js for
   viewing, file-tree components). Do not hand-roll solved problems.

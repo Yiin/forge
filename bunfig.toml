@@ -1,0 +1,3 @@
+[install]
+# pnpm-like layout: no phantom dependencies across workspace packages
+linker = "isolated"

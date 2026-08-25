@@ -15,10 +15,10 @@ planned design. Your child bead's description wins for your own scope.
   lessons; never port Effect code.
 
 ## Check commands (from repo root)
-- Typecheck: `pnpm -r typecheck` (exists after core-scaffold lands; before
+- Typecheck: `bun run --filter '*' typecheck` (exists after core-scaffold lands; before
   that, the spike child defines its own checks).
-- Focused tests: `pnpm vitest run <file>` in the touched package.
-- Lint/format: `pnpm oxlint` / `pnpm prettier --check .` (after core-scaffold).
+- Focused tests: `bunx vitest run <file>` in the touched package.
+- Lint/format: `bunx oxlint` / `bunx prettier --check .` (after core-scaffold).
 - E2e: see delivery-e2e-harness child once landed; browser flows via the
   test-forge-app skill child.
 
