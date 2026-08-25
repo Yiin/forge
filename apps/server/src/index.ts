@@ -8,14 +8,20 @@ import { UploadStore } from './uploads/store.js'
 import { uploadRoutes } from './http/uploads.js'
 import { attachmentRoutes } from './http/attachments.js'
 import { projectFileRoutes } from './http/projectFiles.js'
+import { statusRoutes } from './http/status.js'
+import { EventBus } from './events/bus.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
 
-export function createApp(uploadStore?: UploadStore) {
+export function createApp(
+  uploadStore?: UploadStore,
+  status?: Parameters<typeof statusRoutes>[0],
+) {
   const app = new Hono()
 
-  app.get('/api/health', (c) => c.json({ ok: true, version }))
+  if (status) app.route('/', statusRoutes(status))
+  else app.get('/api/health', (c) => c.json({ ok: true, version }))
   if (uploadStore) {
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
@@ -35,8 +41,15 @@ export function startServer(
   }
   const db = new DatabaseSync(process.env.FORGE_DB ?? ':memory:')
   const dataDir = process.env.FORGE_DATA_DIR ?? 'data'
+  const bus = new EventBus()
+  const uploadStore = new UploadStore(db, { dataDir, bus })
   return serve({
-    fetch: createApp(new UploadStore(db, { dataDir })).fetch,
+    fetch: createApp(uploadStore, {
+      db,
+      bus,
+      version: process.env.FORGE_VERSION ?? version,
+      dataDir,
+    }).fetch,
     port,
   })
 }
