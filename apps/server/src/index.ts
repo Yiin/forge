@@ -6,6 +6,8 @@ import { resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { UploadStore } from './uploads/store.js'
 import { uploadRoutes } from './http/uploads.js'
+import { attachmentRoutes } from './http/attachments.js'
+import { projectFileRoutes } from './http/projectFiles.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -14,7 +16,11 @@ export function createApp(uploadStore?: UploadStore) {
   const app = new Hono()
 
   app.get('/api/health', (c) => c.json({ ok: true, version }))
-  if (uploadStore) app.route('/', uploadRoutes(uploadStore))
+  if (uploadStore) {
+    app.route('/', uploadRoutes(uploadStore))
+    app.route('/', attachmentRoutes(uploadStore))
+    app.route('/', projectFileRoutes(uploadStore.database))
+  }
 
   return app
 }
