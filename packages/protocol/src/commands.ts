@@ -66,6 +66,30 @@ export const search = z.object({
   projectId: id.optional(),
   ...page,
 })
+
+const searchSnippet = z.string()
+export const searchResponse = z.object({
+  sessions: z.array(
+    z.object({ sessionId: id, title: z.string(), snippet: searchSnippet }),
+  ),
+  messages: z.array(
+    z.object({
+      sessionId: id,
+      seq: z.number().int().nonnegative(),
+      itemId: id,
+      snippet: searchSnippet,
+      sessionTitle: z.string(),
+    }),
+  ),
+  runs: z.array(
+    z.object({
+      runId: id,
+      title: z.string(),
+      snippet: searchSnippet,
+      status: z.string(),
+    }),
+  ),
+})
 export const commandSchemas = {
   createProject,
   archiveProject,
@@ -99,3 +123,4 @@ export type EpicPause = z.infer<typeof epicPause>
 export type EpicResume = z.infer<typeof epicResume>
 export type EpicCancel = z.infer<typeof epicCancel>
 export type Search = z.infer<typeof search>
+export type SearchResponse = z.infer<typeof searchResponse>
