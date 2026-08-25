@@ -5,7 +5,10 @@ docs/DIRECTION.md is the scope+stack contract; docs/architecture.md is the
 planned design. Your child bead's description wins for your own scope.
 
 ## Repos & where things live
-- BEADS + CODE: /home/yiin/Projects/forge (one repo; run bd from here).
+- BEADS + CODE: the forge repo (one repo). Your cwd is your checkout. It may
+  be a per-worker git worktree. Edit files under your cwd only. NEVER edit
+  /home/yiin/Projects/forge directly when your cwd is elsewhere. Run bd from
+  your cwd; it reaches the same database through the Dolt server port.
 - docs/DIRECTION.md — binding scope and stack. Never relitigate it.
 - docs/architecture.md — planned schema, module map, UX map, t3code lessons.
 - apps/server — Bun + Hono + one WS. Planned layout in architecture.md §system.
