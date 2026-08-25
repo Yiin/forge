@@ -1,0 +1,157 @@
+import { messageSchema } from '@forge/protocol/message'
+type Db = { exec(sql: string): unknown; prepare(sql: string): any }
+const id = (prefix: string) =>
+  `${prefix}${Date.now().toString(36)}${crypto.randomUUID().replaceAll('-', '')}`
+const json = (value: unknown) => JSON.stringify(value)
+
+export type AppendMessage = {
+  sessionId: string
+  turnId: string
+  itemId: string
+  role: 'user' | 'agent' | 'system'
+  type: string
+  content: unknown
+  createdAt?: number
+}
+
+export function appendMessage(db: Db, input: AppendMessage) {
+  const parsed = messageSchema.parse({
+    ...input,
+    createdAt: input.createdAt ?? Date.now(),
+  })
+  // Messages are strictly append-only. No mutation SQL is allowed for this table.
+  db.exec('BEGIN')
+  try {
+    const result = db
+      .prepare(
+        `INSERT INTO messages
+      (session_id, turn_id, item_id, role, type, content, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        parsed.sessionId,
+        parsed.turnId,
+        parsed.itemId,
+        parsed.role,
+        parsed.type,
+        json(parsed.content),
+        parsed.createdAt,
+      )
+    const seq = Number(result.lastInsertRowid)
+    db.prepare('UPDATE sessions SET last_activity_at = ? WHERE id = ?').run(
+      parsed.createdAt,
+      parsed.sessionId,
+    )
+    if (parsed.type === 'turn_end') {
+      const rows = db
+        .prepare(
+          `SELECT item_id, seq, content FROM messages
+        WHERE session_id = ? AND turn_id = ? AND type = 'text_delta' ORDER BY seq`,
+        )
+        .all(parsed.sessionId, parsed.turnId) as Array<{
+        item_id: string
+        seq: number
+        content: string
+      }>
+      const text = rows
+        .map((row) => {
+          const value = JSON.parse(row.content) as unknown
+          return typeof value === 'string'
+            ? value
+            : ((value as { text?: string })?.text ?? '')
+        })
+        .join('')
+      if (text)
+        db.prepare(
+          'INSERT INTO messages_fts(rowid, text, item_id, seq) VALUES (?, ?, ?, ?)',
+        ).run(
+          rows[0]?.seq ?? seq,
+          text,
+          rows[0]?.item_id ?? parsed.itemId,
+          rows[0]?.seq ?? seq,
+        )
+    }
+    db.exec('COMMIT')
+    return { ...parsed, seq }
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+}
+
+export function replaySince(
+  db: Db,
+  cursor: number,
+  sessionIds: string[] | 'all',
+  limit = 500,
+) {
+  if (sessionIds === 'all')
+    return db
+      .prepare('SELECT * FROM messages WHERE seq > ? ORDER BY seq LIMIT ?')
+      .all(cursor, limit)
+  if (!sessionIds.length) return []
+  const marks = sessionIds.map(() => '?').join(',')
+  return db
+    .prepare(
+      `SELECT * FROM messages WHERE seq > ? AND session_id IN (${marks}) ORDER BY seq LIMIT ?`,
+    )
+    .all(cursor, ...sessionIds, limit)
+}
+
+export function createProject(
+  db: Db,
+  input: { name: string; path: string; now?: number },
+) {
+  const value = {
+    id: id('prj_'),
+    name: input.name,
+    path: input.path,
+    createdAt: input.now ?? Date.now(),
+  }
+  db.prepare(
+    'INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)',
+  ).run(value.id, value.name, value.path, value.createdAt)
+  return value
+}
+export function createSession(
+  db: Db,
+  input: {
+    projectId: string
+    harness: string
+    title: string
+    cwd: string
+    kind?: string
+    parentSessionId?: string | null
+    now?: number
+  },
+) {
+  const now = input.now ?? Date.now()
+  const value = { id: id('ses_'), ...input, kind: input.kind ?? 'chat', now }
+  db.prepare(
+    `INSERT INTO sessions (id, project_id, harness, title, cwd, kind, parent_session_id, status, auto_resume, created_at, last_activity_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
+  ).run(
+    value.id,
+    value.projectId,
+    value.harness,
+    value.title,
+    value.cwd,
+    value.kind,
+    value.parentSessionId ?? null,
+    now,
+    now,
+  )
+  return value
+}
+export const listSessions = (db: Db, projectId?: string) =>
+  projectId
+    ? db
+        .prepare(
+          'SELECT * FROM sessions WHERE project_id = ? ORDER BY last_activity_at DESC',
+        )
+        .all(projectId)
+    : db.prepare('SELECT * FROM sessions ORDER BY last_activity_at DESC').all()
+export const getProject = (db: Db, projectId: string) =>
+  db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId)
+export const getSession = (db: Db, sessionId: string) =>
+  db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId)
