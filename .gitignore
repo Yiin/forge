@@ -4,7 +4,7 @@ dist/
 .env
 .env.local
 state/
-uploads/
+/uploads/
 
 # Beads / Dolt files (added by bd init)
 .dolt/
