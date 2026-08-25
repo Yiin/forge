@@ -3,5 +3,7 @@
   "backend": "dolt",
   "dolt_mode": "server",
   "dolt_database": "forge",
-  "project_id": "2cea65de-d98a-4187-9fed-ee10f92eba3b"
+  "project_id": "2cea65de-d98a-4187-9fed-ee10f92eba3b",
+  "dolt_server_host": "100.107.50.39",
+  "dolt_server_user": "root"
 }

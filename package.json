@@ -1,0 +1,7 @@
+{
+  "name": "forge",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.10.0",
+  "engines": { "bun": ">=1.2.0" }
+}
