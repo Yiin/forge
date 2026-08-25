@@ -8,13 +8,15 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "e2e"
   ],
   "scripts": {
     "lint": "oxlint .",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check .",
     "test": "vitest run",
+    "e2e": "e2e/node_modules/.bin/playwright test -c e2e/playwright.config.ts",
     "typecheck": "bun run --filter '*' typecheck",
     "check": "bun run lint && bun run fmt:check && bun run typecheck && bun run test"
   },
