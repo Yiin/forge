@@ -1,0 +1,46 @@
+import { z } from 'zod'
+export const HealthResponse = z.object({
+  ok: z.boolean(),
+  version: z.string(),
+  db: z.enum(['ok', 'error']),
+})
+export const StatusResponse = z.object({
+  version: z.string(),
+  bootId: z.string(),
+  uptimeSec: z.number().nonnegative(),
+  projects: z.number().int().nonnegative(),
+  sessions: z.object({
+    idle: z.number().int().nonnegative(),
+    running: z.number().int().nonnegative(),
+    errored: z.number().int().nonnegative(),
+  }),
+  epicRuns: z.object({
+    running: z.number().int().nonnegative(),
+    paused: z.number().int().nonnegative(),
+  }),
+  harnesses: z.array(
+    z.object({
+      key: z.string(),
+      protocol: z.enum(['acp', 'pty']),
+      liveProcesses: z.number().int().nonnegative(),
+    }),
+  ),
+  dataDirBytes: z.number().int().nonnegative(),
+})
+export const StatusEvent = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('snapshot'), status: StatusResponse }),
+  z.object({
+    type: z.literal('session'),
+    sessionId: z.string(),
+    status: z.string(),
+  }),
+  z.object({
+    type: z.literal('epicRun'),
+    runId: z.string(),
+    status: z.string(),
+  }),
+  z.object({ type: z.literal('heartbeat'), ts: z.string() }),
+])
+export type HealthResponse = z.infer<typeof HealthResponse>
+export type StatusResponse = z.infer<typeof StatusResponse>
+export type StatusEvent = z.infer<typeof StatusEvent>
