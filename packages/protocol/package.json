@@ -6,7 +6,8 @@
   "exports": {
     "./message": "./src/message.ts",
     "./events": "./src/events.ts",
-    "./commands": "./src/commands.ts"
+    "./commands": "./src/commands.ts",
+    "./status": "./src/status.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

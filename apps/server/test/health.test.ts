@@ -18,6 +18,10 @@ describe('health endpoint', () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/api/health`)
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ ok: true, version: '0.1.0' })
+    expect(await response.json()).toEqual({
+      ok: true,
+      version: '0.1.0',
+      db: 'ok',
+    })
   })
 })
