@@ -6,7 +6,10 @@ import { resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { UploadStore } from './uploads/store.js'
 import { uploadRoutes } from './http/uploads.js'
+import { attachmentRoutes } from './http/attachments.js'
+import { projectFileRoutes } from './http/projectFiles.js'
 import { statusRoutes } from './http/status.js'
+import { migrate } from './db/migrate.js'
 import { EventBus } from './events/bus.js'
 
 const require = createRequire(import.meta.url)
@@ -20,7 +23,11 @@ export function createApp(
 
   if (status) app.route('/', statusRoutes(status))
   else app.get('/api/health', (c) => c.json({ ok: true, version }))
-  if (uploadStore) app.route('/', uploadRoutes(uploadStore))
+  if (uploadStore) {
+    app.route('/', uploadRoutes(uploadStore))
+    app.route('/', attachmentRoutes(uploadStore))
+    app.route('/', projectFileRoutes(uploadStore.database))
+  }
 
   return app
 }
@@ -34,6 +41,7 @@ export function startServer(
     DatabaseSync: new (path: string) => DatabaseSync
   }
   const db = new DatabaseSync(process.env.FORGE_DB ?? ':memory:')
+  migrate(db)
   const dataDir = process.env.FORGE_DATA_DIR ?? 'data'
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })

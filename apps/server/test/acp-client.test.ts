@@ -72,7 +72,9 @@ describe('ACP client', () => {
   it('reports process death with the stderr ring', async () => {
     const exits: AgentProcessDiedError[] = []
     const client = await spawnAcpClient(entry({ EXIT_MID_TURN: '1' }), {
-      onExit: (error) => exits.push(error),
+      onExit: (error) => {
+        exits.push(error)
+      },
     })
     clients.push(client)
     const session = await client.newSession('/tmp')

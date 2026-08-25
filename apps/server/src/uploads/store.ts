@@ -63,6 +63,7 @@ export class UploadStore {
       );
       CREATE TABLE IF NOT EXISTS messages (
         seq INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL, item_id TEXT NOT NULL, role TEXT NOT NULL,
         type TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL
       );
     `)
@@ -76,6 +77,14 @@ export class UploadStore {
 
   get eventBus() {
     return this.bus
+  }
+
+  get dataDir() {
+    return this.options.dataDir
+  }
+
+  get database() {
+    return this.db
   }
 
   init(
@@ -160,13 +169,18 @@ export class UploadStore {
       })
       const sha256 = hash.digest('hex')
       const message = this.db.prepare(
-        'INSERT INTO messages (session_id, type, content, created_at) VALUES (?, ?, ?, ?)',
+        `INSERT INTO messages
+          (session_id, turn_id, item_id, role, type, content, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       this.db.exec('BEGIN')
       let result: { lastInsertRowid: number | bigint }
       try {
         result = message.run(
           row.session_id,
+          attachmentId,
+          attachmentId,
+          'user',
           'attachment_ref',
           JSON.stringify({
             attachmentId,
