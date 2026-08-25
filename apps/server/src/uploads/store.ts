@@ -27,14 +27,21 @@ export type UploadStoreOptions = {
 }
 
 export function toSafeFilename(filename: string) {
-  const base = filename.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
-  return (base.replace(/^-+|-+$/g, '').slice(0, SAFE_FILENAME_LIMIT) || 'file')
+  const base = filename
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+  return base.replace(/^-+|-+$/g, '').slice(0, SAFE_FILENAME_LIMIT) || 'file'
 }
 
 function newId() {
   const time = Date.now().toString(36).padStart(9, '0')
   const random = crypto.getRandomValues(new Uint8Array(10))
-  return `att_${time}${Array.from(random, (byte) => byte.toString(36).padStart(2, '0')).join('').slice(0, 16)}`
+  return `att_${time}${Array.from(random, (byte) =>
+    byte.toString(36).padStart(2, '0'),
+  )
+    .join('')
+    .slice(0, 16)}`
 }
 
 export class UploadStore {
@@ -71,29 +78,52 @@ export class UploadStore {
     return this.bus
   }
 
-  init(sessionId: string, input: { filename: string; mime: string; sizeBytes: number }) {
-    if (input.sizeBytes > MAX_UPLOAD_BYTES) throw new RangeError('Upload exceeds 1 GiB')
-    const session = this.db.prepare('SELECT project_id FROM sessions WHERE id = ?').get(sessionId) as
-      | { project_id: string }
-      | undefined
+  init(
+    sessionId: string,
+    input: { filename: string; mime: string; sizeBytes: number },
+  ) {
+    if (input.sizeBytes > MAX_UPLOAD_BYTES)
+      throw new RangeError('Upload exceeds 1 GiB')
+    const session = this.db
+      .prepare('SELECT project_id FROM sessions WHERE id = ?')
+      .get(sessionId) as { project_id: string } | undefined
     if (!session) throw new Error('Session not found')
     const id = newId()
-    this.db.prepare(
-      'INSERT INTO attachments (id, session_id, filename, mime, size_bytes, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ).run(id, sessionId, input.filename, input.mime, input.sizeBytes, 'pending', this.now())
+    this.db
+      .prepare(
+        'INSERT INTO attachments (id, session_id, filename, mime, size_bytes, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        id,
+        sessionId,
+        input.filename,
+        input.mime,
+        input.sizeBytes,
+        'pending',
+        this.now(),
+      )
     return { attachmentId: id, putUrl: `/api/uploads/${id}` }
   }
 
   async put(attachmentId: string, body: ReadableStream<Uint8Array> | null) {
     if (!body) throw new Error('Upload body is required')
-    const row = this.db.prepare('SELECT * FROM attachments WHERE id = ?').get(attachmentId) as UploadRow | undefined
+    const row = this.db
+      .prepare('SELECT * FROM attachments WHERE id = ?')
+      .get(attachmentId) as UploadRow | undefined
     if (!row) throw new Error('Attachment not found')
-    const session = this.db.prepare('SELECT project_id FROM sessions WHERE id = ?').get(row.session_id) as
-      | { project_id: string }
-      | undefined
+    const session = this.db
+      .prepare('SELECT project_id FROM sessions WHERE id = ?')
+      .get(row.session_id) as { project_id: string } | undefined
     if (!session) throw new Error('Session not found')
     const safeName = `${attachmentId}-${toSafeFilename(row.filename)}`
-    const relPath = join('projects', session.project_id, 'sessions', row.session_id, 'files', safeName)
+    const relPath = join(
+      'projects',
+      session.project_id,
+      'sessions',
+      row.session_id,
+      'files',
+      safeName,
+    )
     const absolutePath = join(this.options.dataDir, relPath)
     await mkdir(join(absolutePath, '..'), { recursive: true })
     const output = createWriteStream(absolutePath, { flags: 'wx' })
@@ -103,16 +133,25 @@ export class UploadStore {
     try {
       for await (const chunk of body as AsyncIterable<Uint8Array>) {
         received += chunk.byteLength
-        if (received > MAX_UPLOAD_BYTES) throw new RangeError('Upload exceeds 1 GiB')
+        if (received > MAX_UPLOAD_BYTES)
+          throw new RangeError('Upload exceeds 1 GiB')
         hash.update(chunk)
-        if (!output.write(chunk)) await new Promise<void>((resolve, reject) => {
-          output.once('drain', resolve)
-          output.once('error', reject)
-        })
+        if (!output.write(chunk))
+          await new Promise<void>((resolve, reject) => {
+            output.once('drain', resolve)
+            output.once('error', reject)
+          })
         const now = this.now()
         if (now - lastProgress >= 500) {
           lastProgress = now
-          this.bus.publish({ seq: null, type: 'uploadProgress', attachmentId, sessionId: row.session_id, bytesReceived: received, sizeBytes: row.size_bytes })
+          this.bus.publish({
+            seq: null,
+            type: 'uploadProgress',
+            attachmentId,
+            sessionId: row.session_id,
+            bytesReceived: received,
+            sizeBytes: row.size_bytes,
+          })
         }
       }
       await new Promise<void>((resolve, reject) => {
@@ -140,30 +179,54 @@ export class UploadStore {
           this.now(),
         )
         this.db
-          .prepare('UPDATE attachments SET status = ?, sha256 = ?, rel_path = ?, size_bytes = ? WHERE id = ?')
+          .prepare(
+            'UPDATE attachments SET status = ?, sha256 = ?, rel_path = ?, size_bytes = ? WHERE id = ?',
+          )
           .run('complete', sha256, relPath, received, attachmentId)
         this.db.exec('COMMIT')
       } catch (error) {
         this.db.exec('ROLLBACK')
         throw error
       }
-      return { seq: Number(result.lastInsertRowid), relPath, sha256, sizeBytes: received }
+      return {
+        seq: Number(result.lastInsertRowid),
+        relPath,
+        sha256,
+        sizeBytes: received,
+      }
     } catch (error) {
       output.destroy()
       await rm(absolutePath, { force: true })
-      this.db.prepare('UPDATE attachments SET status = ? WHERE id = ?').run('failed', attachmentId)
+      this.db
+        .prepare('UPDATE attachments SET status = ? WHERE id = ?')
+        .run('failed', attachmentId)
       throw error
     }
   }
 
   async sweep() {
     const cutoff = this.now() - 24 * 60 * 60 * 1000
-    const rows = this.db.prepare('SELECT * FROM attachments WHERE status = ? AND created_at < ?').all('pending', cutoff) as UploadRow[]
+    const rows = this.db
+      .prepare('SELECT * FROM attachments WHERE status = ? AND created_at < ?')
+      .all('pending', cutoff) as UploadRow[]
     for (const row of rows) {
-      const session = this.db.prepare('SELECT project_id FROM sessions WHERE id = ?').get(row.session_id) as { project_id: string } | undefined
+      const session = this.db
+        .prepare('SELECT project_id FROM sessions WHERE id = ?')
+        .get(row.session_id) as { project_id: string } | undefined
       if (session) {
         const file = `${row.id}-${toSafeFilename(row.filename)}`
-        await rm(join(this.options.dataDir, 'projects', session.project_id, 'sessions', row.session_id, 'files', file), { force: true })
+        await rm(
+          join(
+            this.options.dataDir,
+            'projects',
+            session.project_id,
+            'sessions',
+            row.session_id,
+            'files',
+            file,
+          ),
+          { force: true },
+        )
       }
       this.db.prepare('DELETE FROM attachments WHERE id = ?').run(row.id)
     }
@@ -171,7 +234,8 @@ export class UploadStore {
   }
 
   attachment(id: string) {
-    return this.db.prepare('SELECT * FROM attachments WHERE id = ?').get(id) as UploadRow | undefined
+    return this.db.prepare('SELECT * FROM attachments WHERE id = ?').get(id) as
+      UploadRow | undefined
   }
 
   async fileSize(path: string) {
