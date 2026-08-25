@@ -47,6 +47,10 @@ tailnet. The web client is the only UI. Phones are first-class.
 - Intelligent title generation: describe what the session is about in plain
   words; never surface bead/epic ids as titles.
 - First-class /btw and chat forks (t3code has a good epic to copy).
+- Copyable session id in the UI, so a session can be handed to an agent for
+  debugging forge itself.
+- Test harness early: a `test-forge-app` skill plus a fake ACP agent fixture,
+  built as one of the first children, so later work self-verifies its UI.
 - Worktrees; harness configs easily addable.
 - Dashboard integration: /api/health, /api/status, SSE events, a small client
   package with the zod types.
@@ -55,8 +59,10 @@ tailnet. The web client is the only UI. Phones are first-class.
 
 ## Non-goals
 
-- No terminal UI. No Electron/desktop. No cloud relay. No multi-user auth
-  (tailnet + bearer token for dashboards). No migration of t3code history.
+- No terminal UI. No Electron/desktop. No cloud relay. No migration of
+  t3code history. No ntfy notifications. No session diff view.
+- Auth: tailnet-only. Dashboards embed forge behind their own auth; forge
+  does not handle users or passwords.
 
 ## Quality bar
 
