@@ -10,6 +10,8 @@
     "@forge/protocol": "workspace:*",
     "@zed-industries/agent-client-protocol": "0.4.x",
     "@hono/node-server": "^1.19.0",
-    "hono": "^4.9.0"
+    "hono": "^4.9.0",
+    "smol-toml": "^1.4.0",
+    "zod": "^4.0.0"
   }
 }
