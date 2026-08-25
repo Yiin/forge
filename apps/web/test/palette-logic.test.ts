@@ -7,6 +7,7 @@ import {
 } from '../src/components/palette/palette-logic'
 describe('palette query routing', () => {
   it('uses a 150ms debounce boundary', () => {
+    expect(SEARCH_DEBOUNCE_MS).toBe(150)
     expect(searchDue('hello', 100, 249)).toBe(false)
     expect(searchDue('hello', 100, 250)).toBe(true)
     expect(searchDue(' ', 100, 1000)).toBe(false)
