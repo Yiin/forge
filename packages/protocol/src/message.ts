@@ -1,6 +1,12 @@
 import { z } from 'zod'
 
 const id = z.string().min(1)
+const subagent = z.object({
+  id,
+  type: id,
+  description: z.string(),
+  status: z.enum(['running', 'completed', 'failed', 'unknown']),
+})
 export const MessageContent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text_delta'), text: z.string() }),
   z.object({ type: z.literal('thought_delta'), text: z.string() }),
@@ -9,18 +15,21 @@ export const MessageContent = z.discriminatedUnion('type', [
     toolCallId: id,
     name: id,
     input: z.unknown(),
+    subagent: subagent.optional(),
   }),
   z.object({
     type: z.literal('tool_update'),
     toolCallId: id,
     status: z.string(),
     output: z.unknown().optional(),
+    subagent: subagent.optional(),
   }),
   z.object({
     type: z.literal('tool_result'),
     toolCallId: id,
     output: z.unknown(),
     isError: z.boolean().default(false),
+    subagent: subagent.optional(),
   }),
   z.object({
     type: z.literal('ask_user_question'),
