@@ -73,7 +73,7 @@ export const epicStart = z.object({
   config: z.record(z.string(), z.unknown()).default({}),
 })
 export const epicPause = z.object({ runId: id })
-export const epicResume = z.object({ runId: id })
+export const epicResume = z.object({ runId: id, skipBead: id.optional() })
 export const epicCancel = z.object({ runId: id })
 export const search = z.object({
   query: z.string().min(1),

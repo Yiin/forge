@@ -39,9 +39,11 @@ export function epicRoutes(options: EpicRouteOptions) {
     return c.json({ ok: true })
   })
   app.post('/api/epics/:runId/resume', async (c) => {
-    await options.runner.resume(
-      epicResume.parse({ runId: c.req.param('runId') }).runId,
-    )
+    const body = epicResume.parse({
+      runId: c.req.param('runId'),
+      ...(await c.req.json().catch(() => ({}))),
+    })
+    await options.runner.resume(body.runId, body.skipBead)
     return c.json({ ok: true })
   })
   return app
