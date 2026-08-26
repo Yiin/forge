@@ -1,0 +1,108 @@
+import { Ephemeral, ServerEvent } from '@forge/protocol/events'
+import { SubscribeFrame } from '@forge/protocol/ws'
+import { useMessagesStore } from '../stores/messages'
+
+export interface ForgeWebSocket {
+  readonly readyState: number
+  send(data: string): void
+  close(): void
+  onopen: (() => void) | null
+  onmessage: ((event: { data: string }) => void) | null
+  onclose: (() => void) | null
+  onerror: (() => void) | null
+}
+type SocketOptions = {
+  url?: string
+  sessions?: string[] | 'all'
+  reconnect?: boolean
+  backoff?: { initialMs?: number; maxMs?: number }
+  createWebSocket?: (url: string) => ForgeWebSocket
+}
+const defaultUrl = () =>
+  typeof window === 'undefined'
+    ? 'ws://localhost:3000/ws'
+    : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
+
+export class ForgeSocket {
+  private socket?: ForgeWebSocket
+  private timer?: ReturnType<typeof setTimeout>
+  private stopped = false
+  private attempt = 0
+  private readonly options: Required<
+    Pick<SocketOptions, 'url' | 'sessions' | 'reconnect'>
+  > &
+    Pick<SocketOptions, 'backoff' | 'createWebSocket'>
+  constructor(options: SocketOptions = {}) {
+    this.options = {
+      url: options.url ?? defaultUrl(),
+      sessions: options.sessions ?? 'all',
+      reconnect: options.reconnect ?? true,
+      backoff: options.backoff,
+      createWebSocket:
+        options.createWebSocket ??
+        ((url) => new WebSocket(url) as ForgeWebSocket),
+    }
+  }
+  start() {
+    this.stopped = false
+    this.connect()
+    return this
+  }
+  stop() {
+    this.stopped = true
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = undefined
+    this.socket?.close()
+    this.socket = undefined
+  }
+  private connect() {
+    if (this.stopped) return
+    const socket = this.options.createWebSocket!(this.options.url)
+    this.socket = socket
+    socket.onopen = () => {
+      this.attempt = 0
+      socket.send(
+        JSON.stringify(
+          SubscribeFrame.parse({
+            type: 'subscribe',
+            sessions: this.options.sessions,
+            cursor: useMessagesStore.getState().lastSeq,
+          }),
+        ),
+      )
+    }
+    socket.onmessage = ({ data }) => this.receive(data)
+    socket.onerror = () => socket.close()
+    socket.onclose = () => {
+      if (this.socket === socket) this.socket = undefined
+      if (!this.stopped && this.options.reconnect) this.scheduleReconnect()
+    }
+  }
+  private receive(data: string) {
+    let value: unknown
+    try {
+      value = JSON.parse(data)
+    } catch {
+      return
+    }
+    const ephemeral = Ephemeral.safeParse(value)
+    if (ephemeral.success)
+      return useMessagesStore.getState().applyEphemeral(ephemeral.data)
+    const event = ServerEvent.safeParse(value)
+    if (event.success) useMessagesStore.getState().applyEvent(event.data)
+  }
+  private scheduleReconnect() {
+    if (this.timer) return
+    const initial = this.options.backoff?.initialMs ?? 100
+    const max = this.options.backoff?.maxMs ?? 10_000
+    this.timer = setTimeout(
+      () => {
+        this.timer = undefined
+        this.connect()
+      },
+      Math.min(max, initial * 2 ** this.attempt++),
+    )
+  }
+}
+export const connectForgeSocket = (options?: SocketOptions) =>
+  new ForgeSocket(options).start()
