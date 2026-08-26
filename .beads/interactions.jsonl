@@ -125,3 +125,4 @@
 {"id":"int-939a33abd58fbc4b955a872658398db8","kind":"field_change","created_at":"2026-08-26T15:03:30.926652022Z","actor":"Yiin","issue_id":"forge-9e1.13","extra":{"field":"status","new_value":"open","old_value":"in_progress"}}
 {"id":"int-1376e3d95cae5eb61627a3e3831d0024","kind":"field_change","created_at":"2026-08-26T15:03:30.926778001Z","actor":"Yiin","issue_id":"forge-9e1.13","extra":{"field":"assignee","new_value":"","old_value":"Yiin"}}
 {"id":"int-519e830fa89041d231a395c70a196e99","kind":"field_change","created_at":"2026-08-26T15:09:23.019732021Z","actor":"Yiin","issue_id":"forge-9e1.19","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-76b3f41fc702fa66bfb9233f514420d6","kind":"field_change","created_at":"2026-08-26T15:10:48.466352775Z","actor":"Yiin","issue_id":"forge-9e1.20","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}

@@ -69,7 +69,12 @@ export function FileTreeView({ projectId, selectedPath, onSelect }: Props) {
     setError(null)
     setPaths([])
     setLoaded({})
-    void loadDirectories().catch((cause: unknown) => { if (active) { setLoading(false); setError(causeMessage(cause)) } })
+    void loadDirectories().catch((cause: unknown) => {
+      if (active) {
+        setLoading(false)
+        setError(causeMessage(cause))
+      }
+    })
     return () => {
       active = false
     }
@@ -100,9 +105,23 @@ export function FileTreeView({ projectId, selectedPath, onSelect }: Props) {
     await navigator.clipboard.writeText(path)
   }
 
-  if (error) return <div className="file-state"><p role="alert">{error}</p><button onClick={() => { setError(null); setLoaded({}) }}><span aria-hidden="true">↻</span> Retry</button></div>
+  if (error)
+    return (
+      <div className="file-state">
+        <p role="alert">{error}</p>
+        <button
+          onClick={() => {
+            setError(null)
+            setLoaded({})
+          }}
+        >
+          <span aria-hidden="true">↻</span> Retry
+        </button>
+      </div>
+    )
   if (loading && !paths.length) return <p role="status">Loading directory…</p>
-  if (!paths.length) return <p className="file-empty">This directory is empty.</p>
+  if (!paths.length)
+    return <p className="file-empty">This directory is empty.</p>
   return (
     <div className="file-tree-view">
       <FileTree

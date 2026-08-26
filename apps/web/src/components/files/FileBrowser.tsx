@@ -8,15 +8,22 @@ import { filePathUrl, parentPath, pathToSplat } from './fileBrowserPath'
 type Entry = { name: string; type: 'file' | 'dir'; sizeBytes: number }
 
 export function FileBrowser() {
-  const params = useParams({ strict: false }) as { projectId?: string; _splat?: string }
+  const params = useParams({ strict: false }) as {
+    projectId?: string
+    _splat?: string
+  }
   const { projectId, _splat } = params
   const path = pathToSplat(_splat)
   const project = projectId ?? ''
   const navigate = useNavigate()
   const location = useLocation()
   const [entry, setEntry] = useState<Entry | null>(null)
-  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([])
-  const [projectState, setProjectState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading')
+  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>(
+    [],
+  )
+  const [projectState, setProjectState] = useState<
+    'loading' | 'ready' | 'empty' | 'error'
+  >('loading')
   const [projectError, setProjectError] = useState<string | null>(null)
   const [quickOpen, setQuickOpen] = useState('')
   const isFile = Boolean(path && entry?.type === 'file')
@@ -33,11 +40,14 @@ export function FileBrowser() {
       .then((items) => {
         setProjects(items)
         setProjectState(items.length ? 'ready' : 'empty')
-        if (!projectId && items.length === 1) void navigate({ to: filePathUrl(items[0].id) })
+        if (!projectId && items.length === 1)
+          void navigate({ to: filePathUrl(items[0].id) })
       })
       .catch((cause: unknown) => {
         setProjectState('error')
-        setProjectError(cause instanceof Error ? cause.message : 'Could not load projects')
+        setProjectError(
+          cause instanceof Error ? cause.message : 'Could not load projects',
+        )
       })
   }
 
@@ -71,14 +81,43 @@ export function FileBrowser() {
 
   if (!projectId) {
     return (
-      <section className="file-browser file-project-picker" aria-labelledby="files-title">
-        <header className="file-browser-header"><Files size={18} aria-hidden="true" /><h1 id="files-title">Files</h1></header>
+      <section
+        className="file-browser file-project-picker"
+        aria-labelledby="files-title"
+      >
+        <header className="file-browser-header">
+          <Files size={18} aria-hidden="true" />
+          <h1 id="files-title">Files</h1>
+        </header>
         {projectState === 'loading' && <p role="status">Loading projects…</p>}
-        {projectState === 'error' && <div className="file-state"><p role="alert">{projectError}</p><button onClick={loadProjects}><RotateCcw size={16} /> Retry</button></div>}
-        {projectState === 'empty' && <div className="file-state"><h2>No projects</h2><p>Create a project before opening files.</p></div>}
-        {projectState === 'ready' && <div className="file-project-list" role="list" aria-label="Projects">
-          {projects.map((item) => <button role="listitem" key={item.id} onClick={() => navigate({ to: filePathUrl(item.id) })}>{item.name}<span>{item.id}</span></button>)}
-        </div>}
+        {projectState === 'error' && (
+          <div className="file-state">
+            <p role="alert">{projectError}</p>
+            <button onClick={loadProjects}>
+              <RotateCcw size={16} /> Retry
+            </button>
+          </div>
+        )}
+        {projectState === 'empty' && (
+          <div className="file-state">
+            <h2>No projects</h2>
+            <p>Create a project before opening files.</p>
+          </div>
+        )}
+        {projectState === 'ready' && (
+          <div className="file-project-list" role="list" aria-label="Projects">
+            {projects.map((item) => (
+              <button
+                role="listitem"
+                key={item.id}
+                onClick={() => navigate({ to: filePathUrl(item.id) })}
+              >
+                {item.name}
+                <span>{item.id}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </section>
     )
   }
@@ -120,9 +159,20 @@ export function FileBrowser() {
       </header>
       <div className="file-browser-content">
         <div className="file-browser-tree">
-          <form className="file-quick-open" onSubmit={(event) => { event.preventDefault(); if (quickOpen.trim()) select(quickOpen.trim()) }}>
+          <form
+            className="file-quick-open"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (quickOpen.trim()) select(quickOpen.trim())
+            }}
+          >
             <Search size={16} aria-hidden="true" />
-            <input aria-label="Quick open file" placeholder="Quick open path" value={quickOpen} onChange={(event) => setQuickOpen(event.target.value)} />
+            <input
+              aria-label="Quick open file"
+              placeholder="Quick open path"
+              value={quickOpen}
+              onChange={(event) => setQuickOpen(event.target.value)}
+            />
           </form>
           <FileTreeView
             projectId={project}
@@ -141,7 +191,10 @@ export function FileBrowser() {
             />
           </div>
         ) : (
-          <div className="file-browser-empty"><strong>Select a file to view it.</strong><span>Use the tree or Quick open.</span></div>
+          <div className="file-browser-empty">
+            <strong>Select a file to view it.</strong>
+            <span>Use the tree or Quick open.</span>
+          </div>
         )}
       </div>
       <span className="sr-only">Current route: {location.pathname}</span>
