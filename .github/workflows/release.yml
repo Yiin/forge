@@ -53,6 +53,13 @@ jobs:
           cp -R apps/server/drizzle/. "$staging/apps/drizzle/"
           cp -R apps/web/dist/. "$staging/web/"
           cp apps/server/package.json "$staging/apps/server/package.json"
+          # node-pty has no linux-x64 prebuild; it compiles on install. The
+          # bundle's native loader checks build/Release next to index.js.
+          mkdir -p "$staging/apps/server/src/build/Release"
+          cp node_modules/node-pty/build/Release/pty.node "$staging/apps/server/src/build/Release/"
+          if [ -f node_modules/node-pty/build/Release/spawn-helper ]; then
+            cp node_modules/node-pty/build/Release/spawn-helper "$staging/apps/server/src/build/Release/"
+          fi
           node -e 'const fs=require("node:fs"); const file=process.argv[1]; const pkg=JSON.parse(fs.readFileSync(file,"utf8")); pkg.version=process.argv[2]; fs.writeFileSync(file, JSON.stringify(pkg)+"\n")' "$staging/apps/server/package.json" "$version"
           test -s "$staging/web/index.html"
           bun run --filter forge-client build
