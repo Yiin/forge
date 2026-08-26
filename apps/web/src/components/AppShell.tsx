@@ -75,7 +75,10 @@ export function AppShell() {
         </main>
       </div>
       <div className="phone-shell">
-        <AppBar title={isSettings ? 'Settings' : 'Forge'} />
+        <AppBar
+          title={isSettings ? 'Settings' : 'Forge'}
+          showBack={location.pathname === '/search'}
+        />
         <main className="main">
           <Outlet />
         </main>
