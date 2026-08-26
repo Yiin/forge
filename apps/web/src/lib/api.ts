@@ -49,6 +49,9 @@ export class ForgeApi {
       `/api/sessions?parentSessionId=${encodeURIComponent(parentSessionId)}`,
     )
   }
+  getSession(sessionId: string) {
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}`)
+  }
   listProjects() {
     return this.get('/api/projects')
   }
