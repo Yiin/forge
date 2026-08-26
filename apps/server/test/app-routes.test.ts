@@ -57,6 +57,39 @@ describe('createApp route composition', () => {
     expect(await files.json()).toEqual([])
   })
 
+  it('mounts session, fork and side-chat routes when a manager is present', async () => {
+    const { db, store } = await fixture()
+    const manager = {
+      list: () => [],
+      keep: () => false,
+      fork: async () => {
+        throw new Error('Session not found')
+      },
+    } as unknown as Parameters<typeof createApp>[3]
+    const app = createApp(
+      store,
+      { db, bus: store.eventBus, version: 'dev', bootId: 'boot' },
+      undefined,
+      manager,
+    )
+
+    const sessions = await app.request('/api/sessions')
+    expect(sessions.status).toBe(200)
+
+    const fork = await app.request('/api/sessions/session/fork', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messageSeq: 1, text: 'hi', includeSource: true }),
+    })
+    expect(fork.status).toBe(400)
+
+    const keep = await app.request('/api/sessions/session/keep', {
+      method: 'POST',
+    })
+    expect(keep.status).toBe(404)
+    expect(await keep.json()).toEqual({ error: 'Side chat not found' })
+  })
+
   it('falls back to a plain health route with no status options', async () => {
     const app = createApp()
     const health = await app.request('/api/health')

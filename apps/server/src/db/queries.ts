@@ -167,7 +167,7 @@ export function createSession(
   const value = { id: id('ses_'), ...input, kind: input.kind ?? 'chat', now }
   db.prepare(
     `INSERT INTO sessions (id, project_id, harness, title, cwd, kind, retention, parent_session_id, forked_at_seq, fork_request_id, context_method, context_confidence, status, auto_resume, created_at, last_activity_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
   ).run(
     value.id,
     value.projectId,
