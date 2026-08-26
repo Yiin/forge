@@ -1,4 +1,11 @@
 import { Paperclip, Send } from 'lucide-react'
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ClipboardEvent } from 'react'
 import { api } from '../../lib/api'
@@ -356,18 +363,23 @@ export function Composer({
             />
           </label>
           {harnesses.length > 0 && (
-            <select
-              className="composer-harness"
-              aria-label="Harness"
+            <Select
               value={selectedHarness}
-              onChange={(event) => setSelectedHarness(event.target.value)}
+              onValueChange={(value) => {
+                if (typeof value === 'string') setSelectedHarness(value)
+              }}
             >
-              {harnesses.map((entry) => (
-                <option key={entry} value={entry}>
-                  {entry}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="composer-harness" aria-label="Harness">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {harnesses.map((entry) => (
+                  <SelectItem key={entry} value={entry}>
+                    {entry}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           )}
           <span className="composer-footer-spacer" />
           {protocol === 'pty' && running && onInterrupt && (
