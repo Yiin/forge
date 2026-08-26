@@ -112,10 +112,9 @@ export class ForgeApi {
     )
   }
   deleteSession(sessionId: string) {
-    return this.post(
-      `/api/sessions/${encodeURIComponent(sessionId)}/delete`,
-      null,
-      {},
+    return this.request(
+      'DELETE',
+      `/api/sessions/${encodeURIComponent(sessionId)}`,
     )
   }
   prompt(input: Prompt) {
@@ -180,6 +179,12 @@ export class ForgeApi {
   }
   private async get(path: string) {
     const response = await this.fetcher(`${this.baseUrl}${path}`)
+    if (!response.ok)
+      throw new Error(`Forge API request failed (${response.status})`)
+    return await response.json()
+  }
+  private async request(method: string, path: string) {
+    const response = await this.fetcher(`${this.baseUrl}${path}`, { method })
     if (!response.ok)
       throw new Error(`Forge API request failed (${response.status})`)
     return await response.json()
