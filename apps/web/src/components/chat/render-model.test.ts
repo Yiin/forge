@@ -24,7 +24,9 @@ describe('chat render model', () => {
         message({ type: 'text_delta', text: 'hel' }),
         message({ type: 'text_delta', text: 'lo' }),
       ]),
-    ).toEqual([{ kind: 'message', id: 'i', seq: 1, role: 'agent', text: 'hello' }])
+    ).toEqual([
+      { kind: 'message', id: 'i', seq: 1, role: 'agent', text: 'hello' },
+    ])
   })
   it('folds tool states and preserves input and output', () => {
     const items = toRenderModel([

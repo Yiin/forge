@@ -59,7 +59,9 @@ export function Timeline({
         }}
       >
         <Virtualizer<ChatRenderItem> data={items} shift>
-          {(item: ChatRenderItem) => <RenderItem key={item.id} item={item} />}
+          {(item: ChatRenderItem) => (
+            <RenderItem key={item.id} item={item} sessionId={sessionId} />
+          )}
         </Virtualizer>
       </div>
       {!atBottom && (
@@ -82,8 +84,10 @@ export function Timeline({
 
 function RenderItem({
   item,
+  sessionId,
 }: {
   item: ReturnType<typeof toRenderModel>[number]
+  sessionId: string
 }) {
   if (item.kind === 'message')
     return <MessageRow item={item} sessionId={sessionId} />

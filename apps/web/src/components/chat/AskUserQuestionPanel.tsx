@@ -84,6 +84,7 @@ function QuestionCard({
               key={option.label}
               onClick={() => choose(option.label)}
               disabled={sending}
+              aria-pressed={multi ? selected.includes(option.label) : undefined}
             >
               <span>
                 {selected.includes(option.label) ? <Check size={16} /> : null}
@@ -97,6 +98,7 @@ function QuestionCard({
       {(options.length === 0 || question.options.length === 0) && (
         <div className="ask-question-free">
           <input
+            aria-label="Answer"
             value={freeText}
             onChange={(event) => setFreeText(event.target.value)}
             placeholder="Type your answer…"
