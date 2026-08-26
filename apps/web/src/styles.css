@@ -732,6 +732,16 @@ body {
   color: var(--muted);
   flex: none;
 }
+.session-rename-button {
+  color: var(--muted);
+  padding: 4px;
+}
+.session-info-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 .session-title-input {
   min-width: 220px;
   max-width: 60vw;

@@ -8,6 +8,9 @@ export type SessionSummary = {
   spawnedBySeq?: number | null
   status?: string
   harness?: string
+  createdAt?: string
+  created_at?: number
+  project_id?: string | null
   lastActivityAt?: number | string
   snippet?: string
   unread?: boolean
