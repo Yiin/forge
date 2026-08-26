@@ -19,9 +19,9 @@ describe('shell storage', () => {
   it('clamps sidebar width', () => {
     const s = storage()
     writeSidebarWidth(500, s)
-    expect(readSidebarWidth(s)).toBe(420)
+    expect(readSidebarWidth(s)).toBe(360)
     writeSidebarWidth(100, s)
-    expect(readSidebarWidth(s)).toBe(220)
+    expect(readSidebarWidth(s)).toBe(216)
   })
   it('persists theme', () => {
     const s = storage()
