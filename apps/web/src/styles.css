@@ -229,6 +229,9 @@ body {
   min-height: 76px;
   resize: vertical;
 }
+.settings-form input[type='number'] {
+  width: 120px;
+}
 .settings-form button {
   min-height: 38px;
   border: 1px solid var(--border);
@@ -278,6 +281,40 @@ body {
   white-space: pre-wrap;
   font-size: 12px;
 }
+.settings-error {
+  margin: 0;
+  color: #fb7185;
+  font-size: 12px;
+}
+.settings-env {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.settings-env legend {
+  padding: 0 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-env-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.8fr) minmax(120px, 1fr) auto auto;
+  gap: 7px;
+  align-items: center;
+}
+.settings-env-row input {
+  min-width: 0;
+}
+.settings-env-row button {
+  min-height: 36px;
+  padding-inline: 8px;
+}
+.settings-env-remove {
+  color: #fb7185 !important;
+}
 .project-setting small {
   display: block;
   margin-top: 5px;
@@ -318,6 +355,13 @@ body {
   .project-setting {
     align-items: stretch;
     flex-direction: column;
+  }
+  .settings-env-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .settings-env-row .settings-env-toggle,
+  .settings-env-row .settings-env-remove {
+    width: 100%;
   }
 }
 .sidebar-header {
