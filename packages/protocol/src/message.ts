@@ -67,6 +67,20 @@ export const MessageContent = z.discriminatedUnion('type', [
     message: z.string(),
     code: z.string().optional(),
   }),
+  z.object({
+    type: z.literal('epic_triage'),
+    runId: id,
+    beadId: id,
+    attempts: z.number().int().nonnegative(),
+    classification: z.enum(['code', 'infra', 'unknown']),
+    failureChain: z.array(
+      z.object({
+        attempt: z.number().int().positive(),
+        signature: id,
+        excerpt: z.string(),
+      }),
+    ),
+  }),
 ])
 export type MessageContent = z.infer<typeof MessageContent>
 export const messageContentTypes = [
@@ -82,6 +96,7 @@ export const messageContentTypes = [
   'turn_end',
   'turn_interrupted',
   'error',
+  'epic_triage',
 ] as const
 export const Message = z.object({
   seq: z.number().int().nonnegative(),
