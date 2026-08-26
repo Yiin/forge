@@ -29,6 +29,8 @@ import { epicRoutes } from './http/epics.js'
 import type { EpicRunner } from './epics/runner.js'
 import { recoverSessions } from './sessions/recovery.js'
 import { harnessRoutes } from './http/harnesses.js'
+import { defaultConfig } from './config.js'
+import { ptyHarness } from './pty/harness.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -162,15 +164,20 @@ export function startServer(
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
   const questions = new ServerQuestionManager({ db, bus })
-  const factory: HarnessFactory = () => ({
-    spawn: async (_session, _onItem, onExit) => ({
-      prompt: async () => {
-        onExit(new Error('No harness adapter configured'))
-      },
-      cancel: () => undefined,
-      kill: () => undefined,
-    }),
-  })
+  const configuredHarnesses = defaultConfig().harness
+  const factory: HarnessFactory = (key) => {
+    const entry = configuredHarnesses[key]
+    if (entry?.protocol === 'pty') return ptyHarness(entry)
+    return {
+      spawn: async (_session, _onItem, onExit) => ({
+        prompt: async () => {
+          onExit(new Error('No harness adapter configured'))
+        },
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }
+  }
   const manager = new SessionManager(db, bus, factory)
   // Settle persisted turns before exposing the port. Respawn work continues
   // from the settled state without delaying health checks.
