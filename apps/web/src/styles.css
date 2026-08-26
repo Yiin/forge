@@ -1281,6 +1281,7 @@ kbd {
 .composer textarea {
   min-height: 44px;
   max-height: 140px;
+  min-width: 0;
   flex: 1;
   resize: vertical;
 }
@@ -1519,6 +1520,21 @@ kbd {
   .chat-attachment,
   .chat-system {
     max-width: none;
+  }
+  .composer-wrap {
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+  }
+  .composer {
+    right: 10px;
+    left: 10px;
+    gap: 4px;
+  }
+  .composer-harness {
+    max-width: 92px;
+    min-width: 0;
+  }
+  .composer-send-label {
+    display: none;
   }
 }
 
