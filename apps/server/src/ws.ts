@@ -59,9 +59,14 @@ export function websocketRoute(
     let heartbeat: ReturnType<typeof setInterval> | undefined
 
     const close = () => {
+      generation++
+      socket = undefined
       unsubscribePersisted?.()
       unsubscribeEphemeral?.()
+      unsubscribePersisted = undefined
+      unsubscribeEphemeral = undefined
       if (heartbeat) clearInterval(heartbeat)
+      heartbeat = undefined
     }
 
     const subscribe = async (frame: unknown) => {
