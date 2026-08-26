@@ -11,6 +11,8 @@ import {
   type ForgeConfig,
   type HarnessConfig,
 } from '@forge/protocol/config'
+import { epicRunConfig, type EpicRunConfig } from '@forge/protocol/rolePolicy'
+import { join } from 'node:path'
 
 type SqliteDb = {
   exec(sql: string): unknown
@@ -25,6 +27,18 @@ type CapabilityRow = {
   capabilities: string
   agent_name: string | null
   updated_at: number
+}
+
+export type ConfigProvenance = Record<string, 'input' | 'repo' | 'default'>
+export type ResolvedRunConfig = EpicRunConfig & { provenance: ConfigProvenance }
+
+export const defaultRolePolicy = {
+  roles: {
+    'iteration-worker': 'default',
+    'triage-control': 'default',
+    'title-generation': 'default',
+  },
+  tiers: { default: [{ harness: 'claude-code-acp' }] },
 }
 
 let activeConfig: ForgeConfig | undefined
@@ -84,8 +98,43 @@ export function defaultConfig(
     dataDir: resolve(process.cwd(), 'data'),
     port: 3900,
     harness,
-    settings: { theme: 'dark', defaultProject: '', titleGeneration: true },
+    settings: {
+      theme: 'dark',
+      defaultProject: '',
+      titleGeneration: true,
+      epicDefaults: {
+        workerCount: 3,
+        mode: 'pool',
+        rolePolicy: defaultRolePolicy,
+      },
+    },
   }
+}
+
+/** Resolve input over repo config over server defaults. */
+export async function resolveRunConfig(
+  repoPath: string,
+  input: unknown,
+  defaults: EpicRunConfig = {
+    workerCount: 3,
+    mode: 'pool',
+    rolePolicy: defaultRolePolicy,
+  },
+): Promise<ResolvedRunConfig> {
+  const parsedInput = epicRunConfig.parse(input ?? {})
+  let repo: EpicRunConfig = {}
+  const file = join(repoPath, '.forge', 'epic-run.json')
+  try {
+    repo = epicRunConfig.parse(JSON.parse(await readFile(file, 'utf8')))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const config = { ...defaults, ...repo, ...parsedInput }
+  const provenance: ConfigProvenance = {}
+  for (const key of Object.keys(config))
+    provenance[key] =
+      key in parsedInput ? 'input' : key in repo ? 'repo' : 'default'
+  return { ...config, provenance }
 }
 
 function formatIssue(

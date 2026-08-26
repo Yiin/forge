@@ -348,22 +348,158 @@ export function ProjectSettings() {
 }
 
 export function EpicSettings() {
+  type Policy = {
+    roles: Record<string, string>
+    tiers: Record<string, Array<{ harness: string; model?: string }>>
+  }
+  type Defaults = {
+    workerCount: number
+    mode: 'pool' | 'serial' | 'auto'
+    gateCommand?: string | string[]
+    installCommand?: string | string[]
+    rolePolicy: Policy
+  }
+  const [defaults, setDefaults] = useState<Defaults>({
+    workerCount: 3,
+    mode: 'pool',
+    rolePolicy: {
+      roles: {
+        'iteration-worker': 'default',
+        'triage-control': 'default',
+        'title-generation': 'default',
+      },
+      tiers: { default: [{ harness: 'claude-code-acp' }] },
+    },
+  })
+  const [harnesses, setHarnesses] = useState<Record<string, { name: string }>>(
+    {},
+  )
+  const [saved, setSaved] = useState(false)
+  useEffect(() => {
+    void Promise.all([api.getSettings(), api.listHarnesses()]).then(
+      ([settings, available]) => {
+        const value = settings as { epicDefaults?: Partial<Defaults> }
+        setDefaults((current) => ({
+          ...current,
+          ...(value.epicDefaults ?? {}),
+          rolePolicy: value.epicDefaults?.rolePolicy ?? current.rolePolicy,
+        }))
+        setHarnesses(available as Record<string, { name: string }>)
+      },
+    )
+  }, [])
+  const updateRole = (role: string, tier: string) =>
+    setDefaults((current) => ({
+      ...current,
+      rolePolicy: {
+        ...current.rolePolicy,
+        roles: { ...current.rolePolicy.roles, [role]: tier },
+      },
+    }))
+  const updateHop = (
+    tier: string,
+    index: number,
+    patch: { harness?: string; model?: string },
+  ) =>
+    setDefaults((current) => ({
+      ...current,
+      rolePolicy: {
+        ...current.rolePolicy,
+        tiers: {
+          ...current.rolePolicy.tiers,
+          [tier]: current.rolePolicy.tiers[tier].map((hop, hopIndex) =>
+            hopIndex === index ? { ...hop, ...patch } : hop,
+          ),
+        },
+      },
+    }))
+  const save = () => {
+    setSaved(false)
+    void api.saveSettings({ epicDefaults: defaults }).then(() => setSaved(true))
+  }
   return (
     <SettingsPage title="Epics" subtitle="Defaults for the epic runner.">
       <label>
         Worker count
-        <input type="number" min="1" defaultValue="3" />
+        <input
+          type="number"
+          min="1"
+          value={defaults.workerCount}
+          onChange={(event) =>
+            setDefaults({
+              ...defaults,
+              workerCount: Number(event.target.value),
+            })
+          }
+        />
       </label>
       <label>
         Default mode
-        <select defaultValue="pool">
+        <select
+          value={defaults.mode}
+          onChange={(event) =>
+            setDefaults({
+              ...defaults,
+              mode: event.target.value as Defaults['mode'],
+            })
+          }
+        >
           <option value="pool">Pool</option>
           <option value="serial">Serial</option>
         </select>
       </label>
-      <p className="muted">
-        Role and model policy editing is owned by the epic runner.
-      </p>
+      <fieldset className="settings-env">
+        <legend>Role policy</legend>
+        {Object.entries(defaults.rolePolicy.roles).map(([role, tier]) => (
+          <label key={role}>
+            {role}
+            <select
+              value={tier}
+              onChange={(event) => updateRole(role, event.target.value)}
+            >
+              {Object.keys(defaults.rolePolicy.tiers).map((name) => (
+                <option key={name}>{name}</option>
+              ))}
+            </select>
+          </label>
+        ))}
+        {Object.entries(defaults.rolePolicy.tiers).map(([tier, hops]) => (
+          <div className="settings-card" key={tier}>
+            <strong>{tier} fallback hops</strong>
+            {hops.map((hop, index) => (
+              <div className="settings-env-row" key={`${tier}-${index}`}>
+                <select
+                  aria-label={`${tier} hop ${index + 1} harness`}
+                  value={hop.harness}
+                  onChange={(event) =>
+                    updateHop(tier, index, { harness: event.target.value })
+                  }
+                >
+                  {Object.keys(harnesses).map((name) => (
+                    <option key={name}>{name}</option>
+                  ))}
+                </select>
+                <input
+                  aria-label={`${tier} hop ${index + 1} model`}
+                  placeholder="Model (optional)"
+                  value={hop.model ?? ''}
+                  onChange={(event) =>
+                    updateHop(tier, index, {
+                      model: event.target.value || undefined,
+                    })
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        ))}
+      </fieldset>
+      <button onClick={save}>Save epic defaults</button>
+      {saved && (
+        <p className="muted" role="status">
+          Saved.
+        </p>
+      )}
     </SettingsPage>
   )
 }
