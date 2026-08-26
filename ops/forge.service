@@ -1,0 +1,13 @@
+[Unit]
+Description=Forge personal agent workspace
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/forge
+Restart=on-failure
+RestartSec=3
+Environment=FORGE_PORT=3900
+Environment=FORGE_DATA_DIR=%h/.local/share/forge
+
+[Install]
+WantedBy=default.target

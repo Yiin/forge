@@ -1,0 +1,6 @@
+[Unit]
+Description=Update Forge from the latest GitHub release
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/forge-update
