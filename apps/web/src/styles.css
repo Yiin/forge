@@ -334,11 +334,19 @@ body {
   color: var(--muted);
   font-size: 12px;
 }
+.settings-env > .muted {
+  margin: 0;
+  font-size: 12px;
+}
 .settings-env-row {
   display: grid;
   grid-template-columns: minmax(100px, 0.8fr) minmax(120px, 1fr) auto auto;
   gap: 7px;
   align-items: center;
+}
+.settings-add-tier {
+  grid-template-columns: minmax(100px, 1fr) auto;
+  margin-top: 4px;
 }
 .settings-env-row input {
   min-width: 0;
