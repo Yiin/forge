@@ -69,7 +69,7 @@ jobs:
           test -n "$client_tarball"
           mv "$client_tarball" "dist/forge-client-${version}.tgz"
           tar -C "$RUNNER_TEMP" -czf "dist/forge-linux-x64.tar.gz" forge-linux-x64
-          sha256sum dist/forge-linux-x64.tar.gz dist/forge-client-${version}.tgz > dist/checksums.txt
+          (cd dist && sha256sum forge-linux-x64.tar.gz "forge-client-${version}.tgz" > checksums.txt)
           printf 'version=%s\nclient_tarball=dist/forge-client-%s.tgz\n' "$version" "$version" >> "$GITHUB_OUTPUT"
       - name: Boot smoke
         env:
