@@ -9,7 +9,11 @@ export type ForgeServer = {
   dataDir: string
   stop: () => Promise<void>
 }
-export type LaunchOptions = { env?: Record<string, string>; dataDir?: string }
+export type LaunchOptions = {
+  env?: Record<string, string>
+  dataDir?: string
+  fakeAgentEnv?: Record<string, string>
+}
 
 export async function launchForge(
   options: LaunchOptions = {},
@@ -20,15 +24,26 @@ export async function launchForge(
   const tmpRoot = resolve(tmpdir())
   if (dataDir !== tmpRoot && !dataDir.startsWith(`${tmpRoot}/`))
     throw new Error('e2e data directory must be under tmpdir')
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+  const fakeAgent = resolve(root, 'apps/server/test/fixtures/acp-mock-agent.ts')
+  const tomlEnv = Object.entries(options.fakeAgentEnv ?? {})
+    .map(([key, value]) => `${key} = ${JSON.stringify(value)}`)
+    .join('\n')
   await writeFile(
     resolve(dataDir, 'forge.toml'),
-    '[harnesses.fake-acp-agent]\nprotocol = "acp"\ncommand = "bun"\nargs = []\n',
+    [
+      '[harness.fake-acp-agent]',
+      'protocol = "acp"',
+      'command = "bun"',
+      `args = [${JSON.stringify(fakeAgent)}]`,
+      ...(tomlEnv ? ['[harness.fake-acp-agent.env]', tomlEnv] : []),
+      '',
+    ].join('\n'),
   )
   spawnSync('sqlite3', [
     resolve(dataDir, 'forge.db'),
     'CREATE TABLE IF NOT EXISTS e2e_marker (id INTEGER);',
   ])
-  const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
   const child = spawn('bun', ['run', 'apps/server/src/index.ts'], {
     cwd: root,
     env: {
