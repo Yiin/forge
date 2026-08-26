@@ -54,6 +54,8 @@ const defaultEntry = (
   args,
   env: {},
   protocol,
+  quietPeriodMs: 2000,
+  maxTurnMs: 30 * 60 * 1000,
   enabled: commandAvailable(command),
 })
 
@@ -74,6 +76,7 @@ export function defaultConfig(
   dev = process.env.NODE_ENV !== 'production',
 ): ForgeConfig {
   const harness: Record<string, HarnessConfig> = {
+    shell: defaultEntry('Shell PTY', 'bash', ['-i'], 'pty'),
     'claude-code-acp': defaultEntry('Claude Code ACP', 'npx', [
       '@zed-industries/claude-code-acp',
     ]),
