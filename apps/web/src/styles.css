@@ -527,6 +527,18 @@ kbd {
   max-width: 900px;
   margin: 0 auto;
 }
+.composer-attachments { position: absolute; right: 0; bottom: calc(100% + 6px); left: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.attachment-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 240px; border: 1px solid var(--border); border-radius: 999px; padding: 5px 8px; color: var(--muted); background: var(--panel); font-size: 12px; }
+.attachment-chip button { display: inline-flex; border: 0; color: inherit; background: none; cursor: pointer; }
+.composer-file { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; color: var(--muted); cursor: pointer; }
+.composer-file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.composer-harness { max-width: 130px; min-height: 44px; border: 1px solid var(--border); border-radius: 7px; color: inherit; background: var(--panel); padding: 4px; }
+.composer textarea { overflow-y: auto; resize: none; }
+.composer-command-menu { position: absolute; right: 0; bottom: calc(100% + 8px); left: 0; z-index: 4; max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 6px; background: var(--panel); box-shadow: 0 16px 45px #0007; }
+.composer-command-menu [cmdk-item] { padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.composer-command-menu [cmdk-item][aria-selected='true'] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.composer-command-menu [cmdk-group-heading] { padding: 6px 10px 3px; color: var(--muted); font-size: 11px; }
+.skill-chip { display: inline-block; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 5px; padding: 1px 5px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); font-size: .9em; }
 .composer textarea {
   min-height: 44px;
   max-height: 140px;

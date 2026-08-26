@@ -15,6 +15,7 @@ import {
   type Prompt,
 } from '@forge/protocol/commands'
 export type ApiOptions = { baseUrl?: string; fetch?: typeof globalThis.fetch }
+export type UploadProgress = (fraction: number) => void
 type BodySchema = { parse: (value: unknown) => unknown }
 const base = () =>
   typeof window === 'undefined' ? 'http://localhost:3000' : ''
@@ -49,6 +50,23 @@ export class ForgeApi {
   }
   prompt(input: Prompt) {
     return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)
+  }
+  async upload(sessionId: string, file: File, onProgress?: UploadProgress) {
+    const init = await this.post(`/api/sessions/${encodeURIComponent(sessionId)}/uploads`, null, {
+      filename: file.name,
+      mime: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+    }) as { attachmentId: string; putUrl: string }
+    await new Promise<void>((resolve, reject) => {
+      const request = new XMLHttpRequest()
+      request.open('PUT', `${this.baseUrl}${init.putUrl}`)
+      request.upload.onprogress = (event) => { if (event.lengthComputable) onProgress?.(event.loaded / event.total) }
+      request.onload = () => request.status >= 200 && request.status < 300 ? resolve() : reject(new Error(`Upload failed (${request.status})`))
+      request.onerror = () => reject(new Error('Upload failed'))
+      request.send(file)
+    })
+    onProgress?.(1)
+    return init
   }
   interrupt(input: Interrupt) {
     return this.post(
