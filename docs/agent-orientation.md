@@ -1,48 +1,75 @@
-# Agent orientation — forge
+# Agent orientation: Forge
 
-Operational card for epic forge-3b7 workers. Read before touching code.
-docs/DIRECTION.md is the scope+stack contract; docs/architecture.md is the
-planned design. Your child bead's description wins for your own scope.
+Operational facts for Forge workers. Read this file before you touch code.
+The assigned child and injected epic goal define your scope. `docs/DIRECTION.md`
+defines the product boundary. Treat `docs/architecture.md` as historical plans,
+not current implementation truth.
 
-## Repos & where things live
-- BEADS + CODE: the forge repo (one repo). Your cwd is your checkout. It may
-  be a per-worker git worktree. Edit files under your cwd only. NEVER edit
-  /home/yiin/Projects/forge directly when your cwd is elsewhere. Run bd from
-  your cwd; it reaches the same database through the Dolt server port.
-- docs/DIRECTION.md — binding scope and stack. Never relitigate it.
-- docs/architecture.md — planned schema, module map, UX map, t3code lessons.
-- apps/server — Bun + Hono + one WS. Planned layout in architecture.md §system.
-- apps/web — React/Vite/TanStack Router/Zustand/shadcn.
-- packages/protocol — zod schemas only; server, web, dashboards import it.
-- /home/yiin/Projects/t3code — predecessor, READ-ONLY reference. Mine UX and
-  lessons; never port Effect code.
+## Repos and paths
 
-## Check commands (from repo root)
-- Typecheck: `bun run --filter '*' typecheck` (exists after core-scaffold lands; before
-  that, the spike child defines its own checks).
-- Focused tests: `bunx vitest run <file>` in the touched package.
-- Lint/format: `bunx oxlint` / `bunx prettier --check .` (after core-scaffold).
-- E2e: see delivery-e2e-harness child once landed; browser flows via the
-  test-forge-app skill child.
+- BEADS + CODE: this Forge checkout. It can be a worker Git worktree.
+- Edit only your current checkout. Never edit `/home/yiin/Projects/forge` from another worktree.
+- Run `bd` from your current checkout. It uses the shared Dolt server.
+- `apps/web`: React, Vite, TanStack Router, Zustand, and the workspace UI.
+- `apps/web/src/components/AppShell.tsx`: owns the single mounted route outlet.
+- `apps/web/src/components/chat`: timeline, messages, activity, composer, and agent details.
+- `apps/web/src/stores/shell.ts`: theme, sidebar, and shell preferences.
+- `apps/web/src/styles.css`: shared tokens and layout. Coordinate edits carefully.
+- `apps/server`: Hono server and WebSocket transport. Tooling uses Bun.
+- `packages/protocol`: Zod wire schemas shared by server, web, and dashboards.
+- `e2e`: Playwright fixtures and desktop, phone, and landscape flows.
+- `.agents/skills/test-forge-app/SKILL.md`: disposable browser QA and teardown.
 
-## Vocabulary & contracts
-- "harness" = a config entry (command/args/env, protocol acp|pty), not code.
-- "seq" = the single global message cursor. "session kinds": chat, subagent,
-  epic_worker. "epic run" / "iteration" per epic_runs / epic_iterations tables.
-- packages/protocol binds every wire shape. Change schema and consumers in the
-  same child.
+The release runtime is Node 24. Bun remains the package, test, and development tool.
+
+## Check commands from the repo root
+
+- Typecheck: `bun run typecheck`
+- Focused test: `bunx vitest run <file>`
+- Lint: `bun run lint`
+- Format: `bun run fmt:check`
+- Production web build: `(cd apps/web && bunx vite build)`
+- Browser tests: `bun run e2e`
+- Full integration gate: `bash scripts/epic-gate.sh`
+
+Use the `test-forge-app` skill for attended browser QA. Always stop its server
+and remove its temporary directory through the launcher cleanup path.
+
+## UI and interaction contracts
+
+- Mount one route tree and one `Outlet`. CSS must never hide a second route tree.
+- Use one global shortcut registry. Ignore editable, composing, handled, and modal contexts.
+- Do not bind Command or Control plus `1` through `9`. Browsers own those keys.
+- Keep `Cmd/Ctrl K` for commands, `Cmd/Ctrl \\` for the sidebar, and `G` chords for navigation.
+- Use comfortable density. Primary targets are at least `44px` by `44px`.
+- Keep Forge mint sparse. Use it for focus, connection, progress, and primary actions.
+- Keep Enter to send, Shift Enter for a new line, and IME composition safe.
+- Support System, Light, and Dark themes through one preference source.
+- Test `320x568`, `390x844`, `844x390`, and `1440x900` layouts.
+- Loading, empty, error, saving, and success states need distinct words and controls.
+- Modal layers trap focus, close with Escape, and restore focus to their trigger.
+- Use text or icons with status colors. Do not use color alone.
+- Keep motion between `100ms` and `220ms`. Preserve complete reduced-motion behavior.
+
+The UI redesign is frontend-only unless a child says otherwise. Do not change
+backend domain rules or protocol shapes to simplify a view. The local `.lavish/`
+review is not available in worker worktrees. Child descriptions contain all
+approved values.
+
+## Vocabulary and data contracts
+
+- A harness is configuration with command, arguments, environment, and `acp` or `pty` protocol.
+- `seq` is the single global message cursor.
+- Session kinds are `chat`, `subagent`, and `epic_worker`.
+- Use `epic run` and `iteration` for `epic_runs` and `epic_iterations`.
+- `packages/protocol` binds every wire shape. Change schemas and consumers together.
 
 ## Do not
-- Do not UPDATE or DELETE rows in messages. Append-only; the UI folds deltas
-  by item_id. (2026-08-25 planning)
-- Do not send uploads over WebSocket. HTTP streaming to disk only; t3code
-  proved the WS path wrong (their commits 8e5cf2d02 -> 08f1ac479). (2026-08-25)
-- Do not query the Dolt server SQL from the epic runner. Use `bd --json`; watch
-  .beads/last-touched for change signals. (2026-08-25)
-- Do not publish an event before its row is committed. Publish-after-append,
-  always; reconnect correctness depends on it. (2026-08-25)
-- Do not spawn epic worker processes from inside an agent turn. runner.ts owns
-  them; headless turns die and orphan children. (2026-08-25, t3code lesson)
-- Do not add Effect, event sourcing, projections, or permission modes. Plain
-  TS, plain tables, always-yolo. (2026-08-25)
-- Do not use bead ids in generated session titles. Plain words. (2026-08-25)
+
+- Do not update or delete message rows. Append rows and fold deltas by `item_id`.
+- Do not send uploads over WebSocket. Stream them to disk over HTTP.
+- Do not query Dolt SQL from the epic runner. Use `bd --json`.
+- Do not publish an event before its database row commits.
+- Do not spawn epic workers inside an agent turn. `runner.ts` owns them.
+- Do not add Effect, event sourcing, projections, or permission modes.
+- Do not use Beads IDs in generated session titles.
