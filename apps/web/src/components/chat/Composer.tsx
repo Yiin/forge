@@ -269,6 +269,7 @@ export function Composer({
         <label className="composer-file">
           <Paperclip size={17} />
           <input
+            aria-label="Attach files"
             type="file"
             multiple
             onChange={(event) => {
