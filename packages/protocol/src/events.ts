@@ -41,5 +41,10 @@ export const Ephemeral = z.discriminatedUnion('type', [
     sessionId: z.string(),
     connected: z.boolean(),
   }),
+  z.object({
+    type: z.literal('beadsChanged'),
+    seq: z.null(),
+    repoPath: z.string(),
+  }),
 ])
 export type Ephemeral = z.infer<typeof Ephemeral>

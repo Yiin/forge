@@ -10,7 +10,8 @@
     "./commands": "./src/commands.ts",
     "./ws": "./src/ws.ts",
     "./status": "./src/status.ts",
-    "./config": "./src/config.ts"
+    "./config": "./src/config.ts",
+    "./beads": "./src/beads.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
