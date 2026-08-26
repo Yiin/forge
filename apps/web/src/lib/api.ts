@@ -24,7 +24,7 @@ export class ForgeApi {
   private readonly fetcher: typeof globalThis.fetch
   constructor(options: ApiOptions = {}) {
     this.baseUrl = options.baseUrl ?? base()
-    this.fetcher = options.fetch ?? fetch
+    this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis)
   }
   createProject(input: CreateProject) {
     return this.post('/api/projects', createProject, input)

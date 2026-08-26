@@ -85,6 +85,14 @@ export class ForgeSocket {
     } catch {
       return
     }
+    value = normalizeServerEvent(value)
+    if (
+      value &&
+      typeof value === 'object' &&
+      'message' in value &&
+      value.message
+    )
+      value = normalizeServerEvent(value.message)
     const ephemeral = Ephemeral.safeParse(value)
     if (ephemeral.success)
       return useMessagesStore.getState().applyEphemeral(ephemeral.data)
@@ -102,6 +110,33 @@ export class ForgeSocket {
       },
       Math.min(max, initial * 2 ** this.attempt++),
     )
+  }
+}
+export function normalizeServerEvent(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value
+  const candidate = value as Record<string, any>
+  if (candidate.msg) return value
+  if (
+    typeof candidate.seq !== 'number' ||
+    typeof candidate.sessionId !== 'string'
+  )
+    return value
+  return {
+    seq: candidate.seq,
+    sessionId: candidate.sessionId,
+    msg: {
+      seq: candidate.seq,
+      sessionId: candidate.sessionId,
+      turnId: candidate.turnId ?? `${candidate.sessionId}-turn`,
+      itemId: candidate.itemId ?? `${candidate.sessionId}-${candidate.type}`,
+      role: candidate.role ?? 'system',
+      type: candidate.type,
+      content:
+        candidate.content && typeof candidate.content === 'object'
+          ? { type: candidate.type, ...candidate.content }
+          : { type: candidate.type },
+      createdAt: new Date().toISOString(),
+    },
   }
 }
 export const connectForgeSocket = (options?: SocketOptions) =>
