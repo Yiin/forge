@@ -78,6 +78,7 @@ export function SessionSidebar() {
       <button className="icon-button" aria-label="New project" onClick={() => setProjectDialog(true)}><FolderPlus size={16} /></button>
     </div>
     <ul className="session-list">
+      {active.length === 0 && settled.length === 0 && <li className="sidebar-empty">No sessions yet.<Link to="/">Start a session</Link></li>}
       {active.map((session, index) => <SessionRow key={session.id} session={session} index={index} editing={editing === session.id} onOpen={openSession} onEdit={() => setEditing(session.id)} onRename={rename} />)}
       {settled.length > 0 && <li className="settled-divider">Settled</li>}
       {visibleSettled.items.map((session) => <SessionRow key={session.id} session={session} onOpen={openSession} onEdit={() => setEditing(session.id)} onRename={rename} settled />)}
