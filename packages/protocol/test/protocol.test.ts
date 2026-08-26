@@ -31,6 +31,16 @@ const fixtures = [
   { type: 'turn_end' },
   { type: 'turn_interrupted', reason: 'server restart' },
   { type: 'error', message: 'failed', code: 'E_FAIL' },
+  {
+    type: 'epic_triage',
+    runId: 'run-1',
+    beadId: 'bead-1',
+    attempts: 2,
+    classification: 'code',
+    failureChain: [
+      { attempt: 1, signature: 'sig-1', excerpt: 'typecheck failed' },
+    ],
+  },
 ] as const
 
 describe('protocol schemas', () => {
