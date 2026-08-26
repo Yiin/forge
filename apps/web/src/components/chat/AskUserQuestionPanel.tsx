@@ -59,6 +59,17 @@ function QuestionCard({
       setSending(false)
     }
   }
+  const cancel = async () => {
+    setSending(true)
+    setError(null)
+    try {
+      await api.cancelQuestion({ sessionId, questionId: current.questionId })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Cancel failed')
+    } finally {
+      setSending(false)
+    }
+  }
   const choose = (label: string) => {
     if (multi)
       setSelected((items) =>
@@ -135,6 +146,14 @@ function QuestionCard({
           Confirm selection
         </button>
       )}
+      <button
+        type="button"
+        className="ask-question-cancel"
+        onClick={() => void cancel()}
+        disabled={sending}
+      >
+        Cancel
+      </button>
     </section>
   )
 }

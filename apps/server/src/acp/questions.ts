@@ -254,6 +254,33 @@ export class QuestionManager {
     held.resolve(answer)
     return { answer }
   }
+  cancelQuestion(sessionId: string, questionId: string) {
+    const key = `${sessionId}:${questionId}`
+    const held = this.pending.get(key)
+    if (!held) {
+      if (this.answered.has(key))
+        throw new QuestionError(
+          409,
+          'Question was already answered',
+          this.answered.get(key),
+        )
+      throw new QuestionError(410, 'Question is no longer pending')
+    }
+    this.pending.delete(key)
+    this.answered.set(key, undefined)
+    appendMessage(this.hooks.db, {
+      sessionId,
+      turnId: this.turnId(sessionId),
+      itemId: id(),
+      role: 'user',
+      type: 'user_answer',
+      createdAt: this.now(),
+      eventBus: this.hooks.bus,
+      content: { type: 'user_answer', questionId, cancelled: true },
+    })
+    held.resolve(undefined)
+    return { cancelled: true }
+  }
   cancelSession(sessionId: string) {
     this.finish(sessionId, undefined, true)
   }

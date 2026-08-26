@@ -1207,8 +1207,20 @@ kbd {
 .ask-question-confirm {
   margin-top: 10px;
 }
+.ask-question-cancel {
+  margin-top: 10px;
+  border: 0;
+  padding: 6px 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.ask-question-cancel:hover {
+  color: var(--danger, #f87171);
+}
 .ask-question-free button:disabled,
-.ask-question-confirm:disabled {
+.ask-question-confirm:disabled,
+.ask-question-cancel:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

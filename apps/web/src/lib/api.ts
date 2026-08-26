@@ -1,5 +1,6 @@
 import {
   answerQuestion,
+  cancelQuestion,
   btw,
   createProject,
   createSession,
@@ -149,6 +150,13 @@ export class ForgeApi {
     return this.post(
       `/api/sessions/${input.sessionId}/questions/${input.questionId}/answer`,
       answerQuestion,
+      input,
+    )
+  }
+  cancelQuestion(input: { sessionId: string; questionId: string }) {
+    return this.post(
+      `/api/sessions/${input.sessionId}/questions/${input.questionId}/cancel`,
+      cancelQuestion,
       input,
     )
   }
