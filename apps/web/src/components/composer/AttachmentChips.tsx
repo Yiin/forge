@@ -39,16 +39,22 @@ export function AttachmentChips({
                 max="1"
                 value={item.progress}
                 aria-label={`Uploading ${item.name}`}
+                aria-valuetext={`${Math.round(item.progress * 100)} percent`}
               />
             )}
             {item.state === 'failed' && (
-              <button
-                type="button"
-                onClick={() => onRetry(item.id)}
-                aria-label={`Retry ${item.name}`}
-              >
-                <RotateCcw size={16} />
-              </button>
+              <>
+                <span className="attachment-chip-error" role="status">
+                  {item.error || 'Upload failed'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onRetry(item.id)}
+                  aria-label={`Retry ${item.name}`}
+                >
+                  <RotateCcw size={16} />
+                </button>
+              </>
             )}
             <button
               type="button"
