@@ -87,10 +87,10 @@ export function epicRoutes(options: EpicRouteOptions) {
           title: projectPath
             ? (
                 await show(projectPath, item.bead_id).catch(() => ({
-                  title: item.bead_id,
+                  title: 'Untitled iteration',
                 }))
-              ).title
-            : item.bead_id,
+              ).title || 'Untitled iteration'
+            : 'Untitled iteration',
           sessionId: item.session_id,
           attempt: item.attempt,
           status: item.status,

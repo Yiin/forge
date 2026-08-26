@@ -17,10 +17,14 @@ const elapsed = (started: number) => {
 export function RunsRoute() {
   const [runs, setRuns] = useState<Run[]>([])
   useEffect(() => {
-    void api
-      .listRuns()
-      .then((value) => setRuns(value as Run[]))
-      .catch(() => undefined)
+    const load = () =>
+      void api
+        .listRuns()
+        .then((value) => setRuns(value as Run[]))
+        .catch(() => undefined)
+    load()
+    const timer = setInterval(load, 2000)
+    return () => clearInterval(timer)
   }, [])
   const active = runs.filter((run) =>
     ['running', 'paused'].includes(run.status),
@@ -58,7 +62,7 @@ function RunCard({ run }: { run: Run }) {
     <Link className="run-card" to="/runs/$runId" params={{ runId: run.id }}>
       <div className="run-card-title">
         <span className={`status-dot ${run.status}`} />
-        {run.title}
+        {run.title || 'Untitled run'}
       </div>
       <div className="run-card-meta">
         <span>
