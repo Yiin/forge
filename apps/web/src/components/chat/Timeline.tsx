@@ -6,6 +6,7 @@ import { useMessagesStore } from '../../stores/messages'
 import { MessageRow, ToolCallRow } from './MessageRow'
 import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
+import { AnsweredQuestionRow } from './AnsweredQuestionRow'
 import { SubagentCard } from './SubagentCard'
 import { useSessionsStore } from '../../stores/sessions'
 
@@ -80,6 +81,7 @@ function RenderItem({
 }) {
   if (item.kind === 'message') return <MessageRow item={item} />
   if (item.kind === 'tool') return <ToolCallRow item={item} />
+  if (item.kind === 'answered-question') return <AnsweredQuestionRow question={item.question} answer={item.answer} />
   if (item.kind === 'subagent') return <SubagentCard child={item.child} />
   if (item.kind === 'attachment')
     return (

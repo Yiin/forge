@@ -7,6 +7,7 @@ import { AttachmentChips } from '../composer/AttachmentChips'
 import { attachmentUploadsReducer, canSendUploads, completedAttachmentIds, initialAttachmentUploads } from '../composer/attachmentUploads'
 import { CommandMenu, type ComposerCommand } from './CommandMenu'
 import { detectComposerTrigger, replaceComposerTrigger, type ComposerTrigger } from './composer-triggers'
+import { AskUserQuestionPanel } from './AskUserQuestionPanel'
 
 const commandDefaults: ComposerCommand[] = [
   { id: 'help', label: '/help', group: 'Built-in', value: '/help' },
@@ -89,7 +90,7 @@ export function Composer({ sessionId, harness, onSend, sending = false }: { sess
   }
   const addFiles = (files: FileList | File[]) => { for (const file of files) void upload(file) }
   const paste = (event: ClipboardEvent) => { const files = [...event.clipboardData.files]; if (files.length) addFiles(files) }
-  return <form className={`composer ${dragging ? 'composer-dragging' : ''}`} onSubmit={(event) => { event.preventDefault(); void submit() }} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false) }} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files) }}>
+  return <div className="composer-wrap"><AskUserQuestionPanel sessionId={sessionId} /><form className={`composer ${dragging ? 'composer-dragging' : ''}`} onSubmit={(event) => { event.preventDefault(); void submit() }} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false) }} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files) }}>
     {dragging && <div className="composer-drop-overlay">Drop files to upload</div>}
     {uploads.items.length > 0 && <AttachmentChips items={uploads.items} onRetry={(id) => { const item = uploads.items.find((value) => value.id === id); if (item) void upload(item.file, id) }} onRemove={(id) => dispatchUploads((state) => attachmentUploadsReducer(state, { type: 'remove', id }))} />}
     {trigger && <CommandMenu commands={commands} kind={trigger.kind} query={trigger.query} onSelect={select} />}
@@ -97,5 +98,5 @@ export function Composer({ sessionId, harness, onSend, sending = false }: { sess
     {harnesses.length > 0 && <select className="composer-harness" aria-label="Harness" value={selectedHarness} onChange={(event) => setSelectedHarness(event.target.value)}>{harnesses.map((entry) => <option key={entry} value={entry}>{entry}</option>)}</select>}
     <textarea ref={textarea} aria-label="Message composer" placeholder={harness ? `Message ${harness}…` : 'Send a message…'} value={text} rows={1} onPaste={paste} onChange={(event) => update(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} />
     <button type="submit" disabled={sending || !text.trim() || !canSendUploads(uploads)} title={!canSendUploads(uploads) ? 'Wait for uploads to finish or remove failed files' : undefined} aria-label="Send"><Send size={17} /><span className="composer-send-label">{sending ? 'Sending…' : 'Send'}</span></button>
-  </form>
+  </form></div>
 }
