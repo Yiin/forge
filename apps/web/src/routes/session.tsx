@@ -2,7 +2,7 @@ import { Timeline } from '../components/chat/Timeline'
 import { Composer } from '../components/chat/Composer'
 import { SessionHeader } from '../components/chat/SessionHeader'
 import { useEffect, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
 import { connectForgeSocket, normalizeServerEvent } from '../lib/socket'
 import { useMessagesStore } from '../stores/messages'
@@ -11,6 +11,7 @@ import { PathSwitcher } from '../components/chat/PathSwitcher'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
+  const navigate = useNavigate()
   const targetSeq = Number(new URLSearchParams(window.location.search).get('m'))
   const [sending, setSending] = useState(false)
   const [harness, setHarness] = useState<string>()
@@ -61,7 +62,32 @@ export function SessionRoute() {
     try {
       const value = text.trim()
       if (value === '/btw' || value.startsWith('/btw ')) {
-        await api.btw({ sessionId, text: value.slice(4).trim() })
+        const result = (await api.btw({
+          sessionId,
+          text: value.slice(4).trim(),
+        })) as { sessionId: string }
+        const sideChat = (await api.getSession(result.sessionId)) as {
+          id: string
+          title: string
+          project_id?: string | null
+          parent_session_id?: string | null
+          forked_at_seq?: number | null
+          context_method?: string | null
+          context_confidence?: string | null
+          [key: string]: unknown
+        }
+        useSessionsStore.getState().upsertSession({
+          ...sideChat,
+          projectId: sideChat.project_id,
+          parentSessionId: sideChat.parent_session_id,
+          forkedAtSeq: sideChat.forked_at_seq,
+          contextMethod: sideChat.context_method,
+          contextConfidence: sideChat.context_confidence,
+        })
+        await navigate({
+          to: '/s/$sessionId',
+          params: { sessionId: result.sessionId },
+        })
       } else {
         await api.prompt({
           sessionId,
