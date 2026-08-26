@@ -55,6 +55,7 @@ export const answerQuestion = z
       message: 'answer or answers is required',
     },
   )
+export const cancelQuestion = z.object({ sessionId: id, questionId: id })
 // HTTP body for POST /api/sessions/:id/uploads. The 1 GiB ceiling is enforced
 // by the upload store so an oversize init answers 413, not a validation error.
 export const uploadInitSchema = z.object({
