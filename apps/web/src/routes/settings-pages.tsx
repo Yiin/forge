@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
+import { useShellStore } from '../stores/shell'
 
 type Harness = {
   name: string
@@ -18,8 +19,10 @@ const input = (value: string, onChange: (value: string) => void) => (
 )
 
 export function GeneralSettings() {
+  const shellTheme = useShellStore((state) => state.theme)
+  const setShellTheme = useShellStore((state) => state.setTheme)
   const [settings, setSettings] = useState({
-    theme: 'dark',
+    theme: shellTheme,
     defaultProject: '',
     titleGeneration: true,
   })
@@ -39,9 +42,14 @@ export function GeneralSettings() {
       <label>
         Theme
         <select
-          value={settings.theme}
-          onChange={(e) => save({ ...settings, theme: e.target.value })}
+          value={shellTheme}
+          onChange={(e) => {
+            const theme = e.target.value as 'system' | 'light' | 'dark'
+            setShellTheme(theme)
+            save({ ...settings, theme })
+          }}
         >
+          <option>system</option>
           <option>dark</option>
           <option>light</option>
         </select>

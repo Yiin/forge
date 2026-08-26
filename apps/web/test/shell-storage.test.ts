@@ -3,6 +3,7 @@ import {
   getStartPath,
   readSidebarWidth,
   readTheme,
+  resolveTheme,
   writeLastSession,
   writeSidebarWidth,
   writeTheme,
@@ -24,9 +25,12 @@ describe('shell storage', () => {
   })
   it('persists theme', () => {
     const s = storage()
-    expect(readTheme(s)).toBe('dark')
+    expect(readTheme(s)).toBe('system')
     writeTheme('light', s)
     expect(readTheme(s)).toBe('light')
+    writeTheme('system', s)
+    expect(resolveTheme(readTheme(s), true)).toBe('dark')
+    expect(resolveTheme(readTheme(s), false)).toBe('light')
   })
   it('chooses the last session path', () => {
     const s = storage()
