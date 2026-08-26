@@ -45,7 +45,15 @@ export class SessionManager {
     })
   }
 
-  list(projectId?: string) {
+  list(projectId?: string, parentSessionId?: string) {
+    if (parentSessionId) {
+      const sql = projectId
+        ? 'SELECT * FROM sessions WHERE project_id = ? AND parent_session_id = ? ORDER BY last_activity_at DESC'
+        : 'SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY last_activity_at DESC'
+      return projectId
+        ? this.db.prepare(sql).all(projectId, parentSessionId)
+        : this.db.prepare(sql).all(parentSessionId)
+    }
     const sql = projectId
       ? 'SELECT * FROM sessions WHERE project_id = ? ORDER BY last_activity_at DESC'
       : 'SELECT * FROM sessions ORDER BY last_activity_at DESC'

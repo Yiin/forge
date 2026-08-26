@@ -56,21 +56,18 @@ export class ForgeSocket {
     this.socket?.close()
     this.socket = undefined
   }
+  setSessions(sessions: string[] | 'all') {
+    this.options.sessions = sessions
+    if (this.socket?.readyState === 1)
+      this.socket.send(JSON.stringify(this.subscribeFrame()))
+  }
   private connect() {
     if (this.stopped) return
     const socket = this.options.createWebSocket!(this.options.url)
     this.socket = socket
     socket.onopen = () => {
       this.attempt = 0
-      socket.send(
-        JSON.stringify(
-          SubscribeFrame.parse({
-            type: 'subscribe',
-            sessions: this.options.sessions,
-            cursor: useMessagesStore.getState().lastSeq,
-          }),
-        ),
-      )
+      socket.send(JSON.stringify(this.subscribeFrame()))
     }
     socket.onmessage = ({ data }) => this.receive(data)
     socket.onerror = () => socket.close()
@@ -78,6 +75,13 @@ export class ForgeSocket {
       if (this.socket === socket) this.socket = undefined
       if (!this.stopped && this.options.reconnect) this.scheduleReconnect()
     }
+  }
+  private subscribeFrame() {
+    return SubscribeFrame.parse({
+      type: 'subscribe',
+      sessions: this.options.sessions,
+      cursor: useMessagesStore.getState().lastSeq,
+    })
   }
   private receive(data: string) {
     let value: unknown

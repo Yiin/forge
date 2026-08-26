@@ -6,6 +6,8 @@ import { useMessagesStore } from '../../stores/messages'
 import { MessageRow, ToolCallRow } from './MessageRow'
 import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
+import { SubagentCard } from './SubagentCard'
+import { useSessionsStore } from '../../stores/sessions'
 
 const EMPTY_MESSAGES: never[] = []
 
@@ -18,9 +20,12 @@ export function Timeline({
   const messages = useMessagesStore(
     (state) => state.bySession[sessionId] ?? EMPTY_MESSAGES,
   )
+  const children = useSessionsStore((state) =>
+    state.sessions.filter((session) => session.parentSessionId === sessionId),
+  )
   const items = useMemo(
-    () => toRenderModel(messages, resumedWithRecap),
-    [messages, resumedWithRecap],
+    () => toRenderModel(messages, resumedWithRecap, children),
+    [messages, resumedWithRecap, children],
   )
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -73,6 +78,7 @@ function RenderItem({
 }) {
   if (item.kind === 'message') return <MessageRow item={item} />
   if (item.kind === 'tool') return <ToolCallRow item={item} />
+  if (item.kind === 'subagent') return <SubagentCard child={item.child} />
   if (item.kind === 'attachment')
     return (
       <Link
