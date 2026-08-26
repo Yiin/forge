@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import { useMessagesStore } from '../../stores/messages'
 import { CommandMenu, type ComposerCommand } from './CommandMenu'
 import { detectComposerTrigger, replaceComposerTrigger, type ComposerTrigger } from './composer-triggers'
+import { AskUserQuestionPanel } from './AskUserQuestionPanel'
 
 type Attachment = { id: string; name: string; size: number; progress: number; state: 'uploading' | 'complete' | 'failed' }
 const commandDefaults: ComposerCommand[] = [
@@ -62,12 +63,12 @@ export function Composer({ sessionId, harness, onSend, sending = false }: { sess
     await onSend(value, attachments.filter((item) => item.state === 'complete').map((item) => item.id))
     setText(''); setTrigger(null); setAttachments([])
   }
-  return <form className="composer" onSubmit={(event) => { event.preventDefault(); void submit() }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); for (const file of event.dataTransfer.files) void upload(file) }}>
+  return <div className="composer-wrap"><AskUserQuestionPanel sessionId={sessionId} /><form className="composer" onSubmit={(event) => { event.preventDefault(); void submit() }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); for (const file of event.dataTransfer.files) void upload(file) }}>
     {attachments.length > 0 && <div className="composer-attachments">{attachments.map((item) => <span className="attachment-chip" key={item.id}><Paperclip size={13} />{item.name} {item.state === 'uploading' ? `${Math.round(item.progress * 100)}%` : item.state === 'failed' ? 'failed' : ''}<button type="button" aria-label={`Remove ${item.name}`} onClick={() => setAttachments((items) => items.filter((value) => value.id !== item.id))}><X size={13} /></button></span>)}</div>}
     {trigger && <CommandMenu commands={commands} kind={trigger.kind} query={trigger.query} onSelect={select} />}
     <label className="composer-file"><Paperclip size={17} /><input type="file" multiple onChange={(event) => { for (const file of event.target.files ?? []) void upload(file); event.target.value = '' }} /></label>
     {harnesses.length > 0 && <select className="composer-harness" aria-label="Harness" value={selectedHarness} onChange={(event) => setSelectedHarness(event.target.value)}>{harnesses.map((entry) => <option key={entry} value={entry}>{entry}</option>)}</select>}
     <textarea ref={textarea} aria-label="Message composer" placeholder={harness ? `Message ${harness}…` : 'Send a message…'} value={text} rows={1} onChange={(event) => update(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} />
     <button type="submit" disabled={sending || !text.trim()} aria-label="Send"><Send size={17} /><span className="composer-send-label">{sending ? 'Sending…' : 'Send'}</span></button>
-  </form>
+  </form></div>
 }

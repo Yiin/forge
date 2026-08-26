@@ -77,7 +77,7 @@ export class ForgeApi {
   }
   answerQuestion(input: AnswerQuestion) {
     return this.post(
-      `/api/sessions/${input.sessionId}/answer`,
+      `/api/sessions/${input.sessionId}/questions/${input.questionId}/answer`,
       answerQuestion,
       input,
     )

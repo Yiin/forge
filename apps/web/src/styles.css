@@ -527,6 +527,23 @@ kbd {
   max-width: 900px;
   margin: 0 auto;
 }
+.composer-wrap { position: relative; flex: none; padding: 16px 24px 24px; }
+.ask-question-panel { margin: 0 auto 10px; max-width: 760px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 12px; padding: 14px; background: var(--panel); box-shadow: 0 12px 35px #0003; }
+.ask-question-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+.ask-question-panel h2 { margin: 8px 0 12px; font-size: 16px; font-weight: 600; }
+.ask-question-options { display: grid; gap: 8px; }
+.ask-question-option { display: grid; gap: 3px; min-height: 44px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.ask-question-option:hover, .ask-question-option.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.ask-question-option span { display: flex; align-items: center; gap: 7px; font: inherit; }
+.ask-question-option small { color: var(--muted); }
+.ask-question-free { display: flex; gap: 8px; }
+.ask-question-free input { min-width: 0; flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 10px; color: inherit; background: transparent; font: inherit; }
+.ask-question-free button, .ask-question-confirm { min-height: 44px; border: 0; border-radius: 8px; padding: 0 14px; color: #10231b; background: var(--accent); cursor: pointer; }
+.ask-question-confirm { margin-top: 10px; }
+.ask-question-free button:disabled, .ask-question-confirm:disabled { opacity: .5; cursor: not-allowed; }
+.chat-answered-question { display: grid; gap: 4px; margin: 8px auto; max-width: 760px; border-left: 2px solid var(--accent); padding: 8px 12px; color: var(--muted); font-size: 13px; }
+.chat-answered-question strong { color: inherit; font-weight: 500; }
+.chat-answered-label { color: var(--accent); font-size: 11px; text-transform: uppercase; }
 .composer-attachments { position: absolute; right: 0; bottom: calc(100% + 6px); left: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .attachment-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 240px; border: 1px solid var(--border); border-radius: 999px; padding: 5px 8px; color: var(--muted); background: var(--panel); font-size: 12px; }
 .attachment-chip button { display: inline-flex; border: 0; color: inherit; background: none; cursor: pointer; }

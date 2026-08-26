@@ -18,6 +18,7 @@ export type ChatRenderItem =
       output?: unknown
     }
   | { kind: 'attachment'; id: string; filename: string; path: string }
+  | { kind: 'answered-question'; id: string; question: string; answer: unknown }
   | { kind: 'system'; id: string; text: string }
 
 export function toRenderModel(
@@ -27,7 +28,9 @@ export function toRenderModel(
   const result: ChatRenderItem[] = resumedWithRecap
     ? [{ kind: 'system', id: 'resumed-recap', text: 'Resumed with recap' }]
     : []
+  const questions = new Map<string, string>()
   for (const message of messages) {
+    if (message.content.type === 'ask_user_question') questions.set(message.content.questionId, message.content.question ?? message.content.questions?.[0]?.question ?? 'Question')
     const content = message.content
     if (content.type === 'text_delta' || content.type === 'thought_delta') {
       const previous = result.at(-1)
@@ -81,6 +84,8 @@ export function toRenderModel(
         filename: content.filename,
         path: content.path,
       })
+    } else if (content.type === 'user_answer') {
+      result.push({ kind: 'answered-question', id: message.itemId, question: questions.get(content.questionId) ?? 'Question', answer: content.cancelled ? 'Cancelled' : content.answers ?? content.answer })
     } else if (content.type === 'turn_interrupted') {
       result.push({
         kind: 'system',
