@@ -1,4 +1,5 @@
 export type SearchScope = 'all' | 'sessions' | 'messages' | 'runs'
+export const SEARCH_ROUTE_DEBOUNCE_MS = 200
 
 export type SnippetSegment = { text: string; highlighted: boolean }
 

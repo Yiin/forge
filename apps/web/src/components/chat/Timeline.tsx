@@ -14,8 +14,10 @@ const EMPTY_MESSAGES: never[] = []
 
 export function Timeline({
   resumedWithRecap = false,
+  targetSeq,
 }: {
   resumedWithRecap?: boolean
+  targetSeq?: number
 }) {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
   const messages = useMessagesStore(
@@ -36,6 +38,14 @@ export function Timeline({
     if (atBottom)
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [items, atBottom])
+  useEffect(() => {
+    if (targetSeq === undefined) return
+    const target = scrollRef.current?.querySelector(`[data-seq="${targetSeq}"]`)
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ block: 'center' })
+      target.classList.add('chat-deep-link-target')
+    }
+  }, [items, targetSeq])
   return (
     <section className="chat-timeline-shell">
       <div

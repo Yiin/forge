@@ -8,6 +8,7 @@ describe('MessageRow', () => {
     const item = {
       kind: 'message' as const,
       id: 'item-1',
+      seq: 1,
       role: 'agent' as const,
       text: 'hello',
     }

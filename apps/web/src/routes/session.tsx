@@ -10,6 +10,7 @@ import { useSessionsStore } from '../stores/sessions'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
+  const targetSeq = Number(new URLSearchParams(window.location.search).get('m'))
   const [sending, setSending] = useState(false)
   useEffect(() => {
     const socket = connectForgeSocket({ sessions: [sessionId] })
@@ -54,7 +55,9 @@ export function SessionRoute() {
   return (
     <div className="session-view">
       <SessionHeader sessionId={sessionId} />
-      <Timeline />
+      <Timeline
+        targetSeq={Number.isFinite(targetSeq) ? targetSeq : undefined}
+      />
       <Composer sessionId={sessionId} onSend={send} sending={sending} />
     </div>
   )

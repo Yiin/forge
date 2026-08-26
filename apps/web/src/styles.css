@@ -1686,6 +1686,10 @@ kbd {
   text-align: center;
   padding: 32px 10px;
 }
+.chat-deep-link-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
 @media (max-width: 767px) {
   .search-page {
     padding: 14px 10px;
