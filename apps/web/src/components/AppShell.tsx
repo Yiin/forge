@@ -17,6 +17,14 @@ export function AppShell() {
   const store = useShellStore()
   const navigate = useNavigate()
   const isSettings = location.pathname.startsWith('/settings')
+  const isSearch = location.pathname === '/search'
+  const title = isSettings
+    ? 'Settings'
+    : location.pathname.startsWith('/runs')
+      ? 'Runs'
+      : location.pathname.startsWith('/files')
+        ? 'Files'
+        : 'Chat'
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => handleShortcut(event)
     window.addEventListener('keydown', onKeyDown)
@@ -79,15 +87,16 @@ export function AppShell() {
     >
       <CommandPalette />
       <div className="desktop-chrome">
-        <Sidebar width={store.sidebarWidth} onResize={store.setSidebarWidth}>
+        <Sidebar
+          width={store.sidebarWidth}
+          open={store.sidebarOpen}
+          onResize={store.setSidebarWidth}
+        >
           {isSettings ? <SettingsNav /> : <SessionSidebar />}
         </Sidebar>
       </div>
-      <div className="phone-chrome">
-        <AppBar
-          title={isSettings ? 'Settings' : 'Forge'}
-          showBack={location.pathname === '/search'}
-        />
+      <div className={`phone-chrome ${isSearch ? 'phone-chrome-hidden' : ''}`}>
+        <AppBar title={title} />
         <Drawer.Root
           direction="left"
           open={store.drawerOpen}

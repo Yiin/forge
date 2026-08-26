@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import {
   FolderPlus,
+  Folder,
+  MessageSquare,
   MoreHorizontal,
   Plus,
   Search,
@@ -175,9 +177,28 @@ export function SessionSidebar() {
           </Link>
         </div>
       </div>
+      <div className="primary-nav">
+        <Link
+          to="/"
+          search={{ new: '1' }}
+          activeOptions={{ exact: true }}
+          activeProps={{ className: 'active', 'aria-current': 'page' }}
+          onClick={() => setDrawerOpen(false)}
+        >
+          <MessageSquare size={16} /> Chat
+        </Link>
+        <Link
+          to="/files"
+          activeProps={{ className: 'active', 'aria-current': 'page' }}
+          onClick={() => setDrawerOpen(false)}
+        >
+          <Folder size={16} /> Files
+        </Link>
+      </div>
       <Link
         className="runs-link"
         to="/runs"
+        activeProps={{ className: 'runs-link active', 'aria-current': 'page' }}
         onClick={() => setDrawerOpen(false)}
       >
         <span>Runs</span>
@@ -276,7 +297,11 @@ export function SessionSidebar() {
         )}
       </ul>
       <div className="nav-footer">
-        <Link to="/settings" onClick={() => setDrawerOpen(false)}>
+        <Link
+          to="/settings"
+          activeProps={{ className: 'active', 'aria-current': 'page' }}
+          onClick={() => setDrawerOpen(false)}
+        >
           <Settings size={16} /> Settings
         </Link>
       </div>
@@ -379,7 +404,15 @@ function SessionRow({
           }}
         />
       ) : (
-        <button className="session-button" onClick={() => onOpen(session.id)}>
+        <button
+          className="session-button"
+          aria-current={
+            window.location.pathname === `/s/${encodeURIComponent(session.id)}`
+              ? 'page'
+              : undefined
+          }
+          onClick={() => onOpen(session.id)}
+        >
           <span className={`status-dot ${session.status ?? 'idle'}`} />
           <span className="session-copy">
             <span className="session-title">

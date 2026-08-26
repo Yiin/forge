@@ -14,7 +14,11 @@ export function SettingsNav() {
     <nav className="settings-nav">
       <p className="eyebrow">Workspace</p>
       {items.map(([to, label, Icon]) => (
-        <Link key={to} to={to}>
+        <Link
+          key={to}
+          to={to}
+          activeProps={{ className: 'active', 'aria-current': 'page' }}
+        >
           <Icon size={16} />
           {label}
         </Link>

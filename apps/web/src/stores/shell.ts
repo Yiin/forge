@@ -35,8 +35,9 @@ export const useShellStore = create<ShellState>((set, get) => ({
     set(({ sidebarOpen }) => ({ sidebarOpen: !sidebarOpen })),
   setDrawerOpen: (drawerOpen) => set({ drawerOpen }),
   setSidebarWidth: (width) => {
-    writeSidebarWidth(width)
-    set({ sidebarWidth: width })
+    const next = Math.min(360, Math.max(216, width))
+    writeSidebarWidth(next)
+    set({ sidebarWidth: next })
   },
   toggleTheme: () => {
     const theme = get().theme === 'dark' ? 'light' : 'dark'
