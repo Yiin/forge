@@ -21,14 +21,6 @@ import {
   AboutSettings,
 } from './routes/settings-pages'
 const root = createRootRoute({ component: AppShell })
-const empty =
-  (title: string, text = 'This area is ready for the next feature.') =>
-  () => (
-    <section className="empty-panel">
-      <h1>{title}</h1>
-      <p>{text}</p>
-    </section>
-  )
 const index = createRoute({
   getParentRoute: () => root,
   path: '/',
@@ -63,7 +55,7 @@ const files = createRoute({
 const filesIndex = createRoute({
   getParentRoute: () => root,
   path: '/files',
-  component: empty('Files'),
+  component: FileBrowser,
 })
 const search = createRoute({
   getParentRoute: () => root,

@@ -23,11 +23,14 @@ const PdfDocument = lazy(() =>
     return {
       default: function Pdf({ url }: { url: string }) {
         const [pages, setPages] = useState(0)
+        const [error, setError] = useState<string | null>(null)
         return (
+          error ? <ViewerError message={error} onRetry={() => setError(null)} /> :
           <Document
             file={url}
             loading={<p>Loading PDF…</p>}
             onLoadSuccess={({ numPages }) => setPages(numPages)}
+            onLoadError={() => setError('Could not load PDF')}
           >
             <div className="file-viewer-pdf-pages">
               {Array.from({ length: pages }, (_, index) => (
@@ -136,7 +139,7 @@ function TextViewer({ file }: { file: FileViewerProps }) {
       })
     return () => controller.abort()
   }, [file.url])
-  if (error) return <p role="alert">{error}</p>
+  if (error) return <ViewerError message={error} onRetry={() => { setError(null); setText(null) }} />
   if (text === null) return <p>Loading file…</p>
   const truncated = file.sizeBytes > 1024 * 1024
   return (
@@ -158,52 +161,41 @@ function TextViewer({ file }: { file: FileViewerProps }) {
   )
 }
 
+function ViewerError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return <div className="file-state"><p role="alert">{message}</p><button onClick={onRetry}><span aria-hidden="true">↻</span> Retry</button></div>
+}
+
+function MediaViewer({ file, kind }: { file: FileViewerProps; kind: 'audio' | 'video' }) {
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  if (failed) return <ViewerError message={`Could not load ${file.filename}`} onRetry={() => { setFailed(false); setAttempt((value) => value + 1) }} />
+  const Tag = kind
+  return <Tag key={attempt} className="file-viewer-media" src={file.url} controls preload="metadata" onError={() => setFailed(true)} />
+}
+
+function ImageViewer({ file }: { file: FileViewerProps }) {
+  const [failed, setFailed] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  if (failed) return <ViewerError message={`Could not load ${file.filename}`} onRetry={() => { setFailed(false); setAttempt((value) => value + 1) }} />
+  return <>
+    <button className="file-viewer-image-button" onClick={() => setOpen(true)} aria-label={`Open ${file.filename}`}>
+      <img key={attempt} src={file.url} alt={file.filename} onError={() => setFailed(true)} />
+    </button>
+    {open && <Lightbox open close={() => setOpen(false)} slides={[{ src: file.url, alt: file.filename }]} render={{ buttonPrev: () => null, buttonNext: () => null }} />}
+  </>
+}
+
 export function FileViewer(file: FileViewerProps) {
-  const [lightboxOpen, setLightboxOpen] = useState(false)
   const kind = fileViewerKind(file.filename, file.mime)
   const href = file.downloadUrl ?? file.url
-  if (kind === 'image')
-    return (
-      <>
-        <button
-          className="file-viewer-image-button"
-          onClick={() => setLightboxOpen(true)}
-          aria-label={`Open ${file.filename}`}
-        >
-          <img src={file.url} alt={file.filename} />
-        </button>
-        {lightboxOpen && (
-          <Lightbox
-            open
-            close={() => setLightboxOpen(false)}
-            slides={[{ src: file.url, alt: file.filename }]}
-            render={{ buttonPrev: () => null, buttonNext: () => null }}
-          />
-        )}
-      </>
-    )
+  if (kind === 'image') return <ImageViewer file={file} />
   if (kind === 'pdf') return <PdfDocument url={file.url} />
   if (kind === 'text') return <TextViewer file={file} />
-  if (kind === 'video')
-    return (
-      <video
-        className="file-viewer-media"
-        src={file.url}
-        controls
-        preload="metadata"
-      />
-    )
-  if (kind === 'audio')
-    return (
-      <audio
-        className="file-viewer-media"
-        src={file.url}
-        controls
-        preload="metadata"
-      />
-    )
+  if (kind === 'video' || kind === 'audio') return <MediaViewer file={file} kind={kind} />
   return <DownloadCard file={file} href={href} />
 }
+
 
 export function FileViewerClose({ onClick }: { onClick: () => void }) {
   return (

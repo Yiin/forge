@@ -71,3 +71,5 @@
   right: 12px;
   top: 12px;
 }
+.file-state { display: grid; gap: 12px; justify-items: start; padding: 24px; }
+.file-state button, .file-project-list button { min-height: 44px; }
