@@ -69,6 +69,12 @@ describe('ACP client', () => {
     await first
   })
 
+  it('detects the unstable session/fork capability', async () => {
+    const client = await spawnAcpClient(entry({ ADVERTISE_SESSION_FORK: '1' }))
+    clients.push(client)
+    expect(client.capabilities.sessionFork).toBe(true)
+  })
+
   it('reports process death with the stderr ring', async () => {
     const exits: AgentProcessDiedError[] = []
     const client = await spawnAcpClient(entry({ EXIT_MID_TURN: '1' }), {

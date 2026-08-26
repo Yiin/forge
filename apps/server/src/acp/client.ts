@@ -80,6 +80,9 @@ export type AcpClient = {
   capabilities: AcpCapabilities
   newSession(cwd: string): Promise<acp.NewSessionResponse>
   loadSession(sessionId: string, cwd: string): Promise<acp.LoadSessionResponse>
+  /** Fork an existing provider session through ACP's unstable session/fork method. */
+  fork(sessionId: string, cwd: string): Promise<acp.NewSessionResponse>
+  forkSession(sessionId: string, cwd: string): Promise<acp.NewSessionResponse>
   prompt(sessionId: string, blocks: acp.ContentBlock[]): Promise<PromptResponse>
   cancel(sessionId: string): Promise<void>
   setMode(
@@ -256,7 +259,10 @@ export async function spawnAcpClient(
   const capabilities: AcpCapabilities = {
     loadSession: agent.loadSession === true,
     sessionResume: Boolean((agent as Record<string, unknown>).sessionResume),
-    sessionFork: Boolean((agent as Record<string, unknown>).sessionFork),
+    sessionFork: Boolean(
+      (agent as Record<string, unknown>).sessionFork ??
+      (agent as { session?: { fork?: unknown } }).session?.fork !== undefined,
+    ),
     setMode: false,
     setModel: false,
     agent,
@@ -281,7 +287,7 @@ export async function spawnAcpClient(
     capabilities.setModel ||= Boolean(response.models?.availableModels?.length)
     return response
   }
-  return {
+  const acpClient: AcpClient = {
     capabilities,
     newSession,
     loadSession: async (sessionId, cwd) => {
@@ -300,6 +306,26 @@ export async function spawnAcpClient(
       )
       return response
     },
+    fork: async (sessionId, cwd) => {
+      if (!capabilities.sessionFork)
+        throw new CapabilityUnsupportedError('sessionFork')
+      const params = { sessionId, cwd, mcpServers: [] as [] }
+      // ACP 0.4 has no typed session/fork method yet. Use the generic
+      // extension request until the dependency adds the unstable method.
+      const response = (await race(
+        connection.extMethod('session/fork', params),
+      )) as unknown as acp.NewSessionResponse
+      sessionFeatures.set(response.sessionId, {
+        mode: Boolean(response.modes?.availableModes?.length),
+        model: Boolean(response.models?.availableModels?.length),
+      })
+      capabilities.setMode ||= Boolean(response.modes?.availableModes?.length)
+      capabilities.setModel ||= Boolean(
+        response.models?.availableModels?.length,
+      )
+      return response
+    },
+    forkSession: (sessionId, cwd) => acpClient.fork(sessionId, cwd),
     prompt: async (sessionId, blocks) => {
       if (activePrompts.has(sessionId))
         throw new Error(`Prompt already active for session ${sessionId}`)
@@ -333,4 +359,5 @@ export async function spawnAcpClient(
       if (!dead) process.kill('SIGKILL')
     },
   }
+  return acpClient
 }
