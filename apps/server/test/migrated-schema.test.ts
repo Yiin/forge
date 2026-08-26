@@ -24,6 +24,8 @@ describe('migrated schema', () => {
     ).map((row) => row.name)
     expect(tables).toContain('messages')
     expect(tables).toContain('harness_capabilities')
+    expect(tables).toContain('epic_runs')
+    expect(tables).toContain('epic_iterations')
   })
 
   it('writes an upload attachment row into the migrated messages table', async () => {
