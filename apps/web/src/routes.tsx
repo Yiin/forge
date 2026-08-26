@@ -9,6 +9,7 @@ import { FileBrowser } from './components/files/FileBrowser'
 import { readLastSession } from './lib/shell-storage'
 import { SessionRoute } from './routes/session'
 import { SearchRoute } from './routes/search'
+import { HomeRoute } from './routes/home'
 const root = createRootRoute({ component: AppShell })
 const empty =
   (title: string, text = 'This area is ready for the next feature.') =>
@@ -25,10 +26,7 @@ const index = createRoute({
     const id = readLastSession()
     if (id) throw redirect({ to: '/s/$sessionId', params: { sessionId: id } })
   },
-  component: empty(
-    'Welcome to Forge',
-    'Add a project to start your first session.',
-  ),
+  component: HomeRoute,
 })
 const session = createRoute({
   getParentRoute: () => root,
