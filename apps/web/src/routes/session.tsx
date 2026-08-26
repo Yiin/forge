@@ -13,8 +13,15 @@ export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
   const targetSeq = Number(new URLSearchParams(window.location.search).get('m'))
   const [sending, setSending] = useState(false)
+  const [harness, setHarness] = useState<string>()
   useEffect(() => {
     const socket = connectForgeSocket({ sessions: [sessionId] })
+    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((session: { harness?: string } | null) =>
+        setHarness(session?.harness),
+      )
+      .catch(() => undefined)
     void api
       .listChildSessions(sessionId)
       .then((data) => {
@@ -44,11 +51,21 @@ export function SessionRoute() {
       .catch(() => undefined)
     return () => socket.stop()
   }, [sessionId])
-  const send = async (text: string, attachmentIds: string[]) => {
+  const send = async (
+    text: string,
+    attachmentIds: string[],
+    selectedHarness: string,
+  ) => {
     if (!text.trim()) return
     setSending(true)
     try {
-      await api.prompt({ sessionId, text: text.trim(), attachmentIds })
+      await api.prompt({
+        sessionId,
+        text: text.trim(),
+        attachmentIds,
+        harness: selectedHarness || harness,
+      })
+      setHarness(selectedHarness || harness)
     } finally {
       setSending(false)
     }
@@ -60,7 +77,12 @@ export function SessionRoute() {
       <Timeline
         targetSeq={Number.isFinite(targetSeq) ? targetSeq : undefined}
       />
-      <Composer sessionId={sessionId} onSend={send} sending={sending} />
+      <Composer
+        sessionId={sessionId}
+        harness={harness}
+        onSend={send}
+        sending={sending}
+      />
     </div>
   )
 }

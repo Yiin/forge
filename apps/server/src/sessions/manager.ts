@@ -228,8 +228,9 @@ export class SessionManager {
     text: string,
     requestId?: string,
     attachmentIds?: string[],
+    harness?: string,
   ) {
-    const row = getSession(this.db, id) as SessionRow | undefined
+    let row = getSession(this.db, id) as SessionRow | undefined
     if (!row) throw new Error('Session not found')
     if (requestId) {
       const seen = this.db
@@ -238,6 +239,24 @@ export class SessionManager {
         )
         .get(id, requestId)
       if (seen) return
+    }
+    if (harness && harness !== row.harness) {
+      if (this.turns.has(id))
+        throw new Error('Cannot change harness during a turn')
+      const oldHandle = this.handles.get(id)
+      if (oldHandle) {
+        await oldHandle.kill()
+        this.handles.delete(id)
+      }
+      const timer = this.reapTimers.get(id)
+      if (timer) clearTimeout(timer)
+      this.reapTimers.delete(id)
+      this.db
+        .prepare(
+          "UPDATE sessions SET harness = ?, provider_session_id = NULL, status = 'idle', last_activity_at = ? WHERE id = ?",
+        )
+        .run(harness, Date.now(), id)
+      row = { ...row, harness, provider_session_id: null }
     }
     const handle = this.handles.get(id) ?? (await this.spawn(row))
     const turnId = makeId('turn_')
