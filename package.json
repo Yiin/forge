@@ -12,6 +12,9 @@
     "packages/*",
     "e2e"
   ],
+  "trustedDependencies": [
+    "node-pty"
+  ],
   "scripts": {
     "lint": "oxlint .",
     "fmt": "prettier --write .",
