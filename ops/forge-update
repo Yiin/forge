@@ -52,6 +52,11 @@ if [[ "$asset" == *.tar.gz ]]; then
   # index.js; swap the whole tree, not just the bundle file.
   tree="${source%/apps/server/src/index.js}"
   node_bin="${FORGE_NODE:-$(command -v node || true)}"
+  if [[ -z "$node_bin" && -f "$bin" ]]; then
+    # systemd runs with a minimal PATH; reuse the node path install.sh
+    # baked into the wrapper.
+    node_bin="$(sed -n 's/^exec "\([^"]*\)" .*/\1/p' "$bin" | head -n1)"
+  fi
   [[ -n "$node_bin" ]] || { echo 'forge-update: node not found on PATH' >&2; exit 1; }
   mkdir -p "$(dirname "$lib")"
   new_tree="$lib.new"
