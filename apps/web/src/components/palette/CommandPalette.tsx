@@ -49,7 +49,9 @@ export function CommandPalette() {
     messages: [],
     runs: [],
   })
-  const [searchState, setSearchState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [searchState, setSearchState] = useState<
+    'idle' | 'loading' | 'success' | 'error'
+  >('idle')
   const request = useRef<AbortController | null>(null)
   const [shortcutHelp, setShortcutHelp] = useState(false)
   const sessions = useSessionsStore((state) => state.sessions)
@@ -91,7 +93,10 @@ export function CommandPalette() {
           setSearchState('success')
         }
       } catch (error) {
-        if ((error as Error).name !== 'AbortError' && request.current === controller) {
+        if (
+          (error as Error).name !== 'AbortError' &&
+          request.current === controller
+        ) {
           setResults({ sessions: [], messages: [], runs: [] })
           setSearchState('error')
         }
@@ -205,8 +210,12 @@ export function CommandPalette() {
           )}
           {query.trim() && searchState === 'error' && (
             <CommandGroup heading="Search status" forceMount>
-              <CommandItem disabled role="alert">Search is unavailable. Commands remain available.</CommandItem>
-              <CommandItem onSelect={() => setChangedAt(Date.now())}>Try search again</CommandItem>
+              <CommandItem disabled role="alert">
+                Search is unavailable. Commands remain available.
+              </CommandItem>
+              <CommandItem onSelect={() => setChangedAt(Date.now())}>
+                Try search again
+              </CommandItem>
             </CommandGroup>
           )}
           {(results.messages.length > 0 || results.runs.length > 0) && (

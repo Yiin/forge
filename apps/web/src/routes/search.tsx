@@ -19,7 +19,9 @@ export function SearchRoute() {
   const sessions = useSessionsStore((state) => state.sessions)
   const [input, setInput] = useState(q)
   const [results, setResults] = useState<SearchResultsData>(emptyResults)
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [status, setStatus] = useState<
+    'idle' | 'loading' | 'success' | 'error'
+  >('idle')
   const [retryKey, setRetryKey] = useState(0)
   const [activeResult, setActiveResult] = useState(0)
   const request = useRef<AbortController | null>(null)
@@ -57,7 +59,10 @@ export function SearchRoute() {
           setStatus('success')
         }
       } catch (error) {
-        if ((error as Error).name !== 'AbortError' && request.current === controller) {
+        if (
+          (error as Error).name !== 'AbortError' &&
+          request.current === controller
+        ) {
           setResults(emptyResults)
           setStatus('error')
         }
@@ -82,12 +87,31 @@ export function SearchRoute() {
       return
     }
     if (target.matches('input, textarea, [contenteditable="true"]')) return
-    const items = Array.from(resultsRef.current?.querySelectorAll<HTMLAnchorElement>('.search-result') ?? [])
+    const items = Array.from(
+      resultsRef.current?.querySelectorAll<HTMLAnchorElement>(
+        '.search-result',
+      ) ?? [],
+    )
     if (!items.length) return
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+    if (
+      event.key === 'ArrowDown' ||
+      event.key === 'ArrowUp' ||
+      event.key === 'Home' ||
+      event.key === 'End'
+    ) {
       event.preventDefault()
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 :
-        Math.max(0, Math.min(items.length - 1, activeResult + (event.key === 'ArrowDown' ? 1 : -1)))
+      const next =
+        event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? items.length - 1
+            : Math.max(
+                0,
+                Math.min(
+                  items.length - 1,
+                  activeResult + (event.key === 'ArrowDown' ? 1 : -1),
+                ),
+              )
       setActiveResult(next)
       items[next]?.focus()
     } else if (event.key === 'Enter' && target.matches('.search-result')) {
@@ -140,12 +164,25 @@ export function SearchRoute() {
               className={scope === value ? 'active' : ''}
               onClick={() => updateSearch(input || q, value)}
               onKeyDown={(event) => {
-                if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
+                if (
+                  !['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(
+                    event.key,
+                  )
+                )
+                  return
                 event.preventDefault()
-                const index = ['all', 'sessions', 'messages', 'runs'].indexOf(value)
-                const next = event.key === 'Home' ? 0 : event.key === 'End' ? 3 :
-                  (index + (event.key === 'ArrowRight' ? 1 : -1) + 4) % 4
-                const nextScope = ['all', 'sessions', 'messages', 'runs'][next] as SearchScope
+                const index = ['all', 'sessions', 'messages', 'runs'].indexOf(
+                  value,
+                )
+                const next =
+                  event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? 3
+                      : (index + (event.key === 'ArrowRight' ? 1 : -1) + 4) % 4
+                const nextScope = ['all', 'sessions', 'messages', 'runs'][
+                  next
+                ] as SearchScope
                 updateSearch(input || q, nextScope)
               }}
             >
@@ -177,7 +214,13 @@ export function SearchRoute() {
         </div>
       ) : (
         <div ref={resultsRef}>
-          <SearchResults results={results} query={q} scope={scope} status={status === 'idle' ? 'loading' : status} onRetry={retrySearch} />
+          <SearchResults
+            results={results}
+            query={q}
+            scope={scope}
+            status={status === 'idle' ? 'loading' : status}
+            onRetry={retrySearch}
+          />
         </div>
       )}
     </div>
