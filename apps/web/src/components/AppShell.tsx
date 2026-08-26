@@ -5,6 +5,7 @@ import { Sidebar } from './ui/sidebar'
 import { AppBar } from './AppBar'
 import { useShellStore } from '../stores/shell'
 import { CommandPalette } from './palette/CommandPalette'
+import { SessionSidebar } from './sidebar/SessionSidebar'
 function Navigation({ settings = false }: { settings?: boolean }) {
   return (
     <nav className="nav">
@@ -67,7 +68,7 @@ export function AppShell() {
       <CommandPalette />
       <div className="desktop-shell">
         <Sidebar width={store.sidebarWidth} onResize={store.setSidebarWidth}>
-          <Navigation settings={isSettings} />
+          {isSettings ? <Navigation settings /> : <SessionSidebar />}
         </Sidebar>
         <main className="main">
           <Outlet />
@@ -82,7 +83,7 @@ export function AppShell() {
           <Drawer.Portal>
             <Drawer.Overlay className="drawer-overlay" />
             <Drawer.Content className="drawer">
-              <Navigation settings={isSettings} />
+              {isSettings ? <Navigation settings /> : <SessionSidebar />}
             </Drawer.Content>
           </Drawer.Portal>
         </Drawer.Root>
