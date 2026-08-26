@@ -965,9 +965,6 @@ body {
   background: color-mix(in srgb, var(--border) 45%, transparent);
   font-size: 12px;
 }
-.session-copy-button {
-  display: none;
-}
 .settled-divider {
   color: var(--muted);
   font-size: 11px;
@@ -1212,6 +1209,8 @@ kbd {
 }
 .session-view {
   position: relative;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
 }
@@ -1543,7 +1542,8 @@ kbd {
 }
 .chat-timeline-shell {
   position: relative;
-  height: 100%;
+  flex: 1;
+  width: 100%;
   min-height: 0;
   max-width: 900px;
   margin: 0 auto;
@@ -1758,15 +1758,18 @@ kbd {
   }
   .session-title-button {
     max-width: 65vw;
+    min-height: 44px;
     font-size: 14px;
   }
-  .session-copy-button {
-    display: inline-flex;
+  .session-rename-button,
+  .session-harness-icon {
+    display: none;
   }
   .session-info-popover {
     position: fixed;
     right: 12px;
     top: 104px;
+    max-width: calc(100vw - 24px);
   }
   .chat-timeline {
     padding: 14px 10px calc(90px + env(safe-area-inset-bottom));
@@ -2037,19 +2040,6 @@ kbd {
 }
 .app-bar-spacer {
   flex: 1;
-}
-.icon-button {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  color: inherit;
-  background: none;
-  border: 0;
-  border-radius: 8px;
-}
-.icon-button:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .drawer-overlay {
   position: fixed;

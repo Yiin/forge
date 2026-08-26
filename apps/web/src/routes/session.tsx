@@ -6,7 +6,7 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
 import { connectForgeSocket, normalizeServerEvent } from '../lib/socket'
 import { useMessagesStore } from '../stores/messages'
-import { useSessionsStore } from '../stores/sessions'
+import { useSessionsStore, type SessionSummary } from '../stores/sessions'
 import { PathSwitcher } from '../components/chat/PathSwitcher'
 
 export function SessionRoute() {
@@ -26,13 +26,8 @@ export function SessionRoute() {
     void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`)
       .then((response) => (response.ok ? response.json() : null))
       .then(
-        (
-          session: {
-            harness?: string
-            protocol?: 'acp' | 'pty'
-            status?: string
-          } | null,
-        ) => {
+        (session: (SessionSummary & { protocol?: 'acp' | 'pty' }) | null) => {
+          if (session) useSessionsStore.getState().upsertSession(session)
           setHarness(session?.harness)
           setProtocol(session?.protocol)
           setLoadedStatus(session?.status)

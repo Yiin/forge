@@ -347,6 +347,30 @@ async function startE2eServer(): Promise<void> {
         return response({ id })
       }
       const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/prompt$/)
+      const sessionRow = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
+      const shapeSession = (session: E2eState['sessions'][number]) => ({
+        ...session,
+        title: 'New session',
+        harness: 'fake-acp-agent',
+        status: 'idle',
+        createdAt: new Date().toISOString(),
+      })
+      if (request.method === 'GET' && url.pathname === '/api/sessions') {
+        const projectId = url.searchParams.get('projectId')
+        return response(
+          state.sessions
+            .filter((session) => !projectId || session.projectId === projectId)
+            .map(shapeSession),
+        )
+      }
+      if (request.method === 'GET' && sessionRow) {
+        const session = state.sessions.find(
+          (entry) => entry.id === sessionRow[1],
+        )
+        return session
+          ? response(shapeSession(session))
+          : response({ error: 'Session not found' }, 404)
+      }
       const answer = url.pathname.match(
         /^\/api\/sessions\/([^/]+)\/questions\/([^/]+)\/answer$/,
       )

@@ -1,5 +1,5 @@
 import { Copy, MoreHorizontal, Pencil, Terminal, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '../../lib/api'
 import { useSessionsStore } from '../../stores/sessions'
@@ -11,8 +11,28 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
   const upsertSession = useSessionsStore((state) => state.upsertSession)
   const [editing, setEditing] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
+  const infoRef = useRef<HTMLDetailsElement>(null)
+  const headingRef = useRef<HTMLDivElement>(null)
   const [title, setTitle] = useState(session?.title ?? 'New session')
   useEffect(() => setTitle(session?.title ?? 'New session'), [session?.title])
+  useEffect(() => {
+    if (!infoOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (infoRef.current?.contains(target)) return
+      if (headingRef.current?.contains(target)) return
+      setInfoOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setInfoOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [infoOpen])
   if (!session) return null
   const current = session
   async function rename() {
@@ -42,7 +62,7 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
   const projectId = current.projectId ?? current.project_id
   return (
     <header className="session-header">
-      <div className="session-heading">
+      <div className="session-heading" ref={headingRef}>
         {editing ? (
           <input
             className="session-title-input"
@@ -61,8 +81,8 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
         ) : (
           <button
             className="session-title-button"
-            onClick={() => setInfoOpen(true)}
-            title="Show session information"
+            onClick={() => setInfoOpen((open) => !open)}
+            title="Toggle session information"
           >
             {current.title}
           </button>
@@ -78,7 +98,11 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
           className={`status-dot ${current.status ?? 'idle'}`}
           aria-label={current.status ?? 'idle'}
         />
-        <Terminal size={14} aria-label={current.harness ?? 'harness'} />
+        <Terminal
+          className="session-harness-icon"
+          size={14}
+          aria-label={current.harness ?? 'harness'}
+        />
       </div>
       {current.contextMethod && (
         <span className="session-context-label">
@@ -88,6 +112,7 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
         </span>
       )}
       <details
+        ref={infoRef}
         className="session-info"
         open={infoOpen}
         onToggle={(event) =>
@@ -131,13 +156,6 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
           </button>
         </div>
       </details>
-      <button
-        className="icon-button session-copy-button"
-        aria-label="Copy session ID"
-        onClick={() => void copyId()}
-      >
-        <Copy size={16} />
-      </button>
     </header>
   )
 }
