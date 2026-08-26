@@ -8,6 +8,7 @@ export type SidebarSession = {
   lastActivityAt?: number | string
   snippet?: string
   unread?: boolean
+  retention?: 'permanent' | 'discardable'
 }
 
 export type SidebarRun = {
@@ -21,7 +22,10 @@ export const SETTLED_PAGE_SIZE = 25
 
 export function visibleSessions(sessions: SidebarSession[]) {
   return sessions.filter(
-    (session) => session.kind !== 'subagent' && session.kind !== 'epic_worker',
+    (session) =>
+      session.kind !== 'subagent' &&
+      session.kind !== 'epic_worker' &&
+      session.retention !== 'discardable',
   )
 }
 

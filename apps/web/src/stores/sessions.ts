@@ -17,6 +17,7 @@ export type SessionSummary = {
   forkedAtSeq?: number | null
   contextMethod?: string | null
   contextConfidence?: string | null
+  retention?: 'permanent' | 'discardable'
 }
 export type ProjectSummary = { id: string; name: string; path?: string }
 type SessionsState = {

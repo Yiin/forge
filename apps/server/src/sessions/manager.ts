@@ -16,6 +16,7 @@ export type SessionRow = {
   status: string
   title: string
   kind: string
+  retention?: 'permanent' | 'discardable'
   user_titled?: number
 }
 const makeId = (prefix: string) =>
@@ -41,25 +42,27 @@ export class SessionManager {
     title?: string
     kind?: string
     parentSessionId?: string | null
+    retention?: 'permanent' | 'discardable'
   }) {
     return createSession(this.db, {
       ...input,
       title: input.title?.trim() || 'New session',
+      retention: input.retention,
     })
   }
 
   list(projectId?: string, parentSessionId?: string) {
     if (parentSessionId) {
       const sql = projectId
-        ? 'SELECT * FROM sessions WHERE project_id = ? AND parent_session_id = ? ORDER BY last_activity_at DESC'
-        : 'SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY last_activity_at DESC'
+        ? "SELECT * FROM sessions WHERE project_id = ? AND parent_session_id = ? AND retention = 'permanent' ORDER BY last_activity_at DESC"
+        : "SELECT * FROM sessions WHERE parent_session_id = ? AND retention = 'permanent' ORDER BY last_activity_at DESC"
       return projectId
         ? this.db.prepare(sql).all(projectId, parentSessionId)
         : this.db.prepare(sql).all(parentSessionId)
     }
     const sql = projectId
-      ? 'SELECT * FROM sessions WHERE project_id = ? ORDER BY last_activity_at DESC'
-      : 'SELECT * FROM sessions ORDER BY last_activity_at DESC'
+      ? "SELECT * FROM sessions WHERE project_id = ? AND retention = 'permanent' ORDER BY last_activity_at DESC"
+      : "SELECT * FROM sessions WHERE retention = 'permanent' ORDER BY last_activity_at DESC"
     return projectId
       ? this.db.prepare(sql).all(projectId)
       : this.db.prepare(sql).all()
@@ -335,6 +338,27 @@ export class SessionManager {
   async interrupt(id: string) {
     await this.handles.get(id)?.cancel()
   }
+  async discard(id: string) {
+    await this.handles.get(id)?.cancel()
+    await this.handles.get(id)?.kill()
+    this.handles.delete(id)
+    return Boolean(
+      this.db
+        .prepare(
+          "UPDATE sessions SET retention = 'discardable', status = 'archived' WHERE id = ?",
+        )
+        .run(id).changes,
+    )
+  }
+  keep(id: string) {
+    return Boolean(
+      this.db
+        .prepare(
+          "UPDATE sessions SET retention = 'permanent' WHERE id = ? AND retention = 'discardable'",
+        )
+        .run(id).changes,
+    )
+  }
   async fork(
     input: {
       sessionId: string
@@ -367,6 +391,48 @@ export class SessionManager {
       forkedAtSeq: context.boundary,
       contextMethod: context.method,
       contextConfidence: context.confidence,
+    }
+  }
+  async btw(input: {
+    sessionId: string
+    sourceSeq?: number
+    text: string
+    requestId?: string
+  }) {
+    const parent = getSession(this.db, input.sessionId) as
+      SessionRow | undefined
+    if (!parent) throw new Error('Session not found')
+    const source =
+      input.sourceSeq ??
+      Number(
+        (
+          this.db
+            .prepare(
+              'SELECT MAX(seq) AS seq FROM messages WHERE session_id = ?',
+            )
+            .get(input.sessionId) as { seq: number | null }
+        ).seq ?? 0,
+      )
+    if (!source) throw new Error('Side chat needs a parent message')
+    const requestId = input.requestId ?? crypto.randomUUID()
+    const context = createFork(this.db, {
+      sessionId: input.sessionId,
+      messageSeq: source,
+      text: input.text,
+      requestId,
+      includeSource: true,
+      retention: 'discardable',
+    })
+    if (!context.existing) {
+      appendForkContext(this.db, context.childId, context, this.bus)
+      await this.prompt(context.childId, input.text, requestId)
+    }
+    return {
+      sessionId: context.childId,
+      parentSessionId: input.sessionId,
+      sourceSeq: context.boundary,
+      retention: 'discardable' as const,
+      contextMethod: context.method,
     }
   }
   async answer(id: string, questionId: string, answer: string) {

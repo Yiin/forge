@@ -37,6 +37,9 @@ export async function recoverSessions(
   manager: SessionManager,
   bus: EventBus,
 ) {
+  db.prepare(
+    "UPDATE sessions SET status = 'archived' WHERE retention = 'discardable' AND status != 'archived'",
+  ).run()
   const running = db
     .prepare("SELECT * FROM sessions WHERE status = 'running'")
     .all()

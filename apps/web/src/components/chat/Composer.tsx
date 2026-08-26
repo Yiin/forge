@@ -19,6 +19,7 @@ import {
 import { AskUserQuestionPanel } from './AskUserQuestionPanel'
 
 const commandDefaults: ComposerCommand[] = [
+  { id: 'btw', label: '/btw', group: 'Built-in', value: '/btw ' },
   { id: 'help', label: '/help', group: 'Built-in', value: '/help' },
   { id: 'clear', label: '/clear', group: 'Built-in', value: '/clear' },
 ]

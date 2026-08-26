@@ -48,7 +48,10 @@ export function SessionRoute() {
     if (!text.trim()) return
     setSending(true)
     try {
-      await api.prompt({ sessionId, text: text.trim(), attachmentIds })
+      const value = text.trim()
+      if (value === '/btw' || value.startsWith('/btw ')) {
+        await api.btw({ sessionId, text: value.slice(4).trim() })
+      } else await api.prompt({ sessionId, text: value, attachmentIds })
     } finally {
       setSending(false)
     }

@@ -26,6 +26,9 @@ export function searchRoutes(db: DatabaseSync) {
     const empty = { sessions: [], messages: [], runs: [] }
     if (!match) return c.json(empty)
     const result: typeof empty = { sessions: [], messages: [], runs: [] }
+    const retentionFilter = sessionColumns.has('retention')
+      ? " AND s.retention = 'permanent'"
+      : ''
     if (
       (scope === 'all' || scope === 'sessions') &&
       sessionColumns.has('title')
@@ -36,7 +39,7 @@ export function searchRoutes(db: DatabaseSync) {
         SELECT s.id AS sessionId, COALESCE(s.title, '') AS title,
           snippet(sessions_fts, -1, '<mark>', '</mark>', '…', 32) AS snippet
         FROM sessions_fts JOIN sessions s ON s.rowid = sessions_fts.rowid
-        WHERE sessions_fts MATCH ? ORDER BY bm25(sessions_fts) LIMIT ?
+        WHERE sessions_fts MATCH ?${retentionFilter} ORDER BY bm25(sessions_fts) LIMIT ?
       `,
         )
         .all(match, limit) as typeof result.sessions
@@ -50,7 +53,7 @@ export function searchRoutes(db: DatabaseSync) {
           ${sessionColumns.has('title') ? "COALESCE(s.title, '')" : "''"} AS sessionTitle
         FROM messages_fts JOIN messages m ON m.seq = messages_fts.rowid
           LEFT JOIN sessions s ON s.id = m.session_id
-        WHERE messages_fts MATCH ? ORDER BY bm25(messages_fts) LIMIT ?
+        WHERE messages_fts MATCH ?${retentionFilter} ORDER BY bm25(messages_fts) LIMIT ?
       `,
         )
         .all(match, limit) as typeof result.messages

@@ -154,6 +154,7 @@ export function createSession(
     title: string
     cwd: string
     kind?: string
+    retention?: 'permanent' | 'discardable'
     parentSessionId?: string | null
     forkedAtSeq?: number | null
     forkRequestId?: string | null
@@ -165,8 +166,8 @@ export function createSession(
   const now = input.now ?? Date.now()
   const value = { id: id('ses_'), ...input, kind: input.kind ?? 'chat', now }
   db.prepare(
-    `INSERT INTO sessions (id, project_id, harness, title, cwd, kind, parent_session_id, forked_at_seq, fork_request_id, context_method, context_confidence, status, auto_resume, created_at, last_activity_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
+    `INSERT INTO sessions (id, project_id, harness, title, cwd, kind, retention, parent_session_id, forked_at_seq, fork_request_id, context_method, context_confidence, status, auto_resume, created_at, last_activity_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
   ).run(
     value.id,
     value.projectId,
@@ -174,6 +175,7 @@ export function createSession(
     value.title,
     value.cwd,
     value.kind,
+    input.retention ?? 'permanent',
     value.parentSessionId ?? null,
     input.forkedAtSeq ?? null,
     input.forkRequestId ?? null,
@@ -188,12 +190,12 @@ export const listSessions = (db: Db, projectId?: string) =>
   projectId
     ? db
         .prepare(
-          'SELECT * FROM sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY last_activity_at DESC',
+          "SELECT * FROM sessions WHERE project_id = ? AND deleted_at IS NULL AND retention = 'permanent' ORDER BY last_activity_at DESC",
         )
         .all(projectId)
     : db
         .prepare(
-          'SELECT * FROM sessions WHERE deleted_at IS NULL ORDER BY last_activity_at DESC',
+          "SELECT * FROM sessions WHERE deleted_at IS NULL AND retention = 'permanent' ORDER BY last_activity_at DESC",
         )
         .all()
 export const getProject = (db: Db, projectId: string) =>

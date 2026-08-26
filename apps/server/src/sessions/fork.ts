@@ -36,6 +36,7 @@ export function createFork(
     text: string
     requestId: string
     includeSource: boolean
+    retention?: 'permanent' | 'discardable'
   },
 ): ForkContext {
   const parent = getSession(db, input.sessionId) as Row | undefined
@@ -85,6 +86,7 @@ export function createFork(
     forkRequestId: input.requestId,
     contextMethod: 'synthetic',
     contextConfidence: 'reduced',
+    retention: input.retention,
   })
   const rows = db
     .prepare(
