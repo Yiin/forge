@@ -28,6 +28,7 @@ export function SessionSidebar() {
   const navigate = useNavigate()
   const { sessions, projects, setSessions, setProjects, upsertSession } =
     useSessionsStore()
+  const removeSession = useSessionsStore((state) => state.removeSession)
   const setDrawerOpen = useShellStore((state) => state.setDrawerOpen)
   const [scope, setScope] = useState<string | 'all'>('all')
   const [settledPageNumber, setSettledPageNumber] = useState(1)
@@ -84,6 +85,28 @@ export function SessionSidebar() {
     upsertSession({ ...session, title: clean })
     try {
       await api.renameSession(session.id, clean)
+    } catch {
+      upsertSession(session)
+    }
+  }
+  async function settle(session: SessionSummary, settled: boolean) {
+    upsertSession({ ...session, status: settled ? 'archived' : 'idle' })
+    try {
+      await api.settleSession(session.id, settled)
+    } catch {
+      upsertSession(session)
+    }
+  }
+  async function remove(session: SessionSummary) {
+    if (
+      !window.confirm(
+        `Delete “${session.title || 'Untitled session'}”? This cannot be undone.`,
+      )
+    )
+      return
+    removeSession(session.id)
+    try {
+      await api.deleteSession(session.id)
     } catch {
       upsertSession(session)
     }
@@ -173,6 +196,8 @@ export function SessionSidebar() {
             onOpen={openSession}
             onEdit={() => setEditing(session.id)}
             onRename={rename}
+            onSettle={settle}
+            onDelete={remove}
           />
         ))}
         {settled.length > 0 && <li className="settled-divider">Settled</li>}
@@ -183,6 +208,8 @@ export function SessionSidebar() {
             onOpen={openSession}
             onEdit={() => setEditing(session.id)}
             onRename={rename}
+            onSettle={settle}
+            onDelete={remove}
             settled
           />
         ))}
@@ -252,6 +279,8 @@ function SessionRow({
   onOpen,
   onEdit,
   onRename,
+  onSettle,
+  onDelete,
 }: {
   session: SessionSummary
   index?: number
@@ -260,11 +289,23 @@ function SessionRow({
   onOpen: (id: string) => void
   onEdit: () => void
   onRename: (session: SessionSummary, title: string) => void
+  onSettle: (session: SessionSummary, settled: boolean) => void
+  onDelete: (session: SessionSummary) => void
 }) {
   const [title, setTitle] = useState(session.title)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const toggleUnread = () => {
+    const next = !session.unread
+    useSessionsStore.getState().upsertSession({ ...session, unread: next })
+    setMenuOpen(false)
+  }
+  const copyId = async () => {
+    await navigator.clipboard?.writeText(session.id)
+    setMenuOpen(false)
+  }
   return (
     <li
-      className={`session-row ${settled ? 'settled' : ''}`}
+      className={`session-row session-row-enter ${settled ? 'settled' : ''}`}
       onDoubleClick={onEdit}
     >
       {editing ? (
@@ -299,10 +340,49 @@ function SessionRow({
       <button
         className="icon-button row-menu"
         aria-label={`Actions for ${session.title}`}
-        onClick={onEdit}
+        aria-expanded={menuOpen}
+        onClick={(event) => {
+          event.stopPropagation()
+          setMenuOpen((open) => !open)
+        }}
       >
         <MoreHorizontal size={15} />
       </button>
+      {menuOpen && (
+        <div className="session-menu" role="menu">
+          <button
+            role="menuitem"
+            onClick={() => {
+              onEdit()
+              setMenuOpen(false)
+            }}
+          >
+            Rename
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => void onSettle(session, !settled)}
+          >
+            {settled ? 'Un-settle' : 'Settle'}
+          </button>
+          <button role="menuitem" onClick={toggleUnread}>
+            {session.unread ? 'Mark read' : 'Mark unread'}
+          </button>
+          <button role="menuitem" onClick={() => void copyId()}>
+            Copy session id
+          </button>
+          <button
+            className="danger"
+            role="menuitem"
+            onClick={() => {
+              setMenuOpen(false)
+              onDelete(session)
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
       {session.status === 'running' && (
         <span className="sr-only">{statusLabel(session.status)}</span>
       )}

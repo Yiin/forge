@@ -180,10 +180,14 @@ export const listSessions = (db: Db, projectId?: string) =>
   projectId
     ? db
         .prepare(
-          'SELECT * FROM sessions WHERE project_id = ? ORDER BY last_activity_at DESC',
+          'SELECT * FROM sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY last_activity_at DESC',
         )
         .all(projectId)
-    : db.prepare('SELECT * FROM sessions ORDER BY last_activity_at DESC').all()
+    : db
+        .prepare(
+          'SELECT * FROM sessions WHERE deleted_at IS NULL ORDER BY last_activity_at DESC',
+        )
+        .all()
 export const getProject = (db: Db, projectId: string) =>
   db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId)
 export const getSession = (db: Db, sessionId: string) =>

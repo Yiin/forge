@@ -49,5 +49,14 @@ export function workspaceRoutes(db: DatabaseSync) {
     if (!result.changes) return c.json({ error: 'Session not found' }, 404)
     return c.json({ ok: true, status })
   })
+  app.post('/api/sessions/:id/delete', (c) => {
+    const id = c.req.param('id')
+    const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(id)
+    if (!session) return c.json({ error: 'Session not found' }, 404)
+    db.prepare(
+      'UPDATE sessions SET deleted_at = ?, status = ? WHERE id = ?',
+    ).run(Date.now(), 'archived', id)
+    return c.json({ ok: true })
+  })
   return app
 }
