@@ -16,6 +16,8 @@ type Iteration = {
   title: string
   beadId: string
   sessionId: string
+  harness: string | null
+  model: string | null
   attempt: number
   status: string
   failureReason: string | null
@@ -36,6 +38,7 @@ type Detail = {
     blocked: { id: string; title: string; priority: number }[]
   }
   config: Record<string, unknown>
+  provenance: Record<string, string>
 }
 export function RunRoute() {
   const { runId } = useParams({ from: '/runs/$runId' })
@@ -108,7 +111,9 @@ export function RunRoute() {
       <div className="provenance">
         {Object.keys(run.config).length ? (
           Object.keys(run.config).map((key) => (
-            <span key={key}>{key}: input</span>
+            <span key={key}>
+              {key}: {run.provenance[key] ?? 'default'}
+            </span>
           ))
         ) : (
           <span>Defaults</span>

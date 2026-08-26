@@ -81,6 +81,17 @@ type IterationResult = {
   beadId: string
   worktreePath: string
 }
+function providerFor(config: unknown) {
+  const value = config as {
+    rolePolicy?: {
+      roles?: Record<string, string>
+      tiers?: Record<string, Array<{ harness: string; model?: string }>>
+    }
+  }
+  const tier = value.rolePolicy?.roles?.['iteration-worker']
+  const hop = tier ? value.rolePolicy?.tiers?.[tier]?.[0] : undefined
+  return { harness: hop?.harness ?? null, model: hop?.model ?? null }
+}
 type DispatchResult =
   | { kind: 'ready'; item: IterationResult }
   | { kind: 'failed'; beadId: string; reason: string }
@@ -168,6 +179,7 @@ export class EpicRunner {
           sessionId: session.id,
           worktreePath: input.repoPath,
           branch: input.baseBranch,
+          ...providerFor(input.config),
         })
         try {
           await session.prompt(
@@ -471,6 +483,7 @@ export class EpicRunner {
       sessionId: session.id,
       worktreePath: worktree.worktreePath,
       branch: worktree.branch,
+      ...providerFor(input.config),
     })
     this.workerSessions.set(iteration.id, session)
     try {

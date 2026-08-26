@@ -105,6 +105,8 @@ export const epicIterationResponse = z.object({
   beadId: id,
   title: z.string(),
   sessionId: id,
+  harness: z.string().nullable(),
+  model: z.string().nullable(),
   attempt: z.number().int().positive(),
   status: z.enum(['running', 'merged', 'failed', 'interrupted']),
   failureReason: z.string().nullable(),

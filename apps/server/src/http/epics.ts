@@ -7,6 +7,7 @@ import {
 } from '@forge/protocol/commands'
 import type { EpicRunner } from '../epics/runner.js'
 import { openChildren, readyChildren, show } from '../epics/beads.js'
+import { defaultConfig, resolveRunConfig } from '../config.js'
 
 export type EpicRouteOptions = {
   runner: EpicRunner
@@ -47,6 +48,7 @@ export function epicRoutes(options: EpicRouteOptions) {
     workerCount: row.worker_count,
     baseBranch: row.base_branch,
     config: JSON.parse(row.config ?? '{}'),
+    provenance: JSON.parse(row.config ?? '{}').provenance ?? {},
     startedAt: row.started_at,
     endedAt: row.ended_at ?? null,
     error: row.error ?? null,
@@ -92,6 +94,8 @@ export function epicRoutes(options: EpicRouteOptions) {
               ).title || 'Untitled iteration'
             : 'Untitled iteration',
           sessionId: item.session_id,
+          harness: item.harness ?? null,
+          model: item.model ?? null,
           attempt: item.attempt,
           status: item.status,
           failureReason: item.failure_reason ?? null,
@@ -123,10 +127,15 @@ export function epicRoutes(options: EpicRouteOptions) {
     const body = epicStart.parse(await c.req.json())
     const repoPath = options.projectPath(body.projectId)
     if (!repoPath) return c.json({ error: 'project not found' }, 404)
+    const resolved = await resolveRunConfig(
+      repoPath,
+      body.config,
+      defaultConfig().settings.epicDefaults,
+    )
     const run = await options.runner.startRun({
       ...body,
       repoPath,
-      config: options.config?.(body.projectId) ?? body.config,
+      config: options.config?.(body.projectId) ?? resolved,
     })
     return c.json(run, 202)
   })

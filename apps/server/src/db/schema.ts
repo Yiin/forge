@@ -45,6 +45,7 @@ export const messages = sqliteTable(
   },
   (table) => [index('messages_session_seq_idx').on(table.sessionId, table.seq)],
 )
+// Epic iteration provider columns are added by migration 0008.
 export const attachments = sqliteTable('attachments', {
   id: text('id').primaryKey(),
   sessionId: text('session_id')

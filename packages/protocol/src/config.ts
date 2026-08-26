@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { rolePolicy, type RolePolicy } from './rolePolicy.js'
 
 export const harnessConfigSchema = z
   .object({
@@ -20,9 +21,24 @@ export const forgeConfigSchema = z.object({
       theme: z.enum(['dark', 'light']).default('dark'),
       defaultProject: z.string().default(''),
       titleGeneration: z.boolean().default(true),
+      epicDefaults: z
+        .object({
+          workerCount: z.number().int().positive().max(32).default(3),
+          mode: z.enum(['pool', 'serial', 'auto']).default('pool'),
+          gateCommand: z.union([z.string(), z.array(z.string())]).optional(),
+          installCommand: z.union([z.string(), z.array(z.string())]).optional(),
+          rolePolicy: rolePolicy.optional(),
+        })
+        .default({ workerCount: 3, mode: 'pool' }),
     })
-    .default({ theme: 'dark', defaultProject: '', titleGeneration: true }),
+    .default({
+      theme: 'dark',
+      defaultProject: '',
+      titleGeneration: true,
+      epicDefaults: { workerCount: 3, mode: 'pool' },
+    }),
 })
 
 export type HarnessConfig = z.infer<typeof harnessConfigSchema>
 export type ForgeConfig = z.infer<typeof forgeConfigSchema>
+export type { RolePolicy }

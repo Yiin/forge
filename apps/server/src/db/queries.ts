@@ -268,6 +268,8 @@ export function createIteration(
     worktreePath: string
     branch: string
     attempt?: number
+    harness?: string | null
+    model?: string | null
   },
 ) {
   const value = {
@@ -277,7 +279,7 @@ export function createIteration(
     startedAt: Date.now(),
   }
   db.prepare(
-    `INSERT INTO epic_iterations (id, epic_run_id, bead_id, session_id, worktree_path, branch, attempt, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)`,
+    `INSERT INTO epic_iterations (id, epic_run_id, bead_id, session_id, worktree_path, branch, attempt, harness, model, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)`,
   ).run(
     value.id,
     value.runId,
@@ -286,6 +288,8 @@ export function createIteration(
     value.worktreePath,
     value.branch,
     value.attempt,
+    value.harness ?? null,
+    value.model ?? null,
     value.startedAt,
   )
   return value
