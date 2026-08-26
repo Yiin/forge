@@ -634,6 +634,12 @@ body {
   color: var(--muted);
   font-size: 12px;
 }
+.settings-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .settings-error {
   display: flex;
   align-items: center;
