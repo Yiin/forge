@@ -56,7 +56,9 @@ describe('MessageRow', () => {
     )
 
     expect(screen.getByRole('button', { name: 'Copy message' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Branch from here' })).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Branch from here' }),
+    ).toBeTruthy()
   })
 
   it('exposes tool detail disclosures', () => {

@@ -67,11 +67,11 @@ export function MessageRow({
     <article className={`chat-row chat-${item.role}`} data-seq={item.seq}>
       <div className="chat-row-actions">
         <span>{item.role === 'user' ? 'You' : 'Forge'}</span>
-          <button
-            className="chat-icon-button"
-            type="button"
-            aria-label="Copy message"
-            onClick={copy}
+        <button
+          className="chat-icon-button"
+          type="button"
+          aria-label="Copy message"
+          onClick={copy}
         >
           <Copy size={14} />
         </button>
