@@ -1,6 +1,7 @@
 import { serve, type ServerType } from '@hono/node-server'
 import { Hono } from 'hono'
 import { createRequire } from 'node:module'
+import { createNodeWebSocket } from '@hono/node-ws'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
@@ -15,6 +16,7 @@ import { searchRoutes } from './http/search.js'
 import { questionRoutes } from './http/questions.js'
 import type { QuestionManager } from './acp/questions.js'
 import { QuestionManager as ServerQuestionManager } from './acp/questions.js'
+import { websocketRoute } from './ws.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -53,19 +55,21 @@ export function startServer(
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
   const questions = new ServerQuestionManager({ db, bus })
-  return serve({
-    fetch: createApp(
-      uploadStore,
-      {
-        db,
-        bus,
-        version: process.env.FORGE_VERSION ?? version,
-        dataDir,
-      },
-      questions,
-    ).fetch,
-    port,
-  })
+  const app = createApp(
+    uploadStore,
+    {
+      db,
+      bus,
+      version: process.env.FORGE_VERSION ?? version,
+      dataDir,
+    },
+    questions,
+  )
+  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
+  app.get('/ws', websocketRoute(upgradeWebSocket, db, bus))
+  const server = serve({ fetch: app.fetch, port })
+  injectWebSocket(server)
+  return server
 }
 
 type E2eState = {
