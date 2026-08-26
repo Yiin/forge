@@ -46,21 +46,32 @@ export function MessageRow({
   if (item.thought)
     return (
       <article className="chat-row chat-thought" data-seq={item.seq}>
-        <button className="chat-collapse" onClick={() => setOpen(!open)}>
+        <button
+          className="chat-collapse"
+          type="button"
+          aria-expanded={open}
+          aria-controls={`thought-${item.id}`}
+          onClick={() => setOpen(!open)}
+        >
           {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{' '}
           Thought
         </button>
-        {open && <ChatMarkdown text={item.text} />}
+        {open && (
+          <div id={`thought-${item.id}`} className="chat-thought-content">
+            <ChatMarkdown text={item.text} />
+          </div>
+        )}
       </article>
     )
   return (
     <article className={`chat-row chat-${item.role}`} data-seq={item.seq}>
       <div className="chat-row-actions">
         <span>{item.role === 'user' ? 'You' : 'Forge'}</span>
-        <button
-          className="chat-icon-button"
-          aria-label="Copy message"
-          onClick={copy}
+          <button
+            className="chat-icon-button"
+            type="button"
+            aria-label="Copy message"
+            onClick={copy}
         >
           <Copy size={14} />
         </button>
@@ -68,6 +79,7 @@ export function MessageRow({
           (item.role === 'user' ? (
             <button
               className="chat-text-action"
+              type="button"
               onClick={() => void fork(false)}
             >
               Edit
@@ -75,6 +87,7 @@ export function MessageRow({
           ) : (
             <button
               className="chat-text-action"
+              type="button"
               onClick={() => void fork(true)}
             >
               Branch from here
@@ -106,7 +119,13 @@ export function ToolCallRow({
         : CircleAlert
   return (
     <article className={`chat-tool chat-tool-${item.state}`}>
-      <button className="chat-tool-summary" onClick={() => setOpen(!open)}>
+      <button
+        className="chat-tool-summary"
+        type="button"
+        aria-expanded={open}
+        aria-controls={`tool-detail-${item.id}`}
+        onClick={() => setOpen(!open)}
+      >
         <Status
           size={15}
           className={item.state === 'running' ? 'spin' : undefined}
@@ -116,7 +135,7 @@ export function ToolCallRow({
         {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
       </button>
       {open && (
-        <div className="chat-tool-detail">
+        <div id={`tool-detail-${item.id}`} className="chat-tool-detail">
           <pre>{JSON.stringify(item.input, null, 2)}</pre>
           {item.output !== undefined && (
             <pre>{JSON.stringify(item.output, null, 2)}</pre>

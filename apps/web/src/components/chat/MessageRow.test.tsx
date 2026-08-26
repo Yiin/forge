@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
-import { MessageRow } from './MessageRow'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { MessageRow, ToolCallRow } from './MessageRow'
 
 describe('MessageRow', () => {
+  afterEach(cleanup)
+
   it('updates streamed markdown without changing its row identity', async () => {
     const item = {
       kind: 'message' as const,
@@ -18,5 +20,60 @@ describe('MessageRow', () => {
     view.rerender(<MessageRow item={item} />)
     expect(await screen.findByText('world')).toBeTruthy()
     expect(view.container.querySelectorAll('.chat-agent')).toHaveLength(1)
+  })
+
+  it('exposes thought disclosures to assistive technology', () => {
+    render(
+      <MessageRow
+        item={{
+          kind: 'message',
+          id: 'thought-1',
+          seq: 2,
+          role: 'agent',
+          thought: true,
+          text: 'working',
+        }}
+      />,
+    )
+
+    const disclosure = screen.getByRole('button', { name: /thought/i })
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+    expect(disclosure.getAttribute('aria-controls')).toBe('thought-thought-1')
+  })
+
+  it('keeps message actions keyboard discoverable', () => {
+    render(
+      <MessageRow
+        item={{
+          kind: 'message',
+          id: 'message-1',
+          seq: 3,
+          role: 'agent',
+          text: 'reply',
+        }}
+        sessionId="session-1"
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Copy message' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Branch from here' })).toBeTruthy()
+  })
+
+  it('exposes tool detail disclosures', () => {
+    render(
+      <ToolCallRow
+        item={{
+          kind: 'tool',
+          id: 'tool-1',
+          name: 'Search',
+          state: 'done',
+          input: { query: 'Forge' },
+        }}
+      />,
+    )
+
+    const disclosure = screen.getByRole('button', { name: /searchdone/i })
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+    expect(disclosure.getAttribute('aria-controls')).toBe('tool-detail-tool-1')
   })
 })
