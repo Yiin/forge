@@ -30,6 +30,12 @@ export const Ephemeral = z.discriminatedUnion('type', [
     status: z.enum(['idle', 'running', 'errored', 'archived']),
   }),
   z.object({
+    type: z.literal('sessionTitle'),
+    seq: z.null(),
+    sessionId: z.string(),
+    title: z.string(),
+  }),
+  z.object({
     type: z.literal('epicRunStatus'),
     seq: z.null(),
     runId: z.string(),
