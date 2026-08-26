@@ -163,7 +163,7 @@ export class SessionManager {
     this.reapTimers.delete(id)
     if (getSession(this.db, id)) this.status(id, 'idle')
   }
-  async prompt(id: string, text: string, requestId?: string) {
+  async prompt(id: string, text: string, requestId?: string, attachmentIds?: string[]) {
     const row = getSession(this.db, id) as SessionRow | undefined
     if (!row) throw new Error('Session not found')
     if (requestId) {
@@ -190,6 +190,21 @@ export class SessionManager {
       } as never,
       eventBus: this.bus,
     })
+    for (const attachmentId of attachmentIds ?? []) {
+      const attachment = this.db.prepare(
+        "SELECT id, filename, rel_path FROM attachments WHERE id = ? AND session_id = ? AND status = 'complete'",
+      ).get(attachmentId, id) as { id: string; filename: string; rel_path: string | null } | undefined
+      if (attachment?.rel_path)
+        appendMessage(this.db, {
+          sessionId: id,
+          turnId,
+          itemId: makeId('item_'),
+          role: 'user',
+          type: 'attachment_ref',
+          content: { type: 'attachment_ref', attachmentId: attachment.id, filename: attachment.filename, path: attachment.rel_path },
+          eventBus: this.bus,
+        })
+    }
     appendMessage(this.db, {
       sessionId: id,
       turnId,

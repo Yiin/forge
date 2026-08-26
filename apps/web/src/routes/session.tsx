@@ -1,4 +1,5 @@
 import { Timeline } from '../components/chat/Timeline'
+import { Composer } from '../components/chat/Composer'
 import { SessionHeader } from '../components/chat/SessionHeader'
 import { useEffect, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
@@ -9,7 +10,6 @@ import { useSessionsStore } from '../stores/sessions'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
-  const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   useEffect(() => {
     const socket = connectForgeSocket({ sessions: [sessionId] })
@@ -42,12 +42,11 @@ export function SessionRoute() {
       .catch(() => undefined)
     return () => socket.stop()
   }, [sessionId])
-  const send = async () => {
+  const send = async (text: string, attachmentIds: string[]) => {
     if (!text.trim()) return
     setSending(true)
     try {
-      await api.prompt({ sessionId, text: text.trim() })
-      setText('')
+      await api.prompt({ sessionId, text: text.trim(), attachmentIds })
     } finally {
       setSending(false)
     }
@@ -56,23 +55,7 @@ export function SessionRoute() {
     <div className="session-view">
       <SessionHeader sessionId={sessionId} />
       <Timeline />
-      <form
-        className="composer"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void send()
-        }}
-      >
-        <textarea
-          aria-label="Message composer"
-          placeholder="Send a message…"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-        />
-        <button type="submit" disabled={sending || !text.trim()}>
-          {sending ? 'Sending…' : 'Send'}
-        </button>
-      </form>
+      <Composer sessionId={sessionId} onSend={send} sending={sending} />
     </div>
   )
 }

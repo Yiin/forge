@@ -32,7 +32,7 @@ export function Timeline({
   useEffect(() => {
     if (atBottom)
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [items.length, atBottom])
+  }, [items, atBottom])
   return (
     <section className="chat-timeline-shell">
       <div
