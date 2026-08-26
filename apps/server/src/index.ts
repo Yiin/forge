@@ -24,6 +24,7 @@ import type { HarnessFactory } from './sessions/harness.js'
 import { workspaceRoutes } from './http/workspace.js'
 import { epicRoutes } from './http/epics.js'
 import type { EpicRunner } from './epics/runner.js'
+import { recoverSessions } from './sessions/recovery.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -90,6 +91,9 @@ export function startServer(
     }),
   })
   const manager = new SessionManager(db, bus, factory)
+  // Settle persisted turns before exposing the port. Respawn work continues
+  // from the settled state without delaying health checks.
+  void recoverSessions(db, manager, bus)
   const app = createApp(
     uploadStore,
     {

@@ -6,7 +6,7 @@ import type { HarnessFactory, HarnessHandle, HarnessItem } from './harness.js'
 import { isDefaultTitle, titleFromPrompt } from './titles.js'
 
 type Db = DatabaseSync
-type SessionRow = {
+export type SessionRow = {
   id: string
   project_id: string
   harness: string
@@ -125,6 +125,65 @@ export class SessionManager {
     this.status(row.id, 'running')
     return handle
   }
+
+  canLoad(row: SessionRow) {
+    const process = this.factory(row.harness)
+    return Boolean(
+      process.capabilities?.loadSession &&
+      process.loadSession &&
+      row.provider_session_id,
+    )
+  }
+
+  async recover(row: SessionRow, recap?: string) {
+    const process = this.factory(row.harness)
+    const onItem = (item: HarnessItem) => {
+      appendMessage(this.db, {
+        sessionId: row.id,
+        turnId: makeId('turn_'),
+        itemId: makeId('item_'),
+        role: 'agent',
+        type: item.type,
+        content: item,
+        eventBus: this.bus,
+      })
+    }
+    const onExit = () => this.status(row.id, 'errored')
+    const session = {
+      id: row.id,
+      cwd: row.cwd,
+      harness: row.harness,
+      providerSessionId: row.provider_session_id,
+    }
+    let result: { handle: HarnessHandle; proven: boolean }
+    if (
+      !recap &&
+      process.capabilities?.loadSession &&
+      process.loadSession &&
+      row.provider_session_id
+    ) {
+      result = await process.loadSession(session, onItem, onExit)
+      if (!result.proven)
+        throw new Error('Provider session load was not proven')
+    } else {
+      if (!process.newSession)
+        throw new Error('Harness cannot create a session')
+      result = await process.newSession(session, onItem, onExit)
+      if (!result.proven) throw new Error('New session was not proven')
+      appendMessage(this.db, {
+        sessionId: row.id,
+        turnId: makeId('turn_'),
+        itemId: makeId('item_'),
+        role: 'system',
+        type: 'error',
+        content: { type: 'error', message: `resumed_with_recap: ${recap}` },
+        eventBus: this.bus,
+      })
+    }
+    this.handles.set(row.id, result.handle)
+    if (recap) await result.handle.prompt(recap)
+    await result.handle.prompt('The server restarted mid-turn. Continue.')
+  }
   private readonly turns = new Map<string, string>()
   private readonly firstPrompt = new Map<string, string>()
   private maybeTitle(id: string, current: string, prompt: string) {
@@ -163,7 +222,12 @@ export class SessionManager {
     this.reapTimers.delete(id)
     if (getSession(this.db, id)) this.status(id, 'idle')
   }
-  async prompt(id: string, text: string, requestId?: string, attachmentIds?: string[]) {
+  async prompt(
+    id: string,
+    text: string,
+    requestId?: string,
+    attachmentIds?: string[],
+  ) {
     const row = getSession(this.db, id) as SessionRow | undefined
     if (!row) throw new Error('Session not found')
     if (requestId) {
@@ -191,9 +255,19 @@ export class SessionManager {
       eventBus: this.bus,
     })
     for (const attachmentId of attachmentIds ?? []) {
-      const attachment = this.db.prepare(
-        "SELECT id, filename, mime, size_bytes, rel_path FROM attachments WHERE id = ? AND session_id = ? AND status = 'complete'",
-      ).get(attachmentId, id) as { id: string; filename: string; mime: string; size_bytes: number; rel_path: string | null } | undefined
+      const attachment = this.db
+        .prepare(
+          "SELECT id, filename, mime, size_bytes, rel_path FROM attachments WHERE id = ? AND session_id = ? AND status = 'complete'",
+        )
+        .get(attachmentId, id) as
+        | {
+            id: string
+            filename: string
+            mime: string
+            size_bytes: number
+            rel_path: string | null
+          }
+        | undefined
       if (attachment?.rel_path)
         appendMessage(this.db, {
           sessionId: id,
@@ -201,7 +275,14 @@ export class SessionManager {
           itemId: makeId('item_'),
           role: 'user',
           type: 'attachment_ref',
-          content: { type: 'attachment_ref', attachmentId: attachment.id, filename: attachment.filename, mime: attachment.mime, sizeBytes: attachment.size_bytes, path: attachment.rel_path },
+          content: {
+            type: 'attachment_ref',
+            attachmentId: attachment.id,
+            filename: attachment.filename,
+            mime: attachment.mime,
+            sizeBytes: attachment.size_bytes,
+            path: attachment.rel_path,
+          },
           eventBus: this.bus,
         })
     }
