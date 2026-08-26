@@ -89,11 +89,19 @@ export async function createWorktree(
   repoPath: string,
   runId: string,
   childId: string,
+  baseBranch = 'HEAD',
 ): Promise<{ branch: string; worktreePath: string }> {
   const branch = `epic/${childId}`
   const worktreePath = join(runRoot(repoPath, runId), childId)
   await mkdir(resolve(worktreePath, '..'), { recursive: true })
-  await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, 'HEAD'])
+  await git(repoPath, [
+    'worktree',
+    'add',
+    '-b',
+    branch,
+    worktreePath,
+    baseBranch,
+  ])
   return { branch, worktreePath }
 }
 
@@ -160,6 +168,7 @@ export async function mergeBranch(
   repoPath: string,
   baseBranch: string,
   branch: string,
+  gateCommand?: string | string[],
 ): Promise<MergeResult> {
   const id = `${Date.now()}-${process.pid}`
   const integration = join(repoPath, 'worktrees', `epic-${id}`, 'integration')
@@ -173,6 +182,20 @@ export async function mergeBranch(
       const report = await conflictReport(integration, merged.output)
       await git(integration, ['merge', '--abort'], false)
       return report
+    }
+    if (gateCommand) {
+      const command = Array.isArray(gateCommand)
+        ? gateCommand
+        : gateCommand.trim().split(/\s+/)
+      const gate = await git(integration, command, false)
+      if (gate.code !== 0) {
+        await git(integration, ['merge', '--abort'], false)
+        return {
+          files: [],
+          mergeOutput: `Gate failed (${gate.code})`,
+          hunks: gate.output.slice(0, HUNKS_LIMIT),
+        }
+      }
     }
     const head = (await git(integration, ['rev-parse', 'HEAD'])).output.trim()
     await git(repoPath, ['update-ref', `refs/heads/${baseBranch}`, head])

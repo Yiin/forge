@@ -67,7 +67,7 @@ export const uploadInit = uploadInitSchema.extend({ sessionId: id })
 export const epicStart = z.object({
   projectId: id,
   epicBeadId: id,
-  mode: z.enum(['pool', 'serial']).default('pool'),
+  mode: z.enum(['pool', 'serial', 'auto']).default('pool'),
   workerCount: z.number().int().positive().max(32).default(1),
   baseBranch: z.string().min(1).default('main'),
   config: z.record(z.string(), z.unknown()).default({}),

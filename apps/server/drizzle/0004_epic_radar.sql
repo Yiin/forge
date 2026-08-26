@@ -1,0 +1,1 @@
+ALTER TABLE epic_iterations ADD COLUMN radar_nudges INTEGER NOT NULL DEFAULT 0;
