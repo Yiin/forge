@@ -92,11 +92,15 @@ export class ForgeApi {
   getRun(runId: string) {
     return this.get(`/api/epics/${encodeURIComponent(runId)}`)
   }
-  runAction(runId: string, action: 'pause' | 'resume' | 'cancel') {
+  runAction(
+    runId: string,
+    action: 'pause' | 'resume' | 'cancel',
+    options: { skipBead?: string } = {},
+  ) {
     return this.post(
       `/api/epics/${encodeURIComponent(runId)}/${action}`,
       null,
-      {},
+      options,
     )
   }
   renameSession(sessionId: string, title: string) {
