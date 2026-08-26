@@ -1,4 +1,5 @@
 import { Timeline } from '../components/chat/Timeline'
+import { SessionHeader } from '../components/chat/SessionHeader'
 import { useEffect, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
@@ -53,6 +54,7 @@ export function SessionRoute() {
   }
   return (
     <div className="session-view">
+      <SessionHeader sessionId={sessionId} />
       <Timeline />
       <form
         className="composer"
