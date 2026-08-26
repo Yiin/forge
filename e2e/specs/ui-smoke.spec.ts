@@ -52,9 +52,7 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
     const projectDialog = page.getByRole('dialog', { name: 'Create project' })
     await projectDialog.getByLabel('Name').fill('Browser project')
     await projectDialog.getByLabel('Folder path').fill(forge.dataDir)
-    await projectDialog
-      .getByRole('button', { name: 'Create project' })
-      .click()
+    await projectDialog.getByRole('button', { name: 'Create project' }).click()
     await page.waitForURL(/\/draft\//, { timeout: 10_000 })
     const composer = page.locator(shell).getByLabel('Message composer')
     await expect(composer).toBeVisible()

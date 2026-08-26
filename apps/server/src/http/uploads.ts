@@ -11,7 +11,8 @@ export function uploadRoutes(store: UploadStore) {
       if (!projectId) return c.json({ error: 'X-Project-Id is required' }, 400)
       return c.json(store.initDraft(c.req.param('id'), projectId, input), 201)
     } catch (error) {
-      if (error instanceof RangeError) return c.json({ error: error.message }, 413)
+      if (error instanceof RangeError)
+        return c.json({ error: error.message }, 413)
       if (error instanceof Error && error.message === 'Project not found')
         return c.json({ error: error.message }, 404)
       throw error

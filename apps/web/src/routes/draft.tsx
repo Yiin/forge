@@ -29,7 +29,9 @@ export function DraftRoute() {
           : ((value as { projects?: unknown[] }).projects ?? [])
         const normalized = projects.map((project) => ({
           id: String((project as { id: string }).id),
-          name: String((project as { name?: string }).name ?? 'Unnamed project'),
+          name: String(
+            (project as { name?: string }).name ?? 'Unnamed project',
+          ),
           path: (project as { path?: string }).path,
         }))
         setProjects(normalized)
@@ -39,7 +41,12 @@ export function DraftRoute() {
       })
       .catch(() => setLoading(false))
   }, [draftId, hydrate])
-  if (loading) return <section className="empty-panel" role="status"><p>Loading draft…</p></section>
+  if (loading)
+    return (
+      <section className="empty-panel" role="status">
+        <p>Loading draft…</p>
+      </section>
+    )
   if (!draft || !projects.some((project) => project.id === draft.projectId))
     return (
       <section className="empty-panel">
@@ -52,20 +59,30 @@ export function DraftRoute() {
       <header className="draft-hero">
         <span className="session-context-label">Local draft</span>
         <h1>What do you want to build?</h1>
-        <label className="draft-project-label" htmlFor="draft-project">Project</label>
+        <label className="draft-project-label" htmlFor="draft-project">
+          Project
+        </label>
         <Select
           value={draft.projectId}
           onValueChange={(value) => {
             if (typeof value !== 'string' || value === draft.projectId) return
             const next = useDraftsStore.getState().getOrCreate(value)
-            void navigate({ to: '/draft/$draftId', params: { draftId: next.id }, replace: true })
+            void navigate({
+              to: '/draft/$draftId',
+              params: { draftId: next.id },
+              replace: true,
+            })
           }}
         >
           <SelectTrigger id="draft-project" aria-label="Draft project">
             <SelectValue />
           </SelectTrigger>
           <SelectPopup>
-            {projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+            {projects.map((project) => (
+              <SelectItem key={project.id} value={project.id}>
+                {project.name}
+              </SelectItem>
+            ))}
           </SelectPopup>
         </Select>
       </header>
@@ -79,7 +96,9 @@ export function DraftRoute() {
           useDraftsStore.getState().update(draft.id, { prompt })
         }
         onSend={async (text, attachmentIds, selectedHarness) => {
-          useDraftsStore.getState().update(draft.id, { promotionState: 'promoting' })
+          useDraftsStore
+            .getState()
+            .update(draft.id, { promotionState: 'promoting' })
           try {
             const result = (await api.promoteDraft({
               draftId: draft.id,
@@ -88,10 +107,17 @@ export function DraftRoute() {
               text,
               attachmentIds,
             })) as { sessionId: string }
-            useDraftsStore.getState().update(draft.id, { promotionState: 'promoted' })
-            await navigate({ to: '/s/$sessionId', params: { sessionId: result.sessionId } })
+            useDraftsStore
+              .getState()
+              .update(draft.id, { promotionState: 'promoted' })
+            await navigate({
+              to: '/s/$sessionId',
+              params: { sessionId: result.sessionId },
+            })
           } catch (error) {
-            useDraftsStore.getState().update(draft.id, { promotionState: 'failed' })
+            useDraftsStore
+              .getState()
+              .update(draft.id, { promotionState: 'failed' })
             throw error
           }
         }}

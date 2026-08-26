@@ -20,12 +20,21 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
     }
   })
   app.post('/api/drafts/:id/promote', async (c) => {
-    const value = promoteDraftSchema.safeParse({ ...(await c.req.json()), draftId: c.req.param('id') })
+    const value = promoteDraftSchema.safeParse({
+      ...(await c.req.json()),
+      draftId: c.req.param('id'),
+    })
     const requestId = c.req.header('Idempotency-Key')
     if (!value.success) return c.json({ error: value.error.message }, 400)
     if (!requestId) return c.json({ error: 'Idempotency-Key is required' }, 400)
-    try { return c.json(await manager.promoteDraft(value.data, requestId, uploads), 201) }
-    catch (error) { return c.json({ error: String(error) }, 400) }
+    try {
+      return c.json(
+        await manager.promoteDraft(value.data, requestId, uploads),
+        201,
+      )
+    } catch (error) {
+      return c.json({ error: String(error) }, 400)
+    }
   })
   app.get('/api/sessions', (c) =>
     c.json(

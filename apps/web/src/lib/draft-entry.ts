@@ -21,10 +21,11 @@ type WireSession = SessionSummary & {
 }
 
 export type DraftEntryResult =
-  | { kind: 'draft'; draftId: string }
-  | { kind: 'empty' }
+  { kind: 'draft'; draftId: string } | { kind: 'empty' }
 
-function normalizeProject(value: WireProject): ProjectSummary & { createdAt?: number } {
+function normalizeProject(
+  value: WireProject,
+): ProjectSummary & { createdAt?: number } {
   return {
     id: String(value.id),
     name: value.name,
@@ -63,17 +64,21 @@ export function selectDraftProject(
         session.deletedAt == null,
     )
     .sort((a, b) => activityTime(b) - activityTime(a))[0]
-  if (recent?.projectId) return active.find((project) => project.id === recent.projectId)
+  if (recent?.projectId)
+    return active.find((project) => project.id === recent.projectId)
   return [...active].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0]
 }
 
 function activityTime(session: SessionSummary) {
-  const value = session.lastActivityAt ?? session.createdAt ?? session.created_at
+  const value =
+    session.lastActivityAt ?? session.createdAt ?? session.created_at
   if (typeof value === 'number') return value
   return value ? Date.parse(value) || 0 : 0
 }
 
-export async function openNewDraft(navigate: NavigateFn): Promise<DraftEntryResult> {
+export async function openNewDraft(
+  navigate: NavigateFn,
+): Promise<DraftEntryResult> {
   const [projectData, sessionData] = await Promise.all([
     api.listProjects(),
     api.listSessions(),
@@ -84,8 +89,12 @@ export async function openNewDraft(navigate: NavigateFn): Promise<DraftEntryResu
   const sessionValues = Array.isArray(sessionData)
     ? sessionData
     : ((sessionData as { sessions?: unknown[] }).sessions ?? [])
-  const projects = projectValues.map((value) => normalizeProject(value as WireProject))
-  const sessions = sessionValues.map((value) => normalizeSession(value as WireSession))
+  const projects = projectValues.map((value) =>
+    normalizeProject(value as WireProject),
+  )
+  const sessions = sessionValues.map((value) =>
+    normalizeSession(value as WireSession),
+  )
   useSessionsStore.getState().setProjects(projects)
   useSessionsStore.getState().setSessions(sessions)
   useDraftsStore.getState().hydrate()
@@ -93,6 +102,10 @@ export async function openNewDraft(navigate: NavigateFn): Promise<DraftEntryResu
   const project = selectDraftProject(projects, sessions)
   if (!project) return { kind: 'empty' }
   const draft = useDraftsStore.getState().getOrCreate(project.id)
-  await navigate({ to: '/draft/$draftId', params: { draftId: draft.id }, replace: true })
+  await navigate({
+    to: '/draft/$draftId',
+    params: { draftId: draft.id },
+    replace: true,
+  })
   return { kind: 'draft', draftId: draft.id }
 }

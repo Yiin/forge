@@ -384,28 +384,73 @@ export class SessionManager {
     }
   }
 
-  async promoteDraft(input: { draftId: string; projectId: string; harness: string; text: string; attachmentIds?: string[] }, requestId: string, uploads?: UploadStore) {
-    const existing = this.db.prepare('SELECT session_id FROM draft_promotions WHERE draft_id = ? OR request_id = ?').get(input.draftId, requestId) as { session_id: string } | undefined
+  async promoteDraft(
+    input: {
+      draftId: string
+      projectId: string
+      harness: string
+      text: string
+      attachmentIds?: string[]
+    },
+    requestId: string,
+    uploads?: UploadStore,
+  ) {
+    const existing = this.db
+      .prepare(
+        'SELECT session_id FROM draft_promotions WHERE draft_id = ? OR request_id = ?',
+      )
+      .get(input.draftId, requestId) as { session_id: string } | undefined
     if (existing) return { sessionId: existing.session_id }
-    const project = this.db.prepare('SELECT path FROM projects WHERE id = ? AND archived_at IS NULL').get(input.projectId) as { path: string } | undefined
+    const project = this.db
+      .prepare('SELECT path FROM projects WHERE id = ? AND archived_at IS NULL')
+      .get(input.projectId) as { path: string } | undefined
     if (!project) throw new Error('Project not found')
-    const session = this.create({ projectId: input.projectId, harness: input.harness, cwd: project.path, title: 'New session' })
+    const session = this.create({
+      projectId: input.projectId,
+      harness: input.harness,
+      cwd: project.path,
+      title: 'New session',
+    })
     try {
       try {
-        this.db.prepare('INSERT INTO draft_promotions (draft_id, request_id, session_id) VALUES (?, ?, ?)').run(input.draftId, requestId, session.id)
+        this.db
+          .prepare(
+            'INSERT INTO draft_promotions (draft_id, request_id, session_id) VALUES (?, ?, ?)',
+          )
+          .run(input.draftId, requestId, session.id)
       } catch {
         await this.discard(session.id)
-        const winner = this.db.prepare('SELECT session_id FROM draft_promotions WHERE draft_id = ? OR request_id = ?').get(input.draftId, requestId) as { session_id: string }
+        const winner = this.db
+          .prepare(
+            'SELECT session_id FROM draft_promotions WHERE draft_id = ? OR request_id = ?',
+          )
+          .get(input.draftId, requestId) as { session_id: string }
         return { sessionId: winner.session_id }
       }
-      if (uploads) await uploads.promoteDraft(input.draftId, session.id, input.projectId)
-      await this.prompt(session.id, input.text, requestId, input.attachmentIds, input.harness)
+      if (uploads)
+        await uploads.promoteDraft(input.draftId, session.id, input.projectId)
+      await this.prompt(
+        session.id,
+        input.text,
+        requestId,
+        input.attachmentIds,
+        input.harness,
+      )
       return { sessionId: session.id }
     } catch (error) {
-      if (uploads) await uploads.rollbackPromotion(input.draftId, session.id, input.projectId)
-      this.db.prepare('DELETE FROM draft_promotions WHERE session_id = ?').run(session.id)
+      if (uploads)
+        await uploads.rollbackPromotion(
+          input.draftId,
+          session.id,
+          input.projectId,
+        )
+      this.db
+        .prepare('DELETE FROM draft_promotions WHERE session_id = ?')
+        .run(session.id)
       await this.discard(session.id)
-      this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(session.id)
+      this.db
+        .prepare('DELETE FROM messages WHERE session_id = ?')
+        .run(session.id)
       this.db.prepare('DELETE FROM sessions WHERE id = ?').run(session.id)
       throw error
     }

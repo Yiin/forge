@@ -156,7 +156,11 @@ export function SessionSidebar() {
           >
             <Search size={16} />
           </button>
-          <button className="icon-button" aria-label="New session" onClick={newDraft}>
+          <button
+            className="icon-button"
+            aria-label="New session"
+            onClick={newDraft}
+          >
             <Plus size={17} />
           </button>
         </div>
@@ -327,7 +331,9 @@ function SessionRow({
   }
   useEffect(() => {
     if (!menuOpen) return
-    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+    menuRef.current
+      ?.querySelector<HTMLButtonElement>('[role="menuitem"]')
+      ?.focus()
   }, [menuOpen])
   const toggleUnread = () => {
     const next = !session.unread
@@ -406,15 +412,22 @@ function SessionRow({
           role="menu"
           onKeyDown={(event) => {
             const items = Array.from(
-              event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+              event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                '[role="menuitem"]',
+              ),
             )
-            const index = items.indexOf(document.activeElement as HTMLButtonElement)
+            const index = items.indexOf(
+              document.activeElement as HTMLButtonElement,
+            )
             if (event.key === 'Escape') {
               event.preventDefault()
               closeMenu()
             } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault()
-              items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
+              items[
+                (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) %
+                  items.length
+              ]?.focus()
             } else if (event.key === 'Home' || event.key === 'End') {
               event.preventDefault()
               items[event.key === 'Home' ? 0 : items.length - 1]?.focus()

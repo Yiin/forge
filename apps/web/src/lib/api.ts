@@ -133,16 +133,30 @@ export class ForgeApi {
     return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)
   }
   promoteDraft(input: PromoteDraft) {
-    return this.post(`/api/drafts/${encodeURIComponent(input.draftId)}/promote`, null, input, input.draftId)
+    return this.post(
+      `/api/drafts/${encodeURIComponent(input.draftId)}/promote`,
+      null,
+      input,
+      input.draftId,
+    )
   }
-  async upload(sessionId: string, file: File, onProgress?: UploadProgress, projectId?: string) {
+  async upload(
+    sessionId: string,
+    file: File,
+    onProgress?: UploadProgress,
+    projectId?: string,
+  ) {
     const path = projectId
       ? `/api/drafts/${encodeURIComponent(sessionId)}/uploads`
       : `/api/sessions/${encodeURIComponent(sessionId)}/uploads`
     const init = (await this.post(
       path,
       null,
-      { filename: file.name, mime: file.type || 'application/octet-stream', sizeBytes: file.size },
+      {
+        filename: file.name,
+        mime: file.type || 'application/octet-stream',
+        sizeBytes: file.size,
+      },
       undefined,
       projectId ? { 'X-Project-Id': projectId } : undefined,
     )) as { attachmentId: string; putUrl: string }
@@ -177,7 +191,13 @@ export class ForgeApi {
   btw(input: Btw) {
     return this.post(`/api/sessions/${input.sessionId}/btw`, btw, input)
   }
-  private async post(path: string, schema: BodySchema | null, body: unknown, stableRequestId?: string, extraHeaders?: Record<string, string>) {
+  private async post(
+    path: string,
+    schema: BodySchema | null,
+    body: unknown,
+    stableRequestId?: string,
+    extraHeaders?: Record<string, string>,
+  ) {
     const data = schema ? schema.parse(body) : body
     const requestId = stableRequestId ?? makeRequestId()
     for (let attempt = 0; ; attempt++) {

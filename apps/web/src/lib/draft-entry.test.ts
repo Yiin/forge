@@ -10,18 +10,28 @@ describe('draft entry project selection', () => {
   it('uses the newest visible chat activity', () => {
     expect(
       selectDraftProject(projects, [
-        { id: 'worker', title: '', projectId: 'new', kind: 'epic_worker', lastActivityAt: 100 },
-        { id: 'chat', title: '', projectId: 'old', kind: 'chat', lastActivityAt: 50 },
+        {
+          id: 'worker',
+          title: '',
+          projectId: 'new',
+          kind: 'epic_worker',
+          lastActivityAt: 100,
+        },
+        {
+          id: 'chat',
+          title: '',
+          projectId: 'old',
+          kind: 'chat',
+          lastActivityAt: 50,
+        },
       ])?.id,
     ).toBe('old')
   })
 
   it('falls back to the newest active project', () => {
     expect(
-      selectDraftProject(
-        [{ ...projects[0], archivedAt: 1 }, projects[1]],
-        [],
-      )?.id,
+      selectDraftProject([{ ...projects[0], archivedAt: 1 }, projects[1]], [])
+        ?.id,
     ).toBe('new')
   })
 })

@@ -397,10 +397,25 @@ async function startE2eServer(): Promise<void> {
         const id = `ses_${crypto.randomUUID()}`
         state.sessions.push({ id, projectId: body.projectId ?? '' })
         await writeFile(statePath, JSON.stringify(state))
-        publish({ sessionId: id, type: 'turn_start', role: 'system', content: {} })
+        publish({
+          sessionId: id,
+          type: 'turn_start',
+          role: 'system',
+          content: {},
+        })
         for (const text of ['first ', 'second ', 'third'])
-          publish({ sessionId: id, type: 'text_delta', role: 'agent', content: { text } })
-        publish({ sessionId: id, type: 'turn_end', role: 'system', content: {} })
+          publish({
+            sessionId: id,
+            type: 'text_delta',
+            role: 'agent',
+            content: { text },
+          })
+        publish({
+          sessionId: id,
+          type: 'turn_end',
+          role: 'system',
+          content: {},
+        })
         return response({ sessionId: id })
       }
       if (request.method === 'POST' && prompt) {
