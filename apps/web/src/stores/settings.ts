@@ -20,7 +20,6 @@ type SettingsState = {
 }
 
 const initial: ForgeSettings = {
-  defaultProject: '',
   titleGeneration: true,
   keybindings: {},
   epicDefaults: { workerCount: 3, mode: 'pool' },

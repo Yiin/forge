@@ -14,6 +14,7 @@ import { Button } from '../components/ui/button'
 import { ConfirmationDialog } from '../components/ui/confirmation-dialog'
 import { Field } from '../components/ui/field'
 import { Input } from '../components/ui/input'
+import { Switch } from '../components/ui/switch'
 import { Textarea } from '../components/ui/textarea'
 import {
   Select,
@@ -69,6 +70,8 @@ function RequestState({
   )
 }
 
+const defaultGeneralSettings = { titleGeneration: true }
+
 export function GeneralSettings() {
   const shellTheme = useShellStore((state) => state.theme)
   const setShellTheme = useShellStore((state) => state.setTheme)
@@ -79,25 +82,49 @@ export function GeneralSettings() {
   const retry = useSettingsStore((state) => state.retry)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [defaultProject, setDefaultProject] = useState('')
+  const [restoreOpen, setRestoreOpen] = useState(false)
+  const [about, setAbout] = useState<{
+    version?: string
+    bootId?: string
+    uptimeSec?: number
+  }>({})
+  const [aboutState, setAboutState] = useState<'loading' | 'saved' | 'error'>('loading')
+  const [aboutError, setAboutError] = useState<string | null>(null)
   useEffect(() => {
     void load()
-      .then(() =>
-        setDefaultProject(useSettingsStore.getState().settings.defaultProject),
-      )
       .catch((cause: unknown) =>
         setLoadError(cause instanceof Error ? cause.message : String(cause)),
       )
       .finally(() => setLoading(false))
   }, [load])
-  const commit = (patch: {
-    defaultProject?: string
-    titleGeneration?: boolean
-  }) => {
+  const loadAbout = () => {
+    setAboutState('loading')
+    setAboutError(null)
+    void fetch('/api/status')
+      .then((response) => {
+        if (!response.ok) throw new Error(`Status request failed (${response.status})`)
+        return response.json()
+      })
+      .then((value) => {
+        setAbout(value as typeof about)
+        setAboutState('saved')
+      })
+      .catch((cause: unknown) => {
+        setAboutError(cause instanceof Error ? cause.message : String(cause))
+        setAboutState('error')
+      })
+  }
+  useEffect(loadAbout, [])
+  const commit = (patch: { titleGeneration: boolean }) => {
     void save('general', patch).catch(() => undefined)
   }
+  const resetTitleGeneration = () => commit(defaultGeneralSettings)
+  const restoreDefaults = async () => {
+    setShellTheme('system')
+    resetTitleGeneration()
+  }
   return (
-    <SettingsPage title="General" subtitle="Defaults for new sessions.">
+    <SettingsPage title="General" subtitle="Preferences for your Forge workspace.">
       {loading && <p className="settings-status">Loading…</p>}
       {loadError && (
         <p className="settings-error" role="alert">
@@ -117,46 +144,75 @@ export function GeneralSettings() {
           }
         />
       )}
-      <label>
-        Theme
-        <Select
-          value={shellTheme}
-          onValueChange={(value) => {
-            if (value === 'system' || value === 'light' || value === 'dark') {
-              setShellTheme(value)
-            }
-          }}
+      <SettingsSection title="Workspace preferences" description="Changes apply to this Forge workspace.">
+        <SettingsRow
+          label="Theme"
+          description="Choose the color theme for Forge."
+          reset={
+            shellTheme !== 'system' && (
+              <Button size="compact" onClick={() => setShellTheme('system')}>
+                Reset
+              </Button>
+            )
+          }
         >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            <SelectItem value="system">system</SelectItem>
-            <SelectItem value="dark">dark</SelectItem>
-            <SelectItem value="light">light</SelectItem>
-          </SelectPopup>
-        </Select>
-      </label>
-      <label>
-        Default project
-        <input
-          value={defaultProject}
-          onChange={(event) => setDefaultProject(event.target.value)}
-          onBlur={() => commit({ defaultProject })}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') event.currentTarget.blur()
-          }}
-          autoComplete="off"
-        />
-      </label>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={settings.titleGeneration}
-          onChange={(e) => commit({ titleGeneration: e.target.checked })}
-        />{' '}
-        Generate plain-word session titles
-      </label>
+          <Select
+            value={shellTheme}
+            onValueChange={(value) => {
+              if (value === 'system' || value === 'light' || value === 'dark') setShellTheme(value)
+            }}
+          >
+            <SelectTrigger aria-label="Theme">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              <SelectItem value="system">System</SelectItem>
+              <SelectItem value="light">Light</SelectItem>
+              <SelectItem value="dark">Dark</SelectItem>
+            </SelectPopup>
+          </Select>
+        </SettingsRow>
+        <SettingsRow
+          label="Plain-word titles"
+          description="Generate simple words for new session titles."
+          reset={
+            settings.titleGeneration !== defaultGeneralSettings.titleGeneration && (
+              <Button size="compact" onClick={resetTitleGeneration}>Reset</Button>
+            )
+          }
+        >
+          <Switch
+            checked={settings.titleGeneration}
+            aria-label="Generate plain-word session titles"
+            onCheckedChange={(checked) => commit({ titleGeneration: checked })}
+          />
+        </SettingsRow>
+        <div className="settings-actions">
+          <Button onClick={() => setRestoreOpen(true)}>Restore defaults</Button>
+        </div>
+      </SettingsSection>
+      <SettingsSection title="About" description="Forge runtime information.">
+        <RequestState state={aboutState} error={aboutError} onRetry={loadAbout} />
+        <SettingsRow label="Version" description="The running Forge version.">
+          <code>{about.version ?? 'unknown'}</code>
+        </SettingsRow>
+        <SettingsRow label="Boot ID" description="The identifier for this server start.">
+          <code>{about.bootId ?? 'unknown'}</code>
+        </SettingsRow>
+        <SettingsRow label="Uptime" description="Time since the server started.">
+          <span>{about.uptimeSec ?? 0}s</span>
+        </SettingsRow>
+        <p className="muted">Updates will be available through the release pipeline.</p>
+      </SettingsSection>
+      <ConfirmationDialog
+        open={restoreOpen}
+        onOpenChange={setRestoreOpen}
+        onConfirm={restoreDefaults}
+        title="Restore General defaults"
+        confirmLabel="Restore defaults"
+      >
+        This restores the theme and title generation settings. Other settings stay unchanged.
+      </ConfirmationDialog>
     </SettingsPage>
   )
 }
@@ -1187,51 +1243,6 @@ export function EpicSettings() {
           Save changes
         </Button>
       </div>
-    </SettingsPage>
-  )
-}
-export function AboutSettings() {
-  const [status, setStatus] = useState<{
-    version?: string
-    bootId?: string
-    uptimeSec?: number
-  }>({})
-  const [state, setState] = useState<'loading' | 'saved' | 'error'>('loading')
-  const [error, setError] = useState<string | null>(null)
-  const load = () => {
-    setState('loading')
-    void fetch('/api/status')
-      .then((response) => {
-        if (!response.ok)
-          throw new Error(`Status request failed (${response.status})`)
-        return response.json()
-      })
-      .then((value) => {
-        setStatus(value)
-        setState('saved')
-      })
-      .catch((cause: unknown) => {
-        setError(cause instanceof Error ? cause.message : String(cause))
-        setState('error')
-      })
-  }
-  useEffect(load, [])
-  return (
-    <SettingsPage title="About" subtitle="Forge runtime information.">
-      <RequestState state={state} error={error} onRetry={load} />
-      <dl className="about-list">
-        <dt>Version</dt>
-        <dd>{status.version ?? 'unknown'}</dd>
-        <dt>Boot id</dt>
-        <dd>
-          <code>{status.bootId ?? 'unknown'}</code>
-        </dd>
-        <dt>Uptime</dt>
-        <dd>{status.uptimeSec ?? 0}s</dd>
-      </dl>
-      <p className="muted">
-        Updates will be available through the release pipeline.
-      </p>
     </SettingsPage>
   )
 }

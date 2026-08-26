@@ -106,7 +106,6 @@ export function defaultConfig(
     port: 3900,
     harness,
     settings: {
-      defaultProject: '',
       titleGeneration: true,
       keybindings: {},
       epicDefaults: {
