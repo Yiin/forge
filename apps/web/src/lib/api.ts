@@ -35,6 +35,18 @@ export class ForgeApi {
   createSession(input: CreateSession) {
     return this.post('/api/sessions', createSession, input)
   }
+  listSessions(projectId?: string) {
+    return this.get(`/api/sessions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`)
+  }
+  listProjects() {
+    return this.get('/api/projects')
+  }
+  renameSession(sessionId: string, title: string) {
+    return this.post(`/api/sessions/${encodeURIComponent(sessionId)}`, null, { title })
+  }
+  settleSession(sessionId: string, settled: boolean) {
+    return this.post(`/api/sessions/${encodeURIComponent(sessionId)}/settle`, null, { settled })
+  }
   prompt(input: Prompt) {
     return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)
   }
@@ -80,6 +92,11 @@ export class ForgeApi {
         throw new Error(`Forge API request failed (${response.status})`)
       return await response.json()
     }
+  }
+  private async get(path: string) {
+    const response = await this.fetcher(`${this.baseUrl}${path}`)
+    if (!response.ok) throw new Error(`Forge API request failed (${response.status})`)
+    return await response.json()
   }
 }
 export const api = new ForgeApi()

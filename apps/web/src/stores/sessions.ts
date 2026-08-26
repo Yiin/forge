@@ -1,14 +1,29 @@
 import { create } from 'zustand'
-export type SessionSummary = { id: string; title: string; projectId?: string }
+export type SessionSummary = {
+  id: string
+  title: string
+  projectId?: string | null
+  kind?: string
+  status?: string
+  harness?: string
+  lastActivityAt?: number | string
+  snippet?: string
+  unread?: boolean
+}
+export type ProjectSummary = { id: string; name: string; path?: string }
 type SessionsState = {
   sessions: SessionSummary[]
+  projects: ProjectSummary[]
   setSessions: (sessions: SessionSummary[]) => void
+  setProjects: (projects: ProjectSummary[]) => void
   upsertSession: (session: SessionSummary) => void
   removeSession: (id: string) => void
 }
 export const useSessionsStore = create<SessionsState>((set) => ({
   sessions: [],
+  projects: [],
   setSessions: (sessions) => set({ sessions }),
+  setProjects: (projects) => set({ projects }),
   upsertSession: (session) =>
     set((state) => ({
       sessions: state.sessions.some((item) => item.id === session.id)

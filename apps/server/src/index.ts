@@ -17,6 +17,7 @@ import { questionRoutes } from './http/questions.js'
 import type { QuestionManager } from './acp/questions.js'
 import { QuestionManager as ServerQuestionManager } from './acp/questions.js'
 import { websocketRoute } from './ws.js'
+import { workspaceRoutes } from './http/workspace.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -37,6 +38,7 @@ export function createApp(
     app.route('/', searchRoutes(uploadStore.database))
   }
   if (questions) app.route('/', questionRoutes(questions))
+  if (status) app.route('/', workspaceRoutes(status.db))
 
   return app
 }
