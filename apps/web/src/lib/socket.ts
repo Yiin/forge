@@ -18,7 +18,10 @@ type SocketOptions = {
   reconnect?: boolean
   backoff?: { initialMs?: number; maxMs?: number }
   createWebSocket?: (url: string) => ForgeWebSocket
+  onConnectionChange?: (state: ConnectionState) => void
 }
+export type ConnectionState =
+  'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error'
 const defaultUrl = () =>
   typeof window === 'undefined'
     ? 'ws://localhost:3000/ws'
@@ -32,7 +35,8 @@ export class ForgeSocket {
   private readonly options: Required<
     Pick<SocketOptions, 'url' | 'sessions' | 'reconnect'>
   > &
-    Pick<SocketOptions, 'backoff' | 'createWebSocket'>
+    Pick<SocketOptions, 'backoff' | 'createWebSocket'> &
+    Pick<SocketOptions, 'onConnectionChange'>
   constructor(options: SocketOptions = {}) {
     this.options = {
       url: options.url ?? defaultUrl(),
@@ -42,6 +46,7 @@ export class ForgeSocket {
       createWebSocket:
         options.createWebSocket ??
         ((url) => new WebSocket(url) as ForgeWebSocket),
+      onConnectionChange: options.onConnectionChange,
     }
   }
   start() {
@@ -63,17 +68,25 @@ export class ForgeSocket {
   }
   private connect() {
     if (this.stopped) return
+    this.options.onConnectionChange?.(
+      this.attempt > 0 ? 'reconnecting' : 'connecting',
+    )
     const socket = this.options.createWebSocket!(this.options.url)
     this.socket = socket
     socket.onopen = () => {
       this.attempt = 0
+      this.options.onConnectionChange?.('connected')
       socket.send(JSON.stringify(this.subscribeFrame()))
     }
     socket.onmessage = ({ data }) => this.receive(data)
-    socket.onerror = () => socket.close()
+    socket.onerror = () => {
+      this.options.onConnectionChange?.('error')
+      socket.close()
+    }
     socket.onclose = () => {
       if (this.socket === socket) this.socket = undefined
       if (!this.stopped && this.options.reconnect) this.scheduleReconnect()
+      else if (!this.stopped) this.options.onConnectionChange?.('disconnected')
     }
   }
   private subscribeFrame() {
@@ -123,6 +136,7 @@ export class ForgeSocket {
   }
   private scheduleReconnect() {
     if (this.timer) return
+    this.options.onConnectionChange?.('reconnecting')
     const initial = this.options.backoff?.initialMs ?? 100
     const max = this.options.backoff?.maxMs ?? 10_000
     this.timer = setTimeout(

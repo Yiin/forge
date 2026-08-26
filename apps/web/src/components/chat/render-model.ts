@@ -34,7 +34,7 @@ export type ChatRenderItem =
       id: string
       card: Extract<Message['content'], { type: 'epic_triage' }>
     }
-  | { kind: 'system'; id: string; text: string; code?: string }
+  | { kind: 'system'; id: string; text: string; code?: string; alert?: boolean }
   | { kind: 'subagent'; id: string; child: SubagentSession }
   | {
       kind: 'activity'
@@ -229,6 +229,7 @@ export function toRenderModel(
         kind: 'system',
         id: message.itemId,
         text: content.message,
+        alert: true,
         ...(content.code ? { code: content.code } : {}),
       })
     }

@@ -110,7 +110,7 @@ function SystemItem({
   item: Extract<ChatRenderItem, { kind: 'system' }>
 }) {
   return (
-    <div className="chat-system">
+    <div className="chat-system" role={item.alert ? 'alert' : undefined}>
       <span>{item.text}</span>
       {item.code && (
         <details className="chat-system-details">

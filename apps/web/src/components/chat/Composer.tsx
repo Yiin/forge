@@ -298,6 +298,7 @@ export function Composer({
         )}
         <textarea
           ref={textarea}
+          id="message-composer"
           aria-label="Message composer"
           placeholder={harness ? `Message ${harness}…` : 'Send a message…'}
           value={text}

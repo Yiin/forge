@@ -10,6 +10,8 @@ import { useSessionsStore, type SessionSummary } from '../stores/sessions'
 import { PathSwitcher } from '../components/chat/PathSwitcher'
 import { useShellStore } from '../stores/shell'
 import { registerShortcuts } from '../lib/shortcuts'
+import { ChatLifecycle } from '../components/chat/ChatLifecycle'
+import type { ConnectionState } from '../lib/socket'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
@@ -19,6 +21,10 @@ export function SessionRoute() {
   const [harness, setHarness] = useState<string>()
   const [protocol, setProtocol] = useState<'acp' | 'pty'>()
   const [loadedStatus, setLoadedStatus] = useState<string>()
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string>()
+  const [connection, setConnection] = useState<ConnectionState>('connecting')
+  const [retryAttempt, setRetryAttempt] = useState(0)
   const sessionStatus = useSessionsStore(
     (state) =>
       state.sessions.find((session) => session.id === sessionId)?.status,
@@ -40,9 +46,7 @@ export function SessionRoute() {
         )
         if (!response.ok) {
           if (!active) return
-          useShellStore.getState().clearLastSession()
-          await navigate({ to: '/', search: { new: '1' } })
-          return
+          throw new Error(`Session could not be loaded (${response.status})`)
         }
         const session = (await response.json()) as SessionSummary & {
           protocol?: 'acp' | 'pty'
@@ -53,7 +57,12 @@ export function SessionRoute() {
         setHarness(session.harness)
         setProtocol(session.protocol)
         setLoadedStatus(session.status)
-        socket = connectForgeSocket({ sessions: [sessionId] })
+        setLoading(false)
+        setLoadError(undefined)
+        socket = connectForgeSocket({
+          sessions: [sessionId],
+          onConnectionChange: (state) => active && setConnection(state),
+        })
         void fetch('/api/status')
           .then((statusResponse) =>
             statusResponse.ok ? statusResponse.json() : null,
@@ -100,10 +109,14 @@ export function SessionRoute() {
             }
           })
           .catch(() => undefined)
-      } catch {
+      } catch (error) {
         if (active) {
-          useShellStore.getState().clearLastSession()
-          await navigate({ to: '/', search: { new: '1' } })
+          setLoading(false)
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : 'Session could not be loaded',
+          )
         }
       }
     })()
@@ -111,7 +124,7 @@ export function SessionRoute() {
       active = false
       socket?.stop()
     }
-  }, [sessionId])
+  }, [sessionId, navigate, retryAttempt])
   const send = async (
     text: string,
     attachmentIds: string[],
@@ -163,22 +176,43 @@ export function SessionRoute() {
   }
   return (
     <div className="session-view">
-      <SessionHeader sessionId={sessionId} />
-      <PathSwitcher sessionId={sessionId} />
-      <Timeline
-        targetSeq={Number.isFinite(targetSeq) ? targetSeq : undefined}
-      />
-      <Composer
-        sessionId={sessionId}
-        harness={harness}
-        protocol={protocol}
-        running={(sessionStatus ?? loadedStatus) === 'running'}
-        onInterrupt={async () => {
-          await api.interrupt({ sessionId })
+      {!loading && !loadError && <SessionHeader sessionId={sessionId} />}
+      {!loading && !loadError && <PathSwitcher sessionId={sessionId} />}
+      <ChatLifecycle
+        loading={loading}
+        error={loadError}
+        onRetry={() => {
+          setLoading(true)
+          setLoadError(undefined)
+          setConnection('connecting')
+          setRetryAttempt((attempt) => attempt + 1)
         }}
-        onSend={send}
-        sending={sending}
+        connection={connection}
+        running={(sessionStatus ?? loadedStatus) === 'running'}
+        empty={
+          !useMessagesStore(
+            (state) => (state.bySession[sessionId] ?? []).length,
+          )
+        }
       />
+      {!loading && !loadError && (
+        <Timeline
+          targetSeq={Number.isFinite(targetSeq) ? targetSeq : undefined}
+        />
+      )}
+      {!loading && !loadError && (
+        <Composer
+          sessionId={sessionId}
+          harness={harness}
+          protocol={protocol}
+          running={(sessionStatus ?? loadedStatus) === 'running'}
+          onInterrupt={async () => {
+            await api.interrupt({ sessionId })
+          }}
+          onSend={send}
+          sending={sending}
+        />
+      )}
     </div>
   )
 }

@@ -1572,6 +1572,49 @@ kbd {
   height: 100%;
   min-height: 0;
 }
+.chat-lifecycle-status,
+.chat-turn-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 4px max(16px, 4vw);
+  color: var(--muted);
+  font-size: 13px;
+}
+.chat-lifecycle-status {
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+}
+.chat-turn-status {
+  color: var(--accent);
+  justify-content: center;
+}
+.chat-lifecycle.status-panel {
+  margin: 24px auto;
+  width: min(680px, calc(100% - 32px));
+}
+.chat-lifecycle.status-panel > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-lifecycle button,
+.chat-empty button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #102019;
+  background: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.chat-empty {
+  margin: 18px auto 0;
+  max-width: 760px;
+}
 .project-form {
   display: grid;
   gap: 12px;
