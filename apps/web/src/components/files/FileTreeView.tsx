@@ -1,7 +1,7 @@
 import { FileTree, useFileTree } from '@pierre/trees/react'
 import { Copy, Download } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { filePathUrl, pathsToExpand } from './fileBrowserPath'
+import { directoriesToLoad, filePathUrl } from './fileBrowserPath'
 
 type Entry = {
   name: string
@@ -32,7 +32,10 @@ export function FileTreeView({ projectId, selectedPath, onSelect }: Props) {
   const [paths, setPaths] = useState<string[]>([])
   const [loaded, setLoaded] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
-  const expanded = useMemo(() => pathsToExpand(selectedPath), [selectedPath])
+  const expanded = useMemo(
+    () => directoriesToLoad(selectedPath).slice(1),
+    [selectedPath],
+  )
   const { model } = useFileTree({
     paths,
     initialExpansion: 'closed',
@@ -45,17 +48,32 @@ export function FileTreeView({ projectId, selectedPath, onSelect }: Props) {
 
   useEffect(() => {
     let active = true
-    readDirectory(projectId, '')
-      .then((entries) => {
+    const directories = directoriesToLoad(selectedPath)
+
+    async function loadDirectories() {
+      const seen = new Set<string>()
+      for (const directory of directories) {
+        if (loaded[directory] || seen.has(directory)) continue
+        seen.add(directory)
+        const entries = await readDirectory(projectId, directory)
         if (!active) return
-        setPaths(pathsForDirectory('', entries))
-        setLoaded({ '': true })
-      })
-      .catch((cause: unknown) => active && setError(causeMessage(cause)))
+        setPaths((current) => [
+          ...new Set([...current, ...pathsForDirectory(directory, entries)]),
+        ])
+        setLoaded((current) => ({ ...current, [directory]: true }))
+      }
+    }
+
+    setError(null)
+    setPaths([])
+    setLoaded({})
+    void loadDirectories().catch(
+      (cause: unknown) => active && setError(causeMessage(cause)),
+    )
     return () => {
       active = false
     }
-  }, [projectId])
+  }, [projectId, selectedPath])
 
   useEffect(() => {
     const directory =
@@ -63,14 +81,19 @@ export function FileTreeView({ projectId, selectedPath, onSelect }: Props) {
         ? selectedPath
         : ''
     if (!directory || loaded[directory]) return
+    let active = true
     readDirectory(projectId, directory)
       .then((entries) => {
+        if (!active) return
         setPaths((current) => [
           ...new Set([...current, ...pathsForDirectory(directory, entries)]),
         ])
         setLoaded((current) => ({ ...current, [directory]: true }))
       })
-      .catch((cause: unknown) => setError(causeMessage(cause)))
+      .catch((cause: unknown) => active && setError(causeMessage(cause)))
+    return () => {
+      active = false
+    }
   }, [loaded, model, projectId, selectedPath])
 
   const copyPath = async (path: string) => {

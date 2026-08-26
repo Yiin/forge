@@ -20,6 +20,10 @@ export function pathsToExpand(path: string) {
   return ancestorPaths(path).slice(0, -1)
 }
 
+export function directoriesToLoad(path: string) {
+  return ['', ...pathsToExpand(path)]
+}
+
 export function parentPath(path: string) {
   const parts = cleanSplat(path).split('/').filter(Boolean)
   return parts.slice(0, -1).join('/')
