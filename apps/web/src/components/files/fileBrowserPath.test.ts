@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { ancestorPaths, filePathUrl, pathsToExpand } from './fileBrowserPath'
+import {
+  ancestorPaths,
+  directoriesToLoad,
+  filePathUrl,
+  pathsToExpand,
+} from './fileBrowserPath'
 
 describe('file browser paths', () => {
   it('maps a splat to a project file URL', () => {
@@ -15,5 +20,13 @@ describe('file browser paths', () => {
       'src/lib/index.ts',
     ])
     expect(pathsToExpand('src/lib/index.ts')).toEqual(['src', 'src/lib'])
+  })
+
+  it('loads the root and every directory needed for a deep link', () => {
+    expect(directoriesToLoad('src/lib/index.ts')).toEqual([
+      '',
+      'src',
+      'src/lib',
+    ])
   })
 })
