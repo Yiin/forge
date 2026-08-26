@@ -150,7 +150,13 @@ export function normalizeServerEvent(value: unknown): unknown {
       seq: candidate.seq,
       sessionId: candidate.sessionId,
       turnId: candidate.turnId ?? `${candidate.sessionId}-turn`,
-      itemId: candidate.itemId ?? `${candidate.sessionId}-${candidate.type}`,
+      // Deltas coalesce per session; everything else needs a unique itemId
+      // or same-type messages would fold into each other and lose content.
+      itemId:
+        candidate.itemId ??
+        (candidate.type === 'text_delta' || candidate.type === 'thought_delta'
+          ? `${candidate.sessionId}-${candidate.type}`
+          : `${candidate.sessionId}-${candidate.seq}`),
       role: candidate.role ?? 'system',
       type: candidate.type,
       content:

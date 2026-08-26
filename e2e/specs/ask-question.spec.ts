@@ -62,12 +62,15 @@ test('answers a single question and keeps the answer after reload', async ({
       shell.getByRole('region', { name: 'Question from Forge' }),
     ).toBeVisible()
     await shell.getByRole('button', { name: 'First' }).click()
-    await expect(shell.getByText('First')).toBeVisible()
+    const answeredRow = shell.locator('.chat-answered-question')
+    await expect(answeredRow.getByText('First')).toBeVisible()
     await page.reload()
     await expect(
       shell.getByRole('region', { name: 'Question from Forge' }),
     ).toHaveCount(0)
-    await expect(shell.getByText('First')).toBeVisible()
+    await expect(
+      shell.locator('.chat-answered-question').getByText('First'),
+    ).toBeVisible()
   } finally {
     await forge.stop()
   }

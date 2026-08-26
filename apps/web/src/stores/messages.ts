@@ -37,7 +37,11 @@ export function foldEvent(
 ): Pick<MessagesState, 'bySession' | 'lastSeq'> {
   if (event.seq <= state.lastSeq) return state
   const items = state.bySession[event.sessionId] ?? []
-  const index = items.findIndex((item) => item.itemId === event.msg.itemId)
+  // Fold only on a real itemId. Events without one (system rows, answers
+  // from slim producers) must never merge into each other.
+  const index = event.msg.itemId
+    ? items.findIndex((item) => item.itemId === event.msg.itemId)
+    : -1
   const nextItems = [...items]
   if (index < 0) nextItems.push(event.msg)
   else nextItems[index] = foldMessage(nextItems[index], event.msg)
