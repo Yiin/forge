@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { useShellStore } from '../stores/shell'
+import { Button } from '../components/ui/button'
+import { ConfirmationDialog } from '../components/ui/confirmation-dialog'
 
 type Harness = {
   name: string
@@ -18,6 +20,26 @@ const input = (value: string, onChange: (value: string) => void) => (
   />
 )
 
+function RequestState({
+  state,
+  error,
+  onRetry,
+}: {
+  state: 'loading' | 'saving' | 'saved' | 'error'
+  error?: string | null
+  onRetry?: () => void
+}) {
+  if (state === 'loading') return <p className="settings-status">Loading…</p>
+  if (state === 'saving') return <p className="settings-status" role="status">Saving…</p>
+  if (state === 'saved') return <p className="settings-status" role="status">Saved.</p>
+  return (
+    <div className="settings-error" role="alert">
+      <span>Could not load or save{error ? `: ${error}` : '.'}</span>
+      {onRetry && <Button size="compact" onClick={onRetry}>Retry</Button>}
+    </div>
+  )
+}
+
 export function GeneralSettings() {
   const shellTheme = useShellStore((state) => state.theme)
   const setShellTheme = useShellStore((state) => state.setTheme)
@@ -26,19 +48,31 @@ export function GeneralSettings() {
     defaultProject: '',
     titleGeneration: true,
   })
-  useEffect(() => {
-    void api
-      .getSettings()
-      .then((value) =>
-        setSettings((current) => ({ ...current, ...(value as object) })),
-      )
-  }, [])
+  const [state, setState] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading')
+  const [error, setError] = useState<string | null>(null)
+  const load = () => {
+    setState('loading')
+    void api.getSettings().then((value) => {
+      setSettings((current) => ({ ...current, ...(value as object) }))
+      setState('saved')
+    }).catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      setState('error')
+    })
+  }
+  useEffect(load, [])
   const save = (next: typeof settings) => {
     setSettings(next)
-    void api.saveSettings(next)
+    setState('saving')
+    setError(null)
+    void api.saveSettings(next).then(() => setState('saved')).catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      setState('error')
+    })
   }
   return (
     <SettingsPage title="General" subtitle="Defaults for new sessions.">
+      <RequestState state={state} error={error} onRetry={state === 'error' ? load : undefined} />
       <label>
         Theme
         <select
@@ -308,16 +342,30 @@ export function ProjectSettings() {
       archived_at?: number | null
     }>
   >([])
-  const load = () =>
-    void api
-      .listSettingsProjects()
-      .then((value) => setProjects(value as typeof projects))
+  const [loadState, setLoadState] = useState<'loading' | 'saved' | 'error'>('loading')
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState<Record<string, boolean>>({})
+  const [saveState, setSaveState] = useState<Record<string, 'saved' | 'error'>>({})
+  const [archiveProject, setArchiveProject] = useState<typeof projects[number] | null>(null)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
+  const load = () => {
+    setLoadState('loading')
+    void api.listSettingsProjects().then((value) => {
+      setProjects(value as typeof projects)
+      setLoadState('saved')
+    }).catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      setLoadState('error')
+    })
+  }
   useEffect(load, [])
   return (
     <SettingsPage
       title="Projects"
       subtitle="Rename or archive projects. Sessions stay safe when you archive one."
     >
+      {loadState === 'loading' && <RequestState state="loading" />}
+      {loadState === 'error' && <RequestState state="error" error={error} onRetry={load} />}
       <div className="settings-stack">
         {projects.map((project) => (
           <article className="settings-card project-setting" key={project.id}>
@@ -331,26 +379,58 @@ export function ProjectSettings() {
               )}
               <small>{project.path}</small>
             </div>
-            <button
-              onClick={() => void api.renameProject(project.id, project.name)}
+            <Button
+              loading={saving[project.id]}
+              onClick={() => {
+                setSaving((current) => ({ ...current, [project.id]: true }))
+                setSaveState((current) => {
+                  const next = { ...current }
+                  delete next[project.id]
+                  return next
+                })
+                void api.renameProject(project.id, project.name).then(() => {
+                  setSaveState((current) => ({ ...current, [project.id]: 'saved' }))
+                }).catch(() => {
+                  setSaveState((current) => ({ ...current, [project.id]: 'error' }))
+                }).finally(() => {
+                  setSaving((current) => ({ ...current, [project.id]: false }))
+                })
+              }}
             >
               Save
-            </button>
+            </Button>
             <button
-              onClick={() => {
-                if (
-                  window.confirm(
-                    `Archive ${project.name}? Sessions will be kept.`,
-                  )
-                )
-                  void api.archiveProjectById(project.id).then(load)
-              }}
+              disabled={Boolean(project.archived_at)}
+              onClick={() => { setArchiveError(null); setArchiveProject(project) }}
             >
               {project.archived_at ? 'Archived' : 'Archive'}
             </button>
+            {saveState[project.id] === 'saved' && <span className="settings-status" role="status">Saved.</span>}
+            {saveState[project.id] === 'error' && <span className="settings-error" role="alert">Could not save. Retry.</span>}
           </article>
         ))}
       </div>
+      {loadState === 'saved' && projects.length === 0 && <p className="settings-status">No projects yet.</p>}
+      {archiveError && <p className="settings-error" role="alert">Could not archive project: {archiveError}</p>}
+      <ConfirmationDialog
+        open={archiveProject !== null}
+        onOpenChange={(open) => { if (!open) setArchiveProject(null) }}
+        title="Archive project?"
+        confirmLabel="Archive"
+        onConfirm={async () => {
+          if (!archiveProject) return
+          try {
+            await api.archiveProjectById(archiveProject.id)
+            setArchiveProject(null)
+            load()
+          } catch (cause: unknown) {
+            setArchiveError(cause instanceof Error ? cause.message : String(cause))
+            throw cause
+          }
+        }}
+      >
+        {archiveProject ? `${archiveProject.name} will be archived. Sessions will be kept.` : ''}
+      </ConfirmationDialog>
     </SettingsPage>
   )
 }
@@ -597,14 +677,25 @@ export function AboutSettings() {
     bootId?: string
     uptimeSec?: number
   }>({})
-  useEffect(() => {
+  const [state, setState] = useState<'loading' | 'saved' | 'error'>('loading')
+  const [error, setError] = useState<string | null>(null)
+  const load = () => {
+    setState('loading')
     void fetch('/api/status')
-      .then((response) => response.json())
-      .then(setStatus)
-      .catch(() => undefined)
-  }, [])
+      .then((response) => {
+        if (!response.ok) throw new Error(`Status request failed (${response.status})`)
+        return response.json()
+      })
+      .then((value) => { setStatus(value); setState('saved') })
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : String(cause))
+        setState('error')
+      })
+  }
+  useEffect(load, [])
   return (
     <SettingsPage title="About" subtitle="Forge runtime information.">
+      <RequestState state={state} error={error} onRetry={load} />
       <dl className="about-list">
         <dt>Version</dt>
         <dd>{status.version ?? 'unknown'}</dd>

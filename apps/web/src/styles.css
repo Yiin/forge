@@ -522,7 +522,7 @@ body {
   display: flex;
   align-items: center;
   gap: 9px;
-  min-height: 42px;
+  min-height: 44px;
   color: inherit;
   text-decoration: none;
   padding: 8px 10px;
@@ -629,6 +629,16 @@ body {
   color: #fb7185;
   font-size: 12px;
 }
+.settings-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .settings-env {
   display: grid;
   gap: 9px;
@@ -701,7 +711,19 @@ body {
     display: block;
   }
   .settings-nav {
+    display: flex;
+    width: 100%;
+    overflow-x: auto;
+    gap: 4px;
+    padding: 8px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-nav .eyebrow {
     display: none;
+  }
+  .settings-nav a {
+    flex: none;
   }
   .settings-page {
     padding: 22px 16px;
