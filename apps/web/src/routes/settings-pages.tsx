@@ -375,6 +375,8 @@ export function EpicSettings() {
     {},
   )
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [newTier, setNewTier] = useState('')
   useEffect(() => {
     void Promise.all([api.getSettings(), api.listHarnesses()]).then(
       ([settings, available]) => {
@@ -413,9 +415,57 @@ export function EpicSettings() {
         },
       },
     }))
+  const addTier = () => {
+    const name = newTier.trim()
+    if (!name || name in defaults.rolePolicy.tiers) return
+    setDefaults((current) => ({
+      ...current,
+      rolePolicy: {
+        ...current.rolePolicy,
+        tiers: {
+          ...current.rolePolicy.tiers,
+          [name]: [{ harness: Object.keys(harnesses)[0] ?? '' }],
+        },
+      },
+    }))
+    setNewTier('')
+  }
+  const addHop = (tier: string) =>
+    setDefaults((current) => ({
+      ...current,
+      rolePolicy: {
+        ...current.rolePolicy,
+        tiers: {
+          ...current.rolePolicy.tiers,
+          [tier]: [
+            ...current.rolePolicy.tiers[tier],
+            { harness: Object.keys(harnesses)[0] ?? '' },
+          ],
+        },
+      },
+    }))
+  const removeHop = (tier: string, index: number) =>
+    setDefaults((current) => ({
+      ...current,
+      rolePolicy: {
+        ...current.rolePolicy,
+        tiers: {
+          ...current.rolePolicy.tiers,
+          [tier]: current.rolePolicy.tiers[tier].filter(
+            (_, hopIndex) => hopIndex !== index,
+          ),
+        },
+      },
+    }))
   const save = () => {
     setSaved(false)
-    void api.saveSettings({ epicDefaults: defaults }).then(() => setSaved(true))
+    setSaveError(null)
+    void api
+      .saveSettings({ epicDefaults: defaults })
+      .then(() => setSaved(true))
+      .catch((cause) =>
+        setSaveError(cause instanceof Error ? cause.message : String(cause)),
+      )
   }
   return (
     <SettingsPage title="Epics" subtitle="Defaults for the epic runner.">
@@ -450,6 +500,9 @@ export function EpicSettings() {
       </label>
       <fieldset className="settings-env">
         <legend>Role policy</legend>
+        <p className="muted">
+          Each role uses a tier. Hops run from top to bottom until one works.
+        </p>
         {Object.entries(defaults.rolePolicy.roles).map(([role, tier]) => (
           <label key={role}>
             {role}
@@ -489,15 +542,42 @@ export function EpicSettings() {
                     })
                   }
                 />
+                <button
+                  type="button"
+                  className="settings-env-remove"
+                  aria-label={`Remove ${tier} hop ${index + 1}`}
+                  onClick={() => removeHop(tier, index)}
+                >
+                  Remove
+                </button>
               </div>
             ))}
+            <button type="button" onClick={() => addHop(tier)}>
+              Add fallback hop
+            </button>
           </div>
         ))}
+        <div className="settings-env-row settings-add-tier">
+          <input
+            aria-label="New tier name"
+            placeholder="New tier name"
+            value={newTier}
+            onChange={(event) => setNewTier(event.target.value)}
+          />
+          <button type="button" onClick={addTier} disabled={!newTier.trim()}>
+            Add tier
+          </button>
+        </div>
       </fieldset>
       <button onClick={save}>Save epic defaults</button>
       {saved && (
         <p className="muted" role="status">
           Saved.
+        </p>
+      )}
+      {saveError && (
+        <p className="settings-error" role="alert">
+          Could not save: {saveError}
         </p>
       )}
     </SettingsPage>
