@@ -202,7 +202,7 @@ export function Composer({
       window.removeEventListener('dragleave', leave)
       window.removeEventListener('drop', drop)
     }
-  })
+  }, [])
   const submit = async () => {
     const value = text.trim()
     if (!value || !canSendUploads(uploads)) return

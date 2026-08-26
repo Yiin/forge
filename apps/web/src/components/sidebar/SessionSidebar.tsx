@@ -26,8 +26,11 @@ function statusLabel(status?: string) {
 
 export function SessionSidebar() {
   const navigate = useNavigate()
-  const { sessions, projects, setSessions, setProjects, upsertSession } =
-    useSessionsStore()
+  const sessions = useSessionsStore((state) => state.sessions)
+  const projects = useSessionsStore((state) => state.projects)
+  const setSessions = useSessionsStore((state) => state.setSessions)
+  const setProjects = useSessionsStore((state) => state.setProjects)
+  const upsertSession = useSessionsStore((state) => state.upsertSession)
   const removeSession = useSessionsStore((state) => state.removeSession)
   const setDrawerOpen = useShellStore((state) => state.setDrawerOpen)
   const [scope, setScope] = useState<string | 'all'>('all')
@@ -90,7 +93,7 @@ export function SessionSidebar() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  })
+  }, [])
 
   const scoped = useMemo(() => filterScope(sessions, scope), [sessions, scope])
   const { active, settled } = partitionSessions(
