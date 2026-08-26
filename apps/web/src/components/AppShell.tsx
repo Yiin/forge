@@ -1,13 +1,26 @@
 import { Link, Outlet, useLocation } from '@tanstack/react-router'
 import { Drawer } from 'vaul'
-import { Moon, Plus, Settings, Sun } from 'lucide-react'
+import { Moon, Plus, Search, Settings, Sun } from 'lucide-react'
 import { Sidebar } from './ui/sidebar'
 import { AppBar } from './AppBar'
 import { useShellStore } from '../stores/shell'
+import { CommandPalette } from './palette/CommandPalette'
 function Navigation({ settings = false }: { settings?: boolean }) {
   return (
     <nav className="nav">
       <div className="brand">forge</div>
+      {!settings && (
+        <button
+          className="nav-search"
+          onClick={() =>
+            window.dispatchEvent(
+              new KeyboardEvent('keydown', { key: 'k', metaKey: true }),
+            )
+          }
+        >
+          <Search size={16} /> Search
+        </button>
+      )}
       {settings ? (
         <>
           <Link to="/settings">General</Link>
@@ -21,7 +34,9 @@ function Navigation({ settings = false }: { settings?: boolean }) {
             <Plus size={16} /> New session
           </Link>
           <Link to="/runs">Epic runs</Link>
-          <Link to="/search">Search</Link>
+          <Link to="/search" search={{ q: '' }}>
+            Search
+          </Link>
           <Link to="/settings">
             <Settings size={16} /> Settings
           </Link>
@@ -49,6 +64,7 @@ export function AppShell() {
   const isSettings = location.pathname.startsWith('/settings')
   return (
     <div className={`app-shell ${store.theme}`}>
+      <CommandPalette />
       <div className="desktop-shell">
         <Sidebar width={store.sidebarWidth} onResize={store.setSidebarWidth}>
           <Navigation settings={isSettings} />

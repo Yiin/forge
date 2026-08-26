@@ -48,9 +48,15 @@ const files = createRoute({
   path: '/files/$projectId/$',
   component: FileBrowser,
 })
+const filesIndex = createRoute({
+  getParentRoute: () => root,
+  path: '/files',
+  component: empty('Files'),
+})
 const search = createRoute({
   getParentRoute: () => root,
   path: '/search',
+  validateSearch: (value: { q?: string }) => ({ q: value.q }),
   component: empty('Search'),
 })
 const settings = createRoute({
@@ -79,6 +85,7 @@ const tree = root.addChildren([
   runs,
   run,
   files,
+  filesIndex,
   search,
   settings.addChildren([settingsHarnesses, settingsProjects, settingsAbout]),
 ])

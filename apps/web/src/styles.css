@@ -56,6 +56,84 @@ body {
   letter-spacing: -0.04em;
   margin: 3px 10px 25px;
 }
+.nav-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  padding: 8px 10px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+.nav-search:hover {
+  color: inherit;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.palette-dialog {
+  width: min(640px, calc(100vw - 32px));
+  margin: 15vh auto 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: inherit;
+  background: var(--panel);
+  box-shadow: 0 24px 80px #0008;
+}
+.palette-dialog::backdrop {
+  background: #0008;
+}
+.palette-dialog [cmdk-root] {
+  padding: 8px;
+}
+.palette-dialog [cmdk-input] {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 14px 10px;
+  color: inherit;
+  background: transparent;
+  outline: 0;
+  font: inherit;
+}
+.palette-dialog [cmdk-list] {
+  max-height: min(60vh, 460px);
+  overflow: auto;
+  padding: 8px 0;
+}
+.palette-dialog [cmdk-group-heading] {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 10px 5px;
+}
+.palette-dialog [cmdk-item] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.palette-dialog [cmdk-item][aria-selected='true'] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.palette-dialog [cmdk-item] svg {
+  width: 16px;
+  flex: none;
+}
+.palette-dialog [cmdk-empty] {
+  color: var(--muted);
+  padding: 16px 10px;
+}
+.palette-dialog [cmdk-separator] {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--border);
+}
 .nav a,
 .text-button,
 .new-session {

@@ -24,7 +24,7 @@ export function AppBar({
       {children}
       <button
         className="icon-button"
-        onClick={() => navigate({ to: '/search' })}
+        onClick={() => navigate({ to: '/search', search: { q: '' } })}
         aria-label="Search"
       >
         <Search size={19} />
