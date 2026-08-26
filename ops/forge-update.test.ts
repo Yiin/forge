@@ -11,13 +11,14 @@ const dirs: string[] = []
 const script = join(process.cwd(), 'ops/forge-update')
 
 async function fixture(
-  mode: 'same' | 'update' | 'tagged-build' | 'rollback' | 'active',
+  mode: 'same' | 'update' | 'tagged-build' | 'rollback' | 'active' | 'tarball',
 ) {
   const root = await mkdtemp(join(tmpdir(), 'forge-update-'))
   dirs.push(root)
   const tools = join(root, 'tools')
   const state = join(root, 'state')
   const bin = join(root, 'bin', 'forge')
+  const lib = join(root, 'lib')
   await exec('mkdir', ['-p', tools, state, join(root, 'bin')])
   const release = 'v2.0.0'
   const asset = join(root, 'forge')
@@ -25,14 +26,30 @@ async function fixture(
   const checksum = createHash('sha256')
     .update(await readFile(asset))
     .digest('hex')
+  let assets = [{ name: 'forge' }, { name: 'checksums.txt' }]
+  let checksums = `${checksum}  forge\n`
+  if (mode === 'tarball') {
+    const tree = join(root, 'fixture-tree', 'forge-linux-x64')
+    await exec('mkdir', ['-p', join(tree, 'apps/server/src')])
+    await writeFile(join(tree, 'apps/server/src/index.js'), '// new bundle\n')
+    await exec('tar', [
+      '-czf',
+      join(root, 'forge-linux-x64.tar.gz'),
+      '-C',
+      join(root, 'fixture-tree'),
+      'forge-linux-x64',
+    ])
+    const tarChecksum = createHash('sha256')
+      .update(await readFile(join(root, 'forge-linux-x64.tar.gz')))
+      .digest('hex')
+    assets = [{ name: 'forge-linux-x64.tar.gz' }, { name: 'checksums.txt' }]
+    checksums = `${tarChecksum}  forge-linux-x64.tar.gz\n`
+  }
   await writeFile(
     join(root, 'release.json'),
-    JSON.stringify({
-      tagName: release,
-      assets: [{ name: 'forge' }, { name: 'checksums.txt' }],
-    }),
+    JSON.stringify({ tagName: release, assets }),
   )
-  await writeFile(join(root, 'checksums.txt'), `${checksum}  forge\n`)
+  await writeFile(join(root, 'checksums.txt'), checksums)
   await writeFile(
     join(state, 'installed-version'),
     mode === 'same' ? release : 'v1.0.0',
@@ -44,7 +61,11 @@ async function fixture(
     `#!/bin/sh
 if [ "$2" = "view" ]; then cat "$FORGE_FIXTURE/release.json"; exit 0; fi
 if [ "$2" = "download" ]; then
-  case "$*" in *checksums.txt*) cp "$FORGE_FIXTURE/checksums.txt" "$9/checksums.txt";; *) cp "$FORGE_FIXTURE/forge" "$9/forge";; esac
+  case "$*" in
+    *checksums.txt*) cp "$FORGE_FIXTURE/checksums.txt" "$9/checksums.txt";;
+    *.tar.gz*) cp "$FORGE_FIXTURE/forge-linux-x64.tar.gz" "$9/forge-linux-x64.tar.gz";;
+    *) cp "$FORGE_FIXTURE/forge" "$9/forge";;
+  esac
 fi
 `,
   )
@@ -55,8 +76,10 @@ case "$*" in *api/status*)
   [ "$FORGE_MODE" = active ] && echo '{"epicRuns":{"running":1}}' || echo '{"epicRuns":{"running":0}}'
 ;; *)
   if [ "$FORGE_MODE" = rollback ]; then echo '{"ok":false,"version":"v1.0.0"}'
-  elif [ "$FORGE_MODE" = update ] && [ ! -e "$FORGE_FIXTURE/health-seen" ]; then touch "$FORGE_FIXTURE/health-seen"; echo '{"ok":true,"version":"v1.0.0"}'
-  elif [ "$FORGE_MODE" = tagged-build ]; then echo '{"ok":true,"version":"v2.0.0-abc1234"}'
+  elif [ "$FORGE_MODE" = tagged-build ]; then
+    if [ ! -e "$FORGE_FIXTURE/health-seen" ]; then touch "$FORGE_FIXTURE/health-seen"; echo '{"ok":true,"version":"v1.0.0"}'
+    else echo '{"ok":true,"version":"v2.0.0-abc1234"}'; fi
+  elif { [ "$FORGE_MODE" = update ] || [ "$FORGE_MODE" = tarball ]; } && [ ! -e "$FORGE_FIXTURE/health-seen" ]; then touch "$FORGE_FIXTURE/health-seen"; echo '{"ok":true,"version":"v1.0.0"}'
   else echo '{"ok":true,"version":"v2.0.0"}'; fi
 ;; esac
 `,
@@ -73,13 +96,14 @@ case "$*" in *api/status*)
     FORGE_FIXTURE: root,
     FORGE_MODE: mode,
     FORGE_BIN: bin,
+    FORGE_LIB_DIR: lib,
     FORGE_STATE_DIR: state,
     FORGE_UPDATE_DIR: join(root, 'update'),
     FORGE_SYSTEMCTL_LOG: join(root, 'systemctl.log'),
     FORGE_HEALTH_ATTEMPTS: '1',
     FORGE_HEALTH_SLEEP: '0',
   }
-  return { env, bin, state, root }
+  return { env, bin, state, root, lib }
 }
 
 afterEach(async () => {
@@ -93,6 +117,7 @@ describe('forge updater', () => {
     ['tagged-build', 'tagged build health'],
     ['rollback', 'health rollback'],
     ['active', 'active epic skip'],
+    ['tarball', 'tree swap from release archive'],
   ] as const)('%s path: %s', async (mode) => {
     const f = await fixture(mode)
     const result = await exec(script, [], { env: f.env }).catch(
@@ -105,6 +130,14 @@ describe('forge updater', () => {
     if (mode === 'update') {
       expect(installed).toBe('v2.0.0\n')
       expect(binary).toContain('new')
+    } else if (mode === 'tarball') {
+      expect(installed).toBe('v2.0.0\n')
+      expect(binary).toContain('lib/apps/server/src/index.js')
+      const bundle = await readFile(
+        join(f.lib, 'apps/server/src/index.js'),
+        'utf8',
+      )
+      expect(bundle).toContain('new bundle')
     } else if (mode === 'rollback') expect(binary).toContain('old')
     else if (mode === 'tagged-build') expect(binary).toContain('new')
     else expect(binary).toContain('old')

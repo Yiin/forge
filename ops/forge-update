@@ -22,7 +22,7 @@ if [[ "$running" =~ ^[0-9]+$ && "$running" -gt 0 ]]; then
 fi
 current="$(curl -fsS --max-time 5 "$health_url" 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)"
 [[ -n "$current" ]] || current="$(cat "$installed_file" 2>/dev/null || true)"
-if [[ "$latest" == "$current" ]]; then
+if [[ "$current" == "$latest" || "$current" == "$latest"-* ]]; then
   echo "forge-update: already running $current"
   exit 0
 fi
@@ -42,17 +42,36 @@ gh release download "$latest" --repo "$repo" --pattern checksums.txt --dir "$wor
 )
 new="$bin.new"
 prev="$bin.prev"
+lib="${FORGE_LIB_DIR:-$HOME/.local/lib/forge}"
+prev_tree=""
 if [[ "$asset" == *.tar.gz ]]; then
   tar -xzf "$work_dir/$asset" -C "$work_dir"
-  source="$(find "$work_dir" -type f \( -path '*/apps/server/src/index.js' -o -name forge \) -print -quit)"
+  source="$(find "$work_dir" -type f -path '*/apps/server/src/index.js' -print -quit)"
+  [[ -n "${source:-}" && -f "$source" ]] || { echo 'forge-update: archive has no server bundle' >&2; exit 1; }
+  # The bundle loads pty.node, drizzle migrations, and web assets relative to
+  # index.js; swap the whole tree, not just the bundle file.
+  tree="${source%/apps/server/src/index.js}"
+  node_bin="${FORGE_NODE:-$(command -v node || true)}"
+  [[ -n "$node_bin" ]] || { echo 'forge-update: node not found on PATH' >&2; exit 1; }
+  mkdir -p "$(dirname "$lib")"
+  new_tree="$lib.new"
+  prev_tree="$lib.prev"
+  rm -rf "$new_tree"
+  mv "$tree" "$new_tree"
+  printf '#!/usr/bin/env bash\nexec "%s" "%s" "$@"\n' "$node_bin" "$lib/apps/server/src/index.js" > "$new"
 else
   source="$work_dir/$asset"
+  [[ -n "${source:-}" && -f "$source" ]] || { echo 'forge-update: archive has no forge asset' >&2; exit 1; }
+  cp "$source" "$new"
 fi
-[[ -n "${source:-}" && -f "$source" ]] || { echo 'forge-update: archive has no server binary' >&2; exit 1; }
-cp "$source" "$new"
 chmod 755 "$new"
 [[ ! -f "$bin" ]] || cp "$bin" "$prev"
+if [[ -n "$prev_tree" && -d "$lib" ]]; then
+  rm -rf "$prev_tree"
+  mv "$lib" "$prev_tree"
+fi
 mv -f "$new" "$bin"
+[[ -z "$prev_tree" ]] || mv "$new_tree" "$lib"
 systemctl --user restart forge.service
 healthy=0
 for _ in $(seq 1 "$health_attempts"); do
@@ -66,6 +85,10 @@ if [[ "$healthy" != 1 ]]; then
   echo 'forge-update: health failed, restoring previous version' >&2
   [[ -f "$prev" ]] || exit 1
   cp -f "$prev" "$bin"
+  if [[ -n "$prev_tree" && -d "$prev_tree" ]]; then
+    rm -rf "$lib"
+    mv "$prev_tree" "$lib"
+  fi
   systemctl --user restart forge.service || true
   exit 1
 fi
