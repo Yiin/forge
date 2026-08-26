@@ -1,8 +1,7 @@
 import { launchForge } from '../helpers/forgeServer.js'
 
 const forge = await launchForge()
-console.log(`FORGE_URL=${forge.baseUrl}`)
-console.log(`FORGE_DATA_DIR=${forge.dataDir}`)
+console.log(`FORGE_URL=${forge.baseUrl} FORGE_DATA_DIR=${forge.dataDir}`)
 
 let stopping = false
 const stop = async () => {

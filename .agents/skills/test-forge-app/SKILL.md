@@ -18,6 +18,7 @@ bun e2e/scripts/launch-forge.ts
 Keep the process open. It prints `FORGE_URL` and `FORGE_DATA_DIR`.
 Use the printed `FORGE_URL` as the first URL in the controlled browser.
 The launcher uses a new directory below the system temporary directory.
+The values are on one line for easy capture.
 
 ## Browser checks
 
@@ -33,7 +34,12 @@ The e2e helper starts the fake agent for the test server.
 Set these environment flags before launching when needed:
 
 - `FORGE_FAKE_HANG=1` keeps a turn open for reconnect tests.
+- `FORGE_FAKE_DELAY_MS=120` slows each streamed chunk.
 - `FORGE_FAKE_NO_LOAD_SESSION=1` removes load-session capability.
+
+AskUserQuestion and tool-call scenarios use the server mock fixture. They are
+not available from the browser launcher yet. Use `FORGE_MOCK_ASK_QUESTION=1`,
+`FORGE_MOCK_EMIT_TOOL_CALLS=1`, or `FORGE_MOCK_EMIT_SUBAGENT=1` in server tests.
 
 ## Inspect SQLite safely
 
