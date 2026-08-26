@@ -7,13 +7,17 @@ import { MessageRow, ToolCallRow } from './MessageRow'
 import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
 
+const EMPTY_MESSAGES: never[] = []
+
 export function Timeline({
   resumedWithRecap = false,
 }: {
   resumedWithRecap?: boolean
 }) {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
-  const messages = useMessagesStore((state) => state.bySession[sessionId] ?? [])
+  const messages = useMessagesStore(
+    (state) => state.bySession[sessionId] ?? EMPTY_MESSAGES,
+  )
   const items = useMemo(
     () => toRenderModel(messages, resumedWithRecap),
     [messages, resumedWithRecap],

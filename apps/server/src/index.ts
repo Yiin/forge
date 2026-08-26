@@ -190,18 +190,43 @@ async function startE2eServer(): Promise<void> {
         })
         return response({ id })
       }
+      if (request.method === 'POST' && url.pathname === '/api/sessions') {
+        const body = (await request.json()) as { projectId?: string }
+        const id = `ses_${crypto.randomUUID()}`
+        state.sessions.push({ id, projectId: body.projectId ?? '' })
+        publish({
+          sessionId: id,
+          type: 'session_start',
+          role: 'system',
+          content: {},
+        })
+        return response({ id })
+      }
       const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/prompt$/)
+      const messages = url.pathname.match(
+        /^\/api\/sessions\/([^/]+)\/messages$/,
+      )
+      if (request.method === 'GET' && messages)
+        return response(
+          state.messages.filter((message) => message.sessionId === messages[1]),
+        )
       if (request.method === 'POST' && prompt) {
         const sessionId = prompt[1]
         publish({ sessionId, type: 'turn_start', role: 'system', content: {} })
         if (process.env.FORGE_FAKE_HANG !== '1') {
-          for (const text of ['first ', 'second ', 'third'])
+          for (const text of ['first ', 'second ', 'third']) {
+            const delay = Number(process.env.FORGE_FAKE_DELAY_MS ?? 0)
+            if (delay)
+              await new Promise((resolveDelay) =>
+                setTimeout(resolveDelay, delay),
+              )
             publish({
               sessionId,
               type: 'text_delta',
               role: 'agent',
               content: { text },
             })
+          }
           publish({ sessionId, type: 'turn_end', role: 'system', content: {} })
         }
         return response({ ok: true })

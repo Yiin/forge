@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 export type ForgeServer = {
@@ -24,6 +24,10 @@ export async function launchForge(
     resolve(dataDir, 'forge.toml'),
     '[harnesses.fake-acp-agent]\nprotocol = "acp"\ncommand = "bun"\nargs = []\n',
   )
+  spawnSync('sqlite3', [
+    resolve(dataDir, 'forge.db'),
+    'CREATE TABLE IF NOT EXISTS e2e_marker (id INTEGER);',
+  ])
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
   const child = spawn('bun', ['run', 'apps/server/src/index.ts'], {
     cwd: root,
