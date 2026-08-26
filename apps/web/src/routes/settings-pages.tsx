@@ -30,12 +30,26 @@ function RequestState({
   onRetry?: () => void
 }) {
   if (state === 'loading') return <p className="settings-status">Loading…</p>
-  if (state === 'saving') return <p className="settings-status" role="status">Saving…</p>
-  if (state === 'saved') return <p className="settings-status" role="status">Saved.</p>
+  if (state === 'saving')
+    return (
+      <p className="settings-status" role="status">
+        Saving…
+      </p>
+    )
+  if (state === 'saved')
+    return (
+      <p className="settings-status" role="status">
+        Saved.
+      </p>
+    )
   return (
     <div className="settings-error" role="alert">
       <span>Could not load or save{error ? `: ${error}` : '.'}</span>
-      {onRetry && <Button size="compact" onClick={onRetry}>Retry</Button>}
+      {onRetry && (
+        <Button size="compact" onClick={onRetry}>
+          Retry
+        </Button>
+      )}
     </div>
   )
 }
@@ -48,31 +62,43 @@ export function GeneralSettings() {
     defaultProject: '',
     titleGeneration: true,
   })
-  const [state, setState] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading')
+  const [state, setState] = useState<'loading' | 'saving' | 'saved' | 'error'>(
+    'loading',
+  )
   const [error, setError] = useState<string | null>(null)
   const load = () => {
     setState('loading')
-    void api.getSettings().then((value) => {
-      setSettings((current) => ({ ...current, ...(value as object) }))
-      setState('saved')
-    }).catch((cause: unknown) => {
-      setError(cause instanceof Error ? cause.message : String(cause))
-      setState('error')
-    })
+    void api
+      .getSettings()
+      .then((value) => {
+        setSettings((current) => ({ ...current, ...(value as object) }))
+        setState('saved')
+      })
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : String(cause))
+        setState('error')
+      })
   }
   useEffect(load, [])
   const save = (next: typeof settings) => {
     setSettings(next)
     setState('saving')
     setError(null)
-    void api.saveSettings(next).then(() => setState('saved')).catch((cause: unknown) => {
-      setError(cause instanceof Error ? cause.message : String(cause))
-      setState('error')
-    })
+    void api
+      .saveSettings(next)
+      .then(() => setState('saved'))
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : String(cause))
+        setState('error')
+      })
   }
   return (
     <SettingsPage title="General" subtitle="Defaults for new sessions.">
-      <RequestState state={state} error={error} onRetry={state === 'error' ? load : undefined} />
+      <RequestState
+        state={state}
+        error={error}
+        onRetry={state === 'error' ? load : undefined}
+      />
       <label>
         Theme
         <select
@@ -342,21 +368,30 @@ export function ProjectSettings() {
       archived_at?: number | null
     }>
   >([])
-  const [loadState, setLoadState] = useState<'loading' | 'saved' | 'error'>('loading')
+  const [loadState, setLoadState] = useState<'loading' | 'saved' | 'error'>(
+    'loading',
+  )
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState<Record<string, boolean>>({})
-  const [saveState, setSaveState] = useState<Record<string, 'saved' | 'error'>>({})
-  const [archiveProject, setArchiveProject] = useState<typeof projects[number] | null>(null)
+  const [saveState, setSaveState] = useState<Record<string, 'saved' | 'error'>>(
+    {},
+  )
+  const [archiveProject, setArchiveProject] = useState<
+    (typeof projects)[number] | null
+  >(null)
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const load = () => {
     setLoadState('loading')
-    void api.listSettingsProjects().then((value) => {
-      setProjects(value as typeof projects)
-      setLoadState('saved')
-    }).catch((cause: unknown) => {
-      setError(cause instanceof Error ? cause.message : String(cause))
-      setLoadState('error')
-    })
+    void api
+      .listSettingsProjects()
+      .then((value) => {
+        setProjects(value as typeof projects)
+        setLoadState('saved')
+      })
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : String(cause))
+        setLoadState('error')
+      })
   }
   useEffect(load, [])
   return (
@@ -365,7 +400,9 @@ export function ProjectSettings() {
       subtitle="Rename or archive projects. Sessions stay safe when you archive one."
     >
       {loadState === 'loading' && <RequestState state="loading" />}
-      {loadState === 'error' && <RequestState state="error" error={error} onRetry={load} />}
+      {loadState === 'error' && (
+        <RequestState state="error" error={error} onRetry={load} />
+      )}
       <div className="settings-stack">
         {projects.map((project) => (
           <article className="settings-card project-setting" key={project.id}>
@@ -388,33 +425,65 @@ export function ProjectSettings() {
                   delete next[project.id]
                   return next
                 })
-                void api.renameProject(project.id, project.name).then(() => {
-                  setSaveState((current) => ({ ...current, [project.id]: 'saved' }))
-                }).catch(() => {
-                  setSaveState((current) => ({ ...current, [project.id]: 'error' }))
-                }).finally(() => {
-                  setSaving((current) => ({ ...current, [project.id]: false }))
-                })
+                void api
+                  .renameProject(project.id, project.name)
+                  .then(() => {
+                    setSaveState((current) => ({
+                      ...current,
+                      [project.id]: 'saved',
+                    }))
+                  })
+                  .catch(() => {
+                    setSaveState((current) => ({
+                      ...current,
+                      [project.id]: 'error',
+                    }))
+                  })
+                  .finally(() => {
+                    setSaving((current) => ({
+                      ...current,
+                      [project.id]: false,
+                    }))
+                  })
               }}
             >
               Save
             </Button>
             <button
               disabled={Boolean(project.archived_at)}
-              onClick={() => { setArchiveError(null); setArchiveProject(project) }}
+              onClick={() => {
+                setArchiveError(null)
+                setArchiveProject(project)
+              }}
             >
               {project.archived_at ? 'Archived' : 'Archive'}
             </button>
-            {saveState[project.id] === 'saved' && <span className="settings-status" role="status">Saved.</span>}
-            {saveState[project.id] === 'error' && <span className="settings-error" role="alert">Could not save. Retry.</span>}
+            {saveState[project.id] === 'saved' && (
+              <span className="settings-status" role="status">
+                Saved.
+              </span>
+            )}
+            {saveState[project.id] === 'error' && (
+              <span className="settings-error" role="alert">
+                Could not save. Retry.
+              </span>
+            )}
           </article>
         ))}
       </div>
-      {loadState === 'saved' && projects.length === 0 && <p className="settings-status">No projects yet.</p>}
-      {archiveError && <p className="settings-error" role="alert">Could not archive project: {archiveError}</p>}
+      {loadState === 'saved' && projects.length === 0 && (
+        <p className="settings-status">No projects yet.</p>
+      )}
+      {archiveError && (
+        <p className="settings-error" role="alert">
+          Could not archive project: {archiveError}
+        </p>
+      )}
       <ConfirmationDialog
         open={archiveProject !== null}
-        onOpenChange={(open) => { if (!open) setArchiveProject(null) }}
+        onOpenChange={(open) => {
+          if (!open) setArchiveProject(null)
+        }}
         title="Archive project?"
         confirmLabel="Archive"
         onConfirm={async () => {
@@ -424,12 +493,16 @@ export function ProjectSettings() {
             setArchiveProject(null)
             load()
           } catch (cause: unknown) {
-            setArchiveError(cause instanceof Error ? cause.message : String(cause))
+            setArchiveError(
+              cause instanceof Error ? cause.message : String(cause),
+            )
             throw cause
           }
         }}
       >
-        {archiveProject ? `${archiveProject.name} will be archived. Sessions will be kept.` : ''}
+        {archiveProject
+          ? `${archiveProject.name} will be archived. Sessions will be kept.`
+          : ''}
       </ConfirmationDialog>
     </SettingsPage>
   )
@@ -683,10 +756,14 @@ export function AboutSettings() {
     setState('loading')
     void fetch('/api/status')
       .then((response) => {
-        if (!response.ok) throw new Error(`Status request failed (${response.status})`)
+        if (!response.ok)
+          throw new Error(`Status request failed (${response.status})`)
         return response.json()
       })
-      .then((value) => { setStatus(value); setState('saved') })
+      .then((value) => {
+        setStatus(value)
+        setState('saved')
+      })
       .catch((cause: unknown) => {
         setError(cause instanceof Error ? cause.message : String(cause))
         setState('error')
