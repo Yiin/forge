@@ -18,6 +18,7 @@ export const sessions = sqliteTable('sessions', {
   worktreePath: text('worktree_path'),
   providerSessionId: text('provider_session_id'),
   kind: text('kind').notNull(),
+  retention: text('retention').notNull().default('permanent'),
   parentSessionId: text('parent_session_id'),
   forkedAtSeq: integer('forked_at_seq'),
   spawnedBySeq: integer('spawned_by_seq'),

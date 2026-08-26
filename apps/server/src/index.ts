@@ -21,6 +21,7 @@ import { websocketRoute } from './ws.js'
 import { projectRoutes } from './http/projects.js'
 import { sessionRoutes } from './http/sessions.js'
 import { forkRoutes } from './http/forks.js'
+import { sideChatRoutes } from './http/sidechats.js'
 import { SessionManager } from './sessions/manager.js'
 import type { HarnessFactory } from './sessions/harness.js'
 import { workspaceRoutes } from './http/workspace.js'
@@ -104,6 +105,7 @@ export function createApp(
     if (manager) {
       app.route('/', sessionRoutes(manager, uploadStore))
       app.route('/', forkRoutes(manager))
+      app.route('/', sideChatRoutes(manager))
     }
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
