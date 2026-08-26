@@ -7,6 +7,7 @@ import { api } from '../lib/api'
 import { connectForgeSocket, normalizeServerEvent } from '../lib/socket'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore } from '../stores/sessions'
+import { PathSwitcher } from '../components/chat/PathSwitcher'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
@@ -55,6 +56,7 @@ export function SessionRoute() {
   return (
     <div className="session-view">
       <SessionHeader sessionId={sessionId} />
+      <PathSwitcher sessionId={sessionId} />
       <Timeline
         targetSeq={Number.isFinite(targetSeq) ? targetSeq : undefined}
       />

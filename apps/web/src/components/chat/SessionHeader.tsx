@@ -80,6 +80,13 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
         />
         <Terminal size={14} aria-label={current.harness ?? 'harness'} />
       </div>
+      {'contextMethod' in current && current.contextMethod && (
+        <span className="session-context-label">
+          {current.contextMethod === 'exact'
+            ? 'Exact fork'
+            : 'Synthetic context · reduced confidence'}
+        </span>
+      )}
       <details
         className="session-info"
         open={infoOpen}

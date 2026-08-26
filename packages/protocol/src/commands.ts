@@ -27,6 +27,8 @@ export const fork = z.object({
   sessionId: id,
   messageSeq: z.number().int().nonnegative(),
   text: z.string().min(1),
+  requestId: id.optional(),
+  includeSource: z.boolean().default(false),
 })
 export const btw = z.object({
   sessionId: id,
