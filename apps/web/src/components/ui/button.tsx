@@ -1,4 +1,28 @@
 import type { ButtonHTMLAttributes } from 'react'
-export function Button(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button {...props} className={`ui-button ${props.className ?? ''}`} />
+
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
+  size?: 'comfortable' | 'compact'
+  loading?: boolean
+}
+
+export function Button({
+  variant = 'secondary',
+  size = 'comfortable',
+  loading = false,
+  disabled,
+  children,
+  className,
+  ...props
+}: ButtonProps) {
+  return (
+    <button
+      {...props}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      className={`ui-button ${variant} ${size} ${className ?? ''}`}
+    >
+      {loading ? 'Working…' : children}
+    </button>
+  )
 }
