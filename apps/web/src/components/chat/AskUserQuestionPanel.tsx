@@ -36,6 +36,7 @@ function QuestionCard({
   const [selected, setSelected] = useState<string[]>([])
   const [freeText, setFreeText] = useState('')
   const [sending, setSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const multi = question.multiSelect === true
   const options = question.options
   const submit = async (answer: string | string[]) => {
@@ -45,12 +46,15 @@ function QuestionCard({
     )
       return
     setSending(true)
+    setError(null)
     try {
       await api.answerQuestion({
         sessionId,
         questionId: current.questionId,
         ...(Array.isArray(answer) ? { answers: answer } : { answer }),
       })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Answer failed')
     } finally {
       setSending(false)
     }
@@ -71,6 +75,11 @@ function QuestionCard({
         {remaining > 1 && <span>{remaining} questions</span>}
       </div>
       <h2>{question.question}</h2>
+      {error && (
+        <p className="ask-question-error" role="alert">
+          {error}
+        </p>
+      )}
       {options.length > 0 && (
         <div className="ask-question-options">
           {options.map((option) => (
