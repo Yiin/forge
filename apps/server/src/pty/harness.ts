@@ -143,7 +143,6 @@ export function createPtyHarness(options: PtyOptions): HarnessProcess {
       const exit = (event: { exitCode: number }) => {
         clearTimers()
         if (active && !interrupted) {
-          flush()
           emit({
             type: 'error',
             message: 'PTY process exited',
