@@ -56,6 +56,13 @@ export async function launchForge(
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   })
+  const serverLog = resolve(tmpdir(), `forge-e2e-server-${child.pid}.log`)
+  const logStream = (await import('node:fs')).createWriteStream(serverLog)
+  child.stdout?.pipe(logStream)
+  child.stderr?.pipe(logStream)
+  child.once('exit', (code, signal) => {
+    logStream.end(`\n[exit code=${code} signal=${signal}]\n`)
+  })
   let port: number
   try {
     port = await new Promise<number>((resolvePort, reject) => {

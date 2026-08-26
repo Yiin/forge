@@ -4,7 +4,9 @@ export default defineConfig({
   testDir: './specs',
   workers: 1,
   fullyParallel: false,
-  retries: 0,
+  // The mock Bun server intermittently resets a connection (ECONNRESET)
+  // with no crash log; one retry absorbs the harness flake.
+  retries: 1,
   reporter: 'line',
   webServer: {
     command: 'bun run --cwd ../apps/web dev --host 127.0.0.1 --port 5173',
