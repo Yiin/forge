@@ -87,6 +87,50 @@ body {
 .palette-dialog::backdrop {
   background: #0008;
 }
+.launch-form {
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+}
+.launch-heading h2 {
+  margin: 4px 0 0;
+}
+.launch-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.launch-form input,
+.launch-form select,
+.launch-form textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 9px 10px;
+  color: inherit;
+  background: var(--panel);
+  font: inherit;
+}
+.launch-form textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+}
+.launch-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr;
+  gap: 12px;
+}
+.field-error {
+  color: #fca5a5;
+  font-size: 12px;
+}
+.launch-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .palette-dialog [cmdk-root] {
   padding: 8px;
 }
