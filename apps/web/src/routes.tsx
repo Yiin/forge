@@ -18,7 +18,7 @@ import {
   HarnessSettings,
   ProjectSettings,
   EpicSettings,
-  AboutSettings,
+  KeybindingsSettings,
 } from './routes/settings-pages'
 import { DraftRoute } from './routes/draft'
 const root = createRootRoute({ component: AppShell })
@@ -81,10 +81,22 @@ const settings = createRoute({
   path: '/settings',
   component: SettingsLayout,
 })
-const settingsGeneral = createRoute({
+const settingsIndex = createRoute({
   getParentRoute: () => settings,
   path: '/',
+  beforeLoad: () => {
+    throw redirect({ to: '/settings/general', replace: true })
+  },
+})
+const settingsGeneral = createRoute({
+  getParentRoute: () => settings,
+  path: '/general',
   component: GeneralSettings,
+})
+const settingsKeybindings = createRoute({
+  getParentRoute: () => settings,
+  path: '/keybindings',
+  component: KeybindingsSettings,
 })
 const settingsHarnesses = createRoute({
   getParentRoute: () => settings,
@@ -101,11 +113,6 @@ const settingsEpics = createRoute({
   path: '/epics',
   component: EpicSettings,
 })
-const settingsAbout = createRoute({
-  getParentRoute: () => settings,
-  path: '/about',
-  component: AboutSettings,
-})
 const tree = root.addChildren([
   index,
   session,
@@ -116,11 +123,12 @@ const tree = root.addChildren([
   filesIndex,
   search,
   settings.addChildren([
+    settingsIndex,
     settingsGeneral,
+    settingsKeybindings,
     settingsHarnesses,
     settingsProjects,
     settingsEpics,
-    settingsAbout,
   ]),
 ])
 export const router = createRouter({ routeTree: tree })
