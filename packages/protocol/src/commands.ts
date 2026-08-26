@@ -82,6 +82,7 @@ export const search = z.object({
 })
 
 const searchSnippet = z.string()
+// Message hits use /s/:sessionId?m=:seq. The chat route owns scroll and flash.
 export const searchResponse = z.object({
   sessions: z.array(
     z.object({ sessionId: id, title: z.string(), snippet: searchSnippet }),

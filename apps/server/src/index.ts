@@ -17,6 +17,13 @@ import { questionRoutes } from './http/questions.js'
 import type { QuestionManager } from './acp/questions.js'
 import { QuestionManager as ServerQuestionManager } from './acp/questions.js'
 import { websocketRoute } from './ws.js'
+import { projectRoutes } from './http/projects.js'
+import { sessionRoutes } from './http/sessions.js'
+import { SessionManager } from './sessions/manager.js'
+import type { HarnessFactory } from './sessions/harness.js'
+import { workspaceRoutes } from './http/workspace.js'
+import { epicRoutes } from './http/epics.js'
+import type { EpicRunner } from './epics/runner.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -25,18 +32,36 @@ export function createApp(
   uploadStore?: UploadStore,
   status?: Parameters<typeof statusRoutes>[0],
   questions?: QuestionManager,
+  manager?: SessionManager,
+  runner?: EpicRunner,
 ) {
   const app = new Hono()
 
   if (status) app.route('/', statusRoutes(status))
   else app.get('/api/health', (c) => c.json({ ok: true, version }))
   if (uploadStore) {
+    app.route('/', projectRoutes(uploadStore.database))
+    if (manager) app.route('/', sessionRoutes(manager))
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
     app.route('/', searchRoutes(uploadStore.database))
   }
   if (questions) app.route('/', questionRoutes(questions))
+  if (status) app.route('/', workspaceRoutes(status.db))
+  if (runner && status)
+    app.route(
+      '/',
+      epicRoutes({
+        runner,
+        projectPath: (projectId) =>
+          (
+            status.db
+              .prepare('SELECT path FROM projects WHERE id = ?')
+              .get(projectId) as { path?: string } | undefined
+          )?.path,
+      }),
+    )
 
   return app
 }
@@ -55,6 +80,16 @@ export function startServer(
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
   const questions = new ServerQuestionManager({ db, bus })
+  const factory: HarnessFactory = () => ({
+    spawn: async (_session, _onItem, onExit) => ({
+      prompt: async () => {
+        onExit(new Error('No harness adapter configured'))
+      },
+      cancel: () => undefined,
+      kill: () => undefined,
+    }),
+  })
+  const manager = new SessionManager(db, bus, factory)
   const app = createApp(
     uploadStore,
     {
@@ -64,6 +99,7 @@ export function startServer(
       dataDir,
     },
     questions,
+    manager,
   )
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
   app.get('/ws', websocketRoute(upgradeWebSocket, db, bus))

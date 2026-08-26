@@ -5,7 +5,9 @@ import { Sidebar } from './ui/sidebar'
 import { AppBar } from './AppBar'
 import { useShellStore } from '../stores/shell'
 import { CommandPalette } from './palette/CommandPalette'
+import { SessionSidebar } from './sidebar/SessionSidebar'
 function Navigation({ settings = false }: { settings?: boolean }) {
+  const theme = useShellStore((state) => state.theme)
   return (
     <nav className="nav">
       <div className="brand">forge</div>
@@ -34,7 +36,7 @@ function Navigation({ settings = false }: { settings?: boolean }) {
             <Plus size={16} /> New session
           </Link>
           <Link to="/runs">Epic runs</Link>
-          <Link to="/search" search={{ q: '' }}>
+          <Link to="/search" search={{ q: '', scope: 'all' }}>
             Search
           </Link>
           <Link to="/settings">
@@ -47,7 +49,7 @@ function Navigation({ settings = false }: { settings?: boolean }) {
           className="text-button"
           onClick={() => useShellStore.getState().toggleTheme()}
         >
-          {useShellStore.getState().theme === 'dark' ? (
+          {theme === 'dark' ? (
             <Sun size={16} />
           ) : (
             <Moon size={16} />
@@ -67,14 +69,17 @@ export function AppShell() {
       <CommandPalette />
       <div className="desktop-shell">
         <Sidebar width={store.sidebarWidth} onResize={store.setSidebarWidth}>
-          <Navigation settings={isSettings} />
+          {isSettings ? <Navigation settings /> : <SessionSidebar />}
         </Sidebar>
         <main className="main">
           <Outlet />
         </main>
       </div>
       <div className="phone-shell">
-        <AppBar title={isSettings ? 'Settings' : 'Forge'} />
+        <AppBar
+          title={isSettings ? 'Settings' : 'Forge'}
+          showBack={location.pathname === '/search'}
+        />
         <main className="main">
           <Outlet />
         </main>
@@ -82,7 +87,7 @@ export function AppShell() {
           <Drawer.Portal>
             <Drawer.Overlay className="drawer-overlay" />
             <Drawer.Content className="drawer">
-              <Navigation settings={isSettings} />
+              {isSettings ? <Navigation settings /> : <SessionSidebar />}
             </Drawer.Content>
           </Drawer.Portal>
         </Drawer.Root>

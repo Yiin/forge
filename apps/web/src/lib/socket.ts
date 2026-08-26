@@ -1,6 +1,7 @@
 import { Ephemeral, ServerEvent } from '@forge/protocol/events'
 import { SubscribeFrame } from '@forge/protocol/ws'
 import { useMessagesStore } from '../stores/messages'
+import { useSessionsStore } from '../stores/sessions'
 
 export interface ForgeWebSocket {
   readonly readyState: number
@@ -94,8 +95,18 @@ export class ForgeSocket {
     )
       value = normalizeServerEvent(value.message)
     const ephemeral = Ephemeral.safeParse(value)
-    if (ephemeral.success)
-      return useMessagesStore.getState().applyEphemeral(ephemeral.data)
+    if (ephemeral.success) {
+      const frame = ephemeral.data
+      if (frame.type === 'sessionStatus') {
+        const sessions = useSessionsStore.getState()
+        const current = sessions.sessions.find(
+          (session) => session.id === frame.sessionId,
+        )
+        if (current)
+          sessions.upsertSession({ ...current, status: frame.status })
+      }
+      return useMessagesStore.getState().applyEphemeral(frame)
+    }
     const event = ServerEvent.safeParse(value)
     if (event.success) useMessagesStore.getState().applyEvent(event.data)
   }
