@@ -13,6 +13,7 @@ import {
   type Fork,
   type Interrupt,
   type Prompt,
+  type EpicStart,
 } from '@forge/protocol/commands'
 import { putUpload } from './upload'
 export type ApiOptions = { baseUrl?: string; fetch?: typeof globalThis.fetch }
@@ -50,6 +51,22 @@ export class ForgeApi {
   listProjects() {
     return this.get('/api/projects')
   }
+  listRuns() {
+    return this.get('/api/epics')
+  }
+  startRun(input: EpicStart) {
+    return this.post('/api/epics/start', null, input)
+  }
+  getRun(runId: string) {
+    return this.get(`/api/epics/${encodeURIComponent(runId)}`)
+  }
+  runAction(runId: string, action: 'pause' | 'resume' | 'cancel') {
+    return this.post(
+      `/api/epics/${encodeURIComponent(runId)}/${action}`,
+      null,
+      {},
+    )
+  }
   renameSession(sessionId: string, title: string) {
     return this.post(`/api/sessions/${encodeURIComponent(sessionId)}`, null, {
       title,
@@ -60,6 +77,13 @@ export class ForgeApi {
       `/api/sessions/${encodeURIComponent(sessionId)}/settle`,
       null,
       { settled },
+    )
+  }
+  deleteSession(sessionId: string) {
+    return this.post(
+      `/api/sessions/${encodeURIComponent(sessionId)}/delete`,
+      null,
+      {},
     )
   }
   prompt(input: Prompt) {

@@ -10,6 +10,8 @@ import { readLastSession } from './lib/shell-storage'
 import { SessionRoute } from './routes/session'
 import { HomeRoute } from './routes/home'
 import { SearchRoute } from './routes/search'
+import { RunsRoute } from './routes/runs'
+import { RunRoute } from './routes/run'
 const root = createRootRoute({ component: AppShell })
 const empty =
   (title: string, text = 'This area is ready for the next feature.') =>
@@ -36,12 +38,12 @@ const session = createRoute({
 const runs = createRoute({
   getParentRoute: () => root,
   path: '/runs',
-  component: empty('Epic runs'),
+  component: RunsRoute,
 })
 const run = createRoute({
   getParentRoute: () => root,
   path: '/runs/$runId',
-  component: empty('Epic run'),
+  component: RunRoute,
 })
 const files = createRoute({
   getParentRoute: () => root,

@@ -61,6 +61,7 @@ export function createApp(
               .prepare('SELECT path FROM projects WHERE id = ?')
               .get(projectId) as { path?: string } | undefined
           )?.path,
+        db: status.db,
       }),
     )
 

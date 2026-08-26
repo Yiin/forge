@@ -26,6 +26,7 @@ export const sessions = sqliteTable('sessions', {
   autoResume: integer('auto_resume').notNull(),
   createdAt: integer('created_at').notNull(),
   lastActivityAt: integer('last_activity_at').notNull(),
+  deletedAt: integer('deleted_at'),
 })
 export const messages = sqliteTable(
   'messages',
