@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
 import {
   Check,
@@ -49,6 +49,8 @@ export function CommandPalette() {
     messages: [],
     runs: [],
   })
+  const [searchState, setSearchState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const request = useRef<AbortController | null>(null)
   const [shortcutHelp, setShortcutHelp] = useState(false)
   const sessions = useSessionsStore((state) => state.sessions)
   const projects = useMemo(
@@ -68,23 +70,43 @@ export function CommandPalette() {
     [],
   )
   useEffect(() => {
-    if (!query.trim()) return
+    request.current?.abort()
+    if (!query.trim()) {
+      setResults({ sessions: [], messages: [], runs: [] })
+      setSearchState('idle')
+      return
+    }
+    setSearchState('loading')
+    const controller = new AbortController()
+    request.current = controller
     const timer = window.setTimeout(async () => {
       try {
         const response = await fetch(
           `/api/search?scope=all&limit=5&q=${encodeURIComponent(query.trim())}`,
+          { signal: controller.signal },
         )
-        if (response.ok) setResults((await response.json()) as SearchResult)
-      } catch {
-        /* Offline search must not break command navigation. */
+        if (!response.ok) throw new Error('Search request failed')
+        if (request.current === controller) {
+          setResults((await response.json()) as SearchResult)
+          setSearchState('success')
+        }
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError' && request.current === controller) {
+          setResults({ sessions: [], messages: [], runs: [] })
+          setSearchState('error')
+        }
       }
     }, 150)
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
   }, [query, changedAt])
   const close = () => {
     setOpen(false)
     setQuery('')
     setResults({ sessions: [], messages: [], runs: [] })
+    setSearchState('idle')
     setShortcutHelp(false)
   }
   const go = (to: string) => {
@@ -176,6 +198,17 @@ export function CommandPalette() {
               </CommandItem>
             ))}
           </CommandGroup>
+          {query.trim() && searchState === 'loading' && (
+            <CommandGroup heading="Search status" forceMount>
+              <CommandItem disabled>Searching…</CommandItem>
+            </CommandGroup>
+          )}
+          {query.trim() && searchState === 'error' && (
+            <CommandGroup heading="Search status" forceMount>
+              <CommandItem disabled role="alert">Search is unavailable. Commands remain available.</CommandItem>
+              <CommandItem onSelect={() => setChangedAt(Date.now())}>Try search again</CommandItem>
+            </CommandGroup>
+          )}
           {(results.messages.length > 0 || results.runs.length > 0) && (
             <CommandGroup heading="Search results" forceMount>
               {results.messages.map((hit) => (

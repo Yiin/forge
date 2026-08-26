@@ -51,20 +51,39 @@ function ResultGroup({
 export function SearchResults({
   results,
   query,
+  status = 'success',
+  scope = 'all',
+  onRetry,
 }: {
   results: SearchResultsData
   query: string
+  status?: 'loading' | 'success' | 'error'
+  scope?: string
+  onRetry?: () => void
 }) {
   const hasResults =
     results.sessions.length + results.messages.length + results.runs.length > 0
+  if (status === 'loading') {
+    return <p className="search-empty" role="status">Searching…</p>
+  }
+  if (status === 'error') {
+    return (
+      <div className="search-empty search-error" role="alert">
+        <p>Search is unavailable.</p>
+        <button type="button" onClick={onRetry}>Try again</button>
+      </div>
+    )
+  }
   if (!query.trim()) {
     return <p className="search-empty">Recent sessions appear here.</p>
   }
   if (!hasResults) {
-    return <p className="search-empty">No results for “{query.trim()}”.</p>
+    return <p className="search-empty">No {scope} results for “{query.trim()}”.</p>
   }
+  const count = results.sessions.length + results.messages.length + results.runs.length
   return (
     <div className="search-results">
+      <p className="search-result-count" role="status">{count} {count === 1 ? 'result' : 'results'} · {scope}</p>
       {results.sessions.length > 0 && (
         <ResultGroup title="Sessions">
           {results.sessions.map((hit) => (
