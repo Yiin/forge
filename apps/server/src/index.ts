@@ -101,8 +101,10 @@ export function createApp(
   else app.get('/api/health', (c) => c.json({ ok: true, version }))
   if (uploadStore) {
     app.route('/', projectRoutes(uploadStore.database, uploadStore))
-    if (manager) app.route('/', sessionRoutes(manager, uploadStore))
-    if (manager) app.route('/', forkRoutes(manager))
+    if (manager) {
+      app.route('/', sessionRoutes(manager, uploadStore))
+      app.route('/', forkRoutes(manager))
+    }
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))

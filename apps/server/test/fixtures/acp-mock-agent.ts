@@ -51,6 +51,9 @@ class MockAgent implements acp.Agent {
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: {
         ...(flag('OMIT_LOAD_SESSION_CAPABILITY') ? {} : { loadSession: true }),
+        ...(flag('ADVERTISE_SESSION_FORK')
+          ? ({ session: { fork: {} } } as unknown as acp.AgentCapabilities)
+          : {}),
         promptCapabilities: { image: false },
       },
     }

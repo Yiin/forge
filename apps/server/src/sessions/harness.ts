@@ -22,12 +22,21 @@ export type HarnessProcess = {
     onItem: (item: HarnessItem) => void,
     onExit: (error?: Error) => void,
   ): Promise<HarnessHandle> | HarnessHandle
-  capabilities?: { loadSession: boolean }
+  capabilities?: { loadSession: boolean; sessionFork?: boolean }
   loadSession?: (
     session: HarnessSession,
     onItem: (item: HarnessItem) => void,
     onExit: (error?: Error) => void,
   ) => Promise<{ handle: HarnessHandle; proven: boolean }>
+  fork?: (
+    session: HarnessSession,
+    onItem: (item: HarnessItem) => void,
+    onExit: (error?: Error) => void,
+  ) => Promise<{
+    handle: HarnessHandle
+    proven: boolean
+    providerSessionId?: string
+  }>
   newSession?: (
     session: HarnessSession,
     onItem: (item: HarnessItem) => void,
