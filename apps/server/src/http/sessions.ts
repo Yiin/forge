@@ -1,12 +1,13 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import {
   createSession as schema,
   prompt as promptSchema,
   answerQuestion as answerSchema,
 } from '@forge/protocol/commands'
 import type { SessionManager } from '../sessions/manager.js'
+import type { UploadStore } from '../uploads/store.js'
 
-export function sessionRoutes(manager: SessionManager) {
+export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
   const app = new Hono()
   app.post('/api/sessions', async (c) => {
     const value = schema.safeParse(await c.req.json())
@@ -87,5 +88,14 @@ export function sessionRoutes(manager: SessionManager) {
     )
     return c.json({ ok: true })
   })
+  const remove = async (c: Context) => {
+    const removed = uploads
+      ? await uploads.deleteSession(c.req.param('id') ?? '')
+      : false
+    return removed
+      ? c.json({ ok: true })
+      : c.json({ error: 'Session not found' }, 404)
+  }
+  app.delete('/api/sessions/:id', remove)
   return app
 }

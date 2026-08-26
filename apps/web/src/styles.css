@@ -767,6 +767,16 @@ body {
   color: var(--muted);
   flex: none;
 }
+.session-rename-button {
+  color: var(--muted);
+  padding: 4px;
+}
+.session-info-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 .session-title-input {
   min-width: 220px;
   max-width: 60vw;
@@ -1155,6 +1165,13 @@ kbd {
   white-space: nowrap;
 }
 .attachment-chip-meta {
+  white-space: nowrap;
+}
+.attachment-chip-error {
+  max-width: 180px;
+  overflow: hidden;
+  color: #fecaca;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .attachment-chip button {

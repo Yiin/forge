@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
 import type { DatabaseSync } from 'node:sqlite'
 import { createProject, listSessions } from '../db/queries.js'
+import type { UploadStore } from '../uploads/store.js'
 
-export function workspaceRoutes(db: DatabaseSync) {
+export function workspaceRoutes(db: DatabaseSync, uploads?: UploadStore) {
   const app = new Hono()
   app.get('/api/projects', (c) => {
     const projects = db
@@ -49,14 +50,20 @@ export function workspaceRoutes(db: DatabaseSync) {
     if (!result.changes) return c.json({ error: 'Session not found' }, 404)
     return c.json({ ok: true, status })
   })
-  app.post('/api/sessions/:id/delete', (c) => {
-    const id = c.req.param('id')
+  const removeSession = async (c: any) => {
+    const id = c.req.param('id') ?? ''
+    if (uploads)
+      return (await uploads.deleteSession(id))
+        ? c.json({ ok: true })
+        : c.json({ error: 'Session not found' }, 404)
     const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(id)
     if (!session) return c.json({ error: 'Session not found' }, 404)
     db.prepare(
       'UPDATE sessions SET deleted_at = ?, status = ? WHERE id = ?',
     ).run(Date.now(), 'archived', id)
     return c.json({ ok: true })
-  })
+  }
+  app.post('/api/sessions/:id/delete', removeSession)
+  app.delete('/api/sessions/:id', removeSession)
   return app
 }

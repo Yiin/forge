@@ -2,8 +2,9 @@ import { Hono } from 'hono'
 import { createProject, getProject } from '../db/queries.js'
 import { createProject as createProjectSchema } from '@forge/protocol/commands'
 import type { DatabaseSync } from 'node:sqlite'
+import type { UploadStore } from '../uploads/store.js'
 
-export function projectRoutes(db: DatabaseSync) {
+export function projectRoutes(db: DatabaseSync, uploads?: UploadStore) {
   const app = new Hono()
   app.post('/api/projects', async (c) => {
     const value = createProjectSchema.safeParse(await c.req.json())
@@ -39,11 +40,17 @@ export function projectRoutes(db: DatabaseSync) {
     if (!result.changes) return c.json({ error: 'Project not found' }, 404)
     return c.json({ ok: true })
   })
-  app.delete('/api/projects/:id', (c) => {
+  app.delete('/api/projects/:id', async (c) => {
     if (!getProject(db, c.req.param('id')))
       return c.json({ error: 'Project not found' }, 404)
-    db.prepare('DELETE FROM projects WHERE id = ?').run(c.req.param('id'))
+    if (uploads) await uploads.deleteProject(c.req.param('id') ?? '')
+    else db.prepare('DELETE FROM projects WHERE id = ?').run(c.req.param('id'))
     return c.json({ ok: true })
+  })
+  app.get('/api/projects/:id/usage', (c) => {
+    if (!uploads || !getProject(db, c.req.param('id')))
+      return c.json({ error: 'Project not found' }, 404)
+    return c.json(uploads.usage(c.req.param('id')))
   })
   return app
 }

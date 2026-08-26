@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
@@ -244,7 +244,152 @@ export class UploadStore {
       }
       this.db.prepare('DELETE FROM attachments WHERE id = ?').run(row.id)
     }
+    const complete = this.db
+      .prepare("SELECT * FROM attachments WHERE status = 'complete'")
+      .all() as UploadRow[]
+    for (const row of complete) {
+      if (!row.rel_path || !(await this.exists(row))) {
+        this.db
+          .prepare("UPDATE attachments SET status = 'failed' WHERE id = ?")
+          .run(row.id)
+        console.warn(`Attachment file missing: ${row.id}`)
+      }
+    }
+    await this.removeOrphans()
     return rows.length
+  }
+
+  private async exists(row: UploadRow) {
+    try {
+      await stat(join(this.options.dataDir, this.resolvePath(row)))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private async removeOrphans() {
+    const known = new Set(
+      (
+        this.db
+          .prepare('SELECT * FROM attachments WHERE rel_path IS NOT NULL')
+          .all() as UploadRow[]
+      ).map((row) => this.resolvePath(row)),
+    )
+    const projectsRoot = join(this.options.dataDir, 'projects')
+    let projects: string[]
+    try {
+      projects = await readdir(projectsRoot)
+    } catch {
+      return
+    }
+    for (const project of projects) {
+      const sessionsRoot = join(projectsRoot, project, 'sessions')
+      let sessions: string[]
+      try {
+        sessions = await readdir(sessionsRoot)
+      } catch {
+        continue
+      }
+      for (const session of sessions) {
+        const filesRoot = join(sessionsRoot, session, 'files')
+        let files: string[]
+        try {
+          files = await readdir(filesRoot)
+        } catch {
+          continue
+        }
+        for (const file of files) {
+          const relPath = join(
+            'projects',
+            project,
+            'sessions',
+            session,
+            'files',
+            file,
+          )
+          if (!known.has(relPath))
+            await rm(join(this.options.dataDir, relPath), { force: true })
+        }
+      }
+    }
+  }
+
+  private resolvePath(row: UploadRow) {
+    if (row.rel_path!.startsWith('projects/')) return row.rel_path!
+    const session = this.db
+      .prepare('SELECT project_id FROM sessions WHERE id = ?')
+      .get(row.session_id) as { project_id: string } | undefined
+    return join(
+      'projects',
+      session?.project_id ?? '',
+      'sessions',
+      row.session_id,
+      'files',
+      row.rel_path!,
+    )
+  }
+
+  async deleteSession(id: string) {
+    const session = this.db
+      .prepare('SELECT project_id FROM sessions WHERE id = ?')
+      .get(id) as { project_id: string } | undefined
+    if (!session) return false
+    this.db.exec('BEGIN')
+    try {
+      this.db.prepare('DELETE FROM attachments WHERE session_id = ?').run(id)
+      this.db
+        .prepare('UPDATE sessions SET deleted_at = ?, status = ? WHERE id = ?')
+        .run(this.now(), 'archived', id)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+    await rm(
+      join(
+        this.options.dataDir,
+        'projects',
+        session.project_id,
+        'sessions',
+        id,
+      ),
+      {
+        recursive: true,
+        force: true,
+      },
+    )
+    return true
+  }
+
+  async deleteProject(id: string) {
+    const project = this.db
+      .prepare('SELECT id FROM projects WHERE id = ?')
+      .get(id) as { id: string } | undefined
+    if (!project) return false
+    const sessions = this.db
+      .prepare('SELECT id FROM sessions WHERE project_id = ?')
+      .all(id) as Array<{ id: string }>
+    for (const session of sessions) await this.deleteSession(session.id)
+    this.db.prepare('DELETE FROM projects WHERE id = ?').run(id)
+    await rm(join(this.options.dataDir, 'projects', id), {
+      recursive: true,
+      force: true,
+    })
+    return true
+  }
+
+  usage(projectId: string) {
+    return this.db
+      .prepare(
+        `
+      SELECT COALESCE(SUM(a.size_bytes), 0) AS attachmentBytes,
+             COUNT(a.id) AS attachmentCount
+      FROM attachments a JOIN sessions s ON s.id = a.session_id
+      WHERE s.project_id = ? AND a.status = 'complete'
+    `,
+      )
+      .get(projectId) as { attachmentBytes: number; attachmentCount: number }
   }
 
   attachment(id: string) {

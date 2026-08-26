@@ -100,8 +100,8 @@ export function createApp(
   if (status) app.route('/', statusRoutes(status))
   else app.get('/api/health', (c) => c.json({ ok: true, version }))
   if (uploadStore) {
-    app.route('/', projectRoutes(uploadStore.database))
-    if (manager) app.route('/', sessionRoutes(manager))
+    app.route('/', projectRoutes(uploadStore.database, uploadStore))
+    if (manager) app.route('/', sessionRoutes(manager, uploadStore))
     if (manager) app.route('/', forkRoutes(manager))
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
@@ -113,7 +113,7 @@ export function createApp(
     )
   }
   if (questions) app.route('/', questionRoutes(questions))
-  if (status) app.route('/', workspaceRoutes(status.db))
+  if (status) app.route('/', workspaceRoutes(status.db, uploadStore))
   if (runner && status)
     app.route(
       '/',

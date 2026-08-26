@@ -18,7 +18,7 @@ export function MessageRow({
   sessionId,
 }: {
   item: Extract<ChatRenderItem, { kind: 'message' }>
-  sessionId: string
+  sessionId?: string
 }) {
   const [open, setOpen] = useState(!item.thought)
   const copy = async () => {
@@ -26,6 +26,7 @@ export function MessageRow({
     toast.success('Copied message')
   }
   const fork = async (branch: boolean) => {
+    if (!sessionId) return
     const text = branch
       ? 'Continue from this point.'
       : window.prompt('Edit this message', item.text)
@@ -63,15 +64,22 @@ export function MessageRow({
         >
           <Copy size={14} />
         </button>
-        {item.role === 'user' ? (
-          <button className="chat-text-action" onClick={() => void fork(false)}>
-            Edit
-          </button>
-        ) : (
-          <button className="chat-text-action" onClick={() => void fork(true)}>
-            Branch from here
-          </button>
-        )}
+        {sessionId &&
+          (item.role === 'user' ? (
+            <button
+              className="chat-text-action"
+              onClick={() => void fork(false)}
+            >
+              Edit
+            </button>
+          ) : (
+            <button
+              className="chat-text-action"
+              onClick={() => void fork(true)}
+            >
+              Branch from here
+            </button>
+          ))}
       </div>
       {item.role === 'user' ? (
         <p>

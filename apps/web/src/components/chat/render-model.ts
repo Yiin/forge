@@ -106,7 +106,7 @@ export function toRenderModel(
     } else if (content.type === 'attachment_ref') {
       result.push({
         kind: 'attachment',
-        id: message.itemId,
+        id: content.attachmentId,
         filename: content.filename,
         path: content.path,
         mime: content.mime,
