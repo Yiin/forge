@@ -4,6 +4,19 @@ import { UploadStore } from '../uploads/store.js'
 
 export function uploadRoutes(store: UploadStore) {
   const app = new Hono()
+  app.post('/api/drafts/:id/uploads', async (c) => {
+    const input = uploadInitSchema.parse(await c.req.json())
+    try {
+      const projectId = c.req.header('X-Project-Id')
+      if (!projectId) return c.json({ error: 'X-Project-Id is required' }, 400)
+      return c.json(store.initDraft(c.req.param('id'), projectId, input), 201)
+    } catch (error) {
+      if (error instanceof RangeError) return c.json({ error: error.message }, 413)
+      if (error instanceof Error && error.message === 'Project not found')
+        return c.json({ error: error.message }, 404)
+      throw error
+    }
+  })
   app.post('/api/sessions/:id/uploads', async (c) => {
     const input = uploadInitSchema.parse(await c.req.json())
     try {

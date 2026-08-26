@@ -23,6 +23,13 @@ export const prompt = z.object({
   attachmentIds: z.array(id).optional(),
   harness: z.string().min(1).optional(),
 })
+export const promoteDraft = z.object({
+  draftId: id,
+  projectId: id,
+  harness: z.string().min(1),
+  text: z.string().min(1),
+  attachmentIds: z.array(id).optional(),
+})
 export const interrupt = z.object({ sessionId: id })
 export const fork = z.object({
   sessionId: id,
@@ -156,6 +163,7 @@ export const commandSchemas = {
   archiveProject,
   createSession,
   prompt,
+  promoteDraft,
   interrupt,
   fork,
   btw,
@@ -172,6 +180,7 @@ export type CreateProject = z.infer<typeof createProject>
 export type ArchiveProject = z.infer<typeof archiveProject>
 export type CreateSession = z.infer<typeof createSession>
 export type Prompt = z.infer<typeof prompt>
+export type PromoteDraft = z.infer<typeof promoteDraft>
 export type Interrupt = z.infer<typeof interrupt>
 export type Fork = z.infer<typeof fork>
 export type Btw = z.infer<typeof btw>

@@ -40,6 +40,7 @@ export function Composer({
   onSend,
   sending = false,
   draftMode = false,
+  draftProjectId,
   initialText = '',
   onTextChange,
 }: {
@@ -55,6 +56,7 @@ export function Composer({
   ) => Promise<void>
   sending?: boolean
   draftMode?: boolean
+  draftProjectId?: string
   initialText?: string
   onTextChange?: (text: string) => void
 }) {
@@ -178,10 +180,14 @@ export function Composer({
         }),
       )
     try {
-      const result = await api.upload(sessionId, file, (progress) =>
-        dispatchUploads((state) =>
-          attachmentUploadsReducer(state, { type: 'progress', id, progress }),
-        ),
+      const result = await api.upload(
+        sessionId,
+        file,
+        (progress) =>
+          dispatchUploads((state) =>
+            attachmentUploadsReducer(state, { type: 'progress', id, progress }),
+          ),
+        draftProjectId,
       )
       dispatchUploads((state) =>
         attachmentUploadsReducer(state, {
@@ -365,7 +371,6 @@ export function Composer({
               aria-label="Attach files"
               type="file"
               multiple
-              disabled={draftMode}
               onChange={(event) => {
                 addFiles(event.target.files ?? [])
                 event.target.value = ''

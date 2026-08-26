@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { useNavigate, useParams } from '@tanstack/react-router'
 import { Composer } from '../components/chat/Composer'
 import { api } from '../lib/api'
 import { useDraftsStore } from '../stores/drafts'
 
 export function DraftRoute() {
   const { draftId } = useParams({ from: '/draft/$draftId' })
+  const navigate = useNavigate()
   const draft = useDraftsStore((state) => state.drafts[draftId])
   const hydrate = useDraftsStore((state) => state.hydrate)
   const [projectMissing, setProjectMissing] = useState(false)
@@ -42,14 +43,29 @@ export function DraftRoute() {
       </header>
       <Composer
         sessionId={draft.id}
+        draftProjectId={draft.projectId}
         harness={draft.harness}
         draftMode
         initialText={draft.prompt}
         onTextChange={(prompt) =>
           useDraftsStore.getState().update(draft.id, { prompt })
         }
-        onSend={async () => {
-          throw new Error('Draft promotion is not available yet')
+        onSend={async (text, attachmentIds, selectedHarness) => {
+          useDraftsStore.getState().update(draft.id, { promotionState: 'promoting' })
+          try {
+            const result = (await api.promoteDraft({
+              draftId: draft.id,
+              projectId: draft.projectId,
+              harness: selectedHarness || draft.harness,
+              text,
+              attachmentIds,
+            })) as { sessionId: string }
+            useDraftsStore.getState().update(draft.id, { promotionState: 'promoted' })
+            await navigate({ to: '/s/$sessionId', params: { sessionId: result.sessionId } })
+          } catch (error) {
+            useDraftsStore.getState().update(draft.id, { promotionState: 'failed' })
+            throw error
+          }
         }}
       />
     </section>

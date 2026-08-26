@@ -14,6 +14,7 @@ import {
   type Fork,
   type Interrupt,
   type Prompt,
+  type PromoteDraft,
   type EpicStart,
 } from '@forge/protocol/commands'
 import { putUpload } from './upload'
@@ -131,15 +132,19 @@ export class ForgeApi {
   prompt(input: Prompt) {
     return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)
   }
-  async upload(sessionId: string, file: File, onProgress?: UploadProgress) {
+  promoteDraft(input: PromoteDraft) {
+    return this.post(`/api/drafts/${encodeURIComponent(input.draftId)}/promote`, null, input, input.draftId)
+  }
+  async upload(sessionId: string, file: File, onProgress?: UploadProgress, projectId?: string) {
+    const path = projectId
+      ? `/api/drafts/${encodeURIComponent(sessionId)}/uploads`
+      : `/api/sessions/${encodeURIComponent(sessionId)}/uploads`
     const init = (await this.post(
-      `/api/sessions/${encodeURIComponent(sessionId)}/uploads`,
+      path,
       null,
-      {
-        filename: file.name,
-        mime: file.type || 'application/octet-stream',
-        sizeBytes: file.size,
-      },
+      { filename: file.name, mime: file.type || 'application/octet-stream', sizeBytes: file.size },
+      undefined,
+      projectId ? { 'X-Project-Id': projectId } : undefined,
     )) as { attachmentId: string; putUrl: string }
     await putUpload(init, file, this.baseUrl, onProgress)
     onProgress?.(1)
@@ -172,9 +177,9 @@ export class ForgeApi {
   btw(input: Btw) {
     return this.post(`/api/sessions/${input.sessionId}/btw`, btw, input)
   }
-  private async post(path: string, schema: BodySchema | null, body: unknown) {
+  private async post(path: string, schema: BodySchema | null, body: unknown, stableRequestId?: string, extraHeaders?: Record<string, string>) {
     const data = schema ? schema.parse(body) : body
-    const requestId = makeRequestId()
+    const requestId = stableRequestId ?? makeRequestId()
     for (let attempt = 0; ; attempt++) {
       let response: Response
       try {
@@ -182,7 +187,8 @@ export class ForgeApi {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-request-id': requestId,
+            'Idempotency-Key': requestId,
+            ...extraHeaders,
           },
           body: JSON.stringify(data),
         })
