@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@forge/protocol": "workspace:*",
+    "@hono/node-ws": "^1.2.0",
     "@hono/node-server": "^1.19.0",
     "@zed-industries/agent-client-protocol": "0.4.x",
     "drizzle-orm": "^0.44.0",

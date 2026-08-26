@@ -95,7 +95,7 @@ export function appendMessage(db: Db, input: AppendMessage) {
     db.exec('ROLLBACK')
     throw error
   }
-  eventBus?.publishMessage({
+  eventBus?.publishPersisted({
     seq: saved.seq,
     sessionId: saved.sessionId,
     msg: {

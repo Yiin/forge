@@ -8,22 +8,42 @@ export class EventBus {
   private readonly listeners = new Set<Listener>()
   private readonly messageListeners = new Set<MessageListener>()
 
-  publish(event: Ephemeral) {
+  publishEphemeral(event: Ephemeral) {
     for (const listener of this.listeners) listener(event)
   }
 
-  publishMessage(event: ServerEvent) {
+  publishPersisted(event: ServerEvent) {
     for (const listener of this.messageListeners) listener(event)
   }
 
-  subscribe(listener: Listener) {
+  /** @deprecated Use publishEphemeral. */
+  publish(event: Ephemeral) {
+    this.publishEphemeral(event)
+  }
+
+  /** @deprecated Use publishPersisted. */
+  publishMessage(event: ServerEvent) {
+    this.publishPersisted(event)
+  }
+
+  subscribeEphemeral(listener: Listener) {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
-  subscribeMessages(listener: MessageListener) {
+  subscribePersisted(listener: MessageListener) {
     this.messageListeners.add(listener)
     return () => this.messageListeners.delete(listener)
+  }
+
+  /** @deprecated Use subscribeEphemeral. */
+  subscribe(listener: Listener) {
+    return this.subscribeEphemeral(listener)
+  }
+
+  /** @deprecated Use subscribePersisted. */
+  subscribeMessages(listener: MessageListener) {
+    return this.subscribePersisted(listener)
   }
 
   get size() {
