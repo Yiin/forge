@@ -20,8 +20,10 @@ export function Timeline({
   const messages = useMessagesStore(
     (state) => state.bySession[sessionId] ?? EMPTY_MESSAGES,
   )
-  const children = useSessionsStore((state) =>
-    state.sessions.filter((session) => session.parentSessionId === sessionId),
+  const sessions = useSessionsStore((state) => state.sessions)
+  const children = useMemo(
+    () => sessions.filter((session) => session.parentSessionId === sessionId),
+    [sessions, sessionId],
   )
   const items = useMemo(
     () => toRenderModel(messages, resumedWithRecap, children),

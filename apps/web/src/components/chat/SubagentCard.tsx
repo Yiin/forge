@@ -19,11 +19,15 @@ import {
 } from './subagent'
 import { SubagentTranscript } from './SubagentTranscript'
 
+const EMPTY_MESSAGES: Message[] = []
+
 export function SubagentCard({ child }: { child: SubagentSession }) {
   const [expanded, setExpanded] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [now, setNow] = useState(() => Date.now())
-  const messages = useMessagesStore((state) => state.bySession[child.id] ?? [])
+  const messages = useMessagesStore(
+    (state) => state.bySession[child.id] ?? EMPTY_MESSAGES,
+  )
   const status = deriveSubagentStatus(messages, child.status)
   const preview = resultPreview(messages)
   const tools = toolCount(messages)

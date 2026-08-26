@@ -59,4 +59,19 @@ describe('subagent display model', () => {
       { kind: 'subagent', id: 'subagent-child', child },
     ])
   })
+
+  it('places each child card once when anchors resolve the spawn seq', () => {
+    const child = { id: 'child', title: 'Research', spawnedBySeq: 7 }
+    expect(
+      placeSubagents(
+        [{ id: 'item-a' }, { id: 'item-b' }],
+        [child],
+        new Map([['item-a', 7]]),
+      ),
+    ).toEqual([
+      { id: 'item-a' },
+      { kind: 'subagent', id: 'subagent-child', child },
+      { id: 'item-b' },
+    ])
+  })
 })
