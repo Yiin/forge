@@ -184,8 +184,8 @@ export class SessionManager {
     })
     for (const attachmentId of attachmentIds ?? []) {
       const attachment = this.db.prepare(
-        "SELECT id, filename, rel_path FROM attachments WHERE id = ? AND session_id = ? AND status = 'complete'",
-      ).get(attachmentId, id) as { id: string; filename: string; rel_path: string | null } | undefined
+        "SELECT id, filename, mime, size_bytes, rel_path FROM attachments WHERE id = ? AND session_id = ? AND status = 'complete'",
+      ).get(attachmentId, id) as { id: string; filename: string; mime: string; size_bytes: number; rel_path: string | null } | undefined
       if (attachment?.rel_path)
         appendMessage(this.db, {
           sessionId: id,
@@ -193,7 +193,7 @@ export class SessionManager {
           itemId: makeId('item_'),
           role: 'user',
           type: 'attachment_ref',
-          content: { type: 'attachment_ref', attachmentId: attachment.id, filename: attachment.filename, path: attachment.rel_path },
+          content: { type: 'attachment_ref', attachmentId: attachment.id, filename: attachment.filename, mime: attachment.mime, sizeBytes: attachment.size_bytes, path: attachment.rel_path },
           eventBus: this.bus,
         })
     }
