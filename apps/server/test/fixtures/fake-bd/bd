@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+if [ "${FAKE_BD_MODE:-ok}" = "malformed" ]; then
+  echo 'not json'
+  exit 0
+fi
+if [ "${FAKE_BD_MODE:-ok}" = "error" ]; then
+  echo 'fake bd failed' >&2
+  exit 17
+fi
+case "${1:-}" in
+  ready|list|show)
+    printf '%s\n' '[{"id":"forge-test","title":"Test bead","description":"A test","status":"open","priority":1,"labels":["test"],"dependencies":[]}]'
+    ;;
+  comments)
+    printf '%s\n' '[{"created_at":"2099-01-01T00:00:00Z"}]'
+    ;;
+  *)
+    printf '%s\n' '{}'
+    ;;
+esac
