@@ -11,8 +11,36 @@ import {
   DropdownMenu,
 } from './dropdown-menu'
 import { StatusPanel } from './status-panel'
+import { Checkbox } from './checkbox'
+import { Field } from './field'
+import { IconButton } from './icon-button'
+import { Input } from './input'
+import { Switch } from './switch'
+import { Textarea } from './textarea'
 
 describe('interaction primitives', () => {
+  it('provides shared field controls with accessible names and states', () => {
+    const onCheckedChange = vi.fn()
+    render(
+      <>
+        <Field label="Name" htmlFor="name" description="Shown to collaborators" error="Name is required">
+          <Input id="name" aria-invalid="true" />
+        </Field>
+        <Textarea aria-label="Notes" disabled />
+        <Checkbox label="Remember me" />
+        <Switch aria-label="Enable feature" checked onCheckedChange={onCheckedChange} />
+        <IconButton label="Close">×</IconButton>
+      </>,
+    )
+    expect(screen.getByLabelText('Name').getAttribute('aria-invalid')).toBe('true')
+    expect(screen.getByText('Name is required').getAttribute('role')).toBe('alert')
+    expect((screen.getByRole('textbox', { name: 'Notes' }) as HTMLTextAreaElement).disabled).toBe(true)
+    expect(screen.getByRole('checkbox', { name: 'Remember me' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable feature' }))
+    expect(onCheckedChange).toHaveBeenCalledWith(false)
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
+  })
+
   it('keeps focus inside a dialog and restores it after Escape', async () => {
     const onOpenChange = vi.fn()
     const { rerender } = render(
