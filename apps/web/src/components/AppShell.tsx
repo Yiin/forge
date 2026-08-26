@@ -13,6 +13,7 @@ import { handleShortcut, registerShortcuts } from '../lib/shortcuts'
 import { useNavigate } from '@tanstack/react-router'
 import { useSessionsStore } from '../stores/sessions'
 import { ProjectCreationDialog } from './ProjectCreationDialog'
+import { openNewDraft } from '../lib/draft-entry'
 export function AppShell() {
   const location = useLocation()
   const store = useShellStore()
@@ -31,13 +32,14 @@ export function AppShell() {
     window.addEventListener('keydown', onKeyDown)
     const sessions = () => useSessionsStore.getState().sessions
     const go = (to: string) => void navigate({ to: to as never })
+    const newDraft = () => void openNewDraft(navigate).catch(() => undefined)
     const unregister = registerShortcuts({
       'sidebar.toggle': store.toggleSidebar,
       'navigate.chat': () => go('/'),
       'navigate.runs': () => go('/runs'),
       'navigate.files': () => go('/files'),
       'navigate.settings': () => go('/settings'),
-      'session.new': () => go('/?new=1'),
+      'session.new': newDraft,
       'session.previous': () => {
         const list = sessions()
         const index = list.findIndex(

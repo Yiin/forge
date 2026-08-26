@@ -31,7 +31,7 @@ describe('ChatLifecycle', () => {
     expect(onRetry).toHaveBeenCalledOnce()
   })
 
-  it('names reconnecting, ready, working, and empty states', () => {
+  it('names reconnecting, ready, and working states without a start card', () => {
     const view = render(
       <ChatLifecycle
         loading={false}
@@ -42,7 +42,7 @@ describe('ChatLifecycle', () => {
       />,
     )
     expect(screen.getByText(/Reconnecting/).textContent).toContain('preserved')
-    expect(screen.getByText(/No messages yet/)).toBeTruthy()
+    expect(screen.queryByText(/No messages yet/)).toBeNull()
     view.rerender(
       <ChatLifecycle
         loading={false}

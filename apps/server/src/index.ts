@@ -322,6 +322,16 @@ async function startE2eServer(): Promise<void> {
         await writeFile(statePath, JSON.stringify(state))
         return response({ id })
       }
+      if (request.method === 'GET' && url.pathname === '/api/projects') {
+        return response(
+          state.projects.map((project) => ({
+            ...project,
+            name: 'E2E project',
+            path: '/tmp/e2e-project',
+            createdAt: 1,
+          })),
+        )
+      }
       const project = url.pathname.match(/^\/api\/projects\/([^/]+)\/sessions$/)
       if (request.method === 'POST' && project) {
         const id = `ses_${crypto.randomUUID()}`
@@ -347,6 +357,7 @@ async function startE2eServer(): Promise<void> {
         return response({ id })
       }
       const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/prompt$/)
+      const promote = url.pathname.match(/^\/api\/drafts\/([^/]+)\/promote$/)
       const sessionRow = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
       const shapeSession = (session: E2eState['sessions'][number]) => ({
         ...session,
@@ -381,6 +392,17 @@ async function startE2eServer(): Promise<void> {
         return response(
           state.messages.filter((message) => message.sessionId === messages[1]),
         )
+      if (request.method === 'POST' && promote) {
+        const body = (await request.json()) as { projectId?: string }
+        const id = `ses_${crypto.randomUUID()}`
+        state.sessions.push({ id, projectId: body.projectId ?? '' })
+        await writeFile(statePath, JSON.stringify(state))
+        publish({ sessionId: id, type: 'turn_start', role: 'system', content: {} })
+        for (const text of ['first ', 'second ', 'third'])
+          publish({ sessionId: id, type: 'text_delta', role: 'agent', content: { text } })
+        publish({ sessionId: id, type: 'turn_end', role: 'system', content: {} })
+        return response({ sessionId: id })
+      }
       if (request.method === 'POST' && prompt) {
         const sessionId = prompt[1]
         publish({ sessionId, type: 'turn_start', role: 'system', content: {} })

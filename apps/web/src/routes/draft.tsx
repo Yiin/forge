@@ -3,13 +3,22 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 import { Composer } from '../components/chat/Composer'
 import { api } from '../lib/api'
 import { useDraftsStore } from '../stores/drafts'
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select'
+import type { ProjectSummary } from '../stores/sessions'
 
 export function DraftRoute() {
   const { draftId } = useParams({ from: '/draft/$draftId' })
   const navigate = useNavigate()
   const draft = useDraftsStore((state) => state.drafts[draftId])
   const hydrate = useDraftsStore((state) => state.hydrate)
-  const [projectMissing, setProjectMissing] = useState(false)
+  const [projects, setProjects] = useState<ProjectSummary[]>([])
+  const [loading, setLoading] = useState(true)
   useEffect(() => {
     hydrate()
     void api
@@ -18,15 +27,20 @@ export function DraftRoute() {
         const projects = Array.isArray(value)
           ? value
           : ((value as { projects?: unknown[] }).projects ?? [])
-        const ids = projects.map((project) =>
-          String((project as { id: string }).id),
-        )
+        const normalized = projects.map((project) => ({
+          id: String((project as { id: string }).id),
+          name: String((project as { name?: string }).name ?? 'Unnamed project'),
+          path: (project as { path?: string }).path,
+        }))
+        setProjects(normalized)
+        const ids = normalized.map((project) => project.id)
         useDraftsStore.getState().removeInvalid(ids)
-        setProjectMissing(!useDraftsStore.getState().drafts[draftId])
+        setLoading(false)
       })
-      .catch(() => undefined)
+      .catch(() => setLoading(false))
   }, [draftId, hydrate])
-  if (!draft || projectMissing)
+  if (loading) return <section className="empty-panel" role="status"><p>Loading draft…</p></section>
+  if (!draft || !projects.some((project) => project.id === draft.projectId))
     return (
       <section className="empty-panel">
         <h1>Draft not found</h1>
@@ -35,11 +49,25 @@ export function DraftRoute() {
     )
   return (
     <section className="session-view draft-view" aria-label="Local draft">
-      <header className="session-header">
-        <div className="session-heading">
-          <h1>New draft</h1>
-          <span className="session-context-label">Local draft</span>
-        </div>
+      <header className="draft-hero">
+        <span className="session-context-label">Local draft</span>
+        <h1>What do you want to build?</h1>
+        <label className="draft-project-label" htmlFor="draft-project">Project</label>
+        <Select
+          value={draft.projectId}
+          onValueChange={(value) => {
+            if (typeof value !== 'string' || value === draft.projectId) return
+            const next = useDraftsStore.getState().getOrCreate(value)
+            void navigate({ to: '/draft/$draftId', params: { draftId: next.id }, replace: true })
+          }}
+        >
+          <SelectTrigger id="draft-project" aria-label="Draft project">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            {projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+          </SelectPopup>
+        </Select>
       </header>
       <Composer
         sessionId={draft.id}

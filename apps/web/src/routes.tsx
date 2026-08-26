@@ -6,7 +6,6 @@ import {
 } from '@tanstack/react-router'
 import { AppShell } from './components/AppShell'
 import { FileBrowser } from './components/files/FileBrowser'
-import { readLastSession } from './lib/shell-storage'
 import { SessionRoute } from './routes/session'
 import { HomeRoute } from './routes/home'
 import { SearchRoute } from './routes/search'
@@ -26,11 +25,6 @@ const index = createRoute({
   getParentRoute: () => root,
   path: '/',
   validateSearch: (value: { new?: string }) => ({ new: value.new }),
-  beforeLoad: ({ search }) => {
-    if (search.new) return
-    const id = readLastSession()
-    if (id) throw redirect({ to: '/s/$sessionId', params: { sessionId: id } })
-  },
   component: HomeRoute,
 })
 const session = createRoute({

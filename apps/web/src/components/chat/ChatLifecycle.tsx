@@ -13,14 +13,14 @@ export function ChatLifecycle({
   onRetry,
   connection,
   running,
-  empty,
+  empty: _empty,
 }: {
   loading: boolean
   error?: string
   onRetry: () => void
   connection: ConnectionState
   running: boolean
-  empty: boolean
+  empty?: boolean
 }) {
   if (loading)
     return (
@@ -44,21 +44,6 @@ export function ChatLifecycle({
       <div className="chat-lifecycle-status" role="status" aria-live="polite">
         {connectionLabel(connection, running)}
       </div>
-      {empty && (
-        <div className="chat-empty status-panel">
-          <span>No messages yet. Send a message to start this session.</span>
-          <button
-            type="button"
-            onClick={() =>
-              document
-                .querySelector<HTMLTextAreaElement>('#message-composer')
-                ?.focus()
-            }
-          >
-            Start session
-          </button>
-        </div>
-      )}
     </>
   )
 }

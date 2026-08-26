@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { api } from '../../lib/api'
 import { openProjectCreation } from '../ProjectCreationDialog'
+import { openNewDraft } from '../../lib/draft-entry'
 import {
   Select,
   SelectItem,
@@ -98,6 +99,10 @@ export function SessionSidebar() {
     setDrawerOpen(false)
     await navigate({ to: '/s/$sessionId', params: { sessionId: id } })
   }
+  function newDraft() {
+    setDrawerOpen(false)
+    void openNewDraft(navigate).catch(() => undefined)
+  }
   async function rename(session: SessionSummary, title: string) {
     const clean = title.trim()
     setEditing(null)
@@ -151,14 +156,9 @@ export function SessionSidebar() {
           >
             <Search size={16} />
           </button>
-          <Link
-            className="icon-button"
-            aria-label="New session"
-            to="/"
-            search={{ new: '1' }}
-          >
+          <button className="icon-button" aria-label="New session" onClick={newDraft}>
             <Plus size={17} />
-          </Link>
+          </button>
         </div>
       </div>
       <div className="primary-nav">
@@ -167,7 +167,10 @@ export function SessionSidebar() {
           search={{ new: '1' }}
           activeOptions={{ exact: true }}
           activeProps={{ className: 'active', 'aria-current': 'page' }}
-          onClick={() => setDrawerOpen(false)}
+          onClick={(event) => {
+            event.preventDefault()
+            newDraft()
+          }}
         >
           <MessageSquare size={16} /> Chat
         </Link>
@@ -238,9 +241,9 @@ export function SessionSidebar() {
         {active.length === 0 && settled.length === 0 && (
           <li className="sidebar-empty">
             No sessions yet.
-            <Link to="/" search={{ new: '1' }}>
+            <button className="text-button" onClick={newDraft}>
               Start a session
-            </Link>
+            </button>
           </li>
         )}
         {active.map((session, index) => (

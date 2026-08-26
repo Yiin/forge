@@ -189,11 +189,6 @@ export function SessionRoute() {
         }}
         connection={connection}
         running={(sessionStatus ?? loadedStatus) === 'running'}
-        empty={
-          !useMessagesStore(
-            (state) => (state.bySession[sessionId] ?? []).length,
-          )
-        }
       />
       {!loading && !loadError && (
         <Timeline

@@ -8,7 +8,7 @@ export function workspaceRoutes(db: DatabaseSync, uploads?: UploadStore) {
   app.get('/api/projects', (c) => {
     const projects = db
       .prepare(
-        'SELECT id, name, path FROM projects WHERE archived_at IS NULL ORDER BY name',
+        'SELECT id, name, path, created_at FROM projects WHERE archived_at IS NULL ORDER BY name',
       )
       .all()
     return c.json({ projects })

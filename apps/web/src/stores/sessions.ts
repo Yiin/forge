@@ -12,6 +12,7 @@ export type SessionSummary = {
   created_at?: number
   project_id?: string | null
   lastActivityAt?: number | string
+  deletedAt?: number | null
   snippet?: string
   unread?: boolean
   forkedAtSeq?: number | null
@@ -19,7 +20,13 @@ export type SessionSummary = {
   contextConfidence?: string | null
   retention?: 'permanent' | 'discardable'
 }
-export type ProjectSummary = { id: string; name: string; path?: string }
+export type ProjectSummary = {
+  id: string
+  name: string
+  path?: string
+  createdAt?: number
+  archivedAt?: number | null
+}
 type SessionsState = {
   sessions: SessionSummary[]
   projects: ProjectSummary[]

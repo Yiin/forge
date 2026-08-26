@@ -29,6 +29,7 @@ import { openProjectCreation } from '../ProjectCreationDialog'
 import { messageHitUrl, runHitUrl, searchUrl } from './palette-logic'
 import { parseSnippet } from '../search/search-logic'
 import { registerShortcuts, shortcutCommands } from '../../lib/shortcuts'
+import { openNewDraft } from '../../lib/draft-entry'
 type SearchResult = {
   sessions: Array<{ sessionId: string; title: string; snippet: string }>
   messages: Array<{
@@ -119,6 +120,10 @@ export function CommandPalette() {
     close()
     void navigate({ to: to as never })
   }
+  const newDraft = () => {
+    close()
+    void openNewDraft(navigate).catch(() => undefined)
+  }
   const copySession = async () => {
     if (!sessionId) return
     await navigator.clipboard.writeText(sessionId)
@@ -143,7 +148,7 @@ export function CommandPalette() {
         <CommandList>
           <CommandEmpty>No matching commands.</CommandEmpty>
           <CommandGroup heading="Actions">
-            <CommandItem onSelect={() => go('/')}>
+            <CommandItem onSelect={newDraft}>
               <Plus />
               New session{projects.size > 1 ? ' in a project' : ''}
             </CommandItem>
