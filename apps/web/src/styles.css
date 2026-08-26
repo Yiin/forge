@@ -1586,6 +1586,9 @@ kbd {
 }
 .project-form button,
 .composer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   border-radius: 8px;
   padding: 10px 14px;
