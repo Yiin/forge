@@ -67,6 +67,28 @@ describe('app wiring', () => {
       body: JSON.stringify({ questionId: 'q_1', answers: ['a'] }),
     })
     expect(bad.status).toBe(400)
+
+    // Workspace routes stay reachable on the paths nobody else claims.
+    const renamed = await app.request(`/api/sessions/${id}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'renamed' }),
+    })
+    expect(renamed.status).toBe(200)
+    const settled = await app.request(`/api/sessions/${id}/settle`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ settled: true }),
+    })
+    expect(settled.status).toBe(200)
+
+    // The typed list routes win the paths both routers register.
+    expect(await (await app.request('/api/projects')).json()).toBeInstanceOf(
+      Array,
+    )
+    expect(await (await app.request('/api/sessions')).json()).toBeInstanceOf(
+      Array,
+    )
     manager.close()
   })
 })

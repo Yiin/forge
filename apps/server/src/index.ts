@@ -21,6 +21,7 @@ import { projectRoutes } from './http/projects.js'
 import { sessionRoutes } from './http/sessions.js'
 import { SessionManager } from './sessions/manager.js'
 import type { HarnessFactory } from './sessions/harness.js'
+import { workspaceRoutes } from './http/workspace.js'
 import { epicRoutes } from './http/epics.js'
 import type { EpicRunner } from './epics/runner.js'
 
@@ -47,6 +48,7 @@ export function createApp(
     app.route('/', searchRoutes(uploadStore.database))
   }
   if (questions) app.route('/', questionRoutes(questions))
+  if (status) app.route('/', workspaceRoutes(status.db))
   if (runner && status)
     app.route(
       '/',
