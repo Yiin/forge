@@ -12,6 +12,8 @@ export const harnessConfigSchema = z
   .strict()
 
 export const forgeConfigSchema = z.object({
+  dataDir: z.string().min(1).default('.forge/data'),
+  port: z.number().int().positive().max(65535).default(3900),
   harness: z.record(z.string().min(1), harnessConfigSchema),
 })
 
