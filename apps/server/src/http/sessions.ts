@@ -37,6 +37,7 @@ export function sessionRoutes(manager: SessionManager) {
         value.data.sessionId,
         value.data.text,
         c.req.header('Idempotency-Key'),
+        value.data.attachmentIds,
       )
       return c.json({ ok: true })
     } catch (error) {

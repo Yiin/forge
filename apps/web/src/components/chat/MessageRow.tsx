@@ -10,6 +10,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { ChatMarkdown } from './ChatMarkdown'
 import type { ChatRenderItem } from './render-model'
+import { SkillChipText } from './SkillChipText'
 
 export function MessageRow({
   item,
@@ -43,7 +44,7 @@ export function MessageRow({
           <Copy size={14} />
         </button>
       </div>
-      <ChatMarkdown text={item.text} />
+      {item.role === 'user' ? <p><SkillChipText text={item.text} skills={[]} /></p> : <ChatMarkdown text={item.text} />}
     </article>
   )
 }
