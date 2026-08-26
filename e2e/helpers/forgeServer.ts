@@ -41,24 +41,30 @@ export async function launchForge(
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   })
-  const port = await new Promise<number>((resolvePort, reject) => {
-    let output = ''
-    const timer = setTimeout(
-      () => reject(new Error(`forge did not start: ${output}`)),
-      10_000,
-    )
-    const onData = (chunk: Buffer) => {
-      output += chunk.toString()
-      const match = output.match(/FORGE_LISTENING\s+(\d+)/)
-      if (match) {
-        clearTimeout(timer)
-        resolvePort(Number(match[1]))
+  let port: number
+  try {
+    port = await new Promise<number>((resolvePort, reject) => {
+      let output = ''
+      const timer = setTimeout(
+        () => reject(new Error(`forge did not start: ${output}`)),
+        10_000,
+      )
+      const onData = (chunk: Buffer) => {
+        output += chunk.toString()
+        const match = output.match(/FORGE_LISTENING\s+(\d+)/)
+        if (match) {
+          clearTimeout(timer)
+          resolvePort(Number(match[1]))
+        }
       }
-    }
-    child.stdout?.on('data', onData)
-    child.stderr?.on('data', onData)
-    child.once('error', reject)
-  })
+      child.stdout?.on('data', onData)
+      child.stderr?.on('data', onData)
+      child.once('error', reject)
+    })
+  } catch (error) {
+    await stopForge(child, dataDir, !options.dataDir)
+    throw error
+  }
   return {
     baseUrl: `http://127.0.0.1:${port}`,
     dataDir,
