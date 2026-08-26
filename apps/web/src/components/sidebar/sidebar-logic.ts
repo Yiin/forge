@@ -57,9 +57,15 @@ export function jumpTarget(sessions: SidebarSession[], number: number) {
   return number >= 1 && number <= 9 ? sessions[number - 1]?.id : undefined
 }
 
-export function relativeTime(value: number | string | undefined, now = Date.now()) {
+export function relativeTime(
+  value: number | string | undefined,
+  now = Date.now(),
+) {
   if (value === undefined) return ''
-  const seconds = Math.max(0, Math.floor((now - new Date(value).getTime()) / 1000))
+  const seconds = Math.max(
+    0,
+    Math.floor((now - new Date(value).getTime()) / 1000),
+  )
   if (seconds < 60) return 'now'
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`

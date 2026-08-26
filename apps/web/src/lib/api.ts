@@ -66,11 +66,15 @@ export class ForgeApi {
     return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)
   }
   async upload(sessionId: string, file: File, onProgress?: UploadProgress) {
-    const init = await this.post(`/api/sessions/${encodeURIComponent(sessionId)}/uploads`, null, {
-      filename: file.name,
-      mime: file.type || 'application/octet-stream',
-      sizeBytes: file.size,
-    }) as { attachmentId: string; putUrl: string }
+    const init = (await this.post(
+      `/api/sessions/${encodeURIComponent(sessionId)}/uploads`,
+      null,
+      {
+        filename: file.name,
+        mime: file.type || 'application/octet-stream',
+        sizeBytes: file.size,
+      },
+    )) as { attachmentId: string; putUrl: string }
     await putUpload(init, file, this.baseUrl, onProgress)
     onProgress?.(1)
     return init

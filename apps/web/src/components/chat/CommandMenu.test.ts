@@ -10,8 +10,16 @@ const commands: ComposerCommand[] = [
 ]
 describe('command menu groups', () => {
   it('shows only relevant groups for each trigger', () => {
-    expect(groupComposerCommands(commands, 'slash-command').map((item) => item.group)).toEqual(['Built-in', 'Harness'])
-    expect(groupComposerCommands(commands, 'skill').map((item) => item.group)).toEqual(['Skills'])
-    expect(groupComposerCommands(commands, 'path').map((item) => item.group)).toEqual(['Files'])
+    expect(
+      groupComposerCommands(commands, 'slash-command').map(
+        (item) => item.group,
+      ),
+    ).toEqual(['Built-in', 'Harness'])
+    expect(
+      groupComposerCommands(commands, 'skill').map((item) => item.group),
+    ).toEqual(['Skills'])
+    expect(
+      groupComposerCommands(commands, 'path').map((item) => item.group),
+    ).toEqual(['Files'])
   })
 })

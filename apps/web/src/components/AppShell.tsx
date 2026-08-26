@@ -49,12 +49,7 @@ function Navigation({ settings = false }: { settings?: boolean }) {
           className="text-button"
           onClick={() => useShellStore.getState().toggleTheme()}
         >
-          {theme === 'dark' ? (
-            <Sun size={16} />
-          ) : (
-            <Moon size={16} />
-          )}{' '}
-          Theme
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />} Theme
         </button>
       </div>
     </nav>

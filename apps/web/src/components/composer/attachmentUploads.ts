@@ -29,17 +29,45 @@ export function attachmentUploadsReducer(
 ): AttachmentUploads {
   const items = state.items
   switch (action.type) {
-    case 'add': return { items: [...items, action.attachment] }
-    case 'progress': return map(items, action.id, (item) => ({ ...item, progress: Math.max(0, Math.min(1, action.progress)) }))
-    case 'complete': return map(items, action.id, (item) => ({ ...item, id: action.attachmentId, progress: 1, state: 'complete', error: undefined }))
-    case 'fail': return map(items, action.id, (item) => ({ ...item, state: 'failed', error: action.error }))
-    case 'retry': return map(items, action.id, (item) => ({ ...item, state: 'uploading', progress: 0, error: undefined }))
-    case 'remove': return { items: items.filter((item) => item.id !== action.id) }
+    case 'add':
+      return { items: [...items, action.attachment] }
+    case 'progress':
+      return map(items, action.id, (item) => ({
+        ...item,
+        progress: Math.max(0, Math.min(1, action.progress)),
+      }))
+    case 'complete':
+      return map(items, action.id, (item) => ({
+        ...item,
+        id: action.attachmentId,
+        progress: 1,
+        state: 'complete',
+        error: undefined,
+      }))
+    case 'fail':
+      return map(items, action.id, (item) => ({
+        ...item,
+        state: 'failed',
+        error: action.error,
+      }))
+    case 'retry':
+      return map(items, action.id, (item) => ({
+        ...item,
+        state: 'uploading',
+        progress: 0,
+        error: undefined,
+      }))
+    case 'remove':
+      return { items: items.filter((item) => item.id !== action.id) }
   }
 }
 
-function map(items: UploadAttachment[], id: string, update: (item: UploadAttachment) => UploadAttachment) {
-  return { items: items.map((item) => item.id === id ? update(item) : item) }
+function map(
+  items: UploadAttachment[],
+  id: string,
+  update: (item: UploadAttachment) => UploadAttachment,
+) {
+  return { items: items.map((item) => (item.id === id ? update(item) : item)) }
 }
 
 export function canSendUploads(state: AttachmentUploads) {
@@ -47,5 +75,7 @@ export function canSendUploads(state: AttachmentUploads) {
 }
 
 export function completedAttachmentIds(state: AttachmentUploads) {
-  return state.items.filter((item) => item.state === 'complete').map((item) => item.id)
+  return state.items
+    .filter((item) => item.state === 'complete')
+    .map((item) => item.id)
 }
