@@ -66,6 +66,24 @@ describe('chat render model', () => {
       { kind: 'system', id: 'i', text: 'Turn interrupted: cancelled' },
     ])
   })
+  it('keeps process details available without crowding the error row', () => {
+    expect(
+      toRenderModel([
+        message({
+          type: 'error',
+          message: 'ACP agent exited with code 1',
+          code: 'command not found',
+        }),
+      ]),
+    ).toEqual([
+      {
+        kind: 'system',
+        id: 'i',
+        text: 'ACP agent exited with code 1',
+        code: 'command not found',
+      },
+    ])
+  })
   it('keeps epic triage cards in the replay model', () => {
     const items = toRenderModel([
       message({

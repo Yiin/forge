@@ -33,7 +33,7 @@ export type ChatRenderItem =
       id: string
       card: Extract<Message['content'], { type: 'epic_triage' }>
     }
-  | { kind: 'system'; id: string; text: string }
+  | { kind: 'system'; id: string; text: string; code?: string }
   | { kind: 'subagent'; id: string; child: SubagentSession }
 
 export function toRenderModel(
@@ -137,7 +137,12 @@ export function toRenderModel(
           : 'Turn interrupted',
       })
     } else if (content.type === 'error') {
-      result.push({ kind: 'system', id: message.itemId, text: content.message })
+      result.push({
+        kind: 'system',
+        id: message.itemId,
+        text: content.message,
+        ...(content.code ? { code: content.code } : {}),
+      })
     }
   }
   return placeSubagents(result, children, anchors) as ChatRenderItem[]
