@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -20,10 +20,14 @@ async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), 'forge-upload-'))
   const db = new DatabaseSync(':memory:')
   db.exec(
-    'CREATE TABLE projects (id TEXT PRIMARY KEY); CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT NOT NULL);',
+    `CREATE TABLE projects (id TEXT PRIMARY KEY);
+     CREATE TABLE sessions (
+       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'idle',
+       deleted_at INTEGER
+     );`,
   )
   db.prepare('INSERT INTO projects VALUES (?)').run('project-one')
-  db.prepare('INSERT INTO sessions VALUES (?, ?)').run(
+  db.prepare('INSERT INTO sessions (id, project_id) VALUES (?, ?)').run(
     'session-one',
     'project-one',
   )
@@ -161,5 +165,56 @@ describe('UploadStore', () => {
         'utf8',
       ),
     ).resolves.toBe('keep')
+  })
+
+  it('removes a session directory and attachment rows', async () => {
+    const { store, db, dir } = await fixture()
+    const files = join(dir, 'projects/project-one/sessions/session-one/files')
+    await mkdir(files, { recursive: true })
+    await writeFile(join(files, 'stored'), 'data')
+    db.prepare(
+      'INSERT INTO attachments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      'att_delete',
+      'session-one',
+      'stored.txt',
+      'text/plain',
+      4,
+      'hash',
+      'projects/project-one/sessions/session-one/files/stored',
+      'complete',
+      Date.now(),
+    )
+    expect(await store.deleteSession('session-one')).toBe(true)
+    expect(store.attachment('att_delete')).toBeUndefined()
+    await expect(stat(files)).rejects.toThrow()
+    expect(
+      db
+        .prepare('SELECT deleted_at, status FROM sessions WHERE id = ?')
+        .get('session-one') as { deleted_at: number; status: string },
+    ).toMatchObject({ status: 'archived' })
+  })
+
+  it('removes unindexed files and marks missing complete files failed', async () => {
+    const { store, db, dir } = await fixture()
+    const files = join(dir, 'projects/project-one/sessions/session-one/files')
+    await mkdir(files, { recursive: true })
+    await writeFile(join(files, 'orphan'), 'orphan')
+    db.prepare(
+      'INSERT INTO attachments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      'att_missing',
+      'session-one',
+      'missing.txt',
+      'text/plain',
+      7,
+      'hash',
+      'projects/project-one/sessions/session-one/files/missing',
+      'complete',
+      Date.now(),
+    )
+    await store.sweep()
+    await expect(stat(join(files, 'orphan'))).rejects.toThrow()
+    expect(store.attachment('att_missing')?.status).toBe('failed')
   })
 })

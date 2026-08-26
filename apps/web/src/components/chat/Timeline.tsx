@@ -1,7 +1,7 @@
 import { ChevronDown, File, FileImage } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Virtualizer } from 'virtua'
-import { Link, useParams } from '@tanstack/react-router'
+import { useParams } from '@tanstack/react-router'
 import { useMessagesStore } from '../../stores/messages'
 import { MessageRow, ToolCallRow } from './MessageRow'
 import { toRenderModel } from './render-model'
@@ -59,9 +59,7 @@ export function Timeline({
         }}
       >
         <Virtualizer<ChatRenderItem> data={items} shift>
-          {(item: ChatRenderItem) => (
-            <RenderItem key={item.id} item={item} sessionId={sessionId} />
-          )}
+          {(item: ChatRenderItem) => <RenderItem key={item.id} item={item} />}
         </Virtualizer>
       </div>
       {!atBottom && (
@@ -84,36 +82,58 @@ export function Timeline({
 
 function RenderItem({
   item,
-  sessionId,
 }: {
   item: ReturnType<typeof toRenderModel>[number]
-  sessionId: string
 }) {
   if (item.kind === 'message') return <MessageRow item={item} />
   if (item.kind === 'tool') return <ToolCallRow item={item} />
   if (item.kind === 'answered-question')
     return <AnsweredQuestionRow question={item.question} answer={item.answer} />
   if (item.kind === 'subagent') return <SubagentCard child={item.child} />
-  if (item.kind === 'attachment')
-    return (
-      <a
-        className="chat-attachment"
-        href={`/api/attachments/${encodeURIComponent(item.id)}`}
-        target={item.mime?.startsWith('image/') ? '_blank' : undefined}
-        rel="noreferrer"
-      >
-        {item.mime?.startsWith('image/') ? (
-          <FileImage size={15} />
-        ) : (
-          <File size={15} />
-        )}{' '}
-        {item.filename}
-        {item.sizeBytes !== undefined && (
-          <small>{formatBytes(item.sizeBytes)}</small>
-        )}
-      </a>
-    )
+  if (item.kind === 'attachment') return <AttachmentItem item={item} />
   return <div className="chat-system">{item.text}</div>
+}
+
+function AttachmentItem({
+  item,
+}: {
+  item: Extract<ChatRenderItem, { kind: 'attachment' }>
+}) {
+  const [removed, setRemoved] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetch(`/api/attachments/${encodeURIComponent(item.id)}`, {
+      headers: { Range: 'bytes=0-0' },
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (response.status === 410) setRemoved(true)
+      })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [item.id])
+  if (removed)
+    return (
+      <span className="chat-attachment">{item.filename} · file removed</span>
+    )
+  return (
+    <a
+      className="chat-attachment"
+      href={`/api/attachments/${encodeURIComponent(item.id)}`}
+      target={item.mime?.startsWith('image/') ? '_blank' : undefined}
+      rel="noreferrer"
+    >
+      {item.mime?.startsWith('image/') ? (
+        <FileImage size={15} />
+      ) : (
+        <File size={15} />
+      )}{' '}
+      {item.filename}
+      {item.sizeBytes !== undefined && (
+        <small>{formatBytes(item.sizeBytes)}</small>
+      )}
+    </a>
+  )
 }
 
 function formatBytes(bytes: number) {
