@@ -1,4 +1,4 @@
-import { ChevronDown, FileText } from 'lucide-react'
+import { ChevronDown, File, FileImage } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Virtualizer } from 'virtua'
 import { Link, useParams } from '@tanstack/react-router'
@@ -75,13 +75,21 @@ function RenderItem({
   if (item.kind === 'tool') return <ToolCallRow item={item} />
   if (item.kind === 'attachment')
     return (
-      <Link
+      <a
         className="chat-attachment"
-        to="/files/$projectId/$"
-        params={{ projectId: sessionId, _splat: item.path }}
+        href={`/api/attachments/${encodeURIComponent(item.id)}`}
+        target={item.mime?.startsWith('image/') ? '_blank' : undefined}
+        rel="noreferrer"
       >
-        <FileText size={15} /> {item.filename}
-      </Link>
+        {item.mime?.startsWith('image/') ? <FileImage size={15} /> : <File size={15} />} {item.filename}
+        {item.sizeBytes !== undefined && <small>{formatBytes(item.sizeBytes)}</small>}
+      </a>
     )
   return <div className="chat-system">{item.text}</div>
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`
+  return `${(bytes / 1024 ** 2).toFixed(1)} MiB`
 }

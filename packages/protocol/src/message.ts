@@ -53,6 +53,8 @@ export const MessageContent = z.discriminatedUnion('type', [
     attachmentId: id,
     path: z.string(),
     filename: z.string(),
+    mime: z.string().optional(),
+    sizeBytes: z.number().int().nonnegative().optional(),
   }),
   z.object({ type: z.literal('turn_start') }),
   z.object({ type: z.literal('turn_end'), stopReason: z.string().optional() }),

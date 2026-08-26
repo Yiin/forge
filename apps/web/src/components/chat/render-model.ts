@@ -17,7 +17,7 @@ export type ChatRenderItem =
       input: unknown
       output?: unknown
     }
-  | { kind: 'attachment'; id: string; filename: string; path: string }
+  | { kind: 'attachment'; id: string; filename: string; path: string; mime?: string; sizeBytes?: number }
   | { kind: 'system'; id: string; text: string }
 
 export function toRenderModel(
@@ -80,6 +80,8 @@ export function toRenderModel(
         id: message.itemId,
         filename: content.filename,
         path: content.path,
+        mime: content.mime,
+        sizeBytes: content.sizeBytes,
       })
     } else if (content.type === 'turn_interrupted') {
       result.push({

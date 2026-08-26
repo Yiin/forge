@@ -528,8 +528,14 @@ kbd {
   margin: 0 auto;
 }
 .composer-attachments { position: absolute; right: 0; bottom: calc(100% + 6px); left: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.attachment-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 240px; border: 1px solid var(--border); border-radius: 999px; padding: 5px 8px; color: var(--muted); background: var(--panel); font-size: 12px; }
-.attachment-chip button { display: inline-flex; border: 0; color: inherit; background: none; cursor: pointer; }
+.attachment-chip { position: relative; display: inline-flex; align-items: center; gap: 5px; max-width: 280px; min-height: 44px; border: 1px solid var(--border); border-radius: 10px; padding: 5px 8px; color: var(--muted); background: var(--panel); font-size: 12px; }
+.attachment-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-chip-meta { white-space: nowrap; }
+.attachment-chip button { display: inline-flex; min-width: 32px; min-height: 32px; align-items: center; justify-content: center; border: 0; color: inherit; background: none; cursor: pointer; }
+.attachment-chip progress { position: absolute; right: 8px; bottom: 2px; left: 8px; width: calc(100% - 16px); height: 2px; accent-color: var(--accent); }
+.attachment-failed { color: #fca5a5; border-color: #fca5a5; }
+.attachment-spinner { animation: chat-spin 1s linear infinite; }
+.composer-drop-overlay { position: absolute; inset: -12px; z-index: 5; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 12px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); pointer-events: none; }
 .composer-file { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; color: var(--muted); cursor: pointer; }
 .composer-file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .composer-harness { max-width: 130px; min-height: 44px; border: 1px solid var(--border); border-radius: 7px; color: inherit; background: var(--panel); padding: 4px; }
@@ -669,6 +675,7 @@ kbd {
   text-decoration: none;
   background: var(--panel);
 }
+.chat-attachment small { color: var(--muted); }
 .chat-jump {
   position: absolute;
   bottom: 28px;

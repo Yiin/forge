@@ -14,6 +14,7 @@ import {
   type Interrupt,
   type Prompt,
 } from '@forge/protocol/commands'
+import { putUpload } from './upload'
 export type ApiOptions = { baseUrl?: string; fetch?: typeof globalThis.fetch }
 export type UploadProgress = (fraction: number) => void
 type BodySchema = { parse: (value: unknown) => unknown }
@@ -57,14 +58,7 @@ export class ForgeApi {
       mime: file.type || 'application/octet-stream',
       sizeBytes: file.size,
     }) as { attachmentId: string; putUrl: string }
-    await new Promise<void>((resolve, reject) => {
-      const request = new XMLHttpRequest()
-      request.open('PUT', `${this.baseUrl}${init.putUrl}`)
-      request.upload.onprogress = (event) => { if (event.lengthComputable) onProgress?.(event.loaded / event.total) }
-      request.onload = () => request.status >= 200 && request.status < 300 ? resolve() : reject(new Error(`Upload failed (${request.status})`))
-      request.onerror = () => reject(new Error('Upload failed'))
-      request.send(file)
-    })
+    await putUpload(init, file, this.baseUrl, onProgress)
     onProgress?.(1)
     return init
   }
