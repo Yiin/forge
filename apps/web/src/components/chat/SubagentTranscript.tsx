@@ -21,7 +21,7 @@ export function SubagentTranscript({ messages }: { messages: Message[] }) {
                 {item.text}
               </div>
             )
-          return null
+          return <div key={item.id} />
         }}
       </Virtualizer>
     </div>
