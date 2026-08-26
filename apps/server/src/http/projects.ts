@@ -14,7 +14,9 @@ export function projectRoutes(db: DatabaseSync) {
     c.json(
       db
         .prepare(
-          'SELECT * FROM projects WHERE archived_at IS NULL ORDER BY created_at DESC',
+          c.req.query('includeArchived') === '1'
+            ? 'SELECT * FROM projects ORDER BY created_at DESC'
+            : 'SELECT * FROM projects WHERE archived_at IS NULL ORDER BY created_at DESC',
         )
         .all(),
     ),
@@ -26,6 +28,15 @@ export function projectRoutes(db: DatabaseSync) {
       Date.now(),
       c.req.param('id'),
     )
+    return c.json({ ok: true })
+  })
+  app.post('/api/projects/:id/rename', async (c) => {
+    const body = (await c.req.json()) as { name?: string }
+    if (!body.name?.trim()) return c.json({ error: 'name is required' }, 400)
+    const result = db
+      .prepare('UPDATE projects SET name = ? WHERE id = ?')
+      .run(body.name.trim(), c.req.param('id')) as { changes?: number }
+    if (!result.changes) return c.json({ error: 'Project not found' }, 404)
     return c.json({ ok: true })
   })
   app.delete('/api/projects/:id', (c) => {
