@@ -44,7 +44,13 @@ export function MessageRow({
           <Copy size={14} />
         </button>
       </div>
-      {item.role === 'user' ? <p><SkillChipText text={item.text} skills={[]} /></p> : <ChatMarkdown text={item.text} />}
+      {item.role === 'user' ? (
+        <p>
+          <SkillChipText text={item.text} skills={[]} />
+        </p>
+      ) : (
+        <ChatMarkdown text={item.text} />
+      )}
     </article>
   )
 }

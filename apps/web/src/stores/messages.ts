@@ -58,10 +58,9 @@ export const useMessagesStore = create<MessagesState>((set) => ({
         ...state.bySession,
         [sessionId]: Array.from(
           new Map(
-            [...(state.bySession[sessionId] ?? []), ...messages].map((message) => [
-              message.seq,
-              message,
-            ]),
+            [...(state.bySession[sessionId] ?? []), ...messages].map(
+              (message) => [message.seq, message],
+            ),
           ).values(),
         ).sort((left, right) => left.seq - right.seq),
       },

@@ -527,41 +527,247 @@ kbd {
   max-width: 900px;
   margin: 0 auto;
 }
-.composer-wrap { position: relative; flex: none; padding: 16px 24px 24px; }
-.ask-question-panel { margin: 0 auto 10px; max-width: 760px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 12px; padding: 14px; background: var(--panel); box-shadow: 0 12px 35px #0003; }
-.ask-question-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
-.ask-question-panel h2 { margin: 8px 0 12px; font-size: 16px; font-weight: 600; }
-.ask-question-options { display: grid; gap: 8px; }
-.ask-question-option { display: grid; gap: 3px; min-height: 44px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; color: inherit; background: transparent; text-align: left; cursor: pointer; }
-.ask-question-option:hover, .ask-question-option.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.ask-question-option span { display: flex; align-items: center; gap: 7px; font: inherit; }
-.ask-question-option small { color: var(--muted); }
-.ask-question-free { display: flex; gap: 8px; }
-.ask-question-free input { min-width: 0; flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 10px; color: inherit; background: transparent; font: inherit; }
-.ask-question-free button, .ask-question-confirm { min-height: 44px; border: 0; border-radius: 8px; padding: 0 14px; color: #10231b; background: var(--accent); cursor: pointer; }
-.ask-question-confirm { margin-top: 10px; }
-.ask-question-free button:disabled, .ask-question-confirm:disabled { opacity: .5; cursor: not-allowed; }
-.chat-answered-question { display: grid; gap: 4px; margin: 8px auto; max-width: 760px; border-left: 2px solid var(--accent); padding: 8px 12px; color: var(--muted); font-size: 13px; }
-.chat-answered-question strong { color: inherit; font-weight: 500; }
-.chat-answered-label { color: var(--accent); font-size: 11px; text-transform: uppercase; }
-.composer-attachments { position: absolute; right: 0; bottom: calc(100% + 6px); left: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.attachment-chip { position: relative; display: inline-flex; align-items: center; gap: 5px; max-width: 280px; min-height: 44px; border: 1px solid var(--border); border-radius: 10px; padding: 5px 8px; color: var(--muted); background: var(--panel); font-size: 12px; }
-.attachment-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.attachment-chip-meta { white-space: nowrap; }
-.attachment-chip button { display: inline-flex; min-width: 32px; min-height: 32px; align-items: center; justify-content: center; border: 0; color: inherit; background: none; cursor: pointer; }
-.attachment-chip progress { position: absolute; right: 8px; bottom: 2px; left: 8px; width: calc(100% - 16px); height: 2px; accent-color: var(--accent); }
-.attachment-failed { color: #fca5a5; border-color: #fca5a5; }
-.attachment-spinner { animation: chat-spin 1s linear infinite; }
-.composer-drop-overlay { position: absolute; inset: -12px; z-index: 5; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 12px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); pointer-events: none; }
-.composer-file { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; color: var(--muted); cursor: pointer; }
-.composer-file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.composer-harness { max-width: 130px; min-height: 44px; border: 1px solid var(--border); border-radius: 7px; color: inherit; background: var(--panel); padding: 4px; }
-.composer textarea { overflow-y: auto; resize: none; }
-.composer-command-menu { position: absolute; right: 0; bottom: calc(100% + 8px); left: 0; z-index: 4; max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 6px; background: var(--panel); box-shadow: 0 16px 45px #0007; }
-.composer-command-menu [cmdk-item] { padding: 8px 10px; border-radius: 6px; cursor: pointer; }
-.composer-command-menu [cmdk-item][aria-selected='true'] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.composer-command-menu [cmdk-group-heading] { padding: 6px 10px 3px; color: var(--muted); font-size: 11px; }
-.skill-chip { display: inline-block; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 5px; padding: 1px 5px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); font-size: .9em; }
+.composer-wrap {
+  position: relative;
+  flex: none;
+  padding: 16px 24px 24px;
+}
+.ask-question-panel {
+  margin: 0 auto 10px;
+  max-width: 760px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--panel);
+  box-shadow: 0 12px 35px #0003;
+}
+.ask-question-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 12px;
+}
+.ask-question-panel h2 {
+  margin: 8px 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.ask-question-options {
+  display: grid;
+  gap: 8px;
+}
+.ask-question-option {
+  display: grid;
+  gap: 3px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.ask-question-option:hover,
+.ask-question-option.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.ask-question-option span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+}
+.ask-question-option small {
+  color: var(--muted);
+}
+.ask-question-free {
+  display: flex;
+  gap: 8px;
+}
+.ask-question-free input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+.ask-question-free button,
+.ask-question-confirm {
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 14px;
+  color: #10231b;
+  background: var(--accent);
+  cursor: pointer;
+}
+.ask-question-confirm {
+  margin-top: 10px;
+}
+.ask-question-free button:disabled,
+.ask-question-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.chat-answered-question {
+  display: grid;
+  gap: 4px;
+  margin: 8px auto;
+  max-width: 760px;
+  border-left: 2px solid var(--accent);
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.chat-answered-question strong {
+  color: inherit;
+  font-weight: 500;
+}
+.chat-answered-label {
+  color: var(--accent);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.composer-attachments {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attachment-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 280px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 5px 8px;
+  color: var(--muted);
+  background: var(--panel);
+  font-size: 12px;
+}
+.attachment-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-chip-meta {
+  white-space: nowrap;
+}
+.attachment-chip button {
+  display: inline-flex;
+  min-width: 32px;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+.attachment-chip progress {
+  position: absolute;
+  right: 8px;
+  bottom: 2px;
+  left: 8px;
+  width: calc(100% - 16px);
+  height: 2px;
+  accent-color: var(--accent);
+}
+.attachment-failed {
+  color: #fca5a5;
+  border-color: #fca5a5;
+}
+.attachment-spinner {
+  animation: chat-spin 1s linear infinite;
+}
+.composer-drop-overlay {
+  position: absolute;
+  inset: -12px;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  pointer-events: none;
+}
+.composer-file {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.composer-file input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.composer-harness {
+  max-width: 130px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: inherit;
+  background: var(--panel);
+  padding: 4px;
+}
+.composer textarea {
+  overflow-y: auto;
+  resize: none;
+}
+.composer-command-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 4;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px;
+  background: var(--panel);
+  box-shadow: 0 16px 45px #0007;
+}
+.composer-command-menu [cmdk-item] {
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.composer-command-menu [cmdk-item][aria-selected='true'] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.composer-command-menu [cmdk-group-heading] {
+  padding: 6px 10px 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.skill-chip {
+  display: inline-block;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: 0.9em;
+}
 .composer textarea {
   min-height: 44px;
   max-height: 140px;
@@ -759,7 +965,9 @@ kbd {
   text-decoration: none;
   background: var(--panel);
 }
-.chat-attachment small { color: var(--muted); }
+.chat-attachment small {
+  color: var(--muted);
+}
 .chat-jump {
   position: absolute;
   bottom: 28px;

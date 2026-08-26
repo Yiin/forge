@@ -81,7 +81,8 @@ function RenderItem({
 }) {
   if (item.kind === 'message') return <MessageRow item={item} />
   if (item.kind === 'tool') return <ToolCallRow item={item} />
-  if (item.kind === 'answered-question') return <AnsweredQuestionRow question={item.question} answer={item.answer} />
+  if (item.kind === 'answered-question')
+    return <AnsweredQuestionRow question={item.question} answer={item.answer} />
   if (item.kind === 'subagent') return <SubagentCard child={item.child} />
   if (item.kind === 'attachment')
     return (
@@ -91,8 +92,15 @@ function RenderItem({
         target={item.mime?.startsWith('image/') ? '_blank' : undefined}
         rel="noreferrer"
       >
-        {item.mime?.startsWith('image/') ? <FileImage size={15} /> : <File size={15} />} {item.filename}
-        {item.sizeBytes !== undefined && <small>{formatBytes(item.sizeBytes)}</small>}
+        {item.mime?.startsWith('image/') ? (
+          <FileImage size={15} />
+        ) : (
+          <File size={15} />
+        )}{' '}
+        {item.filename}
+        {item.sizeBytes !== undefined && (
+          <small>{formatBytes(item.sizeBytes)}</small>
+        )}
       </a>
     )
   return <div className="chat-system">{item.text}</div>
