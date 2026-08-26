@@ -3,6 +3,7 @@ import { ServerEvent, type Ephemeral } from '@forge/protocol/events'
 import type { NodeWebSocket } from '@hono/node-ws'
 import { replaySince } from './db/queries.js'
 import type { EventBus } from './events/bus.js'
+import { WebSocketEventWriter } from './ws-writer.js'
 
 type Database = {
   exec(sql: string): unknown
@@ -11,6 +12,7 @@ type Database = {
 type Socket = {
   send(value: string): void
   close(): void
+  bufferedAmount?: number
   raw?: { ping?: () => void }
 }
 type MessageRow = {
@@ -57,6 +59,7 @@ export function websocketRoute(
     let unsubscribeEphemeral: (() => void) | undefined
     let generation = 0
     let heartbeat: ReturnType<typeof setInterval> | undefined
+    let writer: WebSocketEventWriter | undefined
 
     const close = () => {
       generation++
@@ -65,6 +68,8 @@ export function websocketRoute(
       unsubscribeEphemeral?.()
       unsubscribePersisted = undefined
       unsubscribeEphemeral = undefined
+      writer?.close()
+      writer = undefined
       if (heartbeat) clearInterval(heartbeat)
       heartbeat = undefined
     }
@@ -78,8 +83,16 @@ export function websocketRoute(
       const buffered: Array<ReturnType<typeof ServerEvent.parse>> = []
       let replaying = true
       let cursor = parsed.data.cursor
-      const send = (event: ReturnType<typeof ServerEvent.parse>) => {
-        if (current === generation) socket?.send(JSON.stringify(event))
+      const activeSocket = socket
+      const eventWriter = new WebSocketEventWriter(activeSocket, () => {
+        if (current === generation) activeSocket.close()
+      })
+      writer = eventWriter
+      const send = async (event: ReturnType<typeof ServerEvent.parse>) => {
+        if (current !== generation) return false
+        const sent = await eventWriter.write(JSON.stringify(event))
+        if (sent && current === generation) cursor = Math.max(cursor, event.seq)
+        return sent
       }
       unsubscribePersisted = bus.subscribePersisted((event) => {
         if (event.sessionId !== event.msg.sessionId) return
@@ -90,8 +103,7 @@ export function websocketRoute(
           return
         if (replaying) buffered.push(event)
         else if (event.seq > cursor) {
-          cursor = event.seq
-          send(event)
+          void send(event)
         }
       })
       unsubscribeEphemeral = bus.subscribeEphemeral((event) => {
@@ -99,7 +111,7 @@ export function websocketRoute(
           matchesSession(event, parsed.data.sessions) &&
           current === generation
         )
-          socket?.send(JSON.stringify(event))
+          void eventWriter.write(JSON.stringify(event))
       })
 
       while (current === generation) {
@@ -113,16 +125,14 @@ export function websocketRoute(
         for (const row of rows) {
           if (current !== generation) return
           const event = eventFromRow(row)
-          cursor = Math.max(cursor, event.seq)
-          send(event)
+          if (!(await send(event))) return
         }
         if (rows.length < 500) break
       }
       if (current !== generation) return
       for (const event of buffered) {
         if (event.seq > cursor) {
-          cursor = event.seq
-          send(event)
+          if (!(await send(event))) return
         }
       }
       replaying = false
