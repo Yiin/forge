@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { ArrowLeft } from 'lucide-react'
 import { harnessConfigSchema, type HarnessConfig } from '@forge/protocol/config'
 import { api } from '../lib/api'
 import { useShellStore } from '../stores/shell'
@@ -983,7 +984,73 @@ export function AboutSettings() {
     </SettingsPage>
   )
 }
-function SettingsPage({
+export function KeybindingsSettings() {
+  return (
+    <SettingsPage
+      title="Keybindings"
+      subtitle="Shortcuts for common Forge actions."
+    >
+      <SettingsSection title="Keyboard shortcuts">
+        <SettingsRow
+          label="Open settings"
+          description="Go to this Settings page."
+        >
+          <kbd>⌘ ,</kbd>
+        </SettingsRow>
+      </SettingsSection>
+    </SettingsPage>
+  )
+}
+
+export function SettingsSection({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description?: string
+  children: ReactNode
+}) {
+  return (
+    <section className="settings-section">
+      <div className="settings-section-heading">
+        <h2>{title}</h2>
+        {description && <p className="muted">{description}</p>}
+      </div>
+      <div className="settings-rows">{children}</div>
+    </section>
+  )
+}
+
+export function SettingsRow({
+  label,
+  description,
+  status,
+  children,
+  reset,
+}: {
+  label: string
+  description?: string
+  status?: ReactNode
+  children: ReactNode
+  reset?: ReactNode
+}) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-copy">
+        <strong>{label}</strong>
+        {description && <span className="muted">{description}</span>}
+      </div>
+      <div className="settings-row-control">
+        {children}
+        {status}
+        {reset}
+      </div>
+    </div>
+  )
+}
+
+export function SettingsPage({
   title,
   subtitle,
   children,
@@ -992,10 +1059,25 @@ function SettingsPage({
   subtitle: string
   children: ReactNode
 }) {
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => headingRef.current?.focus(), [title])
   return (
     <section className="settings-page">
       <p className="eyebrow">Settings</p>
-      <h1>{title}</h1>
+      <div className="settings-page-heading">
+        <button
+          type="button"
+          className="settings-back"
+          onClick={() => window.history.back()}
+          aria-label="Back to workspace"
+        >
+          <ArrowLeft size={16} />
+          Back
+        </button>
+        <h1 ref={headingRef} tabIndex={-1}>
+          {title}
+        </h1>
+      </div>
       <p className="muted">{subtitle}</p>
       <div className="settings-form">{children}</div>
     </section>
