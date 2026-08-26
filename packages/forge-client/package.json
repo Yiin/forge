@@ -1,0 +1,24 @@
+{
+  "name": "forge-client",
+  "version": "0.1.0",
+  "description": "Typed status client for Forge dashboards",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "prebuild": "bun scripts/sync-status-schema.ts",
+    "build": "tsc",
+    "pack:check": "bun run build && bun scripts/verify-pack.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "zod": "^4.0.0"
+  }
+}
