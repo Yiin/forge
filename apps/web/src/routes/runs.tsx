@@ -2,6 +2,13 @@ import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { Dialog, DialogDescription, DialogTitle } from '../components/ui/dialog'
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select'
 import { StatusPanel } from '../components/ui/status-panel'
 import { parseEpicOverrides, type LaunchErrors } from './epic-launch-logic'
 import { useNavigate } from '@tanstack/react-router'
@@ -224,20 +231,28 @@ export function EpicLaunchDialog({
           <>
             <label>
               Project
-              <select
-                aria-invalid={Boolean(fieldError('projectId'))}
-                aria-describedby={
-                  fieldError('projectId') ? 'launch-project-error' : undefined
-                }
+              <Select
                 value={projectId}
-                onChange={(event) => setProjectId(event.target.value)}
+                onValueChange={(value) => {
+                  if (typeof value === 'string') setProjectId(value)
+                }}
               >
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger
+                  aria-invalid={Boolean(fieldError('projectId'))}
+                  aria-describedby={
+                    fieldError('projectId') ? 'launch-project-error' : undefined
+                  }
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  {projects.map((project) => (
+                    <SelectItem key={project.id} value={project.id}>
+                      {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
               {fieldError('projectId') && (
                 <small id="launch-project-error" className="field-error">
                   {fieldError('projectId')}
@@ -264,16 +279,27 @@ export function EpicLaunchDialog({
             <div className="launch-fields">
               <label>
                 Mode
-                <select
+                <Select
                   value={mode}
-                  onChange={(event) =>
-                    setMode(event.target.value as typeof mode)
-                  }
+                  onValueChange={(value) => {
+                    if (
+                      value === 'pool' ||
+                      value === 'serial' ||
+                      value === 'auto'
+                    ) {
+                      setMode(value)
+                    }
+                  }}
                 >
-                  <option value="pool">Pool</option>
-                  <option value="serial">Serial</option>
-                  <option value="auto">Auto</option>
-                </select>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectPopup>
+                    <SelectItem value="pool">Pool</SelectItem>
+                    <SelectItem value="serial">Serial</SelectItem>
+                    <SelectItem value="auto">Auto</SelectItem>
+                  </SelectPopup>
+                </Select>
               </label>
               <label>
                 Workers

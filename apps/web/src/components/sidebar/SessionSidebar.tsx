@@ -15,6 +15,13 @@ import {
 import { api } from '../../lib/api'
 import { folderName } from '../../lib/folder-name'
 import { FolderPicker } from '../FolderPicker'
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select'
 import { useSessionsStore, type SessionSummary } from '../../stores/sessions'
 import { useShellStore } from '../../stores/shell'
 import {
@@ -222,21 +229,26 @@ export function SessionSidebar() {
         </Link>
       ))}
       <div className="scope-row">
-        <select
-          aria-label="Project scope"
+        <Select
           value={scope}
-          onChange={(event) => {
-            setScope(event.target.value)
+          onValueChange={(value) => {
+            if (typeof value !== 'string') return
+            setScope(value)
             setSettledPageNumber(1)
           }}
         >
-          <option value="all">All projects</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger aria-label="Project scope">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value="all">All projects</SelectItem>
+            {projects.map((project) => (
+              <SelectItem key={project.id} value={project.id}>
+                {project.name}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
         <button
           className="icon-button"
           aria-label="New project"

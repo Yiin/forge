@@ -6,6 +6,13 @@ import { useShellStore } from '../stores/shell'
 import { useSettingsStore } from '../stores/settings'
 import { Button } from '../components/ui/button'
 import { ConfirmationDialog } from '../components/ui/confirmation-dialog'
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select'
 import { validateEpicDefaults, type EpicDefaults } from './epic-settings-logic'
 
 type Harness = HarnessConfig
@@ -101,17 +108,23 @@ export function GeneralSettings() {
       )}
       <label>
         Theme
-        <select
+        <Select
           value={shellTheme}
-          onChange={(e) => {
-            const theme = e.target.value as 'system' | 'light' | 'dark'
-            setShellTheme(theme)
+          onValueChange={(value) => {
+            if (value === 'system' || value === 'light' || value === 'dark') {
+              setShellTheme(value)
+            }
           }}
         >
-          <option>system</option>
-          <option>dark</option>
-          <option>light</option>
-        </select>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value="system">system</SelectItem>
+            <SelectItem value="dark">dark</SelectItem>
+            <SelectItem value="light">light</SelectItem>
+          </SelectPopup>
+        </Select>
       </label>
       <label>
         Default project
@@ -348,17 +361,22 @@ export function HarnessSettings() {
             </fieldset>
             <label>
               Protocol
-              <select
+              <Select
                 value={value.protocol}
-                onChange={(e) =>
-                  update(key, {
-                    protocol: e.target.value as Harness['protocol'],
-                  })
-                }
+                onValueChange={(selected) => {
+                  if (selected === 'acp' || selected === 'pty') {
+                    update(key, { protocol: selected })
+                  }
+                }}
               >
-                <option value="acp">ACP</option>
-                <option value="pty">PTY</option>
-              </select>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  <SelectItem value="acp">ACP</SelectItem>
+                  <SelectItem value="pty">PTY</SelectItem>
+                </SelectPopup>
+              </Select>
             </label>
             {results[key] && (
               <pre className="settings-result" role="status">
@@ -765,19 +783,23 @@ export function EpicSettings() {
       </label>
       <label>
         Default mode
-        <select
+        <Select
           value={defaults.mode}
-          onChange={(event) =>
-            setDefaults({
-              ...defaults,
-              mode: event.target.value as EpicDefaults['mode'],
-            })
-          }
+          onValueChange={(value) => {
+            if (value === 'pool' || value === 'serial' || value === 'auto') {
+              setDefaults({ ...defaults, mode: value })
+            }
+          }}
         >
-          <option value="pool">Pool</option>
-          <option value="serial">Serial</option>
-          <option value="auto">Auto</option>
-        </select>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value="pool">Pool</SelectItem>
+            <SelectItem value="serial">Serial</SelectItem>
+            <SelectItem value="auto">Auto</SelectItem>
+          </SelectPopup>
+        </Select>
       </label>
       <label>
         Gate command
@@ -831,17 +853,27 @@ export function EpicSettings() {
         {Object.entries(defaults.rolePolicy.roles).map(([role, tier]) => (
           <label key={role}>
             {role}
-            <select
+            <Select
               value={tier}
-              aria-invalid={Boolean(
-                validationErrors[`rolePolicy.roles.${role}`],
-              )}
-              onChange={(event) => updateRole(role, event.target.value)}
+              onValueChange={(value) => {
+                if (typeof value === 'string') updateRole(role, value)
+              }}
             >
-              {Object.keys(defaults.rolePolicy.tiers).map((name) => (
-                <option key={name}>{name}</option>
-              ))}
-            </select>
+              <SelectTrigger
+                aria-invalid={Boolean(
+                  validationErrors[`rolePolicy.roles.${role}`],
+                )}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {Object.keys(defaults.rolePolicy.tiers).map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
             {validationErrors[`rolePolicy.roles.${role}`] && (
               <small className="field-error">
                 {validationErrors[`rolePolicy.roles.${role}`]}
@@ -854,22 +886,31 @@ export function EpicSettings() {
             <strong>{tier} fallback hops</strong>
             {hops.map((hop, index) => (
               <div className="settings-env-row" key={`${tier}-${index}`}>
-                <select
+                <Select
                   aria-label={`${tier} hop ${index + 1} harness`}
                   value={hop.harness}
-                  aria-invalid={Boolean(
-                    validationErrors[
-                      `rolePolicy.tiers.${tier}.${index}.harness`
-                    ],
-                  )}
-                  onChange={(event) =>
-                    updateHop(tier, index, { harness: event.target.value })
-                  }
+                  onValueChange={(value) => {
+                    if (typeof value === 'string')
+                      updateHop(tier, index, { harness: value })
+                  }}
                 >
-                  {Object.keys(harnesses).map((name) => (
-                    <option key={name}>{name}</option>
-                  ))}
-                </select>
+                  <SelectTrigger
+                    aria-invalid={Boolean(
+                      validationErrors[
+                        `rolePolicy.tiers.${tier}.${index}.harness`
+                      ],
+                    )}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {Object.keys(harnesses).map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
                 {validationErrors[
                   `rolePolicy.tiers.${tier}.${index}.harness`
                 ] && (
