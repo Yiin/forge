@@ -7,7 +7,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { toast } from 'sonner'
 
@@ -69,7 +69,7 @@ export function RunRoute() {
       <header className="run-header">
         <div>
           <p className="eyebrow">Epic run</p>
-          <h1>{run.title}</h1>
+          <h1>{run.title || 'Untitled run'}</h1>
           <p className="run-meta">
             <span className={`status-dot ${run.status}`} />
             {run.status} · {run.mode} · {run.workerCount} workers ·{' '}
@@ -165,14 +165,19 @@ function IterationRow({
   }
   return (
     <article className="iteration">
-      <button className="iteration-summary" onClick={onToggle}>
+      <button
+        className="iteration-summary"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-label={`${item.title || 'Untitled iteration'}, ${item.status}, attempt ${item.attempt}`}
+      >
         <span className={`status-dot ${item.status}`} />
         <span className="iteration-title">{item.title}</span>
-        <span>attempt {item.attempt}</span>
+        <span className="iteration-attempt">attempt {item.attempt}</span>
         {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
       </button>
       <div className="iteration-meta">
-        <code>{item.sessionId}</code>
+        <code title="Worker session id">{item.sessionId}</code>
         <button
           className="copy-chip"
           onClick={(event) => {
@@ -193,20 +198,57 @@ function Transcript({ sessionId }: { sessionId: string }) {
   const [messages, setMessages] = useState<
     Array<{ role?: string; content?: { text?: string } }>
   >([])
-  useEffect(() => {
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  const [following, setFollowing] = useState(true)
+  const load = () =>
     void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`)
       .then((response) => (response.ok ? response.json() : []))
       .then((value) => setMessages(Array.isArray(value) ? value : []))
       .catch(() => undefined)
+  useEffect(() => {
+    load()
+    const timer = setInterval(load, 1000)
+    return () => clearInterval(timer)
   }, [sessionId])
+  useEffect(() => {
+    const element = transcriptRef.current
+    if (element && following) element.scrollTop = element.scrollHeight
+  }, [messages, following])
   return (
-    <div className="iteration-transcript">
-      {messages.map((message, index) => (
-        <p key={index}>
-          <strong>{message.role ?? 'event'}</strong>{' '}
-          {message.content?.text ?? ''}
-        </p>
-      ))}
-    </div>
+    <>
+      <div
+        className="iteration-transcript"
+        ref={transcriptRef}
+        onScroll={(event) => {
+          const element = event.currentTarget
+          setFollowing(
+            element.scrollHeight - element.scrollTop - element.clientHeight <
+              32,
+          )
+        }}
+        aria-live="polite"
+      >
+        {messages.map((message, index) => (
+          <p key={index}>
+            <strong>{message.role ?? 'event'}</strong>{' '}
+            {message.content?.text ?? ''}
+          </p>
+        ))}
+      </div>
+      {!following && (
+        <button
+          className="transcript-latest"
+          onClick={() => {
+            setFollowing(true)
+            transcriptRef.current?.scrollTo({
+              top: transcriptRef.current.scrollHeight,
+              behavior: 'smooth',
+            })
+          }}
+        >
+          Jump to latest
+        </button>
+      )}
+    </>
   )
 }

@@ -532,6 +532,10 @@ body {
   display: flex;
   gap: 4px;
 }
+.run-actions .icon-button {
+  width: 44px;
+  height: 44px;
+}
 .back-link {
   display: inline-block;
   margin-bottom: 24px;
@@ -582,7 +586,7 @@ body {
   align-items: center;
   gap: 9px;
   width: 100%;
-  min-height: 28px;
+  min-height: 44px;
   border: 0;
   color: inherit;
   background: transparent;
@@ -613,7 +617,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 32px;
+  min-height: 44px;
   cursor: pointer;
 }
 .failure {
@@ -633,6 +637,20 @@ body {
   margin: 7px 0;
   white-space: pre-wrap;
 }
+.transcript-latest {
+  display: block;
+  margin: 8px 0 0 16px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  color: inherit;
+  background: var(--panel);
+  cursor: pointer;
+}
+.transcript-latest:hover {
+  border-color: var(--accent);
+}
 @media (max-width: 600px) {
   .runs-page,
   .run-page {
@@ -641,7 +659,7 @@ body {
   .frontier-columns {
     grid-template-columns: 1fr;
   }
-  .iteration-summary > span:not(.status-dot) {
+  .iteration-attempt {
     display: none;
   }
 }
