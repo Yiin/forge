@@ -14,6 +14,10 @@ import { migrate } from './db/migrate.js'
 import { EventBus } from './events/bus.js'
 import { searchRoutes } from './http/search.js'
 import { websocketRoute } from './ws.js'
+import { projectRoutes } from './http/projects.js'
+import { sessionRoutes } from './http/sessions.js'
+import { SessionManager } from './sessions/manager.js'
+import type { HarnessFactory } from './sessions/harness.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -21,12 +25,15 @@ const { version } = require('../package.json') as { version: string }
 export function createApp(
   uploadStore?: UploadStore,
   status?: Parameters<typeof statusRoutes>[0],
+  manager?: SessionManager,
 ) {
   const app = new Hono()
 
   if (status) app.route('/', statusRoutes(status))
   else app.get('/api/health', (c) => c.json({ ok: true, version }))
   if (uploadStore) {
+    app.route('/', projectRoutes(uploadStore.database))
+    if (manager) app.route('/', sessionRoutes(manager))
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
@@ -49,12 +56,26 @@ export function startServer(
   const dataDir = process.env.FORGE_DATA_DIR ?? 'data'
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
-  const app = createApp(uploadStore, {
-    db,
-    bus,
-    version: process.env.FORGE_VERSION ?? version,
-    dataDir,
+  const factory: HarnessFactory = () => ({
+    spawn: async (_session, _onItem, onExit) => ({
+      prompt: async () => {
+        onExit(new Error('No harness adapter configured'))
+      },
+      cancel: () => undefined,
+      kill: () => undefined,
+    }),
   })
+  const manager = new SessionManager(db, bus, factory)
+  const app = createApp(
+    uploadStore,
+    {
+      db,
+      bus,
+      version: process.env.FORGE_VERSION ?? version,
+      dataDir,
+    },
+    manager,
+  )
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
   app.get('/ws', websocketRoute(upgradeWebSocket, db, bus))
   const server = serve({ fetch: app.fetch, port })

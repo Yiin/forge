@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
-import { basename, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import { parse } from 'smol-toml'
 import { z } from 'zod'
 import {
@@ -79,7 +80,7 @@ export function defaultConfig(
       protocol: 'acp',
       enabled: true,
     }
-  return { harness }
+  return { dataDir: resolve(process.cwd(), 'data'), port: 3900, harness }
 }
 
 function formatIssue(
@@ -106,8 +107,10 @@ export function getHarness(
   return value
 }
 
-export async function loadConfig(path = 'forge.toml'): Promise<ForgeConfig> {
-  const file = resolve(path)
+export async function loadConfig(path?: string): Promise<ForgeConfig> {
+  const file = resolve(
+    path ?? process.env.FORGE_CONFIG ?? resolve(homedir(), '.forge/forge.toml'),
+  )
   let source: string
   try {
     source = await readFile(file, 'utf8')
@@ -124,7 +127,12 @@ export async function loadConfig(path = 'forge.toml'): Promise<ForgeConfig> {
       `${file}: invalid TOML: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
-  const entries = (parsed as { harness?: Record<string, unknown> }).harness
+  const document = parsed as {
+    dataDir?: unknown
+    port?: unknown
+    harness?: Record<string, unknown>
+  }
+  const entries = document.harness
   if (!entries || typeof entries !== 'object')
     throw new Error(`${file}: missing harness table`)
   const result: Record<string, HarnessConfig> = {}
@@ -141,7 +149,11 @@ export async function loadConfig(path = 'forge.toml'): Promise<ForgeConfig> {
     }
     result[key] = checked.data
   }
-  const checked = forgeConfigSchema.safeParse({ harness: result })
+  const checked = forgeConfigSchema.safeParse({
+    dataDir: document.dataDir ?? resolve(dirname(file), 'data'),
+    port: document.port ?? 3900,
+    harness: result,
+  })
   if (!checked.success)
     throw new Error(
       `${basename(file)}: invalid config: ${checked.error.message}`,
