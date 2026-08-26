@@ -6,6 +6,7 @@ export type ChatRenderItem =
   | {
       kind: 'message'
       id: string
+      seq: number
       role: 'user' | 'agent'
       text: string
       thought?: boolean
@@ -58,12 +59,16 @@ export function toRenderModel(
         result.push({
           kind: 'message',
           id: message.itemId,
+          seq: message.seq,
           role: message.role === 'user' ? 'user' : 'agent',
           text: content.text,
           ...(content.type === 'thought_delta' ? { thought: true } : {}),
         })
         anchors.set(message.itemId, message.seq)
       }
+      const current = result.at(-1)
+      if (current?.kind === 'message' && current.id === message.itemId)
+        current.seq = message.seq
     } else if (
       content.type === 'tool_call' ||
       content.type === 'tool_update' ||

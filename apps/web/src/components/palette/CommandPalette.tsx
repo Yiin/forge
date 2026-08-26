@@ -26,6 +26,7 @@ import {
 } from '../ui/command'
 import { Dialog } from '../ui/dialog'
 import { messageHitUrl, runHitUrl, searchUrl } from './palette-logic'
+import { parseSnippet } from '../search/search-logic'
 type SearchResult = {
   sessions: Array<{ sessionId: string; title: string; snippet: string }>
   messages: Array<{
@@ -167,7 +168,15 @@ export function CommandPalette() {
                   onSelect={() => go(messageHitUrl(hit.sessionId, hit.seq))}
                 >
                   <Search />
-                  <span dangerouslySetInnerHTML={{ __html: hit.snippet }} />
+                  <span>
+                    {parseSnippet(hit.snippet).map((segment, index) =>
+                      segment.highlighted ? (
+                        <mark key={index}>{segment.text}</mark>
+                      ) : (
+                        <span key={index}>{segment.text}</span>
+                      ),
+                    )}
+                  </span>
                 </CommandItem>
               ))}
               {results.runs.map((hit) => (

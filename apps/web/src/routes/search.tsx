@@ -6,7 +6,10 @@ import {
   type SearchResultsData,
 } from '../components/search/SearchResults'
 import { useSessionsStore } from '../stores/sessions'
-import type { SearchScope } from '../components/search/search-logic'
+import {
+  SEARCH_ROUTE_DEBOUNCE_MS,
+  type SearchScope,
+} from '../components/search/search-logic'
 
 const emptyResults: SearchResultsData = { sessions: [], messages: [], runs: [] }
 
@@ -19,6 +22,14 @@ export function SearchRoute() {
   const request = useRef<AbortController | null>(null)
 
   useEffect(() => setInput(q), [q])
+  useEffect(() => {
+    if (input === q) return
+    const timer = window.setTimeout(
+      () => updateSearch(input),
+      SEARCH_ROUTE_DEBOUNCE_MS,
+    )
+    return () => window.clearTimeout(timer)
+  }, [input, q])
   useEffect(() => {
     request.current?.abort()
     if (!q.trim()) {

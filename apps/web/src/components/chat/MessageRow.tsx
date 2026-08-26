@@ -24,7 +24,7 @@ export function MessageRow({
   }
   if (item.thought)
     return (
-      <article className="chat-row chat-thought">
+      <article className="chat-row chat-thought" data-seq={item.seq}>
         <button className="chat-collapse" onClick={() => setOpen(!open)}>
           {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{' '}
           Thought
@@ -33,7 +33,7 @@ export function MessageRow({
       </article>
     )
   return (
-    <article className={`chat-row chat-${item.role}`}>
+    <article className={`chat-row chat-${item.role}`} data-seq={item.seq}>
       <div className="chat-row-actions">
         <span>{item.role === 'user' ? 'You' : 'Forge'}</span>
         <button
