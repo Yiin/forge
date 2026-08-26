@@ -35,6 +35,15 @@ export function SessionSidebar() {
   const [projectName, setProjectName] = useState('')
   const [projectPath, setProjectPath] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
+  const [runs, setRuns] = useState<
+    Array<{
+      id: string
+      title: string
+      status: string
+      iterationCount: number
+      workerCount: number
+    }>
+  >([])
 
   useEffect(() => {
     void Promise.all([api.listSessions(), api.listProjects()])
@@ -52,6 +61,22 @@ export function SessionSidebar() {
       })
       .catch(() => undefined)
   }, [setProjects, setSessions])
+  useEffect(() => {
+    const load = () =>
+      void api
+        .listRuns()
+        .then((value) =>
+          setRuns(
+            (value as typeof runs).filter((run) =>
+              ['running', 'paused'].includes(run.status),
+            ),
+          ),
+        )
+        .catch(() => undefined)
+    load()
+    const timer = setInterval(load, 2000)
+    return () => clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -134,6 +159,21 @@ export function SessionSidebar() {
           {active.filter((s) => s.status === 'running').length || ''}
         </span>
       </Link>
+      {runs.map((run) => (
+        <Link
+          key={run.id}
+          className="sidebar-run"
+          to="/runs/$runId"
+          params={{ runId: run.id }}
+          onClick={() => setDrawerOpen(false)}
+        >
+          <span className={`status-dot ${run.status}`} />
+          <span>{run.title}</span>
+          <small>
+            {run.iterationCount}/{run.workerCount}
+          </small>
+        </Link>
+      ))}
       <div className="scope-row">
         <select
           aria-label="Project scope"
