@@ -106,7 +106,6 @@ export function defaultConfig(
     port: 3900,
     harness,
     settings: {
-      theme: 'dark',
       defaultProject: '',
       titleGeneration: true,
       epicDefaults: {

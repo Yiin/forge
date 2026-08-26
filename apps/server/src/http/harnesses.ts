@@ -4,8 +4,12 @@ import { writeFile } from 'node:fs/promises'
 import { stringify } from 'smol-toml'
 import { defaultConfig, loadConfig } from '../config.js'
 import { spawnAcpClient } from '../acp/client.js'
-import type { ForgeConfig, HarnessConfig } from '@forge/protocol/config'
-import { rolePolicy } from '@forge/protocol/rolePolicy'
+import {
+  settingsPatchSchema,
+  settingsSchema,
+  type ForgeConfig,
+  type HarnessConfig,
+} from '@forge/protocol/config'
 
 export type ConfigRoutesOptions = {
   config?: ForgeConfig
@@ -30,12 +34,8 @@ export function harnessRoutes(options: ConfigRoutesOptions = {}) {
   }
   app.get('/api/settings', (c) => c.json(config.settings))
   app.put('/api/settings', async (c) => {
-    const body = (await c.req.json()) as Partial<ForgeConfig['settings']>
-    const settings = { ...config.settings, ...body }
-    if (settings.epicDefaults?.rolePolicy)
-      settings.epicDefaults.rolePolicy = rolePolicy.parse(
-        settings.epicDefaults.rolePolicy,
-      )
+    const parsed = settingsPatchSchema.parse(await c.req.json())
+    const settings = settingsSchema.parse({ ...config.settings, ...parsed })
     await save({ ...config, settings })
     return c.json(settings)
   })

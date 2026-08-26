@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { harnessConfigSchema, type HarnessConfig } from '@forge/protocol/config'
 import { api } from '../lib/api'
 import { useShellStore } from '../stores/shell'
+import { useSettingsStore } from '../stores/settings'
 import { Button } from '../components/ui/button'
 import { ConfirmationDialog } from '../components/ui/confirmation-dialog'
 import { validateEpicDefaults, type EpicDefaults } from './epic-settings-logic'
@@ -52,48 +53,36 @@ function RequestState({
 export function GeneralSettings() {
   const shellTheme = useShellStore((state) => state.theme)
   const setShellTheme = useShellStore((state) => state.setTheme)
-  const [settings, setSettings] = useState({
-    theme: shellTheme,
-    defaultProject: '',
-    titleGeneration: true,
-  })
-  const [state, setState] = useState<'loading' | 'saving' | 'saved' | 'error'>(
-    'loading',
-  )
-  const [error, setError] = useState<string | null>(null)
-  const load = () => {
-    setState('loading')
-    void api
-      .getSettings()
-      .then((value) => {
-        setSettings((current) => ({ ...current, ...(value as object) }))
-        setState('saved')
-      })
-      .catch((cause: unknown) => {
-        setError(cause instanceof Error ? cause.message : String(cause))
-        setState('error')
-      })
-  }
-  useEffect(load, [])
-  const save = (next: typeof settings) => {
-    setSettings(next)
-    setState('saving')
-    setError(null)
-    void api
-      .saveSettings(next)
-      .then(() => setState('saved'))
-      .catch((cause: unknown) => {
-        setError(cause instanceof Error ? cause.message : String(cause))
-        setState('error')
-      })
+  const settings = useSettingsStore((state) => state.settings)
+  const settingsState = useSettingsStore((state) => state.scopes.general)
+  const load = useSettingsStore((state) => state.load)
+  const save = useSettingsStore((state) => state.save)
+  const retry = useSettingsStore((state) => state.retry)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [defaultProject, setDefaultProject] = useState('')
+  useEffect(() => {
+    void load()
+      .then(() => setDefaultProject(useSettingsStore.getState().settings.defaultProject))
+      .catch((cause: unknown) =>
+        setLoadError(cause instanceof Error ? cause.message : String(cause)),
+      )
+      .finally(() => setLoading(false))
+  }, [load])
+  const commit = (patch: { defaultProject?: string; titleGeneration?: boolean }) => {
+    void save('general', patch).catch(() => undefined)
   }
   return (
     <SettingsPage title="General" subtitle="Defaults for new sessions.">
-      <RequestState
-        state={state}
-        error={error}
-        onRetry={state === 'error' ? load : undefined}
-      />
+      {loading && <p className="settings-status">Loading…</p>}
+      {loadError && <p className="settings-error" role="alert">Could not load: {loadError}</p>}
+      {!loading && !loadError && settingsState.status !== 'idle' && (
+        <RequestState
+          state={settingsState.status === 'dirty' ? 'saving' : settingsState.status}
+          error={settingsState.error}
+          onRetry={settingsState.status === 'error' ? () => void retry('general') : undefined}
+        />
+      )}
       <label>
         Theme
         <select
@@ -101,7 +90,6 @@ export function GeneralSettings() {
           onChange={(e) => {
             const theme = e.target.value as 'system' | 'light' | 'dark'
             setShellTheme(theme)
-            save({ ...settings, theme })
           }}
         >
           <option>system</option>
@@ -111,16 +99,22 @@ export function GeneralSettings() {
       </label>
       <label>
         Default project
-        {input(settings.defaultProject, (defaultProject) =>
-          save({ ...settings, defaultProject }),
-        )}
+        <input
+          value={defaultProject}
+          onChange={(event) => setDefaultProject(event.target.value)}
+          onBlur={() => commit({ defaultProject })}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur()
+          }}
+          autoComplete="off"
+        />
       </label>
       <label className="check">
         <input
           type="checkbox"
           checked={settings.titleGeneration}
           onChange={(e) =>
-            save({ ...settings, titleGeneration: e.target.checked })
+            commit({ titleGeneration: e.target.checked })
           }
         />{' '}
         Generate plain-word session titles
