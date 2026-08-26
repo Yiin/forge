@@ -21,13 +21,23 @@ const elapsed = (started: number) => {
 export function RunsRoute() {
   const navigate = useNavigate()
   const [runs, setRuns] = useState<Run[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [launchOpen, setLaunchOpen] = useState(false)
   useEffect(() => {
     const load = () =>
       void api
         .listRuns()
-        .then((value) => setRuns(value as Run[]))
-        .catch(() => undefined)
+        .then((value) => {
+          setRuns(value as Run[])
+          setError(null)
+        })
+        .catch((cause) =>
+          setError(
+            cause instanceof Error ? cause.message : 'Could not load runs.',
+          ),
+        )
+        .finally(() => setLoading(false))
     load()
     const timer = setInterval(load, 2000)
     return () => clearInterval(timer)
@@ -47,6 +57,18 @@ export function RunsRoute() {
           Launch epic
         </button>
       </header>
+      {error && (
+        <div className="state-card state-error" role="alert">
+          <strong>Could not load runs</strong>
+          <p>{error}</p>
+          <button
+            className="ui-button"
+            onClick={() => window.location.reload()}
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {active.length > 0 && (
         <div className="run-grid">
           {active.map((run) => (
@@ -61,7 +83,19 @@ export function RunsRoute() {
           .map((run) => (
             <RunCard key={run.id} run={run} />
           ))}
-        {runs.length === 0 && <p className="muted">No runs yet.</p>}
+        {loading && <p className="muted">Loading run history…</p>}
+        {!loading && !error && runs.length === 0 && (
+          <div className="state-card">
+            <strong>No run history</strong>
+            <p>Launch an epic to see its progress here.</p>
+          </div>
+        )}
+        {!loading &&
+          !error &&
+          runs.length > 0 &&
+          runs.every((run) => active.includes(run)) && (
+            <p className="muted">Completed runs will appear here.</p>
+          )}
       </div>
       <EpicLaunchDialog
         open={launchOpen}
@@ -327,9 +361,8 @@ function RunCard({ run }: { run: Run }) {
         {run.title || 'Untitled run'}
       </div>
       <div className="run-card-meta">
-        <span>
-          {run.iterationCount}/{run.workerCount} iterations
-        </span>
+        <span>{run.iterationCount} iterations</span>
+        <span>{run.workerCount} workers</span>
         <span>{run.status}</span>
         <span>{elapsed(run.startedAt)}</span>
       </div>
