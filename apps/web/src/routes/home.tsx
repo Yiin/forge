@@ -1,12 +1,16 @@
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { api } from '../lib/api'
+import { folderName } from '../lib/folder-name'
+import { FolderPicker } from '../components/FolderPicker'
 import { useShellStore } from '../stores/shell'
 
 export function HomeRoute() {
   const navigate = useNavigate()
   const [name, setName] = useState('Test project')
+  const [nameTouched, setNameTouched] = useState(false)
   const [path, setPath] = useState('/tmp/forge-e2e-project')
+  const [browsing, setBrowsing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const create = async () => {
@@ -46,7 +50,10 @@ export function HomeRoute() {
           Project name
           <input
             value={name}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => {
+              setNameTouched(true)
+              setName(event.target.value)
+            }}
           />
         </label>
         <label>
@@ -59,6 +66,24 @@ export function HomeRoute() {
         <button type="submit" disabled={busy || !name || !path}>
           {busy ? 'Creating…' : 'Add project'}
         </button>
+        <button
+          type="button"
+          aria-expanded={browsing}
+          onClick={() => setBrowsing((open) => !open)}
+        >
+          Browse folders
+        </button>
+        {browsing && (
+          <FolderPicker
+            initialPath={path}
+            onSelect={(selected) => {
+              setPath(selected)
+              if (!nameTouched) setName(folderName(selected))
+              setBrowsing(false)
+            }}
+            onCancel={() => setBrowsing(false)}
+          />
+        )}
         {error && <p role="alert">{error}</p>}
       </form>
     </section>

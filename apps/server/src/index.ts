@@ -9,6 +9,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { UploadStore } from './uploads/store.js'
 import { uploadRoutes } from './http/uploads.js'
 import { attachmentRoutes } from './http/attachments.js'
+import { fsBrowseRoutes } from './http/fsBrowse.js'
 import { projectFileRoutes } from './http/projectFiles.js'
 import { statusRoutes } from './http/status.js'
 import { migrate } from './db/migrate.js'
@@ -112,6 +113,7 @@ export function createApp(
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
+    app.route('/', fsBrowseRoutes())
     app.route('/', searchRoutes(uploadStore.database))
     app.route(
       '/',

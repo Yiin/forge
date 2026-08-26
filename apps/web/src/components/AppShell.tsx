@@ -29,7 +29,11 @@ export function AppShell() {
         <main className="main">
           <Outlet />
         </main>
-        <Drawer.Root open={store.drawerOpen} onOpenChange={store.setDrawerOpen}>
+        <Drawer.Root
+          direction="left"
+          open={store.drawerOpen}
+          onOpenChange={store.setDrawerOpen}
+        >
           <Drawer.Portal>
             <Drawer.Overlay className="drawer-overlay" />
             <Drawer.Content className="drawer">

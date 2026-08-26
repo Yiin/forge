@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useNavigate } from '@tanstack/react-router'
 import {
   FolderPlus,
@@ -10,6 +11,8 @@ import {
   X,
 } from 'lucide-react'
 import { api } from '../../lib/api'
+import { folderName } from '../../lib/folder-name'
+import { FolderPicker } from '../FolderPicker'
 import { useSessionsStore, type SessionSummary } from '../../stores/sessions'
 import { useShellStore } from '../../stores/shell'
 import {
@@ -38,6 +41,7 @@ export function SessionSidebar() {
   const [projectDialog, setProjectDialog] = useState(false)
   const [projectName, setProjectName] = useState('')
   const [projectPath, setProjectPath] = useState('')
+  const [nameTouched, setNameTouched] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [runs, setRuns] = useState<
     Array<{
@@ -153,6 +157,7 @@ export function SessionSidebar() {
     setProjectDialog(false)
     setProjectName('')
     setProjectPath('')
+    setNameTouched(false)
   }
   return (
     <nav className="session-sidebar nav">
@@ -219,7 +224,12 @@ export function SessionSidebar() {
         <button
           className="icon-button"
           aria-label="New project"
-          onClick={() => setProjectDialog(true)}
+          onClick={() => {
+            setProjectName('')
+            setProjectPath('')
+            setNameTouched(false)
+            setProjectDialog(true)
+          }}
         >
           <FolderPlus size={16} />
         </button>
@@ -272,44 +282,52 @@ export function SessionSidebar() {
           <Settings size={16} /> Settings
         </Link>
       </div>
-      {projectDialog && (
-        <div className="project-dialog-backdrop">
-          <form className="project-dialog" onSubmit={createProject}>
-            <div className="dialog-title">
-              <strong>New project</strong>
+      {projectDialog &&
+        // Portal escapes the vaul drawer's transform; otherwise position:fixed
+        // would anchor the dialog to the 320px drawer instead of the viewport.
+        createPortal(
+          <div className="project-dialog-backdrop">
+            <form className="project-dialog" onSubmit={createProject}>
+              <div className="dialog-title">
+                <strong>New project</strong>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Close"
+                  onClick={() => setProjectDialog(false)}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <label>
+                Name
+                <input
+                  autoFocus
+                  required
+                  value={projectName}
+                  onChange={(e) => {
+                    setNameTouched(true)
+                    setProjectName(e.target.value)
+                  }}
+                />
+              </label>
+              <FolderPicker
+                onSelect={(path) => {
+                  setProjectPath(path)
+                  if (!nameTouched) setProjectName(folderName(path))
+                }}
+              />
               <button
-                type="button"
-                className="icon-button"
-                aria-label="Close"
-                onClick={() => setProjectDialog(false)}
+                className="new-session"
+                type="submit"
+                disabled={!projectPath}
               >
-                <X size={16} />
+                Create project
               </button>
-            </div>
-            <label>
-              Name
-              <input
-                autoFocus
-                required
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-              />
-            </label>
-            <label>
-              Absolute path
-              <input
-                required
-                pattern="/.*"
-                value={projectPath}
-                onChange={(e) => setProjectPath(e.target.value)}
-              />
-            </label>
-            <button className="new-session" type="submit">
-              Create project
-            </button>
-          </form>
-        </div>
-      )}
+            </form>
+          </div>,
+          document.body,
+        )}
     </nav>
   )
 }

@@ -78,6 +78,9 @@ export class ForgeApi {
   saveSettings(input: Record<string, unknown>) {
     return this.put('/api/settings', input)
   }
+  listDirectories(path?: string) {
+    return this.get(`/api/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`)
+  }
   listHarnesses() {
     return this.get('/api/harnesses')
   }
