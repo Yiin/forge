@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import { useShellStore } from '../stores/shell'
 import { useSettingsStore } from '../stores/settings'
 import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
 import { ConfirmationDialog } from '../components/ui/confirmation-dialog'
 import {
   Select,
@@ -14,6 +15,7 @@ import {
   SelectValue,
 } from '../components/ui/select'
 import { validateEpicDefaults, type EpicDefaults } from './epic-settings-logic'
+import { openProjectCreation } from '../components/ProjectCreationDialog'
 
 type Harness = HarnessConfig
 const input = (value: string, onChange: (value: string) => void) => (
@@ -494,9 +496,7 @@ export function ProjectSettings() {
   )
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState<Record<string, boolean>>({})
-  const [saveState, setSaveState] = useState<Record<string, 'saved' | 'error'>>(
-    {},
-  )
+  const [saveState, setSaveState] = useState<Record<string, 'saved' | 'error'>>({})
   const [archiveProject, setArchiveProject] = useState<
     (typeof projects)[number] | null
   >(null)
@@ -520,76 +520,63 @@ export function ProjectSettings() {
       title="Projects"
       subtitle="Rename or archive projects. Sessions stay safe when you archive one."
     >
+      <Button variant="primary" onClick={openProjectCreation}>
+        Add project
+      </Button>
       {loadState === 'loading' && <RequestState state="loading" />}
       {loadState === 'error' && (
         <RequestState state="error" error={error} onRetry={load} />
       )}
       <div className="settings-stack">
         {projects.map((project) => (
-          <article className="settings-card project-setting" key={project.id}>
-            <div>
-              {input(project.name, (name) =>
-                setProjects((all) =>
-                  all.map((item) =>
-                    item.id === project.id ? { ...item, name } : item,
-                  ),
-                ),
+          <SettingsSection key={project.id} title={project.name}>
+            <SettingsRow label="Name" description="The project display name.">
+              <Input
+                aria-label={`${project.name} name`}
+                value={project.name}
+                onChange={(event) =>
+                  setProjects((all) =>
+                    all.map((item) =>
+                      item.id === project.id
+                        ? { ...item, name: event.target.value }
+                        : item,
+                    ),
+                  )
+                }
+                onBlur={() => void renameProject(project)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    event.currentTarget.blur()
+                  }
+                }}
+              />
+              {saveState[project.id] === 'saved' && <span role="status">Saved.</span>}
+              {saveState[project.id] === 'error' && (
+                <span role="alert">
+                  Could not save.{' '}
+                  <Button size="compact" onClick={() => void renameProject(project)}>
+                    Retry
+                  </Button>
+                </span>
               )}
-              <small>{project.path}</small>
-            </div>
-            <Button
-              loading={saving[project.id]}
-              onClick={() => {
-                setSaving((current) => ({ ...current, [project.id]: true }))
-                setSaveState((current) => {
-                  const next = { ...current }
-                  delete next[project.id]
-                  return next
-                })
-                void api
-                  .renameProject(project.id, project.name)
-                  .then(() => {
-                    setSaveState((current) => ({
-                      ...current,
-                      [project.id]: 'saved',
-                    }))
-                  })
-                  .catch(() => {
-                    setSaveState((current) => ({
-                      ...current,
-                      [project.id]: 'error',
-                    }))
-                  })
-                  .finally(() => {
-                    setSaving((current) => ({
-                      ...current,
-                      [project.id]: false,
-                    }))
-                  })
-              }}
-            >
-              Save
-            </Button>
-            <button
-              disabled={Boolean(project.archived_at)}
-              onClick={() => {
-                setArchiveError(null)
-                setArchiveProject(project)
-              }}
-            >
-              {project.archived_at ? 'Archived' : 'Archive'}
-            </button>
-            {saveState[project.id] === 'saved' && (
-              <span className="settings-status" role="status">
-                Saved.
-              </span>
-            )}
-            {saveState[project.id] === 'error' && (
-              <span className="settings-error" role="alert">
-                Could not save. Retry.
-              </span>
-            )}
-          </article>
+            </SettingsRow>
+            <SettingsRow label="Path" description="The selected project folder.">
+              <span>{project.path}</span>
+            </SettingsRow>
+            <SettingsRow label="State" description="Archived projects cannot start new work.">
+              <Button
+                loading={saving[project.id]}
+                disabled={Boolean(project.archived_at)}
+                onClick={() => {
+                  setArchiveError(null)
+                  setArchiveProject(project)
+                }}
+              >
+                {project.archived_at ? 'Archived' : 'Archive'}
+              </Button>
+            </SettingsRow>
+          </SettingsSection>
         ))}
       </div>
       {loadState === 'saved' && projects.length === 0 && (
@@ -611,8 +598,14 @@ export function ProjectSettings() {
           if (!archiveProject) return
           try {
             await api.archiveProjectById(archiveProject.id)
+            setProjects((all) =>
+              all.map((project) =>
+                project.id === archiveProject.id
+                  ? { ...project, archived_at: Date.now() }
+                  : project,
+              ),
+            )
             setArchiveProject(null)
-            load()
           } catch (cause: unknown) {
             setArchiveError(
               cause instanceof Error ? cause.message : String(cause),
@@ -627,6 +620,26 @@ export function ProjectSettings() {
       </ConfirmationDialog>
     </SettingsPage>
   )
+
+  async function renameProject(project: (typeof projects)[number]) {
+    const name = project.name.trim()
+    if (!name) return
+    setSaving((current) => ({ ...current, [project.id]: true }))
+    setSaveState((current) => {
+      const next = { ...current }
+      delete next[project.id]
+      return next
+    })
+    try {
+      await api.renameProject(project.id, name)
+      setProjects((all) => all.map((item) => item.id === project.id ? { ...item, name } : item))
+      setSaveState((current) => ({ ...current, [project.id]: 'saved' }))
+    } catch {
+      setSaveState((current) => ({ ...current, [project.id]: 'error' }))
+    } finally {
+      setSaving((current) => ({ ...current, [project.id]: false }))
+    }
+  }
 }
 
 export function EpicSettings() {

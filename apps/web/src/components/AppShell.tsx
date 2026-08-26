@@ -12,6 +12,7 @@ import { resolveTheme } from '../lib/shell-storage'
 import { handleShortcut, registerShortcuts } from '../lib/shortcuts'
 import { useNavigate } from '@tanstack/react-router'
 import { useSessionsStore } from '../stores/sessions'
+import { ProjectCreationDialog } from './ProjectCreationDialog'
 export function AppShell() {
   const location = useLocation()
   const store = useShellStore()
@@ -86,6 +87,7 @@ export function AppShell() {
       className={`app-shell desktop-shell phone-shell ${resolveTheme(store.theme)}`}
     >
       <CommandPalette />
+      <ProjectCreationDialog />
       <div className="desktop-chrome">
         <Sidebar
           width={store.sidebarWidth}

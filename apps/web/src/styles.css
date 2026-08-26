@@ -1834,6 +1834,29 @@ body {
   padding: 9px;
   font: inherit;
 }
+.project-create-form {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.project-create-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.project-create-form .folder-picker {
+  min-width: 0;
+}
+.project-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.project-create-actions .ui-button {
+  flex: 1 1 120px;
+}
 kbd {
   color: var(--muted);
   font-size: 10px;

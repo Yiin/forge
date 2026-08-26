@@ -25,6 +25,7 @@ import {
   CommandSeparator,
 } from '../ui/command'
 import { Dialog } from '../ui/dialog'
+import { openProjectCreation } from '../ProjectCreationDialog'
 import { messageHitUrl, runHitUrl, searchUrl } from './palette-logic'
 import { parseSnippet } from '../search/search-logic'
 import { registerShortcuts, shortcutCommands } from '../../lib/shortcuts'
@@ -146,7 +147,12 @@ export function CommandPalette() {
               <Plus />
               New session{projects.size > 1 ? ' in a project' : ''}
             </CommandItem>
-            <CommandItem onSelect={() => go('/settings/projects')}>
+            <CommandItem
+              onSelect={() => {
+                close()
+                openProjectCreation()
+              }}
+            >
               <FolderPlus />
               New project
             </CommandItem>
