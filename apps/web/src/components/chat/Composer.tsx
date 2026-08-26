@@ -52,6 +52,7 @@ export function Composer({
   const [commands, setCommands] = useState(commandDefaults)
   const [selectedHarness, setSelectedHarness] = useState(harness ?? '')
   const [interrupting, setInterrupting] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const volatile = useMessagesStore((state) => state.volatile)
   useLayoutEffect(() => {
@@ -218,10 +219,17 @@ export function Composer({
   const submit = async () => {
     const value = text.trim()
     if (!value || !canSendUploads(uploads)) return
-    await onSend(value, completedAttachmentIds(uploads), selectedHarness)
-    setText('')
-    setTrigger(null)
-    dispatchUploads(initialAttachmentUploads)
+    setSendError(null)
+    try {
+      await onSend(value, completedAttachmentIds(uploads), selectedHarness)
+      setText('')
+      setTrigger(null)
+      dispatchUploads(initialAttachmentUploads)
+    } catch (error) {
+      setSendError(
+        error instanceof Error ? error.message : 'Message failed to send',
+      )
+    }
   }
   const endTurn = async () => {
     if (!onInterrupt || interrupting) return
@@ -285,33 +293,8 @@ export function Composer({
             kind={trigger.kind}
             query={trigger.query}
             onSelect={select}
+            onDismiss={() => setTrigger(null)}
           />
-        )}
-        <label className="composer-file">
-          <Paperclip size={17} />
-          <input
-            aria-label="Attach files"
-            type="file"
-            multiple
-            onChange={(event) => {
-              addFiles(event.target.files ?? [])
-              event.target.value = ''
-            }}
-          />
-        </label>
-        {harnesses.length > 0 && (
-          <select
-            className="composer-harness"
-            aria-label="Harness"
-            value={selectedHarness}
-            onChange={(event) => setSelectedHarness(event.target.value)}
-          >
-            {harnesses.map((entry) => (
-              <option key={entry} value={entry}>
-                {entry}
-              </option>
-            ))}
-          </select>
         )}
         <textarea
           ref={textarea}
@@ -322,39 +305,98 @@ export function Composer({
           onPaste={paste}
           onChange={(event) => update(event.target.value)}
           onKeyDown={(event) => {
+            if (trigger && event.key === 'Escape') {
+              event.preventDefault()
+              setTrigger(null)
+              return
+            }
+            if (
+              trigger &&
+              (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+            ) {
+              event.preventDefault()
+              const item = document.querySelector<HTMLElement>(
+                '.composer-command-menu [cmdk-item]',
+              )
+              item?.focus()
+              return
+            }
             if (event.key === 'Enter' && !event.shiftKey) {
+              if (event.nativeEvent.isComposing) return
+              if (trigger) {
+                event.preventDefault()
+                const item = document.querySelector<HTMLElement>(
+                  '.composer-command-menu [cmdk-item]',
+                )
+                item?.click()
+                return
+              }
               event.preventDefault()
               void submit()
             }
           }}
         />
-        <button
-          type="submit"
-          disabled={sending || !text.trim() || !canSendUploads(uploads)}
-          title={
-            !canSendUploads(uploads)
-              ? 'Wait for uploads to finish or remove failed files'
-              : undefined
-          }
-          aria-label="Send"
-        >
-          <Send size={17} />
-          <span className="composer-send-label">
-            {sending ? 'Sending…' : 'Send'}
-          </span>
-        </button>
-        {protocol === 'pty' && running && onInterrupt && (
-          <button
-            type="button"
-            className="composer-end-turn"
-            disabled={interrupting}
-            aria-label="End turn"
-            title="End the current PTY turn without closing the process"
-            onClick={() => void endTurn()}
-          >
-            {interrupting ? 'Ending…' : 'End turn'}
-          </button>
+        {sendError && (
+          <div className="composer-error" role="alert">
+            {sendError}
+          </div>
         )}
+        <div className="composer-footer">
+          <label className="composer-file">
+            <Paperclip size={17} />
+            <input
+              aria-label="Attach files"
+              type="file"
+              multiple
+              onChange={(event) => {
+                addFiles(event.target.files ?? [])
+                event.target.value = ''
+              }}
+            />
+          </label>
+          {harnesses.length > 0 && (
+            <select
+              className="composer-harness"
+              aria-label="Harness"
+              value={selectedHarness}
+              onChange={(event) => setSelectedHarness(event.target.value)}
+            >
+              {harnesses.map((entry) => (
+                <option key={entry} value={entry}>
+                  {entry}
+                </option>
+              ))}
+            </select>
+          )}
+          <span className="composer-footer-spacer" />
+          {protocol === 'pty' && running && onInterrupt && (
+            <button
+              type="button"
+              className="composer-end-turn"
+              disabled={interrupting}
+              aria-label="End turn"
+              title="End the current PTY turn without closing the process"
+              onClick={() => void endTurn()}
+            >
+              {interrupting ? 'Ending…' : 'End turn'}
+            </button>
+          )}
+          <button
+            type="submit"
+            disabled={sending || !text.trim() || !canSendUploads(uploads)}
+            title={
+              !canSendUploads(uploads)
+                ? 'Wait for uploads to finish or remove failed files'
+                : undefined
+            }
+            aria-label="Send"
+          >
+            <Send size={17} />
+            <span className="composer-send-label">
+              {sending ? 'Sending…' : 'Send'}
+            </span>
+          </button>
+        </div>
       </form>
     </div>
   )

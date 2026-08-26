@@ -19,15 +19,26 @@ export function CommandMenu({
   kind,
   query,
   onSelect,
+  onDismiss,
 }: {
   commands: ComposerCommand[]
   kind: ComposerTriggerKind | null
   query: string
   onSelect: (command: ComposerCommand) => void
+  onDismiss: () => void
 }) {
   const groups = groupComposerCommands(commands, kind)
   return (
-    <Command className="composer-command-menu" shouldFilter={false}>
+    <Command
+      className="composer-command-menu"
+      shouldFilter={false}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          onDismiss()
+        }
+      }}
+    >
       <CommandList>
         <CommandEmpty>No matching commands.</CommandEmpty>
         {groups.map(({ group, commands: items }) => (

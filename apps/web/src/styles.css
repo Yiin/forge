@@ -1610,11 +1610,15 @@ kbd {
   right: 12px;
   bottom: max(12px, env(safe-area-inset-bottom));
   left: 12px;
-  display: flex;
+  display: grid;
   gap: 8px;
-  align-items: end;
-  max-width: 900px;
+  max-width: 760px;
   margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 8px;
+  background: var(--panel);
+  box-shadow: 0 12px 35px #0003;
 }
 .composer-wrap {
   position: relative;
@@ -1840,7 +1844,27 @@ kbd {
   background: var(--panel);
   padding: 4px;
 }
+.composer-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.composer-footer-spacer {
+  flex: 1;
+}
+.composer-footer button {
+  min-height: 44px;
+}
+.composer-error {
+  color: var(--danger, #f87171);
+  font-size: 13px;
+}
 .composer textarea {
+  width: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
   overflow-y: auto;
   resize: none;
 }
@@ -1885,8 +1909,7 @@ kbd {
   min-height: 44px;
   max-height: 140px;
   min-width: 0;
-  flex: 1;
-  resize: vertical;
+  resize: none;
 }
 .chat-timeline-shell {
   position: relative;
@@ -2268,7 +2291,7 @@ kbd {
   .composer {
     right: 10px;
     left: 10px;
-    gap: 4px;
+    gap: 8px;
   }
   .composer-harness {
     max-width: 92px;
