@@ -188,3 +188,114 @@ export const getProject = (db: Db, projectId: string) =>
   db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId)
 export const getSession = (db: Db, sessionId: string) =>
   db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId)
+
+export function createRun(
+  db: Db,
+  input: {
+    projectId: string
+    epicBeadId: string
+    status: string
+    mode: string
+    workerCount: number
+    baseBranch: string
+    config: unknown
+    originSessionId: string | null
+    startedAt?: number
+  },
+) {
+  const value = {
+    id: id('run_'),
+    ...input,
+    startedAt: input.startedAt ?? Date.now(),
+  }
+  db.prepare(
+    `INSERT INTO epic_runs (id, project_id, epic_bead_id, status, mode, worker_count, base_branch, config, origin_session_id, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    value.id,
+    value.projectId,
+    value.epicBeadId,
+    value.status,
+    value.mode,
+    value.workerCount,
+    value.baseBranch,
+    json(value.config),
+    value.originSessionId,
+    value.startedAt,
+  )
+  return { ...value, endedAt: null, error: null }
+}
+export function updateRunStatus(
+  db: Db,
+  runId: string,
+  status: string,
+  error?: string | null,
+) {
+  db.prepare(
+    'UPDATE epic_runs SET status = ?, ended_at = ?, error = ? WHERE id = ?',
+  ).run(
+    status,
+    ['completed', 'failed', 'cancelled'].includes(status) ? Date.now() : null,
+    error ?? null,
+    runId,
+  )
+}
+export function createIteration(
+  db: Db,
+  input: {
+    runId: string
+    beadId: string
+    sessionId: string
+    worktreePath: string
+    branch: string
+    attempt?: number
+  },
+) {
+  const value = {
+    id: id('itr_'),
+    ...input,
+    attempt: input.attempt ?? 1,
+    startedAt: Date.now(),
+  }
+  db.prepare(
+    `INSERT INTO epic_iterations (id, epic_run_id, bead_id, session_id, worktree_path, branch, attempt, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)`,
+  ).run(
+    value.id,
+    value.runId,
+    value.beadId,
+    value.sessionId,
+    value.worktreePath,
+    value.branch,
+    value.attempt,
+    value.startedAt,
+  )
+  return value
+}
+export function settleIteration(
+  db: Db,
+  iterationId: string,
+  status: string,
+  failureReason?: string,
+) {
+  db.prepare(
+    'UPDATE epic_iterations SET status = ?, failure_reason = ?, ended_at = ? WHERE id = ?',
+  ).run(status, failureReason ?? null, Date.now(), iterationId)
+}
+export const listActiveRuns = (db: Db) =>
+  db
+    .prepare(
+      "SELECT * FROM epic_runs WHERE status IN ('running', 'paused') ORDER BY started_at",
+    )
+    .all()
+export function runWithIterations(db: Db, runId: string) {
+  const run = db.prepare('SELECT * FROM epic_runs WHERE id = ?').get(runId)
+  return run
+    ? {
+        run,
+        iterations: db
+          .prepare(
+            'SELECT * FROM epic_iterations WHERE epic_run_id = ? ORDER BY started_at',
+          )
+          .all(runId),
+      }
+    : undefined
+}

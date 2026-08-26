@@ -185,6 +185,13 @@ export async function claim(repoPath: string, id: string): Promise<void> {
   await runBd(repoPath, ['update', id, '--claim'])
 }
 
+export async function releaseClaim(
+  repoPath: string,
+  id: string,
+): Promise<void> {
+  await runBd(repoPath, ['update', id, '--status', 'open'])
+}
+
 export async function close(
   repoPath: string,
   id: string,
