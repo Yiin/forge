@@ -1974,6 +1974,53 @@ kbd {
   max-width: 100%;
   overflow: auto;
 }
+.activity-stack {
+  max-width: 760px;
+  margin: 0 auto 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.activity-stack-summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 13px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.activity-stack-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.activity-stack-summary small {
+  margin-left: auto;
+  color: var(--muted);
+}
+.activity-stack-detail {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+}
+.activity-stack-detail > * {
+  max-width: none;
+  margin-bottom: 10px;
+}
+.activity-stack-running {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.activity-stack-error {
+  color: #fca5a5;
+}
+.activity-stack-unknown {
+  color: var(--muted);
+}
 .chat-thought {
   padding: 4px 0;
   color: var(--muted);
@@ -2077,6 +2124,18 @@ kbd {
 .subagent-transcript .chat-system {
   max-width: none;
   margin-bottom: 10px;
+}
+.subagent-load-state,
+.subagent-load-error {
+  padding: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.subagent-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .chat-tool-detail {
   border-top: 1px solid var(--border);

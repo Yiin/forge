@@ -4,6 +4,8 @@ import type { Message } from '@forge/protocol/message'
 import { MessageRow, ToolCallRow } from './MessageRow'
 import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
+import { ActivityStack } from './ActivityStack'
+import { AttachmentItem } from './TranscriptItems'
 
 export function SubagentTranscript({ messages }: { messages: Message[] }) {
   const items = useMemo(() => toRenderModel(messages), [messages])
@@ -15,6 +17,22 @@ export function SubagentTranscript({ messages }: { messages: Message[] }) {
             return <MessageRow key={item.id} item={item} />
           if (item.kind === 'tool')
             return <ToolCallRow key={item.id} item={item} />
+          if (item.kind === 'activity')
+            return <ActivityStack key={item.id} item={item} />
+          if (item.kind === 'attachment')
+            return <AttachmentItem key={item.id} item={item} />
+          if (item.kind === 'answered-question')
+            return (
+              <div key={item.id} className="chat-system">
+                Answered: {String(item.answer)}
+              </div>
+            )
+          if (item.kind === 'epic-triage')
+            return (
+              <div key={item.id} className="chat-system">
+                Epic triage: {item.card.classification}
+              </div>
+            )
           if (item.kind === 'system')
             return (
               <div key={item.id} className="chat-system">

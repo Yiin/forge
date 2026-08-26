@@ -2,6 +2,7 @@ import type { Message } from '@forge/protocol/message'
 import type { SubagentSession } from './subagent'
 
 export type ToolState = 'running' | 'done' | 'error'
+export type ActivityState = ToolState | 'unknown'
 export type ChatRenderItem =
   | {
       kind: 'message'
@@ -35,6 +36,90 @@ export type ChatRenderItem =
     }
   | { kind: 'system'; id: string; text: string; code?: string }
   | { kind: 'subagent'; id: string; child: SubagentSession }
+  | {
+      kind: 'activity'
+      id: string
+      turnId: string
+      tools: Extract<ChatRenderItem, { kind: 'tool' }>[]
+      agents: SubagentSession[]
+      state: ActivityState
+    }
+
+type ActivitySource =
+  | Extract<ChatRenderItem, { kind: 'tool' }>
+  | Extract<ChatRenderItem, { kind: 'subagent' }>
+
+export function groupActivity(
+  items: ChatRenderItem[],
+  turnIds: Map<string, string>,
+  childTurnIds: Map<string, string>,
+): ChatRenderItem[] {
+  const result: ChatRenderItem[] = []
+  let group: ActivitySource[] = []
+  let groupTurnId: string | undefined
+  const flush = () => {
+    if (!group.length) return
+    if (group.length === 1) result.push(group[0])
+    else {
+      const tools = group.flatMap((entry) =>
+        entry.kind === 'tool' ? [entry] : [],
+      )
+      const agents = group.flatMap((entry) =>
+        entry.kind === 'subagent' ? [entry.child] : [],
+      )
+      const states: ActivityState[] = [
+        ...tools.map((tool) => tool.state),
+        ...agents.map((agent) =>
+          agent.status === 'running'
+            ? 'running'
+            : agent.status === 'failed' || agent.status === 'errored'
+              ? 'error'
+              : agent.status === 'completed' || agent.status === 'done'
+                ? 'done'
+                : 'unknown',
+        ),
+      ]
+      const state = states.includes('error')
+        ? 'error'
+        : states.includes('running')
+          ? 'running'
+          : states.includes('unknown')
+            ? 'unknown'
+            : 'done'
+      result.push({
+        kind: 'activity',
+        id: `activity-${group[0].id}`,
+        turnId: groupTurnId ?? 'unknown-turn',
+        tools,
+        agents,
+        state,
+      })
+    }
+    group = []
+    groupTurnId = undefined
+  }
+  for (const item of items) {
+    if (item.kind !== 'tool' && item.kind !== 'subagent') {
+      flush()
+      result.push(item)
+      continue
+    }
+    const turnId =
+      item.kind === 'tool'
+        ? turnIds.get(item.id)
+        : childTurnIds.get(item.child.id)
+    if (!group.length || turnId === groupTurnId) {
+      group.push(item)
+      groupTurnId ??= turnId
+    } else {
+      flush()
+      group.push(item)
+      groupTurnId = turnId
+    }
+  }
+  flush()
+  return result
+}
 
 export function toRenderModel(
   messages: Message[],
@@ -46,7 +131,10 @@ export function toRenderModel(
     : []
   const questions = new Map<string, string>()
   const anchors = new Map<string, number>()
+  const turnIds = new Map<string, string>()
+  const childTurnIds = new Map<string, string>()
   for (const message of messages) {
+    turnIds.set(message.itemId, message.turnId)
     if (message.content.type === 'ask_user_question')
       questions.set(
         message.content.questionId,
@@ -145,7 +233,14 @@ export function toRenderModel(
       })
     }
   }
-  return placeSubagents(result, children, anchors) as ChatRenderItem[]
+  const placed = placeSubagents(result, children, anchors) as ChatRenderItem[]
+  for (const child of children) {
+    const anchor = child.spawnedBySeq
+    if (anchor == null) continue
+    const anchorItem = messages.find((message) => message.seq === anchor)
+    if (anchorItem) childTurnIds.set(child.id, anchorItem.turnId)
+  }
+  return groupActivity(placed, turnIds, childTurnIds)
 }
 
 import { placeSubagents } from './subagent'

@@ -24,6 +24,7 @@ const EMPTY_MESSAGES: Message[] = []
 export function SubagentCard({ child }: { child: SubagentSession }) {
   const [expanded, setExpanded] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const messages = useMessagesStore(
     (state) => state.bySession[child.id] ?? EMPTY_MESSAGES,
@@ -40,8 +41,12 @@ export function SubagentCard({ child }: { child: SubagentSession }) {
   useEffect(() => {
     if (!expanded || loaded) return
     let active = true
+    setLoadError(false)
     void fetch(`/api/sessions/${encodeURIComponent(child.id)}/messages`)
-      .then((response) => (response.ok ? response.json() : []))
+      .then((response) => {
+        if (!response.ok) throw new Error('Could not load transcript')
+        return response.json()
+      })
       .then((rows: unknown) => {
         if (!active || !Array.isArray(rows)) return
         const parsedRows: Message[] = []
@@ -54,7 +59,12 @@ export function SubagentCard({ child }: { child: SubagentSession }) {
         useMessagesStore.getState().loadMessages(child.id, parsedRows)
         setLoaded(true)
       })
-      .catch(() => setLoaded(true))
+      .catch(() => {
+        if (active) {
+          setLoadError(true)
+          setLoaded(false)
+        }
+      })
     return () => {
       active = false
     }
@@ -97,7 +107,28 @@ export function SubagentCard({ child }: { child: SubagentSession }) {
         )}
         {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
       </button>
-      {expanded && <SubagentTranscript messages={messages} />}
+      {expanded && loadError ? (
+        <div className="subagent-load-error" role="alert">
+          <span>Could not load transcript.</span>
+          <button
+            type="button"
+            onClick={() => {
+              setLoadError(false)
+              setLoaded(false)
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      ) : expanded && !loaded && messages.length === 0 ? (
+        <div className="subagent-load-state">Loading transcript…</div>
+      ) : expanded ? (
+        messages.length ? (
+          <SubagentTranscript messages={messages} />
+        ) : (
+          <div className="subagent-load-state">No transcript items.</div>
+        )
+      ) : null}
     </article>
   )
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Message } from '@forge/protocol/message'
-import { toRenderModel } from './render-model'
+import { groupActivity, toRenderModel } from './render-model'
 
 const message = (
   content: Message['content'],
@@ -18,6 +18,37 @@ const message = (
 })
 
 describe('chat render model', () => {
+  it('groups adjacent tools and agents within one turn', () => {
+    const tool = {
+      kind: 'tool' as const,
+      id: 'tool-1',
+      name: 'shell',
+      state: 'done' as const,
+      input: 'pwd',
+      output: '/tmp',
+    }
+    const agent = {
+      kind: 'subagent' as const,
+      id: 'subagent-child',
+      child: { id: 'child', title: 'Research', status: 'completed' },
+    }
+    expect(
+      groupActivity(
+        [tool, agent],
+        new Map([['tool-1', 'turn-1']]),
+        new Map([['child', 'turn-1']]),
+      ),
+    ).toEqual([
+      {
+        kind: 'activity',
+        id: 'activity-tool-1',
+        turnId: 'turn-1',
+        tools: [tool],
+        agents: [agent.child],
+        state: 'done',
+      },
+    ])
+  })
   it('keeps progressive text under one stable item key', () => {
     expect(
       toRenderModel([
