@@ -3,6 +3,7 @@ import type { EventBus } from '../events/bus.js'
 import type { MessageContent } from '@forge/protocol/message'
 import type { DatabaseSync } from 'node:sqlite'
 import type { HarnessFactory, HarnessHandle, HarnessItem } from './harness.js'
+import { isDefaultTitle, titleFromPrompt } from './titles.js'
 
 type Db = DatabaseSync
 type SessionRow = {
@@ -14,6 +15,7 @@ type SessionRow = {
   status: string
   title: string
   kind: string
+  user_titled?: number
 }
 const makeId = (prefix: string) =>
   `${prefix}${crypto.randomUUID().replaceAll('-', '')}`
@@ -90,6 +92,7 @@ export class SessionManager {
       ) {
         this.turns.delete(row.id)
         this.status(row.id, 'idle')
+        this.maybeTitle(row.id, row.title, this.firstPrompt.get(row.id) ?? '')
         this.scheduleReap(row.id)
       }
     }
@@ -115,6 +118,26 @@ export class SessionManager {
     return handle
   }
   private readonly turns = new Map<string, string>()
+  private readonly firstPrompt = new Map<string, string>()
+  private maybeTitle(id: string, current: string, prompt: string) {
+    let row: { user_titled?: number } | undefined
+    try {
+      row = this.db
+        .prepare('SELECT user_titled FROM sessions WHERE id = ?')
+        .get(id) as { user_titled?: number } | undefined
+    } catch {
+      row = undefined
+    }
+    if (row?.user_titled || !isDefaultTitle(current) || !prompt.trim()) return
+    const title = titleFromPrompt(prompt)
+    this.db.prepare('UPDATE sessions SET title = ? WHERE id = ?').run(title, id)
+    this.bus.publishEphemeral({
+      type: 'sessionTitle',
+      seq: null,
+      sessionId: id,
+      title,
+    })
+  }
   private scheduleReap(id: string) {
     const old = this.reapTimers.get(id)
     if (old) clearTimeout(old)
@@ -145,6 +168,7 @@ export class SessionManager {
     }
     const handle = this.handles.get(id) ?? (await this.spawn(row))
     const turnId = makeId('turn_')
+    if (!this.firstPrompt.has(id)) this.firstPrompt.set(id, text)
     this.turns.set(id, turnId)
     appendMessage(this.db, {
       sessionId: id,
@@ -199,6 +223,7 @@ export class SessionManager {
       })
       this.turns.delete(id)
       this.status(id, 'idle')
+      this.maybeTitle(id, row.title, this.firstPrompt.get(id) ?? '')
       this.scheduleReap(id)
     }
   }

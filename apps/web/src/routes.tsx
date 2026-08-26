@@ -8,8 +8,8 @@ import { AppShell } from './components/AppShell'
 import { FileBrowser } from './components/files/FileBrowser'
 import { readLastSession } from './lib/shell-storage'
 import { SessionRoute } from './routes/session'
-import { SearchRoute } from './routes/search'
 import { HomeRoute } from './routes/home'
+import { SearchRoute } from './routes/search'
 const root = createRootRoute({ component: AppShell })
 const empty =
   (title: string, text = 'This area is ready for the next feature.') =>
