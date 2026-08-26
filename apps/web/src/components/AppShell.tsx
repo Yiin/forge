@@ -7,6 +7,7 @@ import { useShellStore } from '../stores/shell'
 import { CommandPalette } from './palette/CommandPalette'
 import { SessionSidebar } from './sidebar/SessionSidebar'
 function Navigation({ settings = false }: { settings?: boolean }) {
+  const theme = useShellStore((state) => state.theme)
   return (
     <nav className="nav">
       <div className="brand">forge</div>
@@ -48,7 +49,7 @@ function Navigation({ settings = false }: { settings?: boolean }) {
           className="text-button"
           onClick={() => useShellStore.getState().toggleTheme()}
         >
-          {useShellStore.getState().theme === 'dark' ? (
+          {theme === 'dark' ? (
             <Sun size={16} />
           ) : (
             <Moon size={16} />
