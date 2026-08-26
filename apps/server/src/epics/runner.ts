@@ -33,6 +33,7 @@ import {
   isDependencyFailure,
   readSignatures,
   rememberSignature,
+  retryFlakyGate,
   runGate,
   triageCard,
   type FailureEntry,
@@ -255,29 +256,35 @@ export class EpicRunner {
             installCommand?: string | string[]
           }
           if (config?.gateCommand) {
-            const branchGate = await runGate(
+            let branchGate = await runGate(
               item.worktreePath,
               config.gateCommand,
             )
             if (branchGate.code !== 0) {
               const control = await runGate(input.repoPath, config.gateCommand)
-              const classification = classifyGate(branchGate, control)
-              const handled = await this.handleFailure(
-                run,
-                input,
-                item,
-                branchGate.output,
-                classification,
-                config,
+              const retry = await retryFlakyGate(branchGate, control, () =>
+                runGate(item.worktreePath, config.gateCommand!),
               )
-              if (handled) {
-                if (
-                  this.db
-                    .prepare('SELECT status FROM epic_runs WHERE id = ?')
-                    .get(run.id)?.status === 'paused'
+              if (retry?.code !== 0) {
+                if (retry) branchGate = retry
+                const classification = classifyGate(branchGate, control)
+                const handled = await this.handleFailure(
+                  run,
+                  input,
+                  item,
+                  branchGate.output,
+                  classification,
+                  config,
                 )
-                  return
-                continue
+                if (handled) {
+                  if (
+                    this.db
+                      .prepare('SELECT status FROM epic_runs WHERE id = ?')
+                      .get(run.id)?.status === 'paused'
+                  )
+                    return
+                  continue
+                }
               }
             }
           }

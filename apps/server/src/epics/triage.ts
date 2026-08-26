@@ -75,6 +75,16 @@ export function rememberSignature(
 export function triageCard(input: Omit<TriageCard, 'kind'>): TriageCard {
   return { kind: 'epic_triage', ...input }
 }
+
+export async function retryFlakyGate(
+  branch: GateResult,
+  control: GateResult,
+  retry: () => Promise<GateResult>,
+) {
+  if (branch.code === 0 || control.code !== 0) return undefined
+  return retry()
+}
+
 export function appendTriageCard(db: any, sessionId: string, card: TriageCard) {
   return appendMessage(db, {
     sessionId,

@@ -6,6 +6,7 @@ import {
   normalizeFailure,
   readSignatures,
   rememberSignature,
+  retryFlakyGate,
 } from './triage.js'
 
 describe('epic failure triage', () => {
@@ -28,5 +29,29 @@ describe('epic failure triage', () => {
     const config = rememberSignature({}, 'bead', first)
     expect(readSignatures(config, 'bead')).toEqual([first])
     expect(failureSignature('bad /tmp/b')).toBe(first.signature)
+  })
+
+  it('retries a worker-only gate failure without recording the first failure', async () => {
+    const branch = { code: 1, output: 'flaky gate' }
+    const control = { code: 0, output: '' }
+    let calls = 0
+
+    const retry = await retryFlakyGate(branch, control, async () => {
+      calls += 1
+      return { code: 0, output: '' }
+    })
+
+    expect(calls).toBe(1)
+    expect(retry?.code).toBe(0)
+  })
+
+  it('returns the retry failure for normal triage handling', async () => {
+    const retry = await retryFlakyGate(
+      { code: 1, output: 'first failure' },
+      { code: 0, output: '' },
+      async () => ({ code: 1, output: 'second failure' }),
+    )
+
+    expect(retry).toEqual({ code: 1, output: 'second failure' })
   })
 })
