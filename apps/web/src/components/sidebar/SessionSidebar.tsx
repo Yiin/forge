@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import {
   FolderPlus,
@@ -319,14 +319,24 @@ function SessionRow({
 }) {
   const [title, setTitle] = useState(session.title)
   const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
+  const closeMenu = (restoreFocus = true) => {
+    setMenuOpen(false)
+    if (restoreFocus) menuTriggerRef.current?.focus()
+  }
+  useEffect(() => {
+    if (!menuOpen) return
+    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+  }, [menuOpen])
   const toggleUnread = () => {
     const next = !session.unread
     useSessionsStore.getState().upsertSession({ ...session, unread: next })
-    setMenuOpen(false)
+    closeMenu()
   }
   const copyId = async () => {
     await navigator.clipboard?.writeText(session.id)
-    setMenuOpen(false)
+    closeMenu()
   }
   return (
     <li
@@ -371,30 +381,61 @@ function SessionRow({
         </button>
       )}
       <button
+        ref={menuTriggerRef}
         className="icon-button row-menu"
         aria-label={`Actions for ${session.title}`}
         aria-expanded={menuOpen}
+        aria-haspopup="menu"
         onClick={(event) => {
           event.stopPropagation()
           setMenuOpen((open) => !open)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            setMenuOpen(true)
+          }
         }}
       >
         <MoreHorizontal size={15} />
       </button>
       {menuOpen && (
-        <div className="session-menu" role="menu">
+        <div
+          ref={menuRef}
+          className="session-menu"
+          role="menu"
+          onKeyDown={(event) => {
+            const items = Array.from(
+              event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+            )
+            const index = items.indexOf(document.activeElement as HTMLButtonElement)
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              closeMenu()
+            } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault()
+              items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
+            } else if (event.key === 'Home' || event.key === 'End') {
+              event.preventDefault()
+              items[event.key === 'Home' ? 0 : items.length - 1]?.focus()
+            }
+          }}
+        >
           <button
             role="menuitem"
             onClick={() => {
               onEdit()
-              setMenuOpen(false)
+              closeMenu()
             }}
           >
             Rename
           </button>
           <button
             role="menuitem"
-            onClick={() => void onSettle(session, !settled)}
+            onClick={() => {
+              closeMenu()
+              void onSettle(session, !settled)
+            }}
           >
             {settled ? 'Un-settle' : 'Settle'}
           </button>
@@ -408,7 +449,7 @@ function SessionRow({
             className="danger"
             role="menuitem"
             onClick={() => {
-              setMenuOpen(false)
+              closeMenu()
               onDelete(session)
             }}
           >

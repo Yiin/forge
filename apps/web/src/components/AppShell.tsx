@@ -1,5 +1,5 @@
 import { Outlet, useLocation } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Drawer } from 'vaul'
 import { Sidebar } from './ui/sidebar'
 import { AppBar } from './AppBar'
@@ -22,6 +22,7 @@ import { openNewDraft } from '../lib/draft-entry'
 export function AppShell() {
   const location = useLocation()
   const store = useShellStore()
+  const mainRef = useRef<HTMLElement>(null)
   const navigate = useNavigate()
   const loadSettings = useSettingsStore((state) => state.load)
   const isSettings = location.pathname.startsWith('/settings')
@@ -85,6 +86,10 @@ export function AppShell() {
     }
   }, [location.pathname, navigate, store.toggleSidebar])
   useEffect(() => {
+    const frame = window.requestAnimationFrame(() => mainRef.current?.focus())
+    return () => window.cancelAnimationFrame(frame)
+  }, [location.pathname])
+  useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = () => {
       if (useShellStore.getState().theme === 'system') {
@@ -101,6 +106,9 @@ export function AppShell() {
     <div
       className={`app-shell desktop-shell phone-shell ${resolveTheme(store.theme)}`}
     >
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
       <CommandPalette />
       <ProjectCreationDialog />
       <div className="desktop-chrome">
@@ -127,7 +135,7 @@ export function AppShell() {
           </Drawer.Portal>
         </Drawer.Root>
       </div>
-      <main className="main">
+      <main id="main-content" className="main" ref={mainRef} tabIndex={-1}>
         <Outlet />
       </main>
       <Toaster theme={resolveTheme(store.theme)} />
