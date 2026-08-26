@@ -1,8 +1,5 @@
 import { create } from 'zustand'
-import type {
-  ForgeSettings,
-  ForgeSettingsPatch,
-} from '@forge/protocol/config'
+import type { ForgeSettings, ForgeSettingsPatch } from '@forge/protocol/config'
 import { api } from '../lib/api'
 
 export type SettingsStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
@@ -64,21 +61,33 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         if (requestRevision === revisions.get(scope)) {
           failedPatch.delete(scope)
           set((state) => ({
-            settings: { ...state.settings, ...(value as Partial<ForgeSettings>) },
-            scopes: { ...state.scopes, [scope]: { status: 'saved', error: null } },
+            settings: {
+              ...state.settings,
+              ...(value as Partial<ForgeSettings>),
+            },
+            scopes: {
+              ...state.scopes,
+              [scope]: { status: 'saved', error: null },
+            },
           }))
         }
       } catch (cause) {
         if (requestRevision === revisions.get(scope)) {
           failedPatch.set(scope, patch)
           set((state) => ({
-            scopes: { ...state.scopes, [scope]: { status: 'error', error: errorText(cause) } },
+            scopes: {
+              ...state.scopes,
+              [scope]: { status: 'error', error: errorText(cause) },
+            },
           }))
         }
         if (requestRevision === revisions.get(scope)) throw cause
       }
     })
-    pending.set(scope, request.catch(() => undefined))
+    pending.set(
+      scope,
+      request.catch(() => undefined),
+    )
     return request
   },
   retry: async (scope) => get().save(scope, failedPatch.get(scope) ?? {}),

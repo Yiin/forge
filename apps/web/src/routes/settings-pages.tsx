@@ -63,24 +63,39 @@ export function GeneralSettings() {
   const [defaultProject, setDefaultProject] = useState('')
   useEffect(() => {
     void load()
-      .then(() => setDefaultProject(useSettingsStore.getState().settings.defaultProject))
+      .then(() =>
+        setDefaultProject(useSettingsStore.getState().settings.defaultProject),
+      )
       .catch((cause: unknown) =>
         setLoadError(cause instanceof Error ? cause.message : String(cause)),
       )
       .finally(() => setLoading(false))
   }, [load])
-  const commit = (patch: { defaultProject?: string; titleGeneration?: boolean }) => {
+  const commit = (patch: {
+    defaultProject?: string
+    titleGeneration?: boolean
+  }) => {
     void save('general', patch).catch(() => undefined)
   }
   return (
     <SettingsPage title="General" subtitle="Defaults for new sessions.">
       {loading && <p className="settings-status">Loading…</p>}
-      {loadError && <p className="settings-error" role="alert">Could not load: {loadError}</p>}
+      {loadError && (
+        <p className="settings-error" role="alert">
+          Could not load: {loadError}
+        </p>
+      )}
       {!loading && !loadError && settingsState.status !== 'idle' && (
         <RequestState
-          state={settingsState.status === 'dirty' ? 'saving' : settingsState.status}
+          state={
+            settingsState.status === 'dirty' ? 'saving' : settingsState.status
+          }
           error={settingsState.error}
-          onRetry={settingsState.status === 'error' ? () => void retry('general') : undefined}
+          onRetry={
+            settingsState.status === 'error'
+              ? () => void retry('general')
+              : undefined
+          }
         />
       )}
       <label>
@@ -113,9 +128,7 @@ export function GeneralSettings() {
         <input
           type="checkbox"
           checked={settings.titleGeneration}
-          onChange={(e) =>
-            commit({ titleGeneration: e.target.checked })
-          }
+          onChange={(e) => commit({ titleGeneration: e.target.checked })}
         />{' '}
         Generate plain-word session titles
       </label>
