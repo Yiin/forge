@@ -97,6 +97,11 @@ export class ForgeSocket {
         if (current)
           sessions.upsertSession({ ...current, status: frame.status })
       }
+      if (frame.type === 'sessionTitle') {
+        const sessions = useSessionsStore.getState()
+        const current = sessions.sessions.find((session) => session.id === frame.sessionId)
+        if (current) sessions.upsertSession({ ...current, title: frame.title })
+      }
       return useMessagesStore.getState().applyEphemeral(frame)
     }
     const event = ServerEvent.safeParse(value)
