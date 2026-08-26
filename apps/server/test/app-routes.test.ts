@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -62,5 +62,34 @@ describe('createApp route composition', () => {
     const health = await app.request('/api/health')
     expect(health.status).toBe(200)
     expect(await health.json()).toEqual({ ok: true, version: '0.1.0' })
+  })
+
+  it('serves the web entrypoint and rejects missing assets', async () => {
+    const webDir = await mkdtemp(join(tmpdir(), 'forge-web-assets-'))
+    await mkdir(join(webDir, 'assets'))
+    await writeFile(
+      join(webDir, 'index.html'),
+      '<html><script src="/assets/app.js"></script></html>',
+    )
+    await writeFile(join(webDir, 'assets/app.js'), 'console.log("ok")')
+    cleanups.push(() => rm(webDir, { recursive: true, force: true }))
+
+    const app = createApp(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      webDir,
+    )
+    const entrypoint = await app.request('/')
+    expect(entrypoint.status).toBe(200)
+    expect(entrypoint.headers.get('content-type')).toContain('text/html')
+    expect(await entrypoint.text()).toContain('<script')
+
+    const asset = await app.request('/assets/app.js')
+    expect(asset.status).toBe(200)
+    expect(await asset.text()).toContain('console.log')
+    expect((await app.request('/assets/missing.js')).status).toBe(404)
   })
 })

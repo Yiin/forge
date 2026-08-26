@@ -93,6 +93,11 @@ jobs:
             sleep 1
           done
           grep -q "\"version\":\"$FORGE_VERSION\"" "$data_dir/health.json"
+          curl --fail --silent http://127.0.0.1:3900/ | grep -q '<script'
+          if curl --silent --show-error --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3900/assets/does-not-exist.js | grep -q '^2'; then
+            echo 'missing web asset unexpectedly returned success' >&2
+            exit 1
+          fi
           project="$(curl --fail --silent -X POST http://127.0.0.1:3900/api/projects -H 'content-type: application/json' -d '{"name":"Release smoke","path":"."}')"
           project_id="$(printf '%s' "$project" | node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.parse(s).id))')"
           session="$(curl --fail --silent -X POST "http://127.0.0.1:3900/api/projects/$project_id/sessions" -H 'content-type: application/json' -d '{"harness":"mock","title":"Smoke","cwd":"."}')"

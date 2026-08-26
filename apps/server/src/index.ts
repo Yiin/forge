@@ -2,8 +2,9 @@ import { serve, type ServerType } from '@hono/node-server'
 import { Hono } from 'hono'
 import { createRequire } from 'node:module'
 import { createNodeWebSocket } from '@hono/node-ws'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { dirname, extname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { UploadStore } from './uploads/store.js'
 import { uploadRoutes } from './http/uploads.js'
@@ -29,12 +30,68 @@ import { recoverSessions } from './sessions/recovery.js'
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
 
+const contentTypes: Record<string, string> = {
+  '.css': 'text/css; charset=utf-8',
+  '.gif': 'image/gif',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+}
+
+function productionWebDir() {
+  return resolve(
+    process.env.FORGE_WEB_DIR ??
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../../web'),
+  )
+}
+
+function webAssets(webDir: string) {
+  const root = resolve(webDir)
+  return async (request: Request) => {
+    const url = new URL(request.url)
+    const pathname = decodeURIComponent(url.pathname)
+    const relativePath = pathname === '/' ? 'index.html' : pathname.slice(1)
+    const candidate = resolve(root, relativePath)
+    if (candidate !== root && !candidate.startsWith(`${root}/`))
+      return new Response('not found', { status: 404 })
+
+    try {
+      const info = await stat(candidate)
+      if (!info.isFile()) throw new Error('not a file')
+      return new Response(await readFile(candidate), {
+        headers: {
+          'content-type':
+            contentTypes[extname(candidate)] ?? 'application/octet-stream',
+        },
+      })
+    } catch {
+      if (pathname.startsWith('/assets/'))
+        return new Response('asset not found', { status: 404 })
+      try {
+        return new Response(await readFile(resolve(root, 'index.html')), {
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        })
+      } catch {
+        return new Response('web assets are not installed', { status: 503 })
+      }
+    }
+  }
+}
+
 export function createApp(
   uploadStore?: UploadStore,
   status?: Parameters<typeof statusRoutes>[0],
   questions?: QuestionManager,
   manager?: SessionManager,
   runner?: EpicRunner,
+  webDir?: string,
 ) {
   const app = new Hono()
 
@@ -64,6 +121,18 @@ export function createApp(
         db: status.db,
       }),
     )
+  if (webDir) {
+    const assets = webAssets(webDir)
+    app.get('*', async (c, next) => {
+      if (
+        c.req.path === '/api' ||
+        c.req.path.startsWith('/api/') ||
+        c.req.path === '/ws'
+      )
+        return next()
+      return assets(c.req.raw)
+    })
+  }
 
   return app
 }
@@ -105,6 +174,8 @@ export function startServer(
     },
     questions,
     manager,
+    undefined,
+    productionWebDir(),
   )
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
   app.get('/ws', websocketRoute(upgradeWebSocket, db, bus))
