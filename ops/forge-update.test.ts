@@ -10,7 +10,9 @@ const exec = promisify(execFile)
 const dirs: string[] = []
 const script = join(process.cwd(), 'ops/forge-update')
 
-async function fixture(mode: 'same' | 'update' | 'rollback' | 'active') {
+async function fixture(
+  mode: 'same' | 'update' | 'tagged-build' | 'rollback' | 'active',
+) {
   const root = await mkdtemp(join(tmpdir(), 'forge-update-'))
   dirs.push(root)
   const tools = join(root, 'tools')
@@ -54,6 +56,7 @@ case "$*" in *api/status*)
 ;; *)
   if [ "$FORGE_MODE" = rollback ]; then echo '{"ok":false,"version":"v1.0.0"}'
   elif [ "$FORGE_MODE" = update ] && [ ! -e "$FORGE_FIXTURE/health-seen" ]; then touch "$FORGE_FIXTURE/health-seen"; echo '{"ok":true,"version":"v1.0.0"}'
+  elif [ "$FORGE_MODE" = tagged-build ]; then echo '{"ok":true,"version":"v2.0.0-abc1234"}'
   else echo '{"ok":true,"version":"v2.0.0"}'; fi
 ;; esac
 `,
@@ -87,6 +90,7 @@ describe('forge updater', () => {
   it.each([
     ['same', 'no-op'],
     ['update', 'successful update'],
+    ['tagged-build', 'tagged build health'],
     ['rollback', 'health rollback'],
     ['active', 'active epic skip'],
   ] as const)('%s path: %s', async (mode) => {
@@ -102,6 +106,7 @@ describe('forge updater', () => {
       expect(installed).toBe('v2.0.0\n')
       expect(binary).toContain('new')
     } else if (mode === 'rollback') expect(binary).toContain('old')
+    else if (mode === 'tagged-build') expect(binary).toContain('new')
     else expect(binary).toContain('old')
   })
 })

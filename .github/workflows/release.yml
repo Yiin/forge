@@ -53,6 +53,8 @@ jobs:
           cp -R apps/server/drizzle/. "$staging/apps/drizzle/"
           cp -R apps/web/dist/. "$staging/web/"
           cp apps/server/package.json "$staging/apps/server/package.json"
+          node -e 'const fs=require("node:fs"); const file=process.argv[1]; const pkg=JSON.parse(fs.readFileSync(file,"utf8")); pkg.version=process.argv[2]; fs.writeFileSync(file, JSON.stringify(pkg)+"\n")' "$staging/apps/server/package.json" "$version"
+          test -s "$staging/web/index.html"
           bun run --filter forge-client build
           (cd packages/forge-client && bun pm pack --destination "$GITHUB_WORKSPACE/dist")
           client_tarball="$(find dist -maxdepth 1 -type f -name 'forge-client-*.tgz' -print -quit)"
