@@ -5,7 +5,7 @@ import {
   epicResume,
   epicStart,
 } from '@forge/protocol/commands'
-import type { EpicRunner, StartRunInput } from '../epics/runner.js'
+import type { EpicRunner } from '../epics/runner.js'
 
 export type EpicRouteOptions = {
   runner: EpicRunner
