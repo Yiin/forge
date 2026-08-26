@@ -621,6 +621,78 @@ body {
   color: #fb7185;
   font-size: 12px;
 }
+.epic-triage-card {
+  margin: 10px 0;
+  border: 1px solid color-mix(in srgb, #fb7185 55%, var(--border));
+  border-radius: 10px;
+  padding: 13px;
+  background: color-mix(in srgb, #fb7185 7%, var(--panel));
+}
+.epic-triage-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: #fb7185;
+}
+.epic-triage-heading strong {
+  color: inherit;
+}
+.epic-triage-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.epic-triage-chain {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+.epic-triage-chain details {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 9px;
+  background: var(--panel);
+}
+.epic-triage-chain summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.epic-triage-chain pre {
+  max-height: 160px;
+  overflow: auto;
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: inherit;
+  font:
+    11px/1.45 ui-monospace,
+    monospace;
+}
+.epic-triage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.epic-triage-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 11px;
+  color: inherit;
+  background: var(--panel);
+  cursor: pointer;
+}
+.epic-triage-actions button:first-child {
+  border-color: var(--accent);
+}
+.epic-triage-actions button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
 .iteration-transcript {
   max-height: 320px;
   overflow: auto;

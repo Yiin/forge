@@ -66,4 +66,32 @@ describe('chat render model', () => {
       { kind: 'system', id: 'i', text: 'Turn interrupted: cancelled' },
     ])
   })
+  it('keeps epic triage cards in the replay model', () => {
+    const items = toRenderModel([
+      message({
+        type: 'epic_triage',
+        runId: 'run-1',
+        beadId: 'bead-1',
+        attempts: 2,
+        classification: 'unknown',
+        failureChain: [
+          { attempt: 1, signature: 'signature-1', excerpt: 'first failure' },
+          { attempt: 2, signature: 'signature-2', excerpt: 'second failure' },
+        ],
+      }),
+    ])
+    expect(items).toEqual([
+      {
+        kind: 'epic-triage',
+        id: 'i',
+        card: expect.objectContaining({
+          runId: 'run-1',
+          attempts: 2,
+          failureChain: expect.arrayContaining([
+            expect.objectContaining({ excerpt: 'second failure' }),
+          ]),
+        }),
+      },
+    ])
+  })
 })

@@ -8,6 +8,7 @@ import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
 import { AnsweredQuestionRow } from './AnsweredQuestionRow'
 import { SubagentCard } from './SubagentCard'
+import { EpicTriageCard } from './EpicTriageCard'
 import { useSessionsStore } from '../../stores/sessions'
 
 const EMPTY_MESSAGES: never[] = []
@@ -95,6 +96,7 @@ function RenderItem({
   if (item.kind === 'answered-question')
     return <AnsweredQuestionRow question={item.question} answer={item.answer} />
   if (item.kind === 'subagent') return <SubagentCard child={item.child} />
+  if (item.kind === 'epic-triage') return <EpicTriageCard card={item.card} />
   if (item.kind === 'attachment') return <AttachmentItem item={item} />
   return <div className="chat-system">{item.text}</div>
 }

@@ -28,6 +28,11 @@ export type ChatRenderItem =
       sizeBytes?: number
     }
   | { kind: 'answered-question'; id: string; question: string; answer: unknown }
+  | {
+      kind: 'epic-triage'
+      id: string
+      card: Extract<Message['content'], { type: 'epic_triage' }>
+    }
   | { kind: 'system'; id: string; text: string }
   | { kind: 'subagent'; id: string; child: SubagentSession }
 
@@ -121,6 +126,8 @@ export function toRenderModel(
           ? 'Cancelled'
           : (content.answers ?? content.answer),
       })
+    } else if (content.type === 'epic_triage') {
+      result.push({ kind: 'epic-triage', id: message.itemId, card: content })
     } else if (content.type === 'turn_interrupted') {
       result.push({
         kind: 'system',
