@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '../../lib/api'
 import { useSessionsStore } from '../../stores/sessions'
+import { registerShortcuts } from '../../lib/shortcuts'
 
 export function SessionHeader({ sessionId }: { sessionId: string }) {
   const session = useSessionsStore((state) =>
@@ -15,6 +16,13 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
   const headingRef = useRef<HTMLDivElement>(null)
   const [title, setTitle] = useState(session?.title ?? 'New session')
   useEffect(() => setTitle(session?.title ?? 'New session'), [session?.title])
+  useEffect(
+    () =>
+      registerShortcuts({
+        'session.rename': () => setEditing(true),
+      }),
+    [],
+  )
   useEffect(() => {
     if (!infoOpen) return
     const onPointerDown = (event: PointerEvent) => {

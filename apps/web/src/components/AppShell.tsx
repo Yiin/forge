@@ -9,10 +9,57 @@ import { SessionSidebar } from './sidebar/SessionSidebar'
 import { SettingsNav } from './settings/SettingsNav'
 import { Toaster } from 'sonner'
 import { resolveTheme } from '../lib/shell-storage'
+import { handleShortcut, registerShortcuts } from '../lib/shortcuts'
+import { useNavigate } from '@tanstack/react-router'
+import { useSessionsStore } from '../stores/sessions'
 export function AppShell() {
   const location = useLocation()
   const store = useShellStore()
+  const navigate = useNavigate()
   const isSettings = location.pathname.startsWith('/settings')
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => handleShortcut(event)
+    window.addEventListener('keydown', onKeyDown)
+    const sessions = () => useSessionsStore.getState().sessions
+    const go = (to: string) => void navigate({ to: to as never })
+    const unregister = registerShortcuts({
+      'sidebar.toggle': store.toggleSidebar,
+      'navigate.chat': () => go('/'),
+      'navigate.runs': () => go('/runs'),
+      'navigate.files': () => go('/files'),
+      'navigate.settings': () => go('/settings'),
+      'session.new': () => go('/?new=1'),
+      'session.previous': () => {
+        const list = sessions()
+        const index = list.findIndex(
+          (item) => item.id === location.pathname.slice(3),
+        )
+        const target = list[index > 0 ? index - 1 : list.length - 1]
+        if (target)
+          void navigate({
+            to: '/s/$sessionId',
+            params: { sessionId: target.id },
+          })
+      },
+      'session.next': () => {
+        const list = sessions()
+        const index = list.findIndex(
+          (item) => item.id === location.pathname.slice(3),
+        )
+        const target =
+          list[index >= 0 && index < list.length - 1 ? index + 1 : 0]
+        if (target)
+          void navigate({
+            to: '/s/$sessionId',
+            params: { sessionId: target.id },
+          })
+      },
+    })
+    return () => {
+      unregister()
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [location.pathname, navigate, store.toggleSidebar])
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = () => {

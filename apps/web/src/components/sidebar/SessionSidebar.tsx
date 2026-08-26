@@ -17,7 +17,6 @@ import { useSessionsStore, type SessionSummary } from '../../stores/sessions'
 import { useShellStore } from '../../stores/shell'
 import {
   filterScope,
-  jumpTarget,
   partitionSessions,
   relativeTime,
   settledPage,
@@ -85,19 +84,6 @@ export function SessionSidebar() {
     load()
     const timer = setInterval(load, 2000)
     return () => clearInterval(timer)
-  }, [])
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (!event.metaKey && !event.ctrlKey) return
-      const id = jumpTarget(active, Number(event.key))
-      if (id) {
-        event.preventDefault()
-        void openSession(id)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   const scoped = useMemo(() => filterScope(sessions, scope), [sessions, scope])

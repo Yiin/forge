@@ -9,6 +9,7 @@ import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore, type SessionSummary } from '../stores/sessions'
 import { PathSwitcher } from '../components/chat/PathSwitcher'
 import { useShellStore } from '../stores/shell'
+import { registerShortcuts } from '../lib/shortcuts'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
@@ -21,6 +22,13 @@ export function SessionRoute() {
   const sessionStatus = useSessionsStore(
     (state) =>
       state.sessions.find((session) => session.id === sessionId)?.status,
+  )
+  useEffect(
+    () =>
+      registerShortcuts({
+        'session.stop': () => void api.interrupt({ sessionId }),
+      }),
+    [sessionId],
   )
   useEffect(() => {
     let active = true

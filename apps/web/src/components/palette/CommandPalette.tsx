@@ -27,6 +27,7 @@ import {
 import { Dialog } from '../ui/dialog'
 import { messageHitUrl, runHitUrl, searchUrl } from './palette-logic'
 import { parseSnippet } from '../search/search-logic'
+import { registerShortcuts, shortcutCommands } from '../../lib/shortcuts'
 type SearchResult = {
   sessions: Array<{ sessionId: string; title: string; snippet: string }>
   messages: Array<{
@@ -48,22 +49,24 @@ export function CommandPalette() {
     messages: [],
     runs: [],
   })
+  const [shortcutHelp, setShortcutHelp] = useState(false)
   const sessions = useSessionsStore((state) => state.sessions)
   const projects = useMemo(
     () => new Set(sessions.map((session) => session.projectId).filter(Boolean)),
     [sessions],
   )
   const sessionId = location.pathname.match(/^\/s\/([^/]+)/)?.[1]
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        if (!window.matchMedia('(pointer: coarse)').matches) setOpen(true)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  useEffect(
+    () =>
+      registerShortcuts({
+        'palette.open': () => setOpen(true),
+        'help.shortcuts': () => {
+          setShortcutHelp(true)
+          setOpen(true)
+        },
+      }),
+    [],
+  )
   useEffect(() => {
     if (!query.trim()) return
     const timer = window.setTimeout(async () => {
@@ -82,6 +85,7 @@ export function CommandPalette() {
     setOpen(false)
     setQuery('')
     setResults({ sessions: [], messages: [], runs: [] })
+    setShortcutHelp(false)
   }
   const go = (to: string) => {
     close()
@@ -147,6 +151,19 @@ export function CommandPalette() {
               </CommandItem>
             )}
           </CommandGroup>
+          {shortcutHelp && (
+            <CommandGroup heading="Keyboard shortcuts" forceMount>
+              {shortcutCommands().map((command) => (
+                <CommandItem
+                  key={command.id}
+                  value={`${command.label} ${command.ariaKeyshortcuts}`}
+                >
+                  <kbd>{command.ariaKeyshortcuts}</kbd>
+                  {command.label}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
           <CommandGroup heading="Sessions">
             {sessions.map((session) => (
               <CommandItem
