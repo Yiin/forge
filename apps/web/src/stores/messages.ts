@@ -9,6 +9,7 @@ type MessagesState = {
   lastSeq: number
   volatile: VolatileEvent[]
   applyEvent: (event: ServerEvent) => void
+  loadMessages: (sessionId: string, messages: Message[]) => void
   applyEphemeral: (event: VolatileEvent) => void
   reset: () => void
 }
@@ -51,6 +52,20 @@ export const useMessagesStore = create<MessagesState>((set) => ({
   lastSeq: 0,
   volatile: [],
   applyEvent: (event) => set((state) => foldEvent(state, event)),
+  loadMessages: (sessionId, messages) =>
+    set((state) => ({
+      bySession: {
+        ...state.bySession,
+        [sessionId]: Array.from(
+          new Map(
+            [...(state.bySession[sessionId] ?? []), ...messages].map((message) => [
+              message.seq,
+              message,
+            ]),
+          ).values(),
+        ).sort((left, right) => left.seq - right.seq),
+      },
+    })),
   applyEphemeral: (event) =>
     set((state) => ({ volatile: [...state.volatile, event] })),
   reset: () => set({ bySession: {}, lastSeq: 0, volatile: [] }),

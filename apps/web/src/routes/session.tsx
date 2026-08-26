@@ -6,12 +6,29 @@ import { useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
 import { connectForgeSocket, normalizeServerEvent } from '../lib/socket'
 import { useMessagesStore } from '../stores/messages'
+import { useSessionsStore } from '../stores/sessions'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
   const [sending, setSending] = useState(false)
   useEffect(() => {
     const socket = connectForgeSocket({ sessions: [sessionId] })
+    void api
+      .listChildSessions(sessionId)
+      .then((data) => {
+        const children = Array.isArray(data) ? data : (data.sessions ?? [])
+        useSessionsStore
+          .getState()
+          .setSessions([
+            ...useSessionsStore
+              .getState()
+              .sessions.filter(
+                (session) => session.parentSessionId !== sessionId,
+              ),
+            ...children,
+          ])
+      })
+      .catch(() => undefined)
     void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`)
       .then((response) => (response.ok ? response.json() : []))
       .then((messages: unknown) => {
