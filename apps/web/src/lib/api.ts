@@ -79,6 +79,13 @@ export class ForgeApi {
       { settled },
     )
   }
+  deleteSession(sessionId: string) {
+    return this.post(
+      `/api/sessions/${encodeURIComponent(sessionId)}/delete`,
+      null,
+      {},
+    )
+  }
   prompt(input: Prompt) {
     return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)
   }
