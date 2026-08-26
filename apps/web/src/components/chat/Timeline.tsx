@@ -89,7 +89,8 @@ function RenderItem({
   item: ReturnType<typeof toRenderModel>[number]
   sessionId: string
 }) {
-  if (item.kind === 'message') return <MessageRow item={item} />
+  if (item.kind === 'message')
+    return <MessageRow item={item} sessionId={sessionId} />
   if (item.kind === 'tool') return <ToolCallRow item={item} />
   if (item.kind === 'answered-question')
     return <AnsweredQuestionRow question={item.question} answer={item.answer} />

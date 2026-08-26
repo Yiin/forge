@@ -11,6 +11,9 @@ export type SessionSummary = {
   lastActivityAt?: number | string
   snippet?: string
   unread?: boolean
+  forkedAtSeq?: number | null
+  contextMethod?: string | null
+  contextConfidence?: string | null
 }
 export type ProjectSummary = { id: string; name: string; path?: string }
 type SessionsState = {

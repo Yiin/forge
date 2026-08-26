@@ -20,6 +20,7 @@ import { QuestionManager as ServerQuestionManager } from './acp/questions.js'
 import { websocketRoute } from './ws.js'
 import { projectRoutes } from './http/projects.js'
 import { sessionRoutes } from './http/sessions.js'
+import { forkRoutes } from './http/forks.js'
 import { SessionManager } from './sessions/manager.js'
 import type { HarnessFactory } from './sessions/harness.js'
 import { workspaceRoutes } from './http/workspace.js'
@@ -101,6 +102,7 @@ export function createApp(
   if (uploadStore) {
     app.route('/', projectRoutes(uploadStore.database))
     if (manager) app.route('/', sessionRoutes(manager))
+    if (manager) app.route('/', forkRoutes(manager))
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
