@@ -11,16 +11,37 @@ import { toast } from 'sonner'
 import { ChatMarkdown } from './ChatMarkdown'
 import type { ChatRenderItem } from './render-model'
 import { SkillChipText } from './SkillChipText'
+import { api } from '../../lib/api'
 
 export function MessageRow({
   item,
+  sessionId,
 }: {
   item: Extract<ChatRenderItem, { kind: 'message' }>
+  sessionId?: string
 }) {
   const [open, setOpen] = useState(!item.thought)
   const copy = async () => {
     await navigator.clipboard.writeText(item.text)
     toast.success('Copied message')
+  }
+  const fork = async (branch: boolean) => {
+    if (!sessionId) return
+    const text = branch
+      ? 'Continue from this point.'
+      : window.prompt('Edit this message', item.text)
+    if (!text?.trim()) return
+    try {
+      const result = (await api.fork({
+        sessionId,
+        messageSeq: item.seq,
+        text: text.trim(),
+        includeSource: branch,
+      })) as { sessionId: string }
+      window.location.assign(`/s/${encodeURIComponent(result.sessionId)}`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Fork failed')
+    }
   }
   if (item.thought)
     return (
@@ -43,6 +64,22 @@ export function MessageRow({
         >
           <Copy size={14} />
         </button>
+        {sessionId &&
+          (item.role === 'user' ? (
+            <button
+              className="chat-text-action"
+              onClick={() => void fork(false)}
+            >
+              Edit
+            </button>
+          ) : (
+            <button
+              className="chat-text-action"
+              onClick={() => void fork(true)}
+            >
+              Branch from here
+            </button>
+          ))}
       </div>
       {item.role === 'user' ? (
         <p>

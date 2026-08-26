@@ -8,9 +8,8 @@ export function attachmentRoutes(store: UploadStore) {
   const app = new Hono()
   app.get('/api/attachments/:id', async (c) => {
     const row = store.attachment(c.req.param('id'))
-    if (row?.status === 'failed')
-      return c.json({ error: 'Attachment file was removed' }, 410)
-    if (!row || row.status !== 'complete' || !row.rel_path)
+    if (!row) return c.json({ error: 'Attachment not found' }, 404)
+    if (row.status !== 'complete' || !row.rel_path)
       return c.json({ error: 'Attachment file was removed' }, 410)
     const path = join(store.dataDir, row.rel_path)
     try {

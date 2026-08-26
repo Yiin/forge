@@ -155,14 +155,18 @@ export function createSession(
     cwd: string
     kind?: string
     parentSessionId?: string | null
+    forkedAtSeq?: number | null
+    forkRequestId?: string | null
+    contextMethod?: string | null
+    contextConfidence?: string | null
     now?: number
   },
 ) {
   const now = input.now ?? Date.now()
   const value = { id: id('ses_'), ...input, kind: input.kind ?? 'chat', now }
   db.prepare(
-    `INSERT INTO sessions (id, project_id, harness, title, cwd, kind, parent_session_id, status, auto_resume, created_at, last_activity_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
+    `INSERT INTO sessions (id, project_id, harness, title, cwd, kind, parent_session_id, forked_at_seq, fork_request_id, context_method, context_confidence, status, auto_resume, created_at, last_activity_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
   ).run(
     value.id,
     value.projectId,
@@ -171,6 +175,10 @@ export function createSession(
     value.cwd,
     value.kind,
     value.parentSessionId ?? null,
+    input.forkedAtSeq ?? null,
+    input.forkRequestId ?? null,
+    input.contextMethod ?? null,
+    input.contextConfidence ?? null,
     now,
     now,
   )

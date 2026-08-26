@@ -4,6 +4,7 @@ import type { MessageContent } from '@forge/protocol/message'
 import type { DatabaseSync } from 'node:sqlite'
 import type { HarnessFactory, HarnessHandle, HarnessItem } from './harness.js'
 import { isDefaultTitle, titleFromPrompt } from './titles.js'
+import { appendForkContext, createFork } from './fork.js'
 
 type Db = DatabaseSync
 export type SessionRow = {
@@ -333,6 +334,40 @@ export class SessionManager {
   }
   async interrupt(id: string) {
     await this.handles.get(id)?.cancel()
+  }
+  async fork(
+    input: {
+      sessionId: string
+      messageSeq: number
+      text: string
+      requestId?: string
+      includeSource: boolean
+    },
+    headerRequestId?: string,
+  ) {
+    const requestId = input.requestId ?? headerRequestId ?? crypto.randomUUID()
+    const context = createFork(this.db, { ...input, requestId })
+    if (context.existing)
+      return {
+        sessionId: context.childId,
+        parentSessionId: input.sessionId,
+        forkedAtSeq: context.boundary,
+        contextMethod: context.method,
+        contextConfidence: context.confidence,
+      }
+    appendForkContext(this.db, context.childId, context, this.bus)
+    await this.prompt(
+      context.childId,
+      `${context.recap}\n\nUser request:\n${input.text}`,
+      requestId,
+    )
+    return {
+      sessionId: context.childId,
+      parentSessionId: input.sessionId,
+      forkedAtSeq: context.boundary,
+      contextMethod: context.method,
+      contextConfidence: context.confidence,
+    }
   }
   async answer(id: string, questionId: string, answer: string) {
     const row = getSession(this.db, id) as SessionRow | undefined
