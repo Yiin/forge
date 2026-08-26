@@ -7,6 +7,9 @@ import { useSettingsStore } from '../stores/settings'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { ConfirmationDialog } from '../components/ui/confirmation-dialog'
+import { Field } from '../components/ui/field'
+import { Input } from '../components/ui/input'
+import { Textarea } from '../components/ui/textarea'
 import {
   Select,
   SelectItem,
@@ -156,22 +159,26 @@ export function HarnessSettings() {
   const [draft, setDraft] = useState<Record<string, Harness>>({})
   const [results, setResults] = useState<Record<string, string>>({})
   const [saveState, setSaveState] = useState<
-    'loading' | 'idle' | 'saving' | 'saved' | 'error'
-  >('loading')
-  const [saveError, setSaveError] = useState<string | null>(null)
+    Record<string, 'loading' | 'dirty' | 'saving' | 'saved' | 'error'>
+  >({})
+  const [saveError, setSaveError] = useState<Record<string, string | null>>({})
+  const [testing, setTesting] = useState<Record<string, boolean>>({})
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [deleteKey, setDeleteKey] = useState<string | null>(null)
-  const saveQueue = useRef<Promise<void>>(Promise.resolve())
+  const saveQueue = useRef<Record<string, Promise<void>>>({})
   useEffect(() => {
     void api
       .listHarnesses()
       .then((value) => {
         setDraft(value as Record<string, Harness>)
-        setSaveState('idle')
+        setSaveState(
+          Object.fromEntries(Object.keys(value).map((key) => [key, 'saved'])),
+        )
       })
       .catch((error: unknown) => {
-        setSaveError(error instanceof Error ? error.message : String(error))
-        setSaveState('error')
+        setSaveError({
+          _page: error instanceof Error ? error.message : String(error),
+        })
       })
   }, [])
   const update = (key: string, patch: Partial<Harness>) => {
@@ -179,10 +186,10 @@ export function HarnessSettings() {
       ...current,
       [key]: { ...current[key], ...patch },
     }))
-    setSaveState('idle')
-    setSaveError(null)
+    setSaveState((current) => ({ ...current, [key]: 'dirty' }))
+    setSaveError((current) => ({ ...current, [key]: null }))
   }
-  const saveDraft = (next: Record<string, Harness>) => {
+  const saveDraft = (next: Record<string, Harness>, key: string) => {
     const parsed = Object.fromEntries(
       Object.entries(next).map(([key, value]) => [
         key,
@@ -191,8 +198,11 @@ export function HarnessSettings() {
     )
     const invalid = Object.values(parsed).find((result) => !result.success)
     if (invalid && !invalid.success) {
-      setSaveError(invalid.error.issues[0]?.message ?? 'Invalid harness')
-      setSaveState('error')
+      setSaveError((current) => ({
+        ...current,
+        [key]: invalid.error.issues[0]?.message ?? 'Invalid harness',
+      }))
+      setSaveState((current) => ({ ...current, [key]: 'error' }))
       return
     }
     const snapshot = Object.fromEntries(
@@ -201,18 +211,21 @@ export function HarnessSettings() {
         result.success ? result.data : undefined,
       ]),
     ) as Record<string, Harness>
-    setSaveState('saving')
-    setSaveError(null)
-    saveQueue.current = saveQueue.current
+    setSaveState((current) => ({ ...current, [key]: 'saving' }))
+    setSaveError((current) => ({ ...current, [key]: null }))
+    saveQueue.current[key] = (saveQueue.current[key] ?? Promise.resolve())
       .then(() => api.saveHarnesses(snapshot))
-      .then(() => setSaveState('saved'))
+      .then(() => setSaveState((current) => ({ ...current, [key]: 'saved' })))
       .catch((error: unknown) => {
-        setSaveError(error instanceof Error ? error.message : String(error))
-        setSaveState('error')
+        setSaveError((current) => ({
+          ...current,
+          [key]: error instanceof Error ? error.message : String(error),
+        }))
+        setSaveState((current) => ({ ...current, [key]: 'error' }))
       })
   }
   const save = (key: string) => {
-    if (draft[key]) saveDraft(draft)
+    if (draft[key]) saveDraft(draft, key)
   }
   const validationError = (value: Harness) => {
     const parsed = harnessConfigSchema.safeParse(value)
@@ -254,7 +267,7 @@ export function HarnessSettings() {
         enabled: true,
       },
     }))
-    setSaveState('idle')
+    setSaveState((current) => ({ ...current, [key]: 'dirty' }))
   }
   return (
     <SettingsPage
@@ -262,7 +275,7 @@ export function HarnessSettings() {
       subtitle="A harness is a command and its runtime settings."
     >
       <div className="settings-stack">
-        {saveState === 'loading' && (
+        {Object.values(saveState).some((state) => state === 'loading') && (
           <p className="settings-status" role="status">
             Loading harnesses…
           </p>
@@ -271,98 +284,142 @@ export function HarnessSettings() {
           <article className="settings-card" key={key}>
             <div className="settings-card-head">
               <strong>{value.name || key}</strong>
+              <span className="settings-status" role="status">
+                {saveState[key] === 'dirty'
+                  ? 'Unsaved changes'
+                  : saveState[key] === 'saving'
+                    ? 'Saving…'
+                    : saveState[key] === 'error'
+                      ? 'Error'
+                      : 'Saved.'}
+              </span>
             </div>
-            <label>
-              Name{input(value.name, (name) => update(key, { name }))}
-            </label>
-            <label>
-              Command
-              {input(value.command, (command) => update(key, { command }))}
-            </label>
-            <label>
-              Arguments, one per line
-              <textarea
-                value={value.args.join('\n')}
-                onChange={(e) =>
-                  update(key, {
-                    args: e.target.value.split('\n').filter(Boolean),
-                  })
-                }
-              />
-            </label>
-            <fieldset className="settings-env">
-              <legend>Environment variables</legend>
-              {Object.entries(value.env).map(([name, envValue]) => (
-                <div className="settings-env-row" key={name}>
-                  <input
-                    aria-label="Environment variable name"
-                    value={name}
-                    placeholder="NAME"
-                    autoCapitalize="characters"
-                    autoComplete="off"
-                    onChange={(event) => {
-                      const next = { ...value.env }
-                      delete next[name]
-                      if (event.target.value)
-                        next[event.target.value] = envValue
-                      update(key, { env: next })
-                    }}
-                  />
-                  <input
-                    aria-label={`Value for ${name}`}
-                    type={revealed[`${key}:${name}`] ? 'text' : 'password'}
-                    value={envValue}
-                    placeholder="Value"
-                    autoComplete="new-password"
-                    onChange={(event) =>
-                      update(key, {
-                        env: { ...value.env, [name]: event.target.value },
-                      })
-                    }
-                  />
-                  <button
-                    type="button"
-                    className="settings-env-toggle"
-                    aria-label={
-                      revealed[`${key}:${name}`] ? 'Hide value' : 'Show value'
-                    }
-                    onClick={() =>
-                      setRevealed((current) => ({
-                        ...current,
-                        [`${key}:${name}`]: !current[`${key}:${name}`],
-                      }))
-                    }
-                  >
-                    {revealed[`${key}:${name}`] ? 'Hide' : 'Show'}
-                  </button>
-                  <button
-                    type="button"
-                    className="settings-env-remove"
-                    aria-label={`Remove ${name}`}
-                    onClick={() => {
-                      const next = { ...value.env }
-                      delete next[name]
-                      update(key, { env: next })
-                    }}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={() => {
-                  let name = 'NEW_VARIABLE'
-                  let suffix = 1
-                  while (name in value.env) name = `NEW_VARIABLE_${suffix++}`
-                  update(key, { env: { ...value.env, [name]: '' } })
-                }}
+            <SettingsSection
+              title="Connection"
+              description="Choose how Forge starts this harness."
+            >
+              <Field
+                label="Name"
+                htmlFor={`${key}-name`}
+                description="A label shown in session controls."
               >
-                Add variable
-              </button>
-            </fieldset>
-            <label>
-              Protocol
+                <Input
+                  id={`${key}-name`}
+                  value={value.name}
+                  onChange={(event) =>
+                    update(key, { name: event.target.value })
+                  }
+                />
+              </Field>
+              <Field
+                label="Command"
+                htmlFor={`${key}-command`}
+                description="The executable Forge starts."
+              >
+                <Input
+                  id={`${key}-command`}
+                  value={value.command}
+                  onChange={(event) =>
+                    update(key, { command: event.target.value })
+                  }
+                />
+              </Field>
+              <Field
+                label="Arguments"
+                htmlFor={`${key}-args`}
+                description="Enter one argument per line."
+              >
+                <Textarea
+                  id={`${key}-args`}
+                  value={value.args.join('\n')}
+                  onChange={(e) =>
+                    update(key, {
+                      args: e.target.value.split('\n').filter(Boolean),
+                    })
+                  }
+                />
+              </Field>
+            </SettingsSection>
+            <SettingsSection
+              title="Environment"
+              description="Secret values stay hidden until you reveal them."
+            >
+              <fieldset className="settings-env">
+                <legend>Environment variables</legend>
+                {Object.entries(value.env).map(([name, envValue]) => (
+                  <div className="settings-env-row" key={name}>
+                    <Input
+                      aria-label="Environment variable name"
+                      value={name}
+                      placeholder="NAME"
+                      autoCapitalize="characters"
+                      autoComplete="off"
+                      onChange={(event) => {
+                        const next = { ...value.env }
+                        delete next[name]
+                        if (event.target.value)
+                          next[event.target.value] = envValue
+                        update(key, { env: next })
+                      }}
+                    />
+                    <Input
+                      aria-label={`Value for ${name}`}
+                      type={revealed[`${key}:${name}`] ? 'text' : 'password'}
+                      value={envValue}
+                      placeholder="Value"
+                      autoComplete="new-password"
+                      onChange={(event) =>
+                        update(key, {
+                          env: { ...value.env, [name]: event.target.value },
+                        })
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="settings-env-toggle"
+                      aria-label={
+                        revealed[`${key}:${name}`] ? 'Hide value' : 'Show value'
+                      }
+                      onClick={() =>
+                        setRevealed((current) => ({
+                          ...current,
+                          [`${key}:${name}`]: !current[`${key}:${name}`],
+                        }))
+                      }
+                    >
+                      {revealed[`${key}:${name}`] ? 'Hide' : 'Show'}
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-env-remove"
+                      aria-label={`Remove ${name}`}
+                      onClick={() => {
+                        const next = { ...value.env }
+                        delete next[name]
+                        update(key, { env: next })
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    let name = 'NEW_VARIABLE'
+                    let suffix = 1
+                    while (name in value.env) name = `NEW_VARIABLE_${suffix++}`
+                    update(key, { env: { ...value.env, [name]: '' } })
+                  }}
+                >
+                  Add variable
+                </button>
+              </fieldset>
+            </SettingsSection>
+            <Field
+              label="Protocol"
+              description="ACP uses structured messages. PTY uses terminal output."
+            >
               <Select
                 value={value.protocol}
                 onValueChange={(selected) => {
@@ -379,7 +436,7 @@ export function HarnessSettings() {
                   <SelectItem value="pty">PTY</SelectItem>
                 </SelectPopup>
               </Select>
-            </label>
+            </Field>
             {results[key] && (
               <pre className="settings-result" role="status">
                 {results[key]}
@@ -401,8 +458,9 @@ export function HarnessSettings() {
               <Button
                 onClick={() => {
                   setResults((current) => ({ ...current, [key]: 'Testing…' }))
+                  setTesting((current) => ({ ...current, [key]: true }))
                   void api
-                    .testHarness(key)
+                    .testHarness(key, value)
                     .then((result) =>
                       setResults((current) => ({
                         ...current,
@@ -418,9 +476,14 @@ export function HarnessSettings() {
                             : String(error),
                       })),
                     )
+                    .finally(() =>
+                      setTesting((current) => ({ ...current, [key]: false })),
+                    )
                 }}
                 disabled={
-                  Boolean(validationError(value)) || saveState === 'saving'
+                  Boolean(validationError(value)) ||
+                  testing[key] ||
+                  saveState[key] === 'saving'
                 }
               >
                 Test
@@ -428,34 +491,19 @@ export function HarnessSettings() {
               <Button variant="danger" onClick={() => setDeleteKey(key)}>
                 Delete
               </Button>
-              {saveState === 'saving' && (
-                <span className="settings-status" role="status">
-                  Saving…
-                </span>
-              )}
-              {saveState === 'saved' && (
-                <span className="settings-status" role="status">
-                  Saved.
-                </span>
-              )}
             </div>
           </article>
         ))}
       </div>
-      {saveError && (
-        <p className="settings-error" role="alert">
-          Could not save: {saveError}
-        </p>
-      )}
+      {Object.entries(saveError)
+        .filter(([, error]) => error)
+        .map(([key, error]) => (
+          <p className="settings-error" role="alert" key={key}>
+            Could not save: {error}
+          </p>
+        ))}
       <div className="settings-actions">
         <Button onClick={add}>Add harness</Button>
-        <Button
-          variant="primary"
-          onClick={() => saveDraft(draft)}
-          disabled={saveState === 'saving'}
-        >
-          Save changes
-        </Button>
       </div>
       <ConfirmationDialog
         open={deleteKey !== null}
@@ -464,15 +512,18 @@ export function HarnessSettings() {
         }}
         title="Delete harness?"
         confirmLabel="Delete"
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!deleteKey) return
+          const next = { ...draft }
+          delete next[deleteKey]
+          await api.saveHarnesses(next)
           setDraft((current) => {
             const next = { ...current }
             delete next[deleteKey]
             return next
           })
           setDeleteKey(null)
-          setSaveState('idle')
+          setSaveState((current) => ({ ...current, [deleteKey]: 'saved' }))
         }}
       >
         Delete “{deleteKey ? draft[deleteKey]?.name || deleteKey : ''}”? Save
@@ -496,7 +547,9 @@ export function ProjectSettings() {
   )
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState<Record<string, boolean>>({})
-  const [saveState, setSaveState] = useState<Record<string, 'saved' | 'error'>>({})
+  const [saveState, setSaveState] = useState<Record<string, 'saved' | 'error'>>(
+    {},
+  )
   const [archiveProject, setArchiveProject] = useState<
     (typeof projects)[number] | null
   >(null)
@@ -551,20 +604,31 @@ export function ProjectSettings() {
                   }
                 }}
               />
-              {saveState[project.id] === 'saved' && <span role="status">Saved.</span>}
+              {saveState[project.id] === 'saved' && (
+                <span role="status">Saved.</span>
+              )}
               {saveState[project.id] === 'error' && (
                 <span role="alert">
                   Could not save.{' '}
-                  <Button size="compact" onClick={() => void renameProject(project)}>
+                  <Button
+                    size="compact"
+                    onClick={() => void renameProject(project)}
+                  >
                     Retry
                   </Button>
                 </span>
               )}
             </SettingsRow>
-            <SettingsRow label="Path" description="The selected project folder.">
+            <SettingsRow
+              label="Path"
+              description="The selected project folder."
+            >
               <span>{project.path}</span>
             </SettingsRow>
-            <SettingsRow label="State" description="Archived projects cannot start new work.">
+            <SettingsRow
+              label="State"
+              description="Archived projects cannot start new work."
+            >
               <Button
                 loading={saving[project.id]}
                 disabled={Boolean(project.archived_at)}
@@ -632,7 +696,9 @@ export function ProjectSettings() {
     })
     try {
       await api.renameProject(project.id, name)
-      setProjects((all) => all.map((item) => item.id === project.id ? { ...item, name } : item))
+      setProjects((all) =>
+        all.map((item) => (item.id === project.id ? { ...item, name } : item)),
+      )
       setSaveState((current) => ({ ...current, [project.id]: 'saved' }))
     } catch {
       setSaveState((current) => ({ ...current, [project.id]: 'error' }))

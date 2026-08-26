@@ -87,8 +87,8 @@ export class ForgeApi {
   saveHarnesses(harness: Record<string, unknown>) {
     return this.put('/api/harnesses', { harness })
   }
-  testHarness(name: string) {
-    return this.post('/api/harnesses/test', null, { name })
+  testHarness(name: string, harness?: unknown) {
+    return this.post('/api/harnesses/test', null, { name, harness })
   }
   listRuns() {
     return this.get('/api/epics')
