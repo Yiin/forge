@@ -32,6 +32,9 @@ export function Composer({
   onInterrupt,
   onSend,
   sending = false,
+  draftMode = false,
+  initialText = '',
+  onTextChange,
 }: {
   sessionId: string
   harness?: string
@@ -44,8 +47,11 @@ export function Composer({
     harness: string,
   ) => Promise<void>
   sending?: boolean
+  draftMode?: boolean
+  initialText?: string
+  onTextChange?: (text: string) => void
 }) {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialText)
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null)
   const [uploads, dispatchUploads] = useState(initialAttachmentUploads)
   const [dragging, setDragging] = useState(false)
@@ -85,6 +91,7 @@ export function Composer({
       ])
   }, [volatile, sessionId])
   useEffect(() => {
+    if (draftMode) return
     void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`)
       .then((response) => (response.ok ? response.json() : null))
       .then((session: { projectId?: string } | null) => {
@@ -108,7 +115,7 @@ export function Composer({
           )
       })
       .catch(() => undefined)
-  }, [sessionId])
+  }, [draftMode, sessionId])
   const [harnesses, setHarnesses] = useState<string[]>(harness ? [harness] : [])
   useEffect(() => {
     void fetch('/api/status')
@@ -124,6 +131,7 @@ export function Composer({
     cursor = textarea.current?.selectionStart ?? value.length,
   ) => {
     setText(value)
+    onTextChange?.(value)
     setTrigger(detectComposerTrigger(value, cursor))
   }
   const select = (command: ComposerCommand) => {
@@ -140,6 +148,7 @@ export function Composer({
     })
   }
   const upload = async (file: File, retryId?: string) => {
+    if (draftMode) return
     const temp = `local-${crypto.randomUUID()}`
     const id = retryId ?? temp
     if (retryId)
@@ -349,6 +358,7 @@ export function Composer({
               aria-label="Attach files"
               type="file"
               multiple
+              disabled={draftMode}
               onChange={(event) => {
                 addFiles(event.target.files ?? [])
                 event.target.value = ''

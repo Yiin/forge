@@ -20,6 +20,7 @@ import {
   EpicSettings,
   AboutSettings,
 } from './routes/settings-pages'
+import { DraftRoute } from './routes/draft'
 const root = createRootRoute({ component: AppShell })
 const index = createRoute({
   getParentRoute: () => root,
@@ -36,6 +37,11 @@ const session = createRoute({
   getParentRoute: () => root,
   path: '/s/$sessionId',
   component: SessionRoute,
+})
+const draft = createRoute({
+  getParentRoute: () => root,
+  path: '/draft/$draftId',
+  component: DraftRoute,
 })
 const runs = createRoute({
   getParentRoute: () => root,
@@ -103,6 +109,7 @@ const settingsAbout = createRoute({
 const tree = root.addChildren([
   index,
   session,
+  draft,
   runs,
   run,
   files,
