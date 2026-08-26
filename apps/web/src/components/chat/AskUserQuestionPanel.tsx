@@ -4,8 +4,12 @@ import { api } from '../../lib/api'
 import { pendingQuestions, type PendingQuestion } from './question-logic'
 import { useMessagesStore } from '../../stores/messages'
 
+const EMPTY_MESSAGES: never[] = []
+
 export function AskUserQuestionPanel({ sessionId }: { sessionId: string }) {
-  const messages = useMessagesStore((state) => state.bySession[sessionId] ?? [])
+  const messages = useMessagesStore(
+    (state) => state.bySession[sessionId] ?? EMPTY_MESSAGES,
+  )
   const pending = pendingQuestions(messages)
   const current = pending[0]
   if (!current) return null
