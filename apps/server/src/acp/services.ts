@@ -5,6 +5,7 @@ import { resolve, relative, isAbsolute, sep } from 'node:path'
 import { z } from 'zod'
 import * as acp from '@zed-industries/agent-client-protocol'
 import type { ClientHandlers } from './client.js'
+import { isUserQuestion, type QuestionManager } from './questions.js'
 
 const permissionRequest = z.object({
   options: z.array(z.object({ kind: z.string(), optionId: z.string() })),
@@ -88,6 +89,7 @@ export type AcpServicesOptions = {
   projectRoot: string
   logger?: Logger
   isUserQuestion?: (request: acp.RequestPermissionRequest) => boolean
+  questionManager?: QuestionManager
 }
 
 export type AcpServices = ClientHandlers & {
@@ -103,8 +105,11 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
   const service: AcpServices = {
     onRequestPermission: async (request) => {
       const checked = permissionRequest.parse(request)
-      if (options.isUserQuestion?.(request))
+      if (options.isUserQuestion?.(request) ?? isUserQuestion(request)) {
+        if (options.questionManager)
+          return options.questionManager.handlePermission(request)
         return { outcome: { outcome: 'cancelled' } }
+      }
       logger.debug('Auto-granted ACP permission', checked.toolCall.title)
       if (cancelled.has(request.sessionId))
         return { outcome: { outcome: 'cancelled' } }
@@ -219,13 +224,16 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
       terminals.delete(key)
       return {}
     },
-    onExtRequest: async (method) => {
+    onExtRequest: async (method, params) => {
+      const question = options.questionManager?.handleExtension(method, params)
+      if (question) return question
       throw acp.RequestError.methodNotFound(method)
     },
     onExtNotification: async (method) => {
       logger.debug('Ignored unknown ACP extension notification', method)
     },
     releaseSession: async (sessionId) => {
+      options.questionManager?.releaseSession(sessionId)
       cancelled.add(sessionId)
       for (const [key, terminal] of terminals) {
         if (!key.startsWith(`${sessionId}:`)) continue
@@ -234,6 +242,7 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
       }
     },
     cancelSession: (sessionId) => {
+      options.questionManager?.cancelSession(sessionId)
       cancelled.add(sessionId)
     },
   }

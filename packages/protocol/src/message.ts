@@ -25,13 +25,28 @@ export const MessageContent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('ask_user_question'),
     questionId: id,
-    question: z.string(),
+    question: z.string().optional(),
     options: z.array(z.string()).optional(),
+    questions: z
+      .array(
+        z.object({
+          header: z.string().optional(),
+          question: z.string(),
+          options: z.array(
+            z.object({ label: z.string(), description: z.string().optional() }),
+          ),
+          multiSelect: z.boolean().optional(),
+        }),
+      )
+      .optional(),
+    source: z.enum(['permission', 'ext']).optional(),
   }),
   z.object({
     type: z.literal('user_answer'),
     questionId: id,
-    answer: z.string(),
+    answer: z.string().optional(),
+    answers: z.unknown().optional(),
+    cancelled: z.boolean().optional(),
   }),
   z.object({
     type: z.literal('attachment_ref'),
