@@ -8,6 +8,7 @@ import { AppShell } from './components/AppShell'
 import { FileBrowser } from './components/files/FileBrowser'
 import { readLastSession } from './lib/shell-storage'
 import { SessionRoute } from './routes/session'
+import { SearchRoute } from './routes/search'
 const root = createRootRoute({ component: AppShell })
 const empty =
   (title: string, text = 'This area is ready for the next feature.') =>
@@ -57,8 +58,15 @@ const filesIndex = createRoute({
 const search = createRoute({
   getParentRoute: () => root,
   path: '/search',
-  validateSearch: (value: { q?: string }) => ({ q: value.q }),
-  component: empty('Search'),
+  validateSearch: (value: { q?: string; scope?: string }) => ({
+    q: value.q ?? '',
+    scope: (['all', 'sessions', 'messages', 'runs'] as const).includes(
+      value.scope as never,
+    )
+      ? (value.scope as 'all' | 'sessions' | 'messages' | 'runs')
+      : 'all',
+  }),
+  component: SearchRoute,
 })
 const settings = createRoute({
   getParentRoute: () => root,

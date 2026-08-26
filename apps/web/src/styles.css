@@ -750,6 +750,127 @@ kbd {
   color: var(--muted);
   margin: 0;
 }
+.search-page {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px max(16px, 4vw);
+}
+.search-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.search-back {
+  display: none;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  padding: 8px;
+}
+.search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px 12px;
+}
+.search-input-wrap input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  color: inherit;
+  background: transparent;
+  padding: 11px 0;
+  font: inherit;
+}
+.search-scopes {
+  display: flex;
+  gap: 6px;
+  margin: 18px 0;
+  overflow-x: auto;
+}
+.search-scopes button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.search-scopes button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.search-results {
+  display: grid;
+  gap: 20px;
+}
+.search-group h2,
+.search-recent h2 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.search-group-list {
+  display: grid;
+  gap: 4px;
+}
+.search-result {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  border-radius: 9px;
+  color: inherit;
+  padding: 8px 10px;
+  text-decoration: none;
+}
+.search-result:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.search-result-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  flex: 1;
+}
+.search-result-copy strong,
+.search-snippet {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-snippet,
+.search-result-copy > span:last-child {
+  color: var(--muted);
+  font-size: 13px;
+}
+.search-snippet mark {
+  color: inherit;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.search-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+.search-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 32px 10px;
+}
+@media (max-width: 767px) {
+  .search-page {
+    padding: 14px 10px;
+  }
+  .search-back {
+    display: grid;
+    place-items: center;
+  }
+}
 .phone-shell {
   display: none;
 }

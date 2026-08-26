@@ -36,7 +36,7 @@ function Navigation({ settings = false }: { settings?: boolean }) {
             <Plus size={16} /> New session
           </Link>
           <Link to="/runs">Epic runs</Link>
-          <Link to="/search" search={{ q: '' }}>
+          <Link to="/search" search={{ q: '', scope: 'all' }}>
             Search
           </Link>
           <Link to="/settings">
@@ -76,7 +76,10 @@ export function AppShell() {
         </main>
       </div>
       <div className="phone-shell">
-        <AppBar title={isSettings ? 'Settings' : 'Forge'} />
+        <AppBar
+          title={isSettings ? 'Settings' : 'Forge'}
+          showBack={location.pathname === '/search'}
+        />
         <main className="main">
           <Outlet />
         </main>
