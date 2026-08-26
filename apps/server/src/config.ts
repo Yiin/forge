@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { parse } from 'smol-toml'
 import { z } from 'zod'
@@ -91,7 +92,10 @@ export function defaultConfig(
       name: 'Mock ACP agent',
       command: 'bun',
       args: [
-        resolve(process.cwd(), 'apps/server/test/fixtures/acp-mock-agent.ts'),
+        resolve(
+          dirname(fileURLToPath(import.meta.url)),
+          '../test/fixtures/acp-mock-agent.ts',
+        ),
       ],
       env: {},
       protocol: 'acp',

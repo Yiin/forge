@@ -191,8 +191,14 @@ describe('event websocket', () => {
       JSON.stringify({ type: 'subscribe', sessions: 'all', cursor: 0 }),
     )
     await new Promise((resolve) => setTimeout(resolve, 10))
-    appendMany(db, bus, session.id, 1, 250)
-    appendMany(db, bus, other.id, 251, 250)
+    // Chunk the burst with yields: a fully synchronous 500-write burst
+    // overflows the writer's 256-event queue and it closes the socket by
+    // design. A real storm arrives over many ticks.
+    for (let base = 0; base < 250; base += 25) {
+      appendMany(db, bus, session.id, 1 + base, 25)
+      appendMany(db, bus, other.id, 251 + base, 25)
+      await new Promise((resolve) => setImmediate(resolve))
+    }
     const stormEvents = await storm
     expect(new Set(stormEvents.map((event) => event.seq)).size).toBe(500)
     console.info('delta storm: 500 rows, no duplicates')
