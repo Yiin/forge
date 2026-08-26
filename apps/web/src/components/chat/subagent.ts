@@ -78,12 +78,21 @@ export function placeSubagents(
     | { kind: 'subagent'; id: string; child: SubagentSession }
     | (typeof items)[number]
   > = []
-  const bySeq = new Map(children.map((child) => [child.spawnedBySeq, child]))
+  const bySeq = new Map<number, SubagentSession[]>()
+  for (const child of children) {
+    if (child.spawnedBySeq == null) continue
+    const siblings = bySeq.get(child.spawnedBySeq) ?? []
+    siblings.push(child)
+    bySeq.set(child.spawnedBySeq, siblings)
+  }
   const placed = new Set<string>()
   for (const item of items) {
     result.push(item)
-    const child = bySeq.get(anchors?.get(item.id) ?? item.seq)
-    if (child && !placed.has(child.id)) {
+    const anchorSeq = anchors?.get(item.id) ?? item.seq
+    const childrenForAnchor =
+      anchorSeq == null ? [] : (bySeq.get(anchorSeq) ?? [])
+    for (const child of childrenForAnchor) {
+      if (placed.has(child.id)) continue
       placed.add(child.id)
       result.push({ kind: 'subagent', id: `subagent-${child.id}`, child })
     }

@@ -74,4 +74,16 @@ describe('subagent display model', () => {
       { id: 'item-b' },
     ])
   })
+
+  it('places concurrent children at the same spawn anchor', () => {
+    const children = [
+      { id: 'child-a', title: 'Research', spawnedBySeq: 7 },
+      { id: 'child-b', title: 'Review', spawnedBySeq: 7 },
+    ]
+    expect(placeSubagents([{ id: 'spawn', seq: 7 }], children)).toEqual([
+      { id: 'spawn', seq: 7 },
+      { kind: 'subagent', id: 'subagent-child-a', child: children[0] },
+      { kind: 'subagent', id: 'subagent-child-b', child: children[1] },
+    ])
+  })
 })
