@@ -5,7 +5,9 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
   page,
   baseURL,
 }) => {
-  const forge = await launchForge({ env: { FORGE_FAKE_DELAY_MS: '120' } })
+  const forge = await launchForge({
+    fakeAgentEnv: { FORGE_MOCK_PROMPT_DELAY_MS: '120' },
+  })
   try {
     if (test.info().project.name === 'phone')
       await page.setViewportSize({ width: 390, height: 844 })
