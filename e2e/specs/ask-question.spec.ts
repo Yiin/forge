@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { launchForge } from '../helpers/forgeServer.js'
+import { launchForge, stopProxiedForge } from '../helpers/forgeServer.js'
 
 async function openQuestion(page: Page, mode = 'single') {
   const forge = await launchForge({
@@ -8,50 +8,55 @@ async function openQuestion(page: Page, mode = 'single') {
       FORGE_MOCK_ASK_QUESTION_MODE: mode,
     },
   })
-  await page.route('**/api/**', async (route) => {
-    const target = `${forge.baseUrl}${new URL(route.request().url()).pathname}`
-    const response = await fetch(target, {
-      method: route.request().method(),
-      headers: {
-        'content-type':
-          route.request().headers()['content-type'] ?? 'application/json',
-      },
-      body: route.request().postDataBuffer() ?? undefined,
+  try {
+    await page.route('**/api/**', async (route) => {
+      const target = `${forge.baseUrl}${new URL(route.request().url()).pathname}`
+      const response = await fetch(target, {
+        method: route.request().method(),
+        headers: {
+          'content-type':
+            route.request().headers()['content-type'] ?? 'application/json',
+        },
+        body: route.request().postDataBuffer() ?? undefined,
+      })
+      await route.fulfill({
+        status: response.status,
+        headers: Object.fromEntries(response.headers),
+        body: Buffer.from(await response.arrayBuffer()),
+      })
     })
-    await route.fulfill({
-      status: response.status,
-      headers: Object.fromEntries(response.headers),
-      body: Buffer.from(await response.arrayBuffer()),
-    })
-  })
-  await page.addInitScript((url) => {
-    const NativeWebSocket = window.WebSocket
-    const socketUrl = url.replace(/^http/, 'ws') + '/ws'
-    const ForgeWebSocket = function (
-      this: WebSocket,
-      _url: string,
-      protocols?: string | string[],
-    ) {
-      return new NativeWebSocket(socketUrl, protocols)
-    } as unknown as typeof WebSocket
-    ForgeWebSocket.prototype = NativeWebSocket.prototype
-    window.WebSocket = ForgeWebSocket
-  }, forge.baseUrl)
-  await page.goto('/')
-  const shell = page.locator(
-    test.info().project.name.startsWith('phone')
-      ? '.phone-shell'
-      : '.desktop-shell',
-  )
-  await shell.getByLabel('Project name').fill('Question project')
-  await shell.getByRole('button', { name: 'Add project' }).click()
-  await page.waitForURL(/\/s\//)
-  await shell.getByLabel('Message composer').fill('ask me')
-  await shell.getByRole('button', { name: 'Send' }).click()
-  await expect(
-    shell.getByRole('region', { name: 'Question from Forge' }),
-  ).toBeVisible()
-  return { forge, shell }
+    await page.addInitScript((url) => {
+      const NativeWebSocket = window.WebSocket
+      const socketUrl = url.replace(/^http/, 'ws') + '/ws'
+      const ForgeWebSocket = function (
+        this: WebSocket,
+        _url: string,
+        protocols?: string | string[],
+      ) {
+        return new NativeWebSocket(socketUrl, protocols)
+      } as unknown as typeof WebSocket
+      ForgeWebSocket.prototype = NativeWebSocket.prototype
+      window.WebSocket = ForgeWebSocket
+    }, forge.baseUrl)
+    await page.goto('/')
+    const shell = page.locator(
+      test.info().project.name.startsWith('phone')
+        ? '.phone-shell'
+        : '.desktop-shell',
+    )
+    await shell.getByLabel('Project name').fill('Question project')
+    await shell.getByRole('button', { name: 'Add project' }).click()
+    await page.waitForURL(/\/s\//)
+    await shell.getByLabel('Message composer').fill('ask me')
+    await shell.getByRole('button', { name: 'Send' }).click()
+    await expect(
+      shell.getByRole('region', { name: 'Question from Forge' }),
+    ).toBeVisible()
+    return { forge, shell }
+  } catch (setupError) {
+    await stopProxiedForge(page, forge).catch(() => undefined)
+    throw setupError
+  }
 }
 
 test('answers a single question and keeps the answer after reload', async ({
@@ -74,7 +79,7 @@ test('answers a single question and keeps the answer after reload', async ({
       shell.locator('.chat-answered-question').getByText('First'),
     ).toBeVisible()
   } finally {
-    await forge.stop()
+    await stopProxiedForge(page, forge)
   }
 })
 
@@ -90,7 +95,7 @@ test('answers queued questions in order', async ({ page }) => {
     await panel.getByRole('button', { name: 'Third' }).click()
     await expect(panel).toHaveCount(0)
   } finally {
-    await forge.stop()
+    await stopProxiedForge(page, forge)
   }
 })
 
@@ -105,6 +110,6 @@ test('answers a multi-select question on the phone viewport', async ({
     await panel.getByRole('button', { name: 'Confirm selection' }).click()
     await expect(panel).toHaveCount(0)
   } finally {
-    await forge.stop()
+    await stopProxiedForge(page, forge)
   }
 })

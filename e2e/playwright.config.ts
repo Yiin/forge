@@ -17,8 +17,7 @@ export default defineConfig({
   testDir: './specs',
   workers: 1,
   fullyParallel: false,
-  // The mock Bun server intermittently resets a connection (ECONNRESET)
-  // with no crash log; one retry absorbs the harness flake.
+  // Targeted stability runs disable retries to expose first-attempt failures.
   retries: 1,
   reporter: 'line',
   webServer: {

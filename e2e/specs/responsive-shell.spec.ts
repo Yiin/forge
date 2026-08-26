@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { launchForge } from '../helpers/forgeServer.js'
+import { launchForge, stopProxiedForge } from '../helpers/forgeServer.js'
 
 test('workspace shell fits the viewport and supports keyboard navigation', async ({
   page,
@@ -45,6 +45,6 @@ test('workspace shell fits the viewport and supports keyboard navigation', async
     await expect(page).toHaveURL(/\/settings$/)
     await expect(page.getByRole('heading', { name: 'General' })).toBeVisible()
   } finally {
-    await forge.stop()
+    await stopProxiedForge(page, forge)
   }
 })

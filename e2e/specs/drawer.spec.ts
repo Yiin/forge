@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { launchForge } from '../helpers/forgeServer.js'
+import { launchForge, stopProxiedForge } from '../helpers/forgeServer.js'
 
 test('phone drawer opens on-screen within the viewport', async ({
   page,
@@ -54,6 +54,6 @@ test('phone drawer opens on-screen within the viewport', async ({
     expect(box?.width ?? 391).toBeLessThanOrEqual(390)
     await expect(drawer.getByText('forge')).toBeVisible()
   } finally {
-    await forge.stop()
+    await stopProxiedForge(page, forge)
   }
 })

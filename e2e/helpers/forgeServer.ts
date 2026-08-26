@@ -15,6 +15,38 @@ export type LaunchOptions = {
   fakeAgentEnv?: Record<string, string>
 }
 
+export async function stopProxiedForge(
+  page: {
+    unrouteAll(options: { behavior: 'wait' }): Promise<void>
+  },
+  forge: {
+    stop(): Promise<void>
+  },
+): Promise<void> {
+  let routeFailure: { error: unknown } | undefined
+  let stopFailure: { error: unknown } | undefined
+  try {
+    try {
+      await page.unrouteAll({ behavior: 'wait' })
+    } catch (error) {
+      routeFailure = { error }
+    }
+  } finally {
+    try {
+      await forge.stop()
+    } catch (error) {
+      stopFailure = { error }
+    }
+  }
+  if (routeFailure && stopFailure)
+    throw new AggregateError(
+      [routeFailure.error, stopFailure.error],
+      'Failed to clean up proxied Forge server',
+    )
+  if (routeFailure) throw routeFailure.error
+  if (stopFailure) throw stopFailure.error
+}
+
 export async function launchForge(
   options: LaunchOptions = {},
 ): Promise<ForgeServer> {

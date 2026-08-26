@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { launchForge } from '../helpers/forgeServer.js'
+import { launchForge, stopProxiedForge } from '../helpers/forgeServer.js'
 
 test('creates a project, sends a prompt, and replays the full streamed reply', async ({
   page,
@@ -70,6 +70,6 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
       expect(box?.y ?? 0).toBeLessThan(844)
     }
   } finally {
-    await forge.stop()
+    await stopProxiedForge(page, forge)
   }
 })
