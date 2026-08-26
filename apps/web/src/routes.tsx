@@ -7,6 +7,7 @@ import {
 import { AppShell } from './components/AppShell'
 import { FileBrowser } from './components/files/FileBrowser'
 import { readLastSession } from './lib/shell-storage'
+import { SessionRoute } from './routes/session'
 const root = createRootRoute({ component: AppShell })
 const empty =
   (title: string, text = 'This area is ready for the next feature.') =>
@@ -31,7 +32,7 @@ const index = createRoute({
 const session = createRoute({
   getParentRoute: () => root,
   path: '/s/$sessionId',
-  component: empty('Session'),
+  component: SessionRoute,
 })
 const runs = createRoute({
   getParentRoute: () => root,

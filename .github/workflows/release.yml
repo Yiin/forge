@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  ARCHES: linux-x64
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  build:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: bun install --frozen-lockfile
+      - name: Build web assets
+        run: (cd apps/web && bunx vite build)
+      - name: Build Node server bundle
+        run: |
+          mkdir -p dist
+          bun build --target=node apps/server/src/index.ts --outfile dist/forge-server.js
+      - name: Pack release
+        id: pack
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          version="$TAG-${SHA:0:7}"
+          staging="$RUNNER_TEMP/forge-linux-x64"
+          rm -rf "$staging"
+          mkdir -p "$staging/apps/server/src" "$staging/apps/drizzle" "$staging/web"
+          cp dist/forge-server.js "$staging/apps/server/src/index.js"
+          cp -R apps/server/drizzle/. "$staging/apps/drizzle/"
+          cp -R apps/web/dist/. "$staging/web/"
+          cp apps/server/package.json "$staging/apps/server/package.json"
+          bun run --filter forge-client build
+          (cd packages/forge-client && bun pm pack --destination "$GITHUB_WORKSPACE/dist")
+          client_tarball="$(find dist -maxdepth 1 -type f -name 'forge-client-*.tgz' -print -quit)"
+          test -n "$client_tarball"
+          mv "$client_tarball" "dist/forge-client-${version}.tgz"
+          tar -C "$RUNNER_TEMP" -czf "dist/forge-linux-x64.tar.gz" forge-linux-x64
+          sha256sum dist/forge-linux-x64.tar.gz dist/forge-client-${version}.tgz > dist/checksums.txt
+          printf 'version=%s\nclient_tarball=dist/forge-client-%s.tgz\n' "$version" "$version" >> "$GITHUB_OUTPUT"
+      - name: Boot smoke
+        env:
+          FORGE_VERSION: ${{ steps.pack.outputs.version }}
+        run: |
+          set -euo pipefail
+          data_dir="$(mktemp -d)"
+          pid=""
+          trap 'kill "$pid" 2>/dev/null || true; rm -rf "$data_dir"' EXIT
+          cat > "$data_dir/forge.toml" <<'EOF'
+          [harness.mock]
+          name = "Fake ACP agent"
+          command = "node"
+          args = ["-e", "process.exit(0)"]
+          protocol = "acp"
+          enabled = true
+          EOF
+          FORGE_DATA_DIR="$data_dir" FORGE_PORT=3900 FORGE_VERSION="$FORGE_VERSION" \
+            node "$RUNNER_TEMP/forge-linux-x64/apps/server/src/index.js" > "$data_dir/server.log" 2>&1 &
+          pid=$!
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3900/api/health | tee "$data_dir/health.json" | grep -q '"ok":true'; then
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              cat "$data_dir/server.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          grep -q "\"version\":\"$FORGE_VERSION\"" "$data_dir/health.json"
+          project="$(curl --fail --silent -X POST http://127.0.0.1:3900/api/projects -H 'content-type: application/json' -d '{"name":"Release smoke","path":"."}')"
+          project_id="$(printf '%s' "$project" | node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.parse(s).id))')"
+          session="$(curl --fail --silent -X POST "http://127.0.0.1:3900/api/projects/$project_id/sessions" -H 'content-type: application/json' -d '{"harness":"mock","title":"Smoke","cwd":"."}')"
+          session_id="$(printf '%s' "$session" | node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.parse(s).id))')"
+          curl --fail --silent -X POST "http://127.0.0.1:3900/api/sessions/$session_id/prompt" -H 'content-type: application/json' -d '{"text":"hello"}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: forge-linux-x64
+          path: |
+            dist/forge-linux-x64.tar.gz
+            dist/forge-client-*.tgz
+            dist/checksums.txt
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          CLIENT_TARBALL: ${{ steps.pack.outputs.client_tarball }}
+        run: |
+          gh release create "$TAG" \
+            dist/forge-linux-x64.tar.gz \
+            "$CLIENT_TARBALL" \
+            dist/checksums.txt \
+            --generate-notes \
+            --title "$TAG" \
+            --notes 'Forge uses the Node 24 build-on-host fallback. The tarball contains the server bundle and web assets.'

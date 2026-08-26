@@ -53,6 +53,10 @@ export function sessionRoutes(manager: SessionManager) {
       sessionId: c.req.param('id'),
     })
     if (!value.success) return c.json({ error: value.error.message }, 400)
+    // The structured `answers` shape has its own route in http/questions.ts.
+    // This route only carries the plain-string form.
+    if (value.data.answer === undefined)
+      return c.json({ error: 'answer is required' }, 400)
     await manager.answer(
       value.data.sessionId,
       value.data.questionId,
