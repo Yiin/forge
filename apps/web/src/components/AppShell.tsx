@@ -86,9 +86,10 @@ export function AppShell() {
     }
   }, [location.pathname, navigate, store.toggleSidebar])
   useEffect(() => {
+    if (isSettings) return
     const frame = window.requestAnimationFrame(() => mainRef.current?.focus())
     return () => window.cancelAnimationFrame(frame)
-  }, [location.pathname])
+  }, [isSettings, location.pathname])
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = () => {

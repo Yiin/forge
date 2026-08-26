@@ -70,7 +70,7 @@
   --muted: #5f6066;
   --border: #dededb;
   --border-strong: #c9c9c5;
-  --accent: #047857;
+  --accent: #036b50;
   --accent-strong: #065f46;
   --accent-foreground: #ffffff;
   --danger: #b42318;
@@ -274,7 +274,7 @@ body {
 }
 .ui-button.primary {
   border-color: var(--accent);
-  color: #10221b;
+  color: var(--accent-foreground);
   background: var(--accent);
 }
 .ui-button.ghost {
@@ -3053,7 +3053,8 @@ kbd {
   z-index: 50;
   height: 100%;
   width: min(86vw, 320px);
-  padding: var(--space-4) var(--content-gutter) max(var(--space-4), env(safe-area-inset-bottom));
+  padding: var(--space-4) var(--content-gutter)
+    max(var(--space-4), env(safe-area-inset-bottom));
   background: var(--panel);
   transition:
     transform 180ms ease,

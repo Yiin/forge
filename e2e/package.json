@@ -3,8 +3,9 @@
   "private": true,
   "type": "module",
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@forge/protocol": "workspace:*",
     "@playwright/test": "^1.55.0",
-    "zod": "^4.0.0",
-    "@forge/protocol": "workspace:*"
+    "zod": "^4.0.0"
   }
 }

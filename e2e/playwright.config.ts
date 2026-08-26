@@ -50,5 +50,10 @@ export default defineConfig({
         viewport: { width: 844, height: 390 },
       },
     },
+    ...[620, 920, 1280].map((width) => ({
+      name: `breakpoint-${width}`,
+      testMatch: /integrated-ui\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], viewport: { width, height: 900 } },
+    })),
   ],
 })

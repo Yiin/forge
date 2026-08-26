@@ -88,7 +88,9 @@ export function GeneralSettings() {
     bootId?: string
     uptimeSec?: number
   }>({})
-  const [aboutState, setAboutState] = useState<'loading' | 'saved' | 'error'>('loading')
+  const [aboutState, setAboutState] = useState<'loading' | 'saved' | 'error'>(
+    'loading',
+  )
   const [aboutError, setAboutError] = useState<string | null>(null)
   useEffect(() => {
     void load()
@@ -102,7 +104,8 @@ export function GeneralSettings() {
     setAboutError(null)
     void fetch('/api/status')
       .then((response) => {
-        if (!response.ok) throw new Error(`Status request failed (${response.status})`)
+        if (!response.ok)
+          throw new Error(`Status request failed (${response.status})`)
         return response.json()
       })
       .then((value) => {
@@ -124,7 +127,10 @@ export function GeneralSettings() {
     resetTitleGeneration()
   }
   return (
-    <SettingsPage title="General" subtitle="Preferences for your Forge workspace.">
+    <SettingsPage
+      title="General"
+      subtitle="Preferences for your Forge workspace."
+    >
       {loading && <p className="settings-status">Loading…</p>}
       {loadError && (
         <p className="settings-error" role="alert">
@@ -144,7 +150,10 @@ export function GeneralSettings() {
           }
         />
       )}
-      <SettingsSection title="Workspace preferences" description="Changes apply to this Forge workspace.">
+      <SettingsSection
+        title="Workspace preferences"
+        description="Changes apply to this Forge workspace."
+      >
         <SettingsRow
           label="Theme"
           description="Choose the color theme for Forge."
@@ -159,7 +168,8 @@ export function GeneralSettings() {
           <Select
             value={shellTheme}
             onValueChange={(value) => {
-              if (value === 'system' || value === 'light' || value === 'dark') setShellTheme(value)
+              if (value === 'system' || value === 'light' || value === 'dark')
+                setShellTheme(value)
             }}
           >
             <SelectTrigger aria-label="Theme">
@@ -176,8 +186,11 @@ export function GeneralSettings() {
           label="Plain-word titles"
           description="Generate simple words for new session titles."
           reset={
-            settings.titleGeneration !== defaultGeneralSettings.titleGeneration && (
-              <Button size="compact" onClick={resetTitleGeneration}>Reset</Button>
+            settings.titleGeneration !==
+              defaultGeneralSettings.titleGeneration && (
+              <Button size="compact" onClick={resetTitleGeneration}>
+                Reset
+              </Button>
             )
           }
         >
@@ -192,17 +205,29 @@ export function GeneralSettings() {
         </div>
       </SettingsSection>
       <SettingsSection title="About" description="Forge runtime information.">
-        <RequestState state={aboutState} error={aboutError} onRetry={loadAbout} />
+        <RequestState
+          state={aboutState}
+          error={aboutError}
+          onRetry={loadAbout}
+        />
         <SettingsRow label="Version" description="The running Forge version.">
           <code>{about.version ?? 'unknown'}</code>
         </SettingsRow>
-        <SettingsRow label="Boot ID" description="The identifier for this server start.">
+        <SettingsRow
+          label="Boot ID"
+          description="The identifier for this server start."
+        >
           <code>{about.bootId ?? 'unknown'}</code>
         </SettingsRow>
-        <SettingsRow label="Uptime" description="Time since the server started.">
+        <SettingsRow
+          label="Uptime"
+          description="Time since the server started."
+        >
           <span>{about.uptimeSec ?? 0}s</span>
         </SettingsRow>
-        <p className="muted">Updates will be available through the release pipeline.</p>
+        <p className="muted">
+          Updates will be available through the release pipeline.
+        </p>
       </SettingsSection>
       <ConfirmationDialog
         open={restoreOpen}
@@ -211,7 +236,8 @@ export function GeneralSettings() {
         title="Restore General defaults"
         confirmLabel="Restore defaults"
       >
-        This restores the theme and title generation settings. Other settings stay unchanged.
+        This restores the theme and title generation settings. Other settings
+        stay unchanged.
       </ConfirmationDialog>
     </SettingsPage>
   )
@@ -490,7 +516,7 @@ export function HarnessSettings() {
                   }
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-label={`${key} protocol`}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectPopup>
@@ -956,6 +982,7 @@ export function EpicSettings() {
           description="Number of workers in the run."
         >
           <Input
+            aria-label="Worker count"
             type="number"
             min="1"
             value={defaults.workerCount}
@@ -976,7 +1003,7 @@ export function EpicSettings() {
               }
             }}
           >
-            <SelectTrigger>
+            <SelectTrigger aria-label="Default mode">
               <SelectValue />
             </SelectTrigger>
             <SelectPopup>
@@ -991,6 +1018,7 @@ export function EpicSettings() {
           description="Command used to check the work."
         >
           <Input
+            aria-label="Gate command"
             value={
               typeof defaults.gateCommand === 'string'
                 ? defaults.gateCommand
@@ -1021,6 +1049,7 @@ export function EpicSettings() {
           description="Command used before the gate."
         >
           <Input
+            aria-label="Install command"
             value={
               typeof defaults.installCommand === 'string'
                 ? defaults.installCommand
@@ -1064,6 +1093,7 @@ export function EpicSettings() {
               }}
             >
               <SelectTrigger
+                aria-label={`${role} tier`}
                 ref={(node) => {
                   invalidRefs.current[`rolePolicy.roles.${role}`] = node
                 }}
@@ -1107,6 +1137,7 @@ export function EpicSettings() {
                   }}
                 >
                   <SelectTrigger
+                    aria-label={`${tier} hop ${index + 1} harness`}
                     ref={(node) => {
                       invalidRefs.current[
                         `rolePolicy.tiers.${tier}.${index}.harness`

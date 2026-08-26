@@ -48,13 +48,15 @@ async function openQuestion(page: Page, mode = 'single') {
     const projectDialog = page.getByRole('dialog', { name: 'Create project' })
     await projectDialog.getByLabel('Name').fill('Question project')
     await projectDialog.getByLabel('Folder path').fill(forge.dataDir)
-    await projectDialog
-      .getByRole('button', { name: 'Create project' })
-      .click()
+    await projectDialog.getByRole('button', { name: 'Create project' }).click()
     await page.waitForURL(/\/draft\//)
     await shell.getByLabel('Message composer').fill('ask me')
     await shell.getByRole('button', { name: 'Send' }).click()
     await page.waitForURL(/\/s\//)
+    // Promotion creates the session. AskUserQuestion is emitted by the first
+    // prompt sent to that session, so submit the test prompt after promotion.
+    await shell.getByLabel('Message composer').fill('ask me')
+    await shell.getByRole('button', { name: 'Send' }).click()
     await expect(
       shell.getByRole('region', { name: 'Question from Forge' }),
     ).toBeVisible()
