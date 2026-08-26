@@ -969,6 +969,13 @@ body {
   gap: 7px;
   align-items: center;
 }
+.settings-fallback-list {
+  min-width: 0;
+  overflow: hidden;
+}
+.settings-fallback-list .settings-env-row {
+  grid-template-columns: minmax(110px, 0.8fr) minmax(110px, 1fr) auto auto auto;
+}
 .settings-add-tier {
   grid-template-columns: minmax(100px, 1fr) auto;
   margin-top: 4px;

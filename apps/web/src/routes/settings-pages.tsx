@@ -701,7 +701,7 @@ export function ProjectSettings() {
 }
 
 export function EpicSettings() {
-  const [defaults, setDefaults] = useState<EpicDefaults>({
+  const initialDefaults: EpicDefaults = {
     workerCount: 3,
     mode: 'pool',
     rolePolicy: {
@@ -712,153 +712,116 @@ export function EpicSettings() {
       },
       tiers: { default: [{ harness: 'claude-code-acp' }] },
     },
-  })
+  }
+  const [defaults, setDefaults] = useState<EpicDefaults>(initialDefaults)
+  const [savedDefaults, setSavedDefaults] = useState<EpicDefaults>(initialDefaults)
   const [harnesses, setHarnesses] = useState<Record<string, { name: string }>>(
     {},
-  )
-  const [saved, setSaved] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'error'>(
-    'loading',
   )
   const [validationErrors, setValidationErrors] = useState<
     Record<string, string>
   >({})
-  const [saving, setSaving] = useState(false)
   const [newTier, setNewTier] = useState('')
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const invalidRefs = useRef<Record<string, HTMLElement | null>>({})
+  const settingsState = useSettingsStore((state) => state.scopes.epics)
+  const load = useSettingsStore((state) => state.load)
+  const saveSettings = useSettingsStore((state) => state.save)
+  const retry = useSettingsStore((state) => state.retry)
+  const dirty = JSON.stringify(defaults) !== JSON.stringify(savedDefaults)
+  const setField = <K extends keyof EpicDefaults>(key: K, value: EpicDefaults[K]) =>
+    setDefaults((current) => ({ ...current, [key]: value }))
   useEffect(() => {
-    void Promise.all([api.getSettings(), api.listHarnesses()])
-      .then(([settings, available]) => {
-        const value = settings as { epicDefaults?: Partial<EpicDefaults> }
-        setDefaults((current) => ({
-          ...current,
-          ...value.epicDefaults,
-          rolePolicy: value.epicDefaults?.rolePolicy ?? current.rolePolicy,
-        }))
+    void Promise.all([load(), api.listHarnesses()])
+      .then(([, available]) => {
+        const value = useSettingsStore.getState().settings as {
+          epicDefaults?: Partial<EpicDefaults>
+        }
+        const next = { ...initialDefaults, ...value.epicDefaults,
+          rolePolicy: value.epicDefaults?.rolePolicy ?? initialDefaults.rolePolicy }
+        setDefaults(next)
+        setSavedDefaults(next)
         setHarnesses(available as Record<string, { name: string }>)
-        setLoadState('loaded')
       })
-      .catch((cause: unknown) => {
-        setSaveError(cause instanceof Error ? cause.message : String(cause))
-        setLoadState('error')
-      })
-  }, [])
-  const updateRole = (role: string, tier: string) =>
+      .catch((cause: unknown) =>
+        setLoadError(cause instanceof Error ? cause.message : String(cause)),
+      )
+  }, [load])
+  useEffect(() => {
+    if (settingsState.status === 'saved') setSavedDefaults(defaults)
+  }, [defaults, settingsState.status])
+  const updatePolicy = (patch: Partial<EpicDefaults['rolePolicy']>) =>
     setDefaults((current) => ({
       ...current,
-      rolePolicy: {
-        ...current.rolePolicy,
-        roles: { ...current.rolePolicy.roles, [role]: tier },
-      },
+      rolePolicy: { ...current.rolePolicy, ...patch },
     }))
+  const updateRole = (role: string, tier: string) =>
+    updatePolicy({
+      roles: { ...defaults.rolePolicy.roles, [role]: tier },
+    })
   const updateHop = (
     tier: string,
     index: number,
     patch: { harness?: string; model?: string },
   ) =>
-    setDefaults((current) => ({
-      ...current,
-      rolePolicy: {
-        ...current.rolePolicy,
-        tiers: {
-          ...current.rolePolicy.tiers,
-          [tier]: current.rolePolicy.tiers[tier].map((hop, hopIndex) =>
-            hopIndex === index ? { ...hop, ...patch } : hop,
-          ),
-        },
-      },
-    }))
+    setDefaults((current) => ({ ...current, rolePolicy: { ...current.rolePolicy,
+      tiers: { ...current.rolePolicy.tiers,
+        [tier]: current.rolePolicy.tiers[tier].map((hop, hopIndex) =>
+          hopIndex === index ? { ...hop, ...patch } : hop) } } }))
   const addTier = () => {
     const name = newTier.trim()
     if (!name || name in defaults.rolePolicy.tiers) return
-    setDefaults((current) => ({
-      ...current,
-      rolePolicy: {
-        ...current.rolePolicy,
-        tiers: {
-          ...current.rolePolicy.tiers,
-          [name]: [{ harness: Object.keys(harnesses)[0] ?? '' }],
-        },
-      },
-    }))
+    setDefaults((current) => ({ ...current, rolePolicy: { ...current.rolePolicy,
+      tiers: { ...current.rolePolicy.tiers, [name]: [{ harness: Object.keys(harnesses)[0] ?? '' }] } } }))
     setNewTier('')
   }
   const addHop = (tier: string) =>
-    setDefaults((current) => ({
-      ...current,
-      rolePolicy: {
-        ...current.rolePolicy,
-        tiers: {
-          ...current.rolePolicy.tiers,
-          [tier]: [
-            ...current.rolePolicy.tiers[tier],
-            { harness: Object.keys(harnesses)[0] ?? '' },
-          ],
-        },
-      },
-    }))
+    setDefaults((current) => ({ ...current, rolePolicy: { ...current.rolePolicy,
+      tiers: { ...current.rolePolicy.tiers,
+        [tier]: [...current.rolePolicy.tiers[tier], { harness: Object.keys(harnesses)[0] ?? '' }] } } }))
   const removeHop = (tier: string, index: number) =>
-    setDefaults((current) => ({
-      ...current,
-      rolePolicy: {
-        ...current.rolePolicy,
-        tiers: {
-          ...current.rolePolicy.tiers,
-          [tier]: current.rolePolicy.tiers[tier].filter(
-            (_, hopIndex) => hopIndex !== index,
-          ),
-        },
-      },
-    }))
+    setDefaults((current) => ({ ...current, rolePolicy: { ...current.rolePolicy,
+      tiers: { ...current.rolePolicy.tiers,
+        [tier]: current.rolePolicy.tiers[tier].filter((_, hopIndex) => hopIndex !== index) } } }))
+  const moveHop = (tier: string, index: number, direction: -1 | 1) => {
+    const hops = defaults.rolePolicy.tiers[tier]
+    const target = index + direction
+    if (target < 0 || target >= hops.length) return
+    const next = [...hops]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    updatePolicy({ tiers: { ...defaults.rolePolicy.tiers, [tier]: next } })
+  }
   const save = () => {
-    setSaved(false)
-    setSaveError(null)
     const errors = validateEpicDefaults(defaults, Object.keys(harnesses))
     setValidationErrors(errors)
-    if (Object.keys(errors).length > 0) return
-    setSaving(true)
-    void api
-      .saveSettings({ epicDefaults: defaults })
-      .then(() => setSaved(true))
-      .catch((cause) =>
-        setSaveError(cause instanceof Error ? cause.message : String(cause)),
-      )
-      .finally(() => setSaving(false))
+    const first = Object.keys(errors)[0]
+    if (first) {
+      invalidRefs.current[first]?.focus()
+      return
+    }
+    void saveSettings('epics', { epicDefaults: defaults }).then(() => setSavedDefaults(defaults))
   }
+  const reset = () => { setDefaults(savedDefaults); setValidationErrors({}) }
+  const status = settingsState.status === 'saving'
+    ? 'Saving…' : settingsState.status === 'error' ? settingsState.error : dirty ? 'Unsaved changes' : settingsState.status === 'saved' ? 'Saved.' : null
   return (
     <SettingsPage title="Epics" subtitle="Defaults for the epic runner.">
-      {loadState === 'loading' && (
-        <p className="settings-status">Loading epic defaults…</p>
-      )}
-      {loadState === 'error' && (
-        <p className="settings-error" role="alert">
-          Could not load epic defaults: {saveError}
-        </p>
-      )}
-      {loadState === 'loaded' && (
-        <p className="muted">Choose how Forge runs this epic.</p>
-      )}
-      <label>
-        Worker count
-        <input
+      {loadError && <div className="settings-error" role="alert">Could not load epic defaults: {loadError}<Button size="compact" onClick={() => window.location.reload()}>Retry</Button></div>}
+      {settingsState.status === 'error' && <div className="settings-error" role="alert">Could not save: {settingsState.error}<Button size="compact" onClick={() => void retry('epics')}>Retry</Button></div>}
+      <SettingsSection title="Run model" description="Choose how Forge runs an epic.">
+      <SettingsRow label="Worker count" description="Number of workers in the run.">
+        <Input
           type="number"
           min="1"
-          value={defaults.workerCount}
-          onChange={(event) =>
-            setDefaults({
-              ...defaults,
-              workerCount: Number(event.target.value),
-            })
-          }
+          value={defaults.workerCount} onChange={(event) => setField('workerCount', Number(event.target.value))}
         />
-      </label>
-      <label>
-        Default mode
+      </SettingsRow>
+      <SettingsRow label="Default mode" description="How workers run by default.">
         <Select
           value={defaults.mode}
           onValueChange={(value) => {
             if (value === 'pool' || value === 'serial' || value === 'auto') {
-              setDefaults({ ...defaults, mode: value })
+              setField('mode', value)
             }
           }}
         >
@@ -871,10 +834,9 @@ export function EpicSettings() {
             <SelectItem value="auto">Auto</SelectItem>
           </SelectPopup>
         </Select>
-      </label>
-      <label>
-        Gate command
-        <input
+      </SettingsRow>
+      <SettingsRow label="Gate command" description="Command used to check the work.">
+        <Input
           value={
             typeof defaults.gateCommand === 'string'
               ? defaults.gateCommand
@@ -882,20 +844,16 @@ export function EpicSettings() {
           }
           placeholder="bun run test"
           onChange={(event) =>
-            setDefaults({
-              ...defaults,
-              gateCommand: event.target.value || undefined,
-            })
+            setField('gateCommand', event.target.value || undefined)
           }
-          aria-invalid={Boolean(validationErrors.gateCommand)}
+          ref={(node) => { invalidRefs.current.gateCommand = node }} aria-invalid={Boolean(validationErrors.gateCommand)} aria-describedby={validationErrors.gateCommand ? 'epic-error-gateCommand' : undefined}
         />
         {validationErrors.gateCommand && (
-          <small className="field-error">{validationErrors.gateCommand}</small>
+          <small id="epic-error-gateCommand" className="field-error">{validationErrors.gateCommand}</small>
         )}
-      </label>
-      <label>
-        Install command
-        <input
+      </SettingsRow>
+      <SettingsRow label="Install command" description="Command used before the gate.">
+        <Input
           value={
             typeof defaults.installCommand === 'string'
               ? defaults.installCommand
@@ -903,27 +861,20 @@ export function EpicSettings() {
           }
           placeholder="bun install"
           onChange={(event) =>
-            setDefaults({
-              ...defaults,
-              installCommand: event.target.value || undefined,
-            })
+            setField('installCommand', event.target.value || undefined)
           }
-          aria-invalid={Boolean(validationErrors.installCommand)}
+          ref={(node) => { invalidRefs.current.installCommand = node }} aria-invalid={Boolean(validationErrors.installCommand)} aria-describedby={validationErrors.installCommand ? 'epic-error-installCommand' : undefined}
         />
         {validationErrors.installCommand && (
-          <small className="field-error">
+          <small id="epic-error-installCommand" className="field-error">
             {validationErrors.installCommand}
           </small>
         )}
-      </label>
-      <fieldset className="settings-env">
-        <legend>Role policy</legend>
-        <p className="muted">
-          Each role uses a tier. Hops run from top to bottom until one works.
-        </p>
+      </SettingsRow>
+      </SettingsSection>
+      <SettingsSection title="Role policy" description="Each role uses a tier. Hops run from top to bottom until one works.">
         {Object.entries(defaults.rolePolicy.roles).map(([role, tier]) => (
-          <label key={role}>
-            {role}
+          <SettingsRow key={role} label={role} description="Tier used for this role.">
             <Select
               value={tier}
               onValueChange={(value) => {
@@ -931,9 +882,11 @@ export function EpicSettings() {
               }}
             >
               <SelectTrigger
+                ref={(node) => { invalidRefs.current[`rolePolicy.roles.${role}`] = node }}
                 aria-invalid={Boolean(
                   validationErrors[`rolePolicy.roles.${role}`],
                 )}
+                aria-describedby={validationErrors[`rolePolicy.roles.${role}`] ? `epic-error-role-${role}` : undefined}
               >
                 <SelectValue />
               </SelectTrigger>
@@ -946,15 +899,15 @@ export function EpicSettings() {
               </SelectPopup>
             </Select>
             {validationErrors[`rolePolicy.roles.${role}`] && (
-              <small className="field-error">
+              <small id={`epic-error-role-${role}`} className="field-error">
                 {validationErrors[`rolePolicy.roles.${role}`]}
               </small>
             )}
-          </label>
+          </SettingsRow>
         ))}
         {Object.entries(defaults.rolePolicy.tiers).map(([tier, hops]) => (
-          <div className="settings-card" key={tier}>
-            <strong>{tier} fallback hops</strong>
+          <div className="settings-card settings-fallback-list" key={tier}>
+            <strong>{tier} fallback order</strong>
             {hops.map((hop, index) => (
               <div className="settings-env-row" key={`${tier}-${index}`}>
                 <Select
@@ -966,11 +919,13 @@ export function EpicSettings() {
                   }}
                 >
                   <SelectTrigger
+                    ref={(node) => { invalidRefs.current[`rolePolicy.tiers.${tier}.${index}.harness`] = node }}
                     aria-invalid={Boolean(
                       validationErrors[
                         `rolePolicy.tiers.${tier}.${index}.harness`
                       ],
                     )}
+                    aria-describedby={validationErrors[`rolePolicy.tiers.${tier}.${index}.harness`] ? `epic-error-hop-${tier}-${index}` : undefined}
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -985,7 +940,7 @@ export function EpicSettings() {
                 {validationErrors[
                   `rolePolicy.tiers.${tier}.${index}.harness`
                 ] && (
-                  <small className="field-error">
+                  <small id={`epic-error-hop-${tier}-${index}`} className="field-error">
                     {
                       validationErrors[
                         `rolePolicy.tiers.${tier}.${index}.harness`
@@ -993,7 +948,7 @@ export function EpicSettings() {
                     }
                   </small>
                 )}
-                <input
+                <Input
                   aria-label={`${tier} hop ${index + 1} model`}
                   placeholder="Model (optional)"
                   value={hop.model ?? ''}
@@ -1003,14 +958,16 @@ export function EpicSettings() {
                     })
                   }
                 />
-                <button
+                <Button type="button" size="compact" disabled={index === 0} aria-label={`Move ${tier} hop ${index + 1} up`} onClick={() => moveHop(tier, index, -1)}>Move up</Button>
+                <Button type="button" size="compact" disabled={index === hops.length - 1} aria-label={`Move ${tier} hop ${index + 1} down`} onClick={() => moveHop(tier, index, 1)}>Move down</Button>
+                <Button
                   type="button"
-                  className="settings-env-remove"
+                  size="compact"
                   aria-label={`Remove ${tier} hop ${index + 1}`}
                   onClick={() => removeHop(tier, index)}
                 >
                   Remove
-                </button>
+                </Button>
               </div>
             ))}
             {validationErrors[`rolePolicy.tiers.${tier}`] && (
@@ -1018,36 +975,28 @@ export function EpicSettings() {
                 {validationErrors[`rolePolicy.tiers.${tier}`]}
               </p>
             )}
-            <button type="button" onClick={() => addHop(tier)}>
+            <Button type="button" size="compact" onClick={() => addHop(tier)}>
               Add fallback hop
-            </button>
+            </Button>
           </div>
         ))}
         <div className="settings-env-row settings-add-tier">
-          <input
+          <Input
             aria-label="New tier name"
             placeholder="New tier name"
             value={newTier}
             onChange={(event) => setNewTier(event.target.value)}
           />
-          <button type="button" onClick={addTier} disabled={!newTier.trim()}>
+          <Button type="button" size="compact" onClick={addTier} disabled={!newTier.trim()}>
             Add tier
-          </button>
+          </Button>
         </div>
-      </fieldset>
-      <button onClick={save} disabled={saving || loadState !== 'loaded'}>
-        {saving ? 'Saving…' : 'Save epic defaults'}
-      </button>
-      {saved && (
-        <p className="muted" role="status">
-          Saved.
-        </p>
-      )}
-      {saveError && (
-        <p className="settings-error" role="alert">
-          Could not save: {saveError}
-        </p>
-      )}
+      </SettingsSection>
+      <div className="settings-actions">
+        {status && <p className={settingsState.status === 'error' ? 'settings-error' : 'settings-status'} role="status">{status}</p>}
+        <Button type="button" variant="secondary" disabled={!dirty || settingsState.status === 'saving'} onClick={reset}>Reset</Button>
+        <Button type="button" disabled={!dirty || settingsState.status === 'saving'} onClick={save}>Save changes</Button>
+      </div>
     </SettingsPage>
   )
 }
