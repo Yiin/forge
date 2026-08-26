@@ -60,8 +60,8 @@ function makeTerminalId(): string {
   return time + random
 }
 
-function checkedPath(root: string, path: string): string {
-  const full = resolve(root, path)
+function checkedPath(base: string, root: string, path: string): string {
+  const full = resolve(base, path)
   const remainder = relative(resolve(root), full)
   if (
     remainder === '..' ||
@@ -117,7 +117,7 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
     },
     onReadTextFile: async (request) => {
       const checked = readRequest.parse(request)
-      const path = checkedPath(options.projectRoot, checked.path)
+      const path = checkedPath(options.cwd, options.projectRoot, checked.path)
       const bun = (
         globalThis as typeof globalThis & {
           Bun?: { file(path: string): { text(): Promise<string> } }
@@ -139,7 +139,7 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
     },
     onWriteTextFile: async (request) => {
       const checked = writeRequest.parse(request)
-      const path = checkedPath(options.projectRoot, checked.path)
+      const path = checkedPath(options.cwd, options.projectRoot, checked.path)
       const bun = (
         globalThis as typeof globalThis & {
           Bun?: { write(path: string, content: string): Promise<number> }
@@ -153,7 +153,7 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
       const checked = createRequest.parse(request)
       const child = spawn(checked.command, checked.args ?? [], {
         cwd: checked.cwd
-          ? checkedPath(options.projectRoot, checked.cwd)
+          ? checkedPath(options.cwd, options.projectRoot, checked.cwd)
           : options.cwd,
         env: {
           ...process.env,
