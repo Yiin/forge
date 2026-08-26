@@ -56,6 +56,7 @@ export type WorkerSession = {
 export type SessionManager = {
   create(input: {
     projectId: string
+    harness: string
     cwd: string
     title: string
     kind: 'epic_worker'
@@ -81,7 +82,9 @@ type IterationResult = {
   beadId: string
   worktreePath: string
 }
-function providerFor(config: unknown) {
+type ProviderHop = { harness: string; model?: string }
+
+function providerHops(config: unknown): ProviderHop[] {
   const value = config as {
     rolePolicy?: {
       roles?: Record<string, string>
@@ -89,8 +92,8 @@ function providerFor(config: unknown) {
     }
   }
   const tier = value.rolePolicy?.roles?.['iteration-worker']
-  const hop = tier ? value.rolePolicy?.tiers?.[tier]?.[0] : undefined
-  return { harness: hop?.harness ?? null, model: hop?.model ?? null }
+  const hops = tier ? value.rolePolicy?.tiers?.[tier] : undefined
+  return hops?.length ? hops : [{ harness: 'default' }]
 }
 type DispatchResult =
   | { kind: 'ready'; item: IterationResult }
@@ -165,48 +168,83 @@ export class EpicRunner {
           input.baseBranch,
         ])
         await claim(input.repoPath, bead.id)
-        const session = await this.sessions.create({
+        let session = await this.sessions.create({
           projectId: input.projectId,
+          harness: providerHops(input.config)[0]!.harness,
           cwd: input.repoPath,
           title: bead.title,
           kind: 'epic_worker',
           epicRunId: run.id,
         })
         this.active.get(run.id)!.session = session
-        const iteration = createIteration(this.db, {
-          runId: run.id,
-          beadId: bead.id,
-          sessionId: session.id,
-          worktreePath: input.repoPath,
-          branch: input.baseBranch,
-          ...providerFor(input.config),
-        })
-        try {
-          await session.prompt(
-            workerPrompt(
-              await show(input.repoPath, bead.id),
-              input.repoPath,
-              input.baseBranch,
-            ),
-          )
-        } catch (error) {
-          if (signal.aborted) {
-            settleIteration(
-              this.db,
-              iteration.id,
-              'interrupted',
-              'Run cancelled',
+        const hops = providerHops(input.config)
+        let iteration: ReturnType<typeof createIteration> | undefined
+        let promptError: unknown
+        for (const [hopIndex, hop] of hops.entries()) {
+          if (hopIndex > 0) {
+            // Each fallback gets a fresh session so the failed provider cannot
+            // retain a half-open process or provider session.
+            const fallbackSession = await this.sessions.create({
+              projectId: input.projectId,
+              harness: hop.harness,
+              cwd: input.repoPath,
+              title: bead.title,
+              kind: 'epic_worker',
+              epicRunId: run.id,
+            })
+            this.active.get(run.id)!.session = fallbackSession
+            session = fallbackSession
+          }
+          iteration = createIteration(this.db, {
+            runId: run.id,
+            beadId: bead.id,
+            sessionId: session.id,
+            worktreePath: input.repoPath,
+            branch: input.baseBranch,
+            attempt: hopIndex + 1,
+            harness: hop.harness,
+            model: hop.model ?? null,
+          })
+          try {
+            await session.prompt(
+              workerPrompt(
+                await show(input.repoPath, bead.id),
+                input.repoPath,
+                input.baseBranch,
+              ),
             )
+            promptError = undefined
+            break
+          } catch (error) {
+            promptError = error
+            const reason = `Fallback hop ${hopIndex + 1} (${hop.harness}) failed: ${String(error)}${hops[hopIndex + 1] ? `; trying hop ${hopIndex + 2} (${hops[hopIndex + 1]!.harness})` : ''}`
+            settleIteration(this.db, iteration!.id, 'failed', reason)
+            await session.cancel().catch(() => undefined)
+          }
+        }
+        if (promptError) {
+          if (signal.aborted) {
+            if (iteration)
+              settleIteration(
+                this.db,
+                iteration.id,
+                'interrupted',
+                'Run cancelled',
+              )
             await releaseClaim(input.repoPath, bead.id)
             return
           }
-          settleIteration(this.db, iteration.id, 'failed', String(error))
-          await this.fail(run.id, String(error))
+          await this.fail(run.id, String(promptError))
           return
         }
         const closed = (await show(input.repoPath, bead.id)).status === 'closed'
         if (signal.aborted) {
-          settleIteration(this.db, iteration.id, 'interrupted', 'Run cancelled')
+          settleIteration(
+            this.db,
+            iteration!.id,
+            'interrupted',
+            'Run cancelled',
+          )
           if (!closed) await releaseClaim(input.repoPath, bead.id)
           return
         }
@@ -223,14 +261,14 @@ export class EpicRunner {
         if (!closed || !evidence) {
           settleIteration(
             this.db,
-            iteration.id,
+            iteration!.id,
             'failed',
             'Child closed without a commit or comment evidence',
           )
           await this.fail(run.id, 'Child effects proof failed')
           return
         }
-        settleIteration(this.db, iteration.id, 'merged')
+        settleIteration(this.db, iteration!.id, 'merged')
       }
       updateRunStatus(this.db, run.id, 'paused')
       this.publish(run.id, 'paused')
@@ -470,30 +508,74 @@ export class EpicRunner {
     )
     const before = await git(worktree.worktreePath, ['rev-parse', 'HEAD'])
     await claim(input.repoPath, bead.id)
-    const session = await this.sessions.create({
+    let session = await this.sessions.create({
       projectId: input.projectId,
+      harness: providerHops(input.config)[0]!.harness,
       cwd: worktree.worktreePath,
       title: bead.title,
       kind: 'epic_worker',
       epicRunId: run.id,
     })
-    const iteration = createIteration(this.db, {
-      runId: run.id,
-      beadId: bead.id,
-      sessionId: session.id,
-      worktreePath: worktree.worktreePath,
-      branch: worktree.branch,
-      ...providerFor(input.config),
-    })
-    this.workerSessions.set(iteration.id, session)
+    const hops = providerHops(input.config)
+    let iteration: ReturnType<typeof createIteration> | undefined
+    let promptError: unknown
+    for (const [hopIndex, hop] of hops.entries()) {
+      if (hopIndex > 0) {
+        const fallbackSession = await this.sessions.create({
+          projectId: input.projectId,
+          harness: hop.harness,
+          cwd: worktree.worktreePath,
+          title: bead.title,
+          kind: 'epic_worker',
+          epicRunId: run.id,
+        })
+        session = fallbackSession
+      }
+      iteration = createIteration(this.db, {
+        runId: run.id,
+        beadId: bead.id,
+        sessionId: session.id,
+        worktreePath: worktree.worktreePath,
+        branch: worktree.branch,
+        attempt: hopIndex + 1,
+        harness: hop.harness,
+        model: hop.model ?? null,
+      })
+      this.workerSessions.set(iteration.id, session)
+      try {
+        await session.prompt(
+          workerPrompt(
+            await show(input.repoPath, bead.id),
+            worktree.worktreePath,
+            worktree.branch,
+          ),
+        )
+        promptError = undefined
+        break
+      } catch (error) {
+        promptError = error
+        const reason = `Fallback hop ${hopIndex + 1} (${hop.harness}) failed: ${String(error)}${hops[hopIndex + 1] ? `; trying hop ${hopIndex + 2} (${hops[hopIndex + 1]!.harness})` : ''}`
+        settleIteration(this.db, iteration!.id, 'failed', reason)
+        await session.cancel().catch(() => undefined)
+      } finally {
+        this.workerSessions.delete(iteration.id)
+      }
+    }
     try {
-      await session.prompt(
-        workerPrompt(
-          await show(input.repoPath, bead.id),
-          worktree.worktreePath,
-          worktree.branch,
-        ),
-      )
+      if (promptError) {
+        if (signal.aborted) {
+          if (iteration)
+            settleIteration(
+              this.db,
+              iteration.id,
+              'interrupted',
+              'Run cancelled',
+            )
+          return { kind: 'cancelled', beadId: bead.id }
+        }
+        const reason = `All configured fallback hops failed: ${String(promptError)}`
+        return { kind: 'failed', beadId: bead.id, reason }
+      }
       const closed = (await show(input.repoPath, bead.id)).status === 'closed'
       const commits = Number(
         await git(worktree.worktreePath, [
@@ -507,34 +589,35 @@ export class EpicRunner {
         (await hasCommentSince(
           input.repoPath,
           bead.id,
-          new Date(iteration.startedAt).toISOString(),
+          new Date(iteration!.startedAt).toISOString(),
         ))
       if (signal.aborted) {
-        settleIteration(this.db, iteration.id, 'interrupted', 'Run cancelled')
+        settleIteration(this.db, iteration!.id, 'interrupted', 'Run cancelled')
         if (!closed) await releaseClaim(input.repoPath, bead.id)
         return { kind: 'cancelled', beadId: bead.id }
       }
       if (!closed || !evidence) {
         const reason = 'Child closed without a commit or comment evidence'
-        settleIteration(this.db, iteration.id, 'failed', reason)
+        settleIteration(this.db, iteration!.id, 'failed', reason)
         return { kind: 'failed', beadId: bead.id, reason }
       }
       return {
         kind: 'ready',
         item: {
-          id: iteration.id,
+          id: iteration!.id,
           branch: worktree.branch,
           beadId: bead.id,
           worktreePath: worktree.worktreePath,
         },
       }
     } catch (error) {
-      settleIteration(
-        this.db,
-        iteration.id,
-        signal.aborted ? 'interrupted' : 'failed',
-        String(error),
-      )
+      if (iteration)
+        settleIteration(
+          this.db,
+          iteration.id,
+          signal.aborted ? 'interrupted' : 'failed',
+          String(error),
+        )
       if (!signal.aborted) await releaseClaim(input.repoPath, bead.id)
       return {
         kind: signal.aborted ? 'cancelled' : 'failed',
@@ -544,7 +627,7 @@ export class EpicRunner {
           : { reason: error instanceof Error ? error.message : String(error) }),
       } as DispatchResult
     } finally {
-      this.workerSessions.delete(iteration.id)
+      if (iteration) this.workerSessions.delete(iteration.id)
     }
   }
   private async probeRadar(
