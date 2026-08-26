@@ -57,7 +57,10 @@ test('creates a project and session, then replays streamed messages', async () =
 
 test('reconnects after restart without losing the cursor', async () => {
   const dataDir = await mkdtemp(`${tmpdir()}/forge-restart-`)
-  const first = await launchForge({ dataDir, env: { FORGE_FAKE_HANG: '1' } })
+  const first = await launchForge({
+    dataDir,
+    env: { FORGE_MOCK_HANG_PROMPT: '1' },
+  })
   const project = (await (
     await fetch(`${first.baseUrl}/api/projects`, { method: 'POST', body: '{}' })
   ).json()) as { id: string }

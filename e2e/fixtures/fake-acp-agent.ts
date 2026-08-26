@@ -7,7 +7,7 @@ class FakeAgent implements acp.Agent {
     return {
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities:
-        process.env.FORGE_FAKE_NO_LOAD_SESSION === '1'
+        process.env.FORGE_MOCK_OMIT_LOAD_SESSION_CAPABILITY === '1'
           ? {}
           : { loadSession: true },
     }
@@ -16,7 +16,8 @@ class FakeAgent implements acp.Agent {
     return { sessionId: 'fake-session' }
   }
   async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
-    if (process.env.FORGE_FAKE_HANG === '1') await new Promise<void>(() => {})
+    if (process.env.FORGE_MOCK_HANG_PROMPT === '1')
+      await new Promise<void>(() => {})
     for (const text of ['first ', 'second ', 'third'])
       await this.connection.sessionUpdate({
         sessionId: params.sessionId,

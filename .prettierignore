@@ -8,3 +8,5 @@ CLAUDE.md
 docs/
 .agents/
 .claude/
+.lavish/
+graphify-out/

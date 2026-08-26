@@ -21,6 +21,7 @@
     "fmt:check": "prettier --check .",
     "test": "vitest run",
     "e2e": "e2e/node_modules/.bin/playwright test -c e2e/playwright.config.ts",
+    "build": "cd apps/web && bunx vite build",
     "typecheck": "bun run --filter '*' typecheck",
     "check": "bun run lint && bun run fmt:check && bun run typecheck && bun run test"
   },

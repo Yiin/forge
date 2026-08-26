@@ -397,7 +397,7 @@ async function startE2eServer(): Promise<void> {
               questions: [question.question],
             },
           })
-        if (process.env.FORGE_FAKE_HANG !== '1') {
+        if (process.env.FORGE_MOCK_HANG_PROMPT !== '1') {
           for (const text of ['first ', 'second ', 'third']) {
             const delay = Number(process.env.FORGE_FAKE_DELAY_MS ?? 0)
             if (delay)

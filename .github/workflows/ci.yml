@@ -70,4 +70,4 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package.json') }}
       - run: bunx playwright install --with-deps chromium
-      - run: bun run e2e --grep @full
+      - run: bun run e2e
