@@ -116,4 +116,80 @@ describe('session recovery', () => {
       ).status,
     ).toBe('errored')
   })
+
+  it('falls back to recap when the provider rejects session load', async () => {
+    const { db, project, bus } = setup()
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'fake',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    db.prepare(
+      "UPDATE sessions SET status = 'running', auto_resume = 1, provider_session_id = 'provider-1' WHERE id = ?",
+    ).run(session.id)
+    appendMessage(db, {
+      sessionId: session.id,
+      turnId: 'turn-1',
+      itemId: 'item-1',
+      role: 'user',
+      type: 'text_delta',
+      content: { type: 'text_delta', text: 'Finish the report' },
+    })
+    let loaded = 0
+    const prompts: string[] = []
+    const handle = {
+      prompt: async (text: string) => {
+        prompts.push(text)
+      },
+      cancel() {},
+      kill() {},
+    }
+    const process: HarnessProcess = {
+      capabilities: { loadSession: true },
+      loadSession: async () => {
+        loaded += 1
+        throw new Error('provider session expired')
+      },
+      newSession: async () => ({ handle, proven: true }),
+      spawn: async () => handle,
+    }
+    await recoverSessions(db, new SessionManager(db, bus, () => process), bus)
+    expect(loaded).toBe(1)
+    expect(prompts).toHaveLength(2)
+    expect(prompts[0]).toContain('Finish the report')
+    expect(prompts[1]).toBe('The server restarted mid-turn. Continue.')
+    expect(
+      db
+        .prepare(
+          "SELECT count(*) AS count FROM messages WHERE session_id = ? AND type = 'error'",
+        )
+        .get(session.id),
+    ).toEqual({ count: 1 })
+  })
+
+  it('does not resume an idle auto-resume chat on a later boot', async () => {
+    const { db, project, bus } = setup()
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'fake',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    db.prepare('UPDATE sessions SET auto_resume = 1 WHERE id = ?').run(
+      session.id,
+    )
+    let starts = 0
+    const handle = { prompt() {}, cancel() {}, kill() {} }
+    const process: HarnessProcess = {
+      capabilities: { loadSession: false },
+      newSession: async () => {
+        starts += 1
+        return { handle, proven: true }
+      },
+      spawn: async () => handle,
+    }
+    await recoverSessions(db, new SessionManager(db, bus, () => process), bus)
+    expect(starts).toBe(0)
+  })
 })
