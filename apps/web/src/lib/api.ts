@@ -14,6 +14,7 @@ import {
   type Interrupt,
   type Prompt,
 } from '@forge/protocol/commands'
+import { putUpload } from './upload'
 export type ApiOptions = { baseUrl?: string; fetch?: typeof globalThis.fetch }
 export type UploadProgress = (fraction: number) => void
 type BodySchema = { parse: (value: unknown) => unknown }
@@ -37,16 +38,29 @@ export class ForgeApi {
     return this.post('/api/sessions', createSession, input)
   }
   listSessions(projectId?: string) {
-    return this.get(`/api/sessions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`)
+    return this.get(
+      `/api/sessions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+    )
+  }
+  listChildSessions(parentSessionId: string) {
+    return this.get(
+      `/api/sessions?parentSessionId=${encodeURIComponent(parentSessionId)}`,
+    )
   }
   listProjects() {
     return this.get('/api/projects')
   }
   renameSession(sessionId: string, title: string) {
-    return this.post(`/api/sessions/${encodeURIComponent(sessionId)}`, null, { title })
+    return this.post(`/api/sessions/${encodeURIComponent(sessionId)}`, null, {
+      title,
+    })
   }
   settleSession(sessionId: string, settled: boolean) {
-    return this.post(`/api/sessions/${encodeURIComponent(sessionId)}/settle`, null, { settled })
+    return this.post(
+      `/api/sessions/${encodeURIComponent(sessionId)}/settle`,
+      null,
+      { settled },
+    )
   }
   prompt(input: Prompt) {
     return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)
@@ -57,14 +71,7 @@ export class ForgeApi {
       mime: file.type || 'application/octet-stream',
       sizeBytes: file.size,
     }) as { attachmentId: string; putUrl: string }
-    await new Promise<void>((resolve, reject) => {
-      const request = new XMLHttpRequest()
-      request.open('PUT', `${this.baseUrl}${init.putUrl}`)
-      request.upload.onprogress = (event) => { if (event.lengthComputable) onProgress?.(event.loaded / event.total) }
-      request.onload = () => request.status >= 200 && request.status < 300 ? resolve() : reject(new Error(`Upload failed (${request.status})`))
-      request.onerror = () => reject(new Error('Upload failed'))
-      request.send(file)
-    })
+    await putUpload(init, file, this.baseUrl, onProgress)
     onProgress?.(1)
     return init
   }
@@ -113,7 +120,8 @@ export class ForgeApi {
   }
   private async get(path: string) {
     const response = await this.fetcher(`${this.baseUrl}${path}`)
-    if (!response.ok) throw new Error(`Forge API request failed (${response.status})`)
+    if (!response.ok)
+      throw new Error(`Forge API request failed (${response.status})`)
     return await response.json()
   }
 }

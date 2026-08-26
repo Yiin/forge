@@ -1,4 +1,4 @@
-import { ChevronDown, FileText } from 'lucide-react'
+import { ChevronDown, File, FileImage } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Virtualizer } from 'virtua'
 import { Link, useParams } from '@tanstack/react-router'
@@ -7,6 +7,8 @@ import { MessageRow, ToolCallRow } from './MessageRow'
 import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
 import { AnsweredQuestionRow } from './AnsweredQuestionRow'
+import { SubagentCard } from './SubagentCard'
+import { useSessionsStore } from '../../stores/sessions'
 
 const EMPTY_MESSAGES: never[] = []
 
@@ -19,9 +21,14 @@ export function Timeline({
   const messages = useMessagesStore(
     (state) => state.bySession[sessionId] ?? EMPTY_MESSAGES,
   )
+  const sessions = useSessionsStore((state) => state.sessions)
+  const children = useMemo(
+    () => sessions.filter((session) => session.parentSessionId === sessionId),
+    [sessions, sessionId],
+  )
   const items = useMemo(
-    () => toRenderModel(messages, resumedWithRecap),
-    [messages, resumedWithRecap],
+    () => toRenderModel(messages, resumedWithRecap, children),
+    [messages, resumedWithRecap, children],
   )
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -75,15 +82,24 @@ function RenderItem({
   if (item.kind === 'message') return <MessageRow item={item} />
   if (item.kind === 'tool') return <ToolCallRow item={item} />
   if (item.kind === 'answered-question') return <AnsweredQuestionRow question={item.question} answer={item.answer} />
+  if (item.kind === 'subagent') return <SubagentCard child={item.child} />
   if (item.kind === 'attachment')
     return (
-      <Link
+      <a
         className="chat-attachment"
-        to="/files/$projectId/$"
-        params={{ projectId: sessionId, _splat: item.path }}
+        href={`/api/attachments/${encodeURIComponent(item.id)}`}
+        target={item.mime?.startsWith('image/') ? '_blank' : undefined}
+        rel="noreferrer"
       >
-        <FileText size={15} /> {item.filename}
-      </Link>
+        {item.mime?.startsWith('image/') ? <FileImage size={15} /> : <File size={15} />} {item.filename}
+        {item.sizeBytes !== undefined && <small>{formatBytes(item.sizeBytes)}</small>}
+      </a>
     )
   return <div className="chat-system">{item.text}</div>
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`
+  return `${(bytes / 1024 ** 2).toFixed(1)} MiB`
 }

@@ -4,6 +4,8 @@ export type SessionSummary = {
   title: string
   projectId?: string | null
   kind?: string
+  parentSessionId?: string | null
+  spawnedBySeq?: number | null
   status?: string
   harness?: string
   lastActivityAt?: number | string

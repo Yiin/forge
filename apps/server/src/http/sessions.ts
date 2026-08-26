@@ -18,13 +18,35 @@ export function sessionRoutes(manager: SessionManager) {
     }
   })
   app.get('/api/sessions', (c) =>
-    c.json(manager.list(c.req.query('projectId'))),
+    c.json(
+      manager.list(c.req.query('projectId'), c.req.query('parentSessionId')),
+    ),
   )
   app.get('/api/sessions/:id', (c) => {
     const row = manager.database
       .prepare('SELECT * FROM sessions WHERE id = ?')
       .get(c.req.param('id'))
     return row ? c.json(row) : c.json({ error: 'Session not found' }, 404)
+  })
+  app.get('/api/sessions/:id/messages', (c) => {
+    const rows = manager.database
+      .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY seq')
+      .all(c.req.param('id')) as Array<Record<string, unknown>>
+    return c.json(
+      rows.map((row) => ({
+        seq: row.seq,
+        sessionId: row.session_id,
+        turnId: row.turn_id,
+        itemId: row.item_id,
+        role: row.role,
+        type: row.type,
+        content:
+          typeof row.content === 'string'
+            ? JSON.parse(row.content)
+            : row.content,
+        createdAt: new Date(Number(row.created_at)).toISOString(),
+      })),
+    )
   })
   app.post('/api/sessions/:id/prompt', async (c) => {
     const value = promptSchema.safeParse({

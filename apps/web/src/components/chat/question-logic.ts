@@ -5,14 +5,13 @@ export type PendingQuestion = { questionId: string; question: Question }
 
 export function pendingQuestions(messages: Message[]): PendingQuestion[] {
   const answered = new Set(
-    messages
-      .filter((message) => message.content.type === 'user_answer')
-      .map((message) => message.content.questionId),
+    messages.flatMap((message) => (message.content.type === 'user_answer' ? [message.content.questionId] : [])),
   )
   return messages.flatMap((message) => {
-    if (message.content.type !== 'ask_user_question' || answered.has(message.content.questionId)) return []
-    const questions = message.content.questions ?? (message.content.question ? [{ question: message.content.question, options: (message.content.options ?? []).map((label) => ({ label })) }] : [])
-    return questions.map((question) => ({ questionId: message.content.questionId, question }))
+    const content = message.content
+    if (content.type !== 'ask_user_question' || answered.has(content.questionId)) return []
+    const questions = content.questions ?? (content.question ? [{ question: content.question, options: (content.options ?? []).map((label) => ({ label })) }] : [])
+    return questions.map((question) => ({ questionId: content.questionId, question }))
   })
 }
 

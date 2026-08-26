@@ -10,8 +10,13 @@ vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ sessionId: 'session-1' }),
 }))
 vi.mock('lucide-react', () => ({
+  Check: () => null,
   ChevronDown: () => null,
+  ChevronRight: () => null,
+  CircleAlert: () => null,
+  Clock3: () => null,
   FileText: () => null,
+  LoaderCircle: () => null,
 }))
 vi.mock('virtua', () => ({
   Virtualizer: ({
@@ -32,6 +37,7 @@ vi.mock('./MessageRow', () => ({
   ToolCallRow: () => null,
 }))
 
+import { useSessionsStore } from '../../stores/sessions'
 import { Timeline } from './Timeline'
 
 const message = (text: string, seq: number): Message => ({
@@ -48,6 +54,7 @@ const message = (text: string, seq: number): Message => ({
 describe('Timeline', () => {
   beforeEach(() => {
     state.messages = []
+    useSessionsStore.setState({ sessions: [] })
   })
 
   it('keeps a pinned timeline at the latest streamed text', () => {
@@ -74,5 +81,22 @@ describe('Timeline', () => {
     view.rerender(<Timeline />)
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 1000 })
+  })
+
+  it('renders a subagent card without an update loop', () => {
+    state.messages = [message('hello', 1)]
+    useSessionsStore.setState({
+      sessions: [
+        {
+          id: 'child-1',
+          title: 'Child work',
+          parentSessionId: 'session-1',
+          spawnedBySeq: 1,
+          status: 'running',
+        },
+      ],
+    })
+    const view = render(<Timeline />)
+    expect(view.container.querySelector('.subagent-card')).not.toBeNull()
   })
 })
