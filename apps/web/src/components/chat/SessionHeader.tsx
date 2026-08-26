@@ -1,4 +1,4 @@
-import { Copy, MoreHorizontal, Pencil, Terminal } from 'lucide-react'
+import { Copy, MoreHorizontal, Pencil, Terminal, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '../../lib/api'
@@ -10,6 +10,7 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
   )
   const upsertSession = useSessionsStore((state) => state.upsertSession)
   const [editing, setEditing] = useState(false)
+  const [infoOpen, setInfoOpen] = useState(false)
   const [title, setTitle] = useState(session?.title ?? 'New session')
   useEffect(() => setTitle(session?.title ?? 'New session'), [session?.title])
   if (!session) return null
@@ -26,9 +27,19 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
     }
   }
   async function copyId() {
+    if (!navigator.clipboard) {
+      toast.error('Copy is not available')
+      return
+    }
     await navigator.clipboard.writeText(current.id)
     toast.success('Session ID copied')
   }
+  const createdAt = current.createdAt
+    ? new Date(current.createdAt)
+    : current.created_at
+      ? new Date(current.created_at)
+      : undefined
+  const projectId = current.projectId ?? current.project_id
   return (
     <header className="session-header">
       <div className="session-heading">
@@ -50,28 +61,64 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
         ) : (
           <button
             className="session-title-button"
-            onClick={() => setEditing(true)}
-            title="Rename session"
+            onClick={() => setInfoOpen(true)}
+            title="Show session information"
           >
             {current.title}
-            <Pencil size={13} />
           </button>
         )}
+        <button
+          className="icon-button session-rename-button"
+          aria-label="Rename session"
+          onClick={() => setEditing(true)}
+        >
+          <Pencil size={13} />
+        </button>
         <span
           className={`status-dot ${current.status ?? 'idle'}`}
           aria-label={current.status ?? 'idle'}
         />
         <Terminal size={14} aria-label={current.harness ?? 'harness'} />
       </div>
-      <details className="session-info">
+      <details
+        className="session-info"
+        open={infoOpen}
+        onToggle={(event) =>
+          setInfoOpen((event.currentTarget as HTMLDetailsElement).open)
+        }
+      >
         <summary className="icon-button" aria-label="Session information">
           <MoreHorizontal size={18} />
         </summary>
         <div className="session-info-popover">
-          <strong>{current.title}</strong>
+          <div className="session-info-heading">
+            <strong>{current.title}</strong>
+            <button
+              className="icon-button"
+              aria-label="Close session information"
+              onClick={() => setInfoOpen(false)}
+            >
+              <X size={15} />
+            </button>
+          </div>
           <span>Harness: {current.harness ?? 'default'}</span>
-          <span>Project: {current.projectId ?? 'none'}</span>
+          <span>Project: {projectId ?? 'none'}</span>
+          <span>
+            Created:{' '}
+            {createdAt && !Number.isNaN(createdAt.getTime())
+              ? createdAt.toLocaleString()
+              : 'unknown'}
+          </span>
           <code>{current.id}</code>
+          <button
+            className="text-button"
+            onClick={() => {
+              setEditing(true)
+              setInfoOpen(false)
+            }}
+          >
+            <Pencil size={14} /> Rename session
+          </button>
           <button className="text-button" onClick={() => void copyId()}>
             <Copy size={14} /> Copy session ID
           </button>
