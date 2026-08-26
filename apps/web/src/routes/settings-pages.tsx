@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
 
 type Harness = {
@@ -10,7 +10,11 @@ type Harness = {
   enabled?: boolean
 }
 const input = (value: string, onChange: (value: string) => void) => (
-  <input value={value} onChange={(event) => onChange(event.target.value)} />
+  <input
+    value={value}
+    onChange={(event) => onChange(event.target.value)}
+    autoComplete="off"
+  />
 )
 
 export function GeneralSettings() {
@@ -65,6 +69,9 @@ export function GeneralSettings() {
 export function HarnessSettings() {
   const [harnesses, setHarnesses] = useState<Record<string, Harness>>({})
   const [results, setResults] = useState<Record<string, string>>({})
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({})
+  const saveQueue = useRef<Promise<void>>(Promise.resolve())
   useEffect(() => {
     void api
       .listHarnesses()
@@ -72,10 +79,38 @@ export function HarnessSettings() {
   }, [])
   const save = (next: Record<string, Harness>) => {
     setHarnesses(next)
-    void api.saveHarnesses(next)
+    setSaveError(null)
+    saveQueue.current = saveQueue.current
+      .then(() => api.saveHarnesses(next))
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        setSaveError(error instanceof Error ? error.message : String(error))
+      })
   }
   const update = (key: string, patch: Partial<Harness>) =>
     save({ ...harnesses, [key]: { ...harnesses[key], ...patch } })
+  const valid = (value: Harness) =>
+    value.name.trim().length > 0 && value.command.trim().length > 0
+  const formatResult = (result: unknown) => {
+    if (!result || typeof result !== 'object') return String(result)
+    const value = result as {
+      ok?: boolean
+      agentName?: string | null
+      stderrTail?: string
+      capabilities?: Record<string, unknown>
+    }
+    if (!value.ok) return `Failed\n${value.stderrTail ?? 'Unknown error'}`
+    const capabilities = Object.entries(value.capabilities ?? {})
+      .map(([key, enabled]) => `${key}: ${enabled ? 'yes' : 'no'}`)
+      .join('\n')
+    return [
+      'Connection succeeded',
+      value.agentName ? `Agent: ${value.agentName}` : null,
+      capabilities ? `Capabilities:\n${capabilities}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
   const add = () => {
     const key = `harness-${Object.keys(harnesses).length + 1}`
     save({
@@ -100,15 +135,25 @@ export function HarnessSettings() {
             <div className="settings-card-head">
               <strong>{value.name || key}</strong>
               <button
+                disabled={!valid(value)}
                 onClick={() => {
-                  setResults({ ...results, [key]: 'Testing…' })
+                  setResults((current) => ({ ...current, [key]: 'Testing…' }))
                   void api
                     .testHarness(key)
                     .then((result) =>
-                      setResults({ ...results, [key]: JSON.stringify(result) }),
+                      setResults((current) => ({
+                        ...current,
+                        [key]: formatResult(result),
+                      })),
                     )
-                    .catch((error) =>
-                      setResults({ ...results, [key]: error.message }),
+                    .catch((error: unknown) =>
+                      setResults((current) => ({
+                        ...current,
+                        [key]:
+                          error instanceof Error
+                            ? error.message
+                            : String(error),
+                      })),
                     )
                 }}
               >
@@ -142,6 +187,77 @@ export function HarnessSettings() {
                 }
               />
             </label>
+            <fieldset className="settings-env">
+              <legend>Environment variables</legend>
+              {Object.entries(value.env).map(([name, envValue]) => (
+                <div className="settings-env-row" key={name}>
+                  <input
+                    aria-label="Environment variable name"
+                    value={name}
+                    placeholder="NAME"
+                    autoCapitalize="characters"
+                    autoComplete="off"
+                    onChange={(event) => {
+                      const next = { ...value.env }
+                      delete next[name]
+                      if (event.target.value)
+                        next[event.target.value] = envValue
+                      update(key, { env: next })
+                    }}
+                  />
+                  <input
+                    aria-label={`Value for ${name}`}
+                    type={revealed[`${key}:${name}`] ? 'text' : 'password'}
+                    value={envValue}
+                    placeholder="Value"
+                    autoComplete="new-password"
+                    onChange={(event) =>
+                      update(key, {
+                        env: { ...value.env, [name]: event.target.value },
+                      })
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="settings-env-toggle"
+                    aria-label={
+                      revealed[`${key}:${name}`] ? 'Hide value' : 'Show value'
+                    }
+                    onClick={() =>
+                      setRevealed((current) => ({
+                        ...current,
+                        [`${key}:${name}`]: !current[`${key}:${name}`],
+                      }))
+                    }
+                  >
+                    {revealed[`${key}:${name}`] ? 'Hide' : 'Show'}
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-env-remove"
+                    aria-label={`Remove ${name}`}
+                    onClick={() => {
+                      const next = { ...value.env }
+                      delete next[name]
+                      update(key, { env: next })
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  let name = 'NEW_VARIABLE'
+                  let suffix = 1
+                  while (name in value.env) name = `NEW_VARIABLE_${suffix++}`
+                  update(key, { env: { ...value.env, [name]: '' } })
+                }}
+              >
+                Add variable
+              </button>
+            </fieldset>
             <label>
               Protocol
               <select
@@ -159,9 +275,17 @@ export function HarnessSettings() {
             {results[key] && (
               <pre className="settings-result">{results[key]}</pre>
             )}
+            {!valid(value) && (
+              <p className="settings-error">
+                Add a name and command before testing this harness.
+              </p>
+            )}
           </article>
         ))}
       </div>
+      {saveError && (
+        <p className="settings-error">Could not save: {saveError}</p>
+      )}
       <button onClick={add}>Add harness</button>
     </SettingsPage>
   )
