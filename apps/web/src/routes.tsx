@@ -12,6 +12,14 @@ import { HomeRoute } from './routes/home'
 import { SearchRoute } from './routes/search'
 import { RunsRoute } from './routes/runs'
 import { RunRoute } from './routes/run'
+import { SettingsLayout } from './routes/settings'
+import {
+  GeneralSettings,
+  HarnessSettings,
+  ProjectSettings,
+  EpicSettings,
+  AboutSettings,
+} from './routes/settings-pages'
 const root = createRootRoute({ component: AppShell })
 const empty =
   (title: string, text = 'This area is ready for the next feature.') =>
@@ -71,22 +79,32 @@ const search = createRoute({
 const settings = createRoute({
   getParentRoute: () => root,
   path: '/settings',
-  component: empty('Settings'),
+  component: SettingsLayout,
+})
+const settingsGeneral = createRoute({
+  getParentRoute: () => settings,
+  path: '/',
+  component: GeneralSettings,
 })
 const settingsHarnesses = createRoute({
   getParentRoute: () => settings,
   path: '/harnesses',
-  component: empty('Settings · harnesses'),
+  component: HarnessSettings,
 })
 const settingsProjects = createRoute({
   getParentRoute: () => settings,
   path: '/projects',
-  component: empty('Settings · projects'),
+  component: ProjectSettings,
+})
+const settingsEpics = createRoute({
+  getParentRoute: () => settings,
+  path: '/epics',
+  component: EpicSettings,
 })
 const settingsAbout = createRoute({
   getParentRoute: () => settings,
   path: '/about',
-  component: empty('Settings · about'),
+  component: AboutSettings,
 })
 const tree = root.addChildren([
   index,
@@ -96,7 +114,13 @@ const tree = root.addChildren([
   files,
   filesIndex,
   search,
-  settings.addChildren([settingsHarnesses, settingsProjects, settingsAbout]),
+  settings.addChildren([
+    settingsGeneral,
+    settingsHarnesses,
+    settingsProjects,
+    settingsEpics,
+    settingsAbout,
+  ]),
 ])
 export const router = createRouter({ routeTree: tree })
 declare module '@tanstack/react-router' {
