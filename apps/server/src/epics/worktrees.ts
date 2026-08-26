@@ -9,6 +9,8 @@ import {
   unlink,
 } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 
 declare const Bun: {
   spawn(
@@ -23,6 +25,7 @@ declare const Bun: {
 }
 
 const HUNKS_LIMIT = 32 * 1024
+const nodeExec = promisify(execFile)
 
 export type ConflictReport = {
   files: string[]
@@ -65,7 +68,26 @@ async function git(
   args: string[],
   check = true,
 ): Promise<{ output: string; code: number }> {
-  const proc = Bun.spawn(['git', ...args], {
+  const bun = (globalThis as typeof globalThis & { Bun?: typeof Bun }).Bun
+  if (!bun) {
+    try {
+      const result = await nodeExec('git', args, { cwd: repoPath })
+      return { output: result.stdout + result.stderr, code: 0 }
+    } catch (error) {
+      const failure = error as {
+        stdout?: string
+        stderr?: string
+        code?: number
+      }
+      const output = (failure.stdout ?? '') + (failure.stderr ?? '')
+      if (check)
+        throw new Error(
+          `git ${args.join(' ')} failed (${failure.code ?? 1}): ${output}`,
+        )
+      return { output, code: failure.code ?? 1 }
+    }
+  }
+  const proc = bun.spawn(['git', ...args], {
     cwd: repoPath,
     stdout: 'pipe',
     stderr: 'pipe',

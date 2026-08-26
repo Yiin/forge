@@ -12,6 +12,7 @@ import {
 import { acquireRunLock } from './worktrees.js'
 import {
   createWorktree,
+  listRunWorktrees,
   mergeBranch,
   removeWorktree,
   trialMerge,
@@ -20,9 +21,22 @@ import {
 import {
   createIteration,
   createRun,
+  createSession,
   settleIteration,
   updateRunStatus,
+  updateRunConfig,
 } from '../db/queries.js'
+import {
+  appendTriageCard,
+  classifyGate,
+  failureSignature,
+  isDependencyFailure,
+  readSignatures,
+  rememberSignature,
+  runGate,
+  triageCard,
+  type FailureEntry,
+} from './triage.js'
 import { workerPrompt } from './prompts.js'
 const exec = promisify(execFile)
 type Db = {
@@ -73,6 +87,7 @@ export class EpicRunner {
   >()
   private inputs = new Map<string, StartRunInput>()
   private workerSessions = new Map<string, WorkerSession>()
+  private skippedBeads = new Map<string, Set<string>>()
   constructor(
     private readonly db: Db,
     private readonly sessions: SessionManager,
@@ -80,6 +95,10 @@ export class EpicRunner {
   ) {}
   get eventBus() {
     return this.bus
+  }
+  private async cleanupRunWorktrees(runId: string, repoPath: string) {
+    for (const worktree of await listRunWorktrees(repoPath, runId))
+      await removeWorktree(repoPath, worktree, false).catch(() => undefined)
   }
   async startRun(input: StartRunInput) {
     const run = createRun(this.db, {
@@ -110,10 +129,13 @@ export class EpicRunner {
         return
       }
       while (!signal.aborted) {
-        const children = await readyChildren(input.repoPath, input.epicBeadId)
+        const children = (
+          await readyChildren(input.repoPath, input.epicBeadId)
+        ).filter((child) => !this.skippedBeads.get(run.id)?.has(child.id))
         if (!children.length) {
           if (!(await openChildren(input.repoPath, input.epicBeadId)).length) {
             updateRunStatus(this.db, run.id, 'completed')
+            await this.cleanupRunWorktrees(run.id, input.repoPath)
             this.publish(run.id, 'completed')
             return
           }
@@ -211,9 +233,9 @@ export class EpicRunner {
     )
     try {
       while (!signal.aborted) {
-        const ready = (
-          await readyChildren(input.repoPath, input.epicBeadId)
-        ).sort((a, b) => a.priority - b.priority)
+        const ready = (await readyChildren(input.repoPath, input.epicBeadId))
+          .filter((child) => !this.skippedBeads.get(run.id)?.has(child.id))
+          .sort((a, b) => a.priority - b.priority)
         const pooled =
           input.mode === 'pool' || ready.length > 1 || inFlight.size > 1
         while (inFlight.size < (pooled ? max : 1) && ready.length) {
@@ -228,15 +250,63 @@ export class EpicRunner {
         }
         while (queue.length) {
           const item = queue.shift()!
-          const config = input.config as { gateCommand?: string | string[] }
+          const config = input.config as {
+            gateCommand?: string | string[]
+            installCommand?: string | string[]
+          }
+          if (config?.gateCommand) {
+            const branchGate = await runGate(
+              item.worktreePath,
+              config.gateCommand,
+            )
+            if (branchGate.code !== 0) {
+              const control = await runGate(input.repoPath, config.gateCommand)
+              const classification = classifyGate(branchGate, control)
+              const handled = await this.handleFailure(
+                run,
+                input,
+                item,
+                branchGate.output,
+                classification,
+                config,
+              )
+              if (handled) {
+                if (
+                  this.db
+                    .prepare('SELECT status FROM epic_runs WHERE id = ?')
+                    .get(run.id)?.status === 'paused'
+                )
+                  return
+                continue
+              }
+            }
+          }
           const result = await mergeBranch(
             input.repoPath,
             input.baseBranch,
             item.branch,
-            config?.gateCommand,
+            undefined,
           )
           if (result !== 'clean') {
-            settleIteration(this.db, item.id, 'failed', JSON.stringify(result))
+            const output = JSON.stringify(result)
+            const control = config?.gateCommand
+              ? await runGate(input.repoPath, config.gateCommand)
+              : { code: 1, output }
+            const classification = classifyGate({ code: 1, output }, control)
+            await this.handleFailure(
+              run,
+              input,
+              item,
+              output,
+              classification,
+              config,
+            )
+            if (
+              this.db
+                .prepare('SELECT status FROM epic_runs WHERE id = ?')
+                .get(run.id)?.status === 'paused'
+            )
+              return
             continue
           }
           settleIteration(this.db, item.id, 'merged')
@@ -253,6 +323,7 @@ export class EpicRunner {
         }
         if (!(await openChildren(input.repoPath, input.epicBeadId)).length) {
           updateRunStatus(this.db, run.id, 'completed')
+          await this.cleanupRunWorktrees(run.id, input.repoPath)
           this.publish(run.id, 'completed')
           return
         }
@@ -263,6 +334,81 @@ export class EpicRunner {
     } finally {
       clearInterval(radar)
     }
+  }
+  private async handleFailure(
+    run: any,
+    input: StartRunInput,
+    item: IterationResult,
+    output: string,
+    classification: 'code' | 'infra' | 'unknown',
+    config: {
+      gateCommand?: string | string[]
+      installCommand?: string | string[]
+    },
+  ) {
+    const signature = failureSignature(output, input.repoPath)
+    const previous = readSignatures(input.config, item.beadId)
+    const entry: FailureEntry = {
+      attempt: previous.length + 1,
+      signature,
+      excerpt: output.slice(0, 1000),
+    }
+    input.config = rememberSignature(input.config, item.beadId, entry)
+    updateRunConfig(this.db, run.id, input.config)
+    if (
+      classification === 'infra' &&
+      isDependencyFailure(output) &&
+      config.installCommand &&
+      !previous.some((value) => value.signature === signature)
+    ) {
+      const install = await runGate(item.worktreePath, config.installCommand)
+      if (install.code === 0 && config.gateCommand) {
+        const retry = await runGate(item.worktreePath, config.gateCommand)
+        if (retry.code === 0) return false
+        output = retry.output
+      }
+    }
+    const attempts = previous.length + 1
+    const repeated = previous.some((value) => value.signature === signature)
+    settleIteration(
+      this.db,
+      item.id,
+      classification === 'infra' ? 'interrupted' : 'failed',
+      output,
+    )
+    if (attempts < 2 && !repeated && classification === 'code') return true
+    let origin =
+      run.origin_session_id ??
+      run.originSessionId ??
+      this.db
+        .prepare(
+          'SELECT id FROM sessions WHERE epic_run_id = ? ORDER BY created_at LIMIT 1',
+        )
+        .get(run.id)?.id
+    if (!origin) {
+      const root = createSession(this.db, {
+        projectId: run.project_id,
+        harness: 'none',
+        cwd: input.repoPath,
+        title: 'Epic triage',
+        kind: 'epic_worker',
+        now: Date.now(),
+      })
+      origin = root.id
+    }
+    const card = triageCard({
+      runId: run.id,
+      beadId: item.beadId,
+      attempts,
+      classification,
+      failureChain: [...previous, entry],
+    })
+    if (origin) {
+      appendTriageCard(this.db, origin, card)
+      updateRunStatus(this.db, run.id, 'paused', output)
+      this.publish(run.id, 'paused')
+    } else await this.fail(run.id, output)
+    return true
   }
   private async dispatch(
     run: any,
@@ -401,12 +547,14 @@ export class EpicRunner {
   }
   async cancel(runId: string) {
     const item = this.active.get(runId)
+    const input = this.inputs.get(runId)
     if (item?.session) await item.session.cancel()
     item?.abort.abort()
+    if (input) await this.cleanupRunWorktrees(runId, input.repoPath)
     updateRunStatus(this.db, runId, 'cancelled')
     this.publish(runId, 'cancelled')
   }
-  async resume(runId: string) {
+  async resume(runId: string, skipBead?: string) {
     const input = this.inputs.get(runId)
     if (!input) throw new Error('Run configuration is not available')
     const row = this.db
@@ -414,6 +562,12 @@ export class EpicRunner {
       .get(runId)
     if (!row) throw new Error('Run not found')
     if (this.active.has(runId)) return
+    if (skipBead) {
+      const skipped = this.skippedBeads.get(runId) ?? new Set<string>()
+      skipped.add(skipBead)
+      this.skippedBeads.set(runId, skipped)
+      await releaseClaim(input.repoPath, skipBead).catch(() => {})
+    }
     updateRunStatus(this.db, runId, 'running')
     const abort = new AbortController()
     this.active.set(runId, { abort })
