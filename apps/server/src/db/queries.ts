@@ -239,6 +239,12 @@ export function updateRunStatus(
     runId,
   )
 }
+export function updateRunConfig(db: Db, runId: string, config: unknown) {
+  db.prepare('UPDATE epic_runs SET config = ? WHERE id = ?').run(
+    json(config),
+    runId,
+  )
+}
 export function createIteration(
   db: Db,
   input: {
