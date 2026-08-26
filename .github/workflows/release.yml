@@ -108,7 +108,7 @@ jobs:
           fi
           project="$(curl --fail --silent -X POST http://127.0.0.1:3900/api/projects -H 'content-type: application/json' -d '{"name":"Release smoke","path":"."}')"
           project_id="$(printf '%s' "$project" | node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.parse(s).id))')"
-          session="$(curl --fail --silent -X POST "http://127.0.0.1:3900/api/projects/$project_id/sessions" -H 'content-type: application/json' -d '{"harness":"mock","title":"Smoke","cwd":"."}')"
+          session="$(curl --fail --silent -X POST "http://127.0.0.1:3900/api/sessions" -H 'content-type: application/json' -d "{\"projectId\":\"$project_id\",\"harness\":\"mock\",\"title\":\"Smoke\",\"cwd\":\".\"}")"
           session_id="$(printf '%s' "$session" | node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.parse(s).id))')"
           curl --fail --silent -X POST "http://127.0.0.1:3900/api/sessions/$session_id/prompt" -H 'content-type: application/json' -d '{"text":"hello"}'
       - uses: actions/upload-artifact@v4
