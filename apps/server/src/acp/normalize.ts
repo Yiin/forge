@@ -6,9 +6,16 @@ import type {
 } from './client.js'
 import { appendMessage, type AppendMessage } from '../db/queries.js'
 import type { EventBus } from '../events/bus.js'
+import {
+  createSubagentTurn,
+  detectToolCall,
+  finalizeSubagents,
+  updateToolCall,
+  type SubagentTurn,
+} from './subagents.js'
 
 type Db = { exec(sql: string): unknown; prepare(sql: string): any }
-type Logger = Pick<Console, 'warn'>
+export type Logger = Pick<Console, 'warn'>
 type BufferKey = `${string}:${string}`
 type BufferState = {
   text: string
@@ -35,7 +42,7 @@ export class AcpNormalizer {
   private readonly buffers = new Map<BufferKey, BufferState>()
   private readonly turns = new Map<
     string,
-    { turnId: string; closed: boolean }
+    { turnId: string; closed: boolean; subagents: SubagentTurn }
   >()
   private readonly commands = new Map<string, readonly unknown[]>()
   private readonly logger: Logger
@@ -51,7 +58,11 @@ export class AcpNormalizer {
   }
 
   beginTurn(sessionId: string, turnId = ulid()) {
-    this.turns.set(sessionId, { turnId, closed: false })
+    this.turns.set(sessionId, {
+      turnId,
+      closed: false,
+      subagents: createSubagentTurn(),
+    })
     this.append(sessionId, turnId, newItem(), 'turn_start', {
       type: 'turn_start',
     })
@@ -62,7 +73,11 @@ export class AcpNormalizer {
     const current = this.turns.get(sessionId)
     if (current && !current.closed) return current.turnId
     const turnId = `autonomous-${ulid()}`
-    this.turns.set(sessionId, { turnId, closed: false })
+    this.turns.set(sessionId, {
+      turnId,
+      closed: false,
+      subagents: createSubagentTurn(),
+    })
     this.append(sessionId, turnId, newItem(), 'turn_start', {
       type: 'turn_start',
     })
@@ -156,28 +171,49 @@ export class AcpNormalizer {
         return
       case 'tool_call':
         this.flush(sessionId, turnId)
-        this.append(sessionId, turnId, value.toolCallId, 'tool_call', {
-          type: 'tool_call',
-          toolCallId: value.toolCallId,
-          name: value.title,
-          input: value.rawInput,
-        })
+        {
+          const subagent = detectToolCall(
+            stateFor(this.turns, sessionId),
+            value,
+          )
+          this.append(sessionId, turnId, value.toolCallId, 'tool_call', {
+            type: 'tool_call',
+            toolCallId: value.toolCallId,
+            name: value.title,
+            input: value.rawInput,
+            ...(subagent ? { subagent } : {}),
+          })
+        }
         return
       case 'tool_call_update':
         this.flush(sessionId, turnId)
-        this.append(sessionId, turnId, value.toolCallId, 'tool_update', {
-          type: 'tool_update',
-          toolCallId: value.toolCallId,
-          status: value.status ?? 'unknown',
-          output: value.rawOutput ?? value.content,
-        })
-        if (value.status === 'completed' || value.status === 'failed')
-          this.append(sessionId, turnId, value.toolCallId, 'tool_result', {
-            type: 'tool_result',
+        {
+          const subagent = updateToolCall(
+            stateFor(this.turns, sessionId),
+            value,
+            this.logger,
+          )
+          this.append(sessionId, turnId, value.toolCallId, 'tool_update', {
+            type: 'tool_update',
             toolCallId: value.toolCallId,
-            output: value.rawOutput ?? value.content ?? null,
-            isError: value.status === 'failed',
+            status: value.status ?? 'unknown',
+            output: value.rawOutput ?? value.content,
+            ...(subagent ? { subagent } : {}),
           })
+          if (
+            (value.status === 'completed' || value.status === 'failed') &&
+            (!subagent ||
+              subagent.status === 'completed' ||
+              subagent.status === 'failed')
+          )
+            this.append(sessionId, turnId, value.toolCallId, 'tool_result', {
+              type: 'tool_result',
+              toolCallId: value.toolCallId,
+              output: value.rawOutput ?? value.content ?? null,
+              isError: value.status === 'failed',
+              ...(subagent ? { subagent } : {}),
+            })
+        }
         return
       case 'plan':
         this.flush(sessionId, turnId)
@@ -210,6 +246,14 @@ export class AcpNormalizer {
     const current = this.turns.get(sessionId)
     if (!current || current.closed) return
     this.flush(sessionId, current.turnId)
+    for (const subagent of finalizeSubagents(current.subagents))
+      this.append(sessionId, current.turnId, newItem(), 'tool_result', {
+        type: 'tool_result',
+        toolCallId: subagent.toolCallId,
+        output: null,
+        isError: false,
+        subagent,
+      })
     this.append(sessionId, current.turnId, newItem(), 'turn_end', {
       type: 'turn_end',
       stopReason: response.stopReason,
@@ -268,6 +312,15 @@ export class AcpNormalizer {
       this.flush(sessionId, turnId)
     }
   }
+}
+
+function stateFor(
+  turns: Map<string, { subagents: SubagentTurn }>,
+  sessionId: string,
+) {
+  const state = turns.get(sessionId)
+  if (!state) throw new Error(`No active turn for ${sessionId}`)
+  return state.subagents
 }
 
 export function promptTurn(

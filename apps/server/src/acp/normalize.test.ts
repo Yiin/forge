@@ -32,6 +32,99 @@ const notification = (sessionId: string, update: unknown) =>
   ({ sessionId, update }) as acp.SessionNotification
 
 describe('ACP update normalization', () => {
+  it('stamps and completes a subagent on every tool row', async () => {
+    const { db, session } = fixture()
+    const normalizer = new AcpNormalizer({ db })
+    normalizer.beginTurn(session.id, 'subagent-turn')
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'research-1',
+        title: 'Research',
+        kind: 'other',
+        rawInput: { subagent_type: 'researcher' },
+      }),
+    )
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'research-1',
+        status: 'completed',
+        content: [
+          {
+            type: 'content',
+            content: {
+              type: 'text',
+              text: 'agent_id: agent-1\nactual_subagent_type: researcher\nstatus: completed',
+            },
+          },
+        ],
+      }),
+    )
+    normalizer.endTurn(session.id, { stopReason: 'end_turn' })
+    const rows = replaySince(db, 0, [session.id]) as Array<{
+      type: string
+      content: string
+    }>
+    const tools = rows.filter((row) => row.type.startsWith('tool_'))
+    const subagents = tools.map((row) => JSON.parse(row.content).subagent)
+    expect(subagents.every(Boolean)).toBe(true)
+    expect(new Set(subagents.map((item) => item.id)).size).toBe(1)
+    expect(subagents.at(-1)!.status).toBe('completed')
+  })
+
+  it('marks an unfinished subagent as unknown in the final row', async () => {
+    const { db, session } = fixture()
+    const normalizer = new AcpNormalizer({ db })
+    normalizer.beginTurn(session.id, 'unknown-turn')
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'research-1',
+        title: 'Task',
+        rawInput: { prompt: 'investigate' },
+      }),
+    )
+    normalizer.endTurn(session.id, { stopReason: 'end_turn' })
+    const rows = replaySince(db, 0, [session.id]) as Array<{
+      type: string
+      content: string
+    }>
+    const results = rows.filter((row) => row.type === 'tool_result')
+    expect(JSON.parse(results.at(-1)!.content).subagent.status).toBe('unknown')
+  })
+
+  it('ignores malformed completion signals and finalizes them honestly', async () => {
+    const { db, session } = fixture()
+    const logger = { warn: vi.fn() }
+    const normalizer = new AcpNormalizer({ db, logger })
+    normalizer.beginTurn(session.id, 'malformed-turn')
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'research-1',
+        title: 'Task',
+        rawInput: { prompt: 'investigate' },
+      }),
+    )
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'research-1',
+        status: 'completed',
+        content: 'agent_id: missing fields',
+      }),
+    )
+    normalizer.endTurn(session.id, { stopReason: 'end_turn' })
+    expect(logger.warn).toHaveBeenCalled()
+    const rows = replaySince(db, 0, [session.id]) as Array<{
+      type: string
+      content: string
+    }>
+    const result = rows.find((row) => row.type === 'tool_result')
+    expect(JSON.parse(result!.content).subagent.status).toBe('unknown')
+  })
+
   it('frames and coalesces text deltas into an exact replay', async () => {
     const { db, session } = fixture()
     const normalizer = new AcpNormalizer({ db, now: () => 1 })
