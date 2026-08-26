@@ -95,6 +95,6 @@ describe('HarnessSettings', () => {
     await waitFor(() =>
       expect(screen.queryByDisplayValue('mock-agent')).toBeNull(),
     )
-    expect(saveHarnesses).not.toHaveBeenCalled()
+    expect(saveHarnesses).toHaveBeenCalledWith({})
   })
 })

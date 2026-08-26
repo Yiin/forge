@@ -6,6 +6,9 @@ import { useShellStore } from '../stores/shell'
 import { useSettingsStore } from '../stores/settings'
 import { Button } from '../components/ui/button'
 import { ConfirmationDialog } from '../components/ui/confirmation-dialog'
+import { Field } from '../components/ui/field'
+import { Input } from '../components/ui/input'
+import { Textarea } from '../components/ui/textarea'
 import {
   Select,
   SelectItem,
@@ -153,23 +156,21 @@ export function GeneralSettings() {
 export function HarnessSettings() {
   const [draft, setDraft] = useState<Record<string, Harness>>({})
   const [results, setResults] = useState<Record<string, string>>({})
-  const [saveState, setSaveState] = useState<
-    'loading' | 'idle' | 'saving' | 'saved' | 'error'
-  >('loading')
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveState, setSaveState] = useState<Record<string, 'loading' | 'dirty' | 'saving' | 'saved' | 'error'>>({})
+  const [saveError, setSaveError] = useState<Record<string, string | null>>({})
+  const [testing, setTesting] = useState<Record<string, boolean>>({})
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [deleteKey, setDeleteKey] = useState<string | null>(null)
-  const saveQueue = useRef<Promise<void>>(Promise.resolve())
+  const saveQueue = useRef<Record<string, Promise<void>>>({})
   useEffect(() => {
     void api
       .listHarnesses()
       .then((value) => {
         setDraft(value as Record<string, Harness>)
-        setSaveState('idle')
+        setSaveState(Object.fromEntries(Object.keys(value).map((key) => [key, 'saved'])))
       })
       .catch((error: unknown) => {
-        setSaveError(error instanceof Error ? error.message : String(error))
-        setSaveState('error')
+        setSaveError({ _page: error instanceof Error ? error.message : String(error) })
       })
   }, [])
   const update = (key: string, patch: Partial<Harness>) => {
@@ -177,10 +178,10 @@ export function HarnessSettings() {
       ...current,
       [key]: { ...current[key], ...patch },
     }))
-    setSaveState('idle')
-    setSaveError(null)
+    setSaveState((current) => ({ ...current, [key]: 'dirty' }))
+    setSaveError((current) => ({ ...current, [key]: null }))
   }
-  const saveDraft = (next: Record<string, Harness>) => {
+  const saveDraft = (next: Record<string, Harness>, key: string) => {
     const parsed = Object.fromEntries(
       Object.entries(next).map(([key, value]) => [
         key,
@@ -189,8 +190,8 @@ export function HarnessSettings() {
     )
     const invalid = Object.values(parsed).find((result) => !result.success)
     if (invalid && !invalid.success) {
-      setSaveError(invalid.error.issues[0]?.message ?? 'Invalid harness')
-      setSaveState('error')
+      setSaveError((current) => ({ ...current, [key]: invalid.error.issues[0]?.message ?? 'Invalid harness' }))
+      setSaveState((current) => ({ ...current, [key]: 'error' }))
       return
     }
     const snapshot = Object.fromEntries(
@@ -199,18 +200,18 @@ export function HarnessSettings() {
         result.success ? result.data : undefined,
       ]),
     ) as Record<string, Harness>
-    setSaveState('saving')
-    setSaveError(null)
-    saveQueue.current = saveQueue.current
+    setSaveState((current) => ({ ...current, [key]: 'saving' }))
+    setSaveError((current) => ({ ...current, [key]: null }))
+    saveQueue.current[key] = (saveQueue.current[key] ?? Promise.resolve())
       .then(() => api.saveHarnesses(snapshot))
-      .then(() => setSaveState('saved'))
+      .then(() => setSaveState((current) => ({ ...current, [key]: 'saved' })))
       .catch((error: unknown) => {
-        setSaveError(error instanceof Error ? error.message : String(error))
-        setSaveState('error')
+        setSaveError((current) => ({ ...current, [key]: error instanceof Error ? error.message : String(error) }))
+        setSaveState((current) => ({ ...current, [key]: 'error' }))
       })
   }
   const save = (key: string) => {
-    if (draft[key]) saveDraft(draft)
+    if (draft[key]) saveDraft(draft, key)
   }
   const validationError = (value: Harness) => {
     const parsed = harnessConfigSchema.safeParse(value)
@@ -252,7 +253,7 @@ export function HarnessSettings() {
         enabled: true,
       },
     }))
-    setSaveState('idle')
+    setSaveState((current) => ({ ...current, [key]: 'dirty' }))
   }
   return (
     <SettingsPage
@@ -260,7 +261,7 @@ export function HarnessSettings() {
       subtitle="A harness is a command and its runtime settings."
     >
       <div className="settings-stack">
-        {saveState === 'loading' && (
+        {Object.values(saveState).some((state) => state === 'loading') && (
           <p className="settings-status" role="status">
             Loading harnesses…
           </p>
@@ -269,17 +270,20 @@ export function HarnessSettings() {
           <article className="settings-card" key={key}>
             <div className="settings-card-head">
               <strong>{value.name || key}</strong>
+              <span className="settings-status" role="status">
+                {saveState[key] === 'dirty' ? 'Unsaved changes' : saveState[key] === 'saving' ? 'Saving…' : saveState[key] === 'error' ? 'Error' : 'Saved.'}
+              </span>
             </div>
-            <label>
-              Name{input(value.name, (name) => update(key, { name }))}
-            </label>
-            <label>
-              Command
-              {input(value.command, (command) => update(key, { command }))}
-            </label>
-            <label>
-              Arguments, one per line
-              <textarea
+            <SettingsSection title="Connection" description="Choose how Forge starts this harness.">
+            <Field label="Name" htmlFor={`${key}-name`} description="A label shown in session controls.">
+              <Input id={`${key}-name`} value={value.name} onChange={(event) => update(key, { name: event.target.value })} />
+            </Field>
+            <Field label="Command" htmlFor={`${key}-command`} description="The executable Forge starts.">
+              <Input id={`${key}-command`} value={value.command} onChange={(event) => update(key, { command: event.target.value })} />
+            </Field>
+            <Field label="Arguments" htmlFor={`${key}-args`} description="Enter one argument per line.">
+              <Textarea
+                id={`${key}-args`}
                 value={value.args.join('\n')}
                 onChange={(e) =>
                   update(key, {
@@ -287,12 +291,14 @@ export function HarnessSettings() {
                   })
                 }
               />
-            </label>
+            </Field>
+            </SettingsSection>
+            <SettingsSection title="Environment" description="Secret values stay hidden until you reveal them.">
             <fieldset className="settings-env">
               <legend>Environment variables</legend>
               {Object.entries(value.env).map(([name, envValue]) => (
                 <div className="settings-env-row" key={name}>
-                  <input
+                  <Input
                     aria-label="Environment variable name"
                     value={name}
                     placeholder="NAME"
@@ -306,7 +312,7 @@ export function HarnessSettings() {
                       update(key, { env: next })
                     }}
                   />
-                  <input
+                  <Input
                     aria-label={`Value for ${name}`}
                     type={revealed[`${key}:${name}`] ? 'text' : 'password'}
                     value={envValue}
@@ -359,8 +365,8 @@ export function HarnessSettings() {
                 Add variable
               </button>
             </fieldset>
-            <label>
-              Protocol
+            </SettingsSection>
+            <Field label="Protocol" description="ACP uses structured messages. PTY uses terminal output.">
               <Select
                 value={value.protocol}
                 onValueChange={(selected) => {
@@ -377,7 +383,7 @@ export function HarnessSettings() {
                   <SelectItem value="pty">PTY</SelectItem>
                 </SelectPopup>
               </Select>
-            </label>
+            </Field>
             {results[key] && (
               <pre className="settings-result" role="status">
                 {results[key]}
@@ -399,8 +405,9 @@ export function HarnessSettings() {
               <Button
                 onClick={() => {
                   setResults((current) => ({ ...current, [key]: 'Testing…' }))
+                  setTesting((current) => ({ ...current, [key]: true }))
                   void api
-                    .testHarness(key)
+                    .testHarness(key, value)
                     .then((result) =>
                       setResults((current) => ({
                         ...current,
@@ -416,9 +423,10 @@ export function HarnessSettings() {
                             : String(error),
                       })),
                     )
+                    .finally(() => setTesting((current) => ({ ...current, [key]: false })))
                 }}
                 disabled={
-                  Boolean(validationError(value)) || saveState === 'saving'
+                  Boolean(validationError(value)) || testing[key] || saveState[key] === 'saving'
                 }
               >
                 Test
@@ -426,34 +434,15 @@ export function HarnessSettings() {
               <Button variant="danger" onClick={() => setDeleteKey(key)}>
                 Delete
               </Button>
-              {saveState === 'saving' && (
-                <span className="settings-status" role="status">
-                  Saving…
-                </span>
-              )}
-              {saveState === 'saved' && (
-                <span className="settings-status" role="status">
-                  Saved.
-                </span>
-              )}
             </div>
           </article>
         ))}
       </div>
-      {saveError && (
-        <p className="settings-error" role="alert">
-          Could not save: {saveError}
-        </p>
-      )}
+      {Object.entries(saveError).filter(([, error]) => error).map(([key, error]) => (
+        <p className="settings-error" role="alert" key={key}>Could not save: {error}</p>
+      ))}
       <div className="settings-actions">
         <Button onClick={add}>Add harness</Button>
-        <Button
-          variant="primary"
-          onClick={() => saveDraft(draft)}
-          disabled={saveState === 'saving'}
-        >
-          Save changes
-        </Button>
       </div>
       <ConfirmationDialog
         open={deleteKey !== null}
@@ -462,15 +451,18 @@ export function HarnessSettings() {
         }}
         title="Delete harness?"
         confirmLabel="Delete"
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!deleteKey) return
+          const next = { ...draft }
+          delete next[deleteKey]
+          await api.saveHarnesses(next)
           setDraft((current) => {
             const next = { ...current }
             delete next[deleteKey]
             return next
           })
           setDeleteKey(null)
-          setSaveState('idle')
+          setSaveState((current) => ({ ...current, [deleteKey]: 'saved' }))
         }}
       >
         Delete “{deleteKey ? draft[deleteKey]?.name || deleteKey : ''}”? Save

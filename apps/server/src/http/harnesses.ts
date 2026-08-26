@@ -7,6 +7,7 @@ import { spawnAcpClient } from '../acp/client.js'
 import {
   settingsPatchSchema,
   settingsSchema,
+  harnessConfigSchema,
   type ForgeConfig,
   type HarnessConfig,
 } from '@forge/protocol/config'
@@ -49,8 +50,15 @@ export function harnessRoutes(options: ConfigRoutesOptions = {}) {
     return c.json(next.harness)
   })
   app.post('/api/harnesses/test', async (c) => {
-    const body = (await c.req.json()) as { name?: string }
-    const entry = body.name ? config.harness[body.name] : undefined
+    const body = (await c.req.json()) as { name?: string; harness?: unknown }
+    const parsedDraft = body.harness
+      ? harnessConfigSchema.safeParse(body.harness)
+      : null
+    const entry = parsedDraft?.success
+      ? parsedDraft.data
+      : body.name
+        ? config.harness[body.name]
+        : undefined
     if (!entry) return c.json({ ok: false, stderrTail: 'Unknown harness' }, 404)
     if (entry.protocol === 'pty') return testPty(entry, c)
     try {
