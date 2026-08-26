@@ -22,6 +22,22 @@ export type SessionRow = {
 const makeId = (prefix: string) =>
   `${prefix}${crypto.randomUUID().replaceAll('-', '')}`
 
+function recoveryRecap(db: Db, sessionId: string) {
+  const rows = db
+    .prepare(
+      `SELECT role, type, content FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT 30`,
+    )
+    .all(sessionId) as Array<{ role: string; type: string; content: string }>
+  const prompt = rows.find((row) => {
+    if (row.role !== 'user' || row.type !== 'text_delta') return false
+    return Boolean((JSON.parse(row.content) as { text?: string }).text)
+  })
+  const tools = rows.filter(
+    (row) => row.type === 'tool_call' || row.type === 'tool_result',
+  ).length
+  return `Last user prompt: ${prompt ? (JSON.parse(prompt.content) as { text: string }).text : '(none)'}. Tool events: ${tools}.`
+}
+
 export class SessionManager {
   private readonly handles = new Map<string, HarnessHandle>()
   private readonly reapTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -160,20 +176,32 @@ export class SessionManager {
       providerSessionId: row.provider_session_id,
     }
     let result: { handle: HarnessHandle; proven: boolean }
-    if (
+    const canLoad =
       !recap &&
       process.capabilities?.loadSession &&
       process.loadSession &&
       row.provider_session_id
-    ) {
-      result = await process.loadSession(session, onItem, onExit)
-      if (!result.proven)
-        throw new Error('Provider session load was not proven')
+    if (canLoad) {
+      try {
+        result = await process.loadSession!(session, onItem, onExit)
+        if (!result.proven)
+          throw new Error('Provider session load was not proven')
+      } catch {
+        // Providers can advertise loading but lose the persisted session.
+        // Fall back to a fresh session and preserve the local conversation.
+        if (!process.newSession)
+          throw new Error('Harness cannot create a session')
+        result = await process.newSession(session, onItem, onExit)
+        if (!result.proven) throw new Error('New session was not proven')
+        recap = recoveryRecap(this.db, row.id)
+      }
     } else {
       if (!process.newSession)
         throw new Error('Harness cannot create a session')
       result = await process.newSession(session, onItem, onExit)
       if (!result.proven) throw new Error('New session was not proven')
+    }
+    if (recap) {
       appendMessage(this.db, {
         sessionId: row.id,
         turnId: makeId('turn_'),

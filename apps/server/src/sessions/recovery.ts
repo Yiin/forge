@@ -43,7 +43,6 @@ export async function recoverSessions(
   const running = db
     .prepare("SELECT * FROM sessions WHERE status = 'running'")
     .all()
-  const interrupted = new Set(running.map((row) => row.id as string))
   for (const row of running) {
     const turn = db
       .prepare(
@@ -63,16 +62,10 @@ export async function recoverSessions(
       'UPDATE sessions SET status = ?, last_activity_at = ? WHERE id = ?',
     ).run('idle', Date.now(), row.id)
   }
-  const candidates = db
-    .prepare("SELECT * FROM sessions WHERE kind = 'chat' AND auto_resume = 1")
-    .all()
-  candidates.push(
-    ...running.filter(
-      (row) =>
-        row.kind === 'chat' &&
-        interrupted.has(row.id) &&
-        !candidates.some((candidate) => candidate.id === row.id),
-    ),
+  // Only sessions that were active when the process stopped need recovery.
+  // Idle auto-resume sessions must wait for the user's next prompt.
+  const candidates = running.filter(
+    (row) => row.kind === 'chat' && row.auto_resume === 1,
   )
   for (const row of candidates) {
     try {
