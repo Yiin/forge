@@ -53,10 +53,12 @@ export function ProjectCreationDialog() {
         name: name.trim(),
         path: path.trim(),
       })) as { id: string; name?: string; path?: string }
-      useSessionsStore.getState().setProjects([
-        ...useSessionsStore.getState().projects,
-        { id: project.id, name: name.trim(), path: path.trim() },
-      ])
+      useSessionsStore
+        .getState()
+        .setProjects([
+          ...useSessionsStore.getState().projects,
+          { id: project.id, name: name.trim(), path: path.trim() },
+        ])
       const draft = useDraftsStore.getState().getOrCreate(project.id)
       setOpen(false)
       await navigate({ to: '/draft/$draftId', params: { draftId: draft.id } })

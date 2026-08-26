@@ -5,7 +5,6 @@ import { api } from '../lib/api'
 import { useShellStore } from '../stores/shell'
 import { useSettingsStore } from '../stores/settings'
 import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
 import { ConfirmationDialog } from '../components/ui/confirmation-dialog'
 import { Field } from '../components/ui/field'
 import { Input } from '../components/ui/input'
@@ -21,13 +20,6 @@ import { validateEpicDefaults, type EpicDefaults } from './epic-settings-logic'
 import { openProjectCreation } from '../components/ProjectCreationDialog'
 
 type Harness = HarnessConfig
-const input = (value: string, onChange: (value: string) => void) => (
-  <input
-    value={value}
-    onChange={(event) => onChange(event.target.value)}
-    autoComplete="off"
-  />
-)
 
 function RequestState({
   state,

@@ -45,16 +45,22 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
     const shell = test.info().project.name.startsWith('phone')
       ? '.phone-shell'
       : '.desktop-shell'
-    await page.locator(shell).getByLabel('Project name').fill('Browser project')
     await page
       .locator(shell)
       .getByRole('button', { name: 'Add project' })
       .click()
-    await page.waitForURL(/\/s\//, { timeout: 10_000 })
+    const projectDialog = page.getByRole('dialog', { name: 'Create project' })
+    await projectDialog.getByLabel('Name').fill('Browser project')
+    await projectDialog.getByLabel('Folder path').fill(forge.dataDir)
+    await projectDialog
+      .getByRole('button', { name: 'Create project' })
+      .click()
+    await page.waitForURL(/\/draft\//, { timeout: 10_000 })
     const composer = page.locator(shell).getByLabel('Message composer')
     await expect(composer).toBeVisible()
     await composer.fill('hello from the browser')
     await page.locator(shell).getByRole('button', { name: 'Send' }).click()
+    await page.waitForURL(/\/s\//, { timeout: 10_000 })
     await page.waitForTimeout(160)
     await page.reload()
     await expect(

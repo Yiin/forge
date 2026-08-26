@@ -5,6 +5,9 @@
   "vcs": {
     "noPush": true
   },
+  "execution": {
+    "mode": "sequential"
+  },
   "limits": {
     "maxIterations": 250
   }
