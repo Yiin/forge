@@ -23,6 +23,16 @@ export type HarnessProcess = {
     onExit: (error?: Error) => void,
   ): Promise<HarnessHandle> | HarnessHandle
   capabilities?: { loadSession: boolean }
+  loadSession?: (
+    session: HarnessSession,
+    onItem: (item: HarnessItem) => void,
+    onExit: (error?: Error) => void,
+  ) => Promise<{ handle: HarnessHandle; proven: boolean }>
+  newSession?: (
+    session: HarnessSession,
+    onItem: (item: HarnessItem) => void,
+    onExit: (error?: Error) => void,
+  ) => Promise<{ handle: HarnessHandle; proven: boolean }>
 }
 
 export type HarnessFactory = (harness: string) => HarnessProcess
