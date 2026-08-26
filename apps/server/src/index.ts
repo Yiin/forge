@@ -196,6 +196,54 @@ type E2eState = {
   seq: number
 }
 
+type E2eQuestion = {
+  questionId: string
+  question: {
+    header: string
+    question: string
+    options: Array<{ label: string; description?: string }>
+    multiSelect?: boolean
+  }
+}
+
+function e2eQuestions(): E2eQuestion[] {
+  if (process.env.FORGE_MOCK_ASK_QUESTION !== '1') return []
+  const mode = process.env.FORGE_MOCK_ASK_QUESTION_MODE ?? 'single'
+  const multiSelect = mode === 'multi'
+  const questions: E2eQuestion['question'][] = multiSelect
+    ? [
+        {
+          header: 'Toppings',
+          question: 'Choose your toppings',
+          options: [
+            { label: 'Cheese', description: 'A classic choice' },
+            { label: 'Mushrooms', description: 'A savoury choice' },
+          ],
+          multiSelect: true,
+        },
+      ]
+    : [
+        {
+          header: 'Choice',
+          question: 'Pick one',
+          options: [
+            { label: 'First', description: 'The first option' },
+            { label: 'Second', description: 'The second option' },
+          ],
+        },
+      ]
+  if (mode === 'queued')
+    questions.push({
+      header: 'Second choice',
+      question: 'Pick another one',
+      options: [{ label: 'Third' }, { label: 'Fourth' }],
+    })
+  return questions.map((question) => ({
+    questionId: `question-${crypto.randomUUID()}`,
+    question,
+  }))
+}
+
 async function startE2eServer(): Promise<void> {
   const dataDir = resolve(process.env.FORGE_DATA_DIR ?? '/tmp/forge-e2e')
   await mkdir(dataDir, { recursive: true })
@@ -284,6 +332,9 @@ async function startE2eServer(): Promise<void> {
         return response({ id })
       }
       const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/prompt$/)
+      const answer = url.pathname.match(
+        /^\/api\/sessions\/([^/]+)\/questions\/([^/]+)\/answer$/,
+      )
       const messages = url.pathname.match(
         /^\/api\/sessions\/([^/]+)\/messages$/,
       )
@@ -294,6 +345,19 @@ async function startE2eServer(): Promise<void> {
       if (request.method === 'POST' && prompt) {
         const sessionId = prompt[1]
         publish({ sessionId, type: 'turn_start', role: 'system', content: {} })
+        for (const question of e2eQuestions())
+          publish({
+            sessionId,
+            type: 'ask_user_question',
+            role: 'agent',
+            turnId: `turn-${state.seq}`,
+            itemId: question.questionId,
+            content: {
+              type: 'ask_user_question',
+              questionId: question.questionId,
+              questions: [question.question],
+            },
+          })
         if (process.env.FORGE_FAKE_HANG !== '1') {
           for (const text of ['first ', 'second ', 'third']) {
             const delay = Number(process.env.FORGE_FAKE_DELAY_MS ?? 0)
@@ -310,6 +374,28 @@ async function startE2eServer(): Promise<void> {
           }
           publish({ sessionId, type: 'turn_end', role: 'system', content: {} })
         }
+        return response({ ok: true })
+      }
+      if (request.method === 'POST' && answer) {
+        const body = (await request.json()) as {
+          questionId?: string
+          answer?: string
+          answers?: unknown
+        }
+        if (!body.questionId || body.questionId !== answer[2])
+          return response({ error: 'invalid question' }, 400)
+        publish({
+          sessionId: answer[1],
+          type: 'user_answer',
+          role: 'user',
+          content: {
+            type: 'user_answer',
+            questionId: body.questionId,
+            ...(body.answers !== undefined
+              ? { answers: body.answers }
+              : { answer: body.answer }),
+          },
+        })
         return response({ ok: true })
       }
       return response({ error: 'not found' }, 404)
