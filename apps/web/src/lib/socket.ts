@@ -88,13 +88,16 @@ export class ForgeSocket {
     }
     const ephemeral = Ephemeral.safeParse(value)
     if (ephemeral.success) {
-      if (ephemeral.data.type === 'sessionStatus')
-        {
-          const current = useSessionsStore.getState().sessions.find((session) => session.id === ephemeral.data.sessionId)
-          if (current)
-            useSessionsStore.getState().upsertSession({ ...current, status: ephemeral.data.status })
-        }
-      return useMessagesStore.getState().applyEphemeral(ephemeral.data)
+      const frame = ephemeral.data
+      if (frame.type === 'sessionStatus') {
+        const sessions = useSessionsStore.getState()
+        const current = sessions.sessions.find(
+          (session) => session.id === frame.sessionId,
+        )
+        if (current)
+          sessions.upsertSession({ ...current, status: frame.status })
+      }
+      return useMessagesStore.getState().applyEphemeral(frame)
     }
     const event = ServerEvent.safeParse(value)
     if (event.success) useMessagesStore.getState().applyEvent(event.data)

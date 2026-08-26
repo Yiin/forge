@@ -18,6 +18,8 @@ import type { QuestionManager } from './acp/questions.js'
 import { QuestionManager as ServerQuestionManager } from './acp/questions.js'
 import { websocketRoute } from './ws.js'
 import { workspaceRoutes } from './http/workspace.js'
+import { epicRoutes } from './http/epics.js'
+import type { EpicRunner } from './epics/runner.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -26,6 +28,7 @@ export function createApp(
   uploadStore?: UploadStore,
   status?: Parameters<typeof statusRoutes>[0],
   questions?: QuestionManager,
+  runner?: EpicRunner,
 ) {
   const app = new Hono()
 
@@ -39,6 +42,19 @@ export function createApp(
   }
   if (questions) app.route('/', questionRoutes(questions))
   if (status) app.route('/', workspaceRoutes(status.db))
+  if (runner && status)
+    app.route(
+      '/',
+      epicRoutes({
+        runner,
+        projectPath: (projectId) =>
+          (
+            status.db
+              .prepare('SELECT path FROM projects WHERE id = ?')
+              .get(projectId) as { path?: string } | undefined
+          )?.path,
+      }),
+    )
 
   return app
 }
