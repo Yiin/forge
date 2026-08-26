@@ -27,11 +27,17 @@ const commandDefaults: ComposerCommand[] = [
 export function Composer({
   sessionId,
   harness,
+  protocol,
+  running = false,
+  onInterrupt,
   onSend,
   sending = false,
 }: {
   sessionId: string
   harness?: string
+  protocol?: 'acp' | 'pty'
+  running?: boolean
+  onInterrupt?: () => Promise<void>
   onSend: (
     text: string,
     attachmentIds: string[],
@@ -45,6 +51,7 @@ export function Composer({
   const [dragging, setDragging] = useState(false)
   const [commands, setCommands] = useState(commandDefaults)
   const [selectedHarness, setSelectedHarness] = useState(harness ?? '')
+  const [interrupting, setInterrupting] = useState(false)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const volatile = useMessagesStore((state) => state.volatile)
   useLayoutEffect(() => {
@@ -216,6 +223,15 @@ export function Composer({
     setTrigger(null)
     dispatchUploads(initialAttachmentUploads)
   }
+  const endTurn = async () => {
+    if (!onInterrupt || interrupting) return
+    setInterrupting(true)
+    try {
+      await onInterrupt()
+    } finally {
+      setInterrupting(false)
+    }
+  }
   const addFiles = (files: FileList | File[]) => {
     for (const file of files) void upload(file)
   }
@@ -327,6 +343,18 @@ export function Composer({
             {sending ? 'Sending…' : 'Send'}
           </span>
         </button>
+        {protocol === 'pty' && running && onInterrupt && (
+          <button
+            type="button"
+            className="composer-end-turn"
+            disabled={interrupting}
+            aria-label="End turn"
+            title="End the current PTY turn without closing the process"
+            onClick={() => void endTurn()}
+          >
+            {interrupting ? 'Ending…' : 'End turn'}
+          </button>
+        )}
       </form>
     </div>
   )

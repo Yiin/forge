@@ -133,6 +133,23 @@ describe('PTY harness', () => {
     expect(items.at(-1)?.reason).toBe('cancelled')
   })
 
+  it('keeps the PTY alive after manually ending a turn', async () => {
+    const { handle, items } = await fixture(500)
+    handle.prompt('sleep 30')
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    handle.cancel()
+    await waitFor(items, 'turn_interrupted')
+
+    handle.prompt('echo alive')
+    await waitForCount(items, 'turn_end', 1)
+    expect(
+      items
+        .filter((item) => item.type === 'text_delta')
+        .map((item) => item.text)
+        .join(''),
+    ).toContain('alive')
+  })
+
   it('supports a real Python REPL prompt', async () => {
     try {
       execFileSync('python3', ['--version'], { stdio: 'ignore' })

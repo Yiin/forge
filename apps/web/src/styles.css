@@ -1117,6 +1117,12 @@ kbd {
   opacity: 0.5;
   cursor: default;
 }
+.composer-end-turn {
+  color: var(--text) !important;
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  white-space: nowrap;
+}
 .composer {
   position: absolute;
   right: 12px;
