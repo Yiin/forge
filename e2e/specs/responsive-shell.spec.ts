@@ -42,7 +42,7 @@ test('workspace shell fits the viewport and supports keyboard navigation', async
 
     await page.keyboard.press('g')
     await page.keyboard.press('s')
-    await expect(page).toHaveURL(/\/settings$/)
+    await expect(page).toHaveURL(/\/settings\/general$/)
     await expect(page.getByRole('heading', { name: 'General' })).toBeVisible()
   } finally {
     await stopProxiedForge(page, forge)
