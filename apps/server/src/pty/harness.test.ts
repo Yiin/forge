@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanPtyText, createPtyHarness } from './harness.js'
 
@@ -19,6 +20,33 @@ async function fixture(quietPeriodMs = 300) {
   })
   const handle = await harness.spawn(
     { id: 'session', cwd: globalThis.process.cwd(), harness: 'bash' },
+    (item) => items.push(item as (typeof items)[number]),
+    (error) => {
+      exited = error
+    },
+  )
+  handles.push(handle)
+  return {
+    handle,
+    items,
+    get exited() {
+      return exited
+    },
+  }
+}
+
+async function processFixture(command: string, args: string[]) {
+  const items: Array<{ type: string; text?: string; reason?: string }> = []
+  let exited: Error | undefined
+  const harness = createPtyHarness({
+    command,
+    args,
+    env: { TERM: 'xterm-256color' },
+    quietPeriodMs: 200,
+    maxTurnMs: 5_000,
+  })
+  const handle = await harness.spawn(
+    { id: 'session', cwd: globalThis.process.cwd(), harness: command },
     (item) => items.push(item as (typeof items)[number]),
     (error) => {
       exited = error
@@ -103,6 +131,38 @@ describe('PTY harness', () => {
     expect(text).toContain('red')
     expect(text).not.toMatch(/\u001b\[/)
     expect(items.at(-1)?.reason).toBe('cancelled')
+  })
+
+  it('supports a real Python REPL prompt', async () => {
+    try {
+      execFileSync('python3', ['--version'], { stdio: 'ignore' })
+    } catch {
+      return
+    }
+    const { handle, items } = await processFixture('python3', ['-i', '-q'])
+    handle.prompt("print('python hello')")
+    await waitFor(items, 'turn_end')
+    const text = items
+      .filter((item) => item.type === 'text_delta')
+      .map((item) => item.text)
+      .join('')
+    expect(text).toContain('python hello')
+    expect(text).not.toContain("print('python hello')")
+  })
+
+  it('does not duplicate output when the PTY exits during a turn', async () => {
+    const { handle, items } = await processFixture('bash', [
+      '-c',
+      'read command; printf "child output\\n"; exit 1',
+    ])
+    handle.prompt('anything')
+    await waitFor(items, 'turn_interrupted')
+    const text = items
+      .filter((item) => item.type === 'text_delta')
+      .map((item) => item.text)
+      .join('')
+    expect(text.match(/child output/g)).toHaveLength(1)
+    expect(items.filter((item) => item.type === 'error')).toHaveLength(1)
   })
 
   it('scrubs OSC and cursor-control sequences', () => {
