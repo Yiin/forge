@@ -6,7 +6,7 @@ test('phone drawer opens on-screen within the viewport', async ({
   baseURL,
 }) => {
   test.skip(
-    test.info().project.name !== 'phone',
+    !test.info().project.name.startsWith('phone'),
     'drawer only exists in the phone shell',
   )
   const forge = await launchForge()

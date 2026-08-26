@@ -39,7 +39,9 @@ async function openQuestion(page: Page, mode = 'single') {
   }, forge.baseUrl)
   await page.goto('/')
   const shell = page.locator(
-    test.info().project.name === 'phone' ? '.phone-shell' : '.desktop-shell',
+    test.info().project.name.startsWith('phone')
+      ? '.phone-shell'
+      : '.desktop-shell',
   )
   await shell.getByLabel('Project name').fill('Question project')
   await shell.getByRole('button', { name: 'Add project' }).click()

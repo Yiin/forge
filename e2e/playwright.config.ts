@@ -33,12 +33,23 @@ export default defineConfig({
       name: 'desktop',
       use: {
         ...devices['Desktop Chrome'],
-        viewport: { width: 1280, height: 800 },
+        viewport: { width: 1440, height: 900 },
       },
     },
     {
       name: 'phone',
       use: { ...devices['Pixel 5'], viewport: { width: 390, height: 844 } },
+    },
+    {
+      name: 'phone-compact',
+      use: { ...devices['Pixel 5'], viewport: { width: 320, height: 568 } },
+    },
+    {
+      name: 'landscape',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 844, height: 390 },
+      },
     },
   ],
 })

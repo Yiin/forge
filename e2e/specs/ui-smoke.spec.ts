@@ -9,7 +9,7 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
     fakeAgentEnv: { FORGE_MOCK_PROMPT_DELAY_MS: '120' },
   })
   try {
-    if (test.info().project.name === 'phone')
+    if (test.info().project.name.startsWith('phone'))
       await page.setViewportSize({ width: 390, height: 844 })
     await page.route('**/api/**', async (route) => {
       const target = `${forge.baseUrl}${new URL(route.request().url()).pathname}${new URL(route.request().url()).search}`
@@ -42,8 +42,9 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
       window.WebSocket = ForgeWebSocket
     }, forge.baseUrl)
     await page.goto(baseURL ?? '/')
-    const shell =
-      test.info().project.name === 'phone' ? '.phone-shell' : '.desktop-shell'
+    const shell = test.info().project.name.startsWith('phone')
+      ? '.phone-shell'
+      : '.desktop-shell'
     await page.locator(shell).getByLabel('Project name').fill('Browser project')
     await page
       .locator(shell)
@@ -61,7 +62,7 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
     ).toBeVisible({
       timeout: 10_000,
     })
-    if (test.info().project.name === 'phone') {
+    if (test.info().project.name.startsWith('phone')) {
       await expect(composer).toBeVisible()
       await expect(composer).toBeEnabled()
       const box = await composer.boundingBox()
