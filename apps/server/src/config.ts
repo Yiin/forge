@@ -80,7 +80,12 @@ export function defaultConfig(
       protocol: 'acp',
       enabled: true,
     }
-  return { dataDir: resolve(process.cwd(), 'data'), port: 3900, harness }
+  return {
+    dataDir: resolve(process.cwd(), 'data'),
+    port: 3900,
+    harness,
+    settings: { theme: 'dark', defaultProject: '', titleGeneration: true },
+  }
 }
 
 function formatIssue(
@@ -131,6 +136,7 @@ export async function loadConfig(path?: string): Promise<ForgeConfig> {
     dataDir?: unknown
     port?: unknown
     harness?: Record<string, unknown>
+    settings?: Record<string, unknown>
   }
   const entries = document.harness
   if (!entries || typeof entries !== 'object')
@@ -153,6 +159,7 @@ export async function loadConfig(path?: string): Promise<ForgeConfig> {
     dataDir: document.dataDir ?? resolve(dirname(file), 'data'),
     port: document.port ?? 3900,
     harness: result,
+    settings: document.settings,
   })
   if (!checked.success)
     throw new Error(

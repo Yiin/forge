@@ -51,6 +51,38 @@ export class ForgeApi {
   listProjects() {
     return this.get('/api/projects')
   }
+  listSettingsProjects() {
+    return this.get('/api/projects?includeArchived=1')
+  }
+  renameProject(projectId: string, name: string) {
+    return this.post(
+      `/api/projects/${encodeURIComponent(projectId)}/rename`,
+      null,
+      { name },
+    )
+  }
+  archiveProjectById(projectId: string) {
+    return this.post(
+      `/api/projects/${encodeURIComponent(projectId)}/archive`,
+      null,
+      {},
+    )
+  }
+  getSettings() {
+    return this.get('/api/settings')
+  }
+  saveSettings(input: Record<string, unknown>) {
+    return this.put('/api/settings', input)
+  }
+  listHarnesses() {
+    return this.get('/api/harnesses')
+  }
+  saveHarnesses(harness: Record<string, unknown>) {
+    return this.put('/api/harnesses', { harness })
+  }
+  testHarness(name: string) {
+    return this.post('/api/harnesses/test', null, { name })
+  }
   listRuns() {
     return this.get('/api/epics')
   }
@@ -148,6 +180,16 @@ export class ForgeApi {
   }
   private async get(path: string) {
     const response = await this.fetcher(`${this.baseUrl}${path}`)
+    if (!response.ok)
+      throw new Error(`Forge API request failed (${response.status})`)
+    return await response.json()
+  }
+  private async put(path: string, body: unknown) {
+    const response = await this.fetcher(`${this.baseUrl}${path}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
     if (!response.ok)
       throw new Error(`Forge API request failed (${response.status})`)
     return await response.json()

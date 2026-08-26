@@ -25,6 +25,7 @@ import { workspaceRoutes } from './http/workspace.js'
 import { epicRoutes } from './http/epics.js'
 import type { EpicRunner } from './epics/runner.js'
 import { recoverSessions } from './sessions/recovery.js'
+import { harnessRoutes } from './http/harnesses.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -47,6 +48,10 @@ export function createApp(
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
     app.route('/', searchRoutes(uploadStore.database))
+    app.route(
+      '/',
+      harnessRoutes({ config: undefined, db: uploadStore.database }),
+    )
   }
   if (questions) app.route('/', questionRoutes(questions))
   if (status) app.route('/', workspaceRoutes(status.db))
