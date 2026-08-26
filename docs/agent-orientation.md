@@ -1,75 +1,59 @@
 # Agent orientation: Forge
 
-Operational facts for Forge workers. Read this file before you touch code.
-The assigned child and injected epic goal define your scope. `docs/DIRECTION.md`
-defines the product boundary. Treat `docs/architecture.md` as historical plans,
-not current implementation truth.
+Read this before edits. The child and epic define scope. `docs/DIRECTION.md`
+defines product limits. `docs/architecture.md` is historical.
 
 ## Repos and paths
 
-- BEADS + CODE: this Forge checkout. It can be a worker Git worktree.
-- Edit only your current checkout. Never edit `/home/yiin/Projects/forge` from another worktree.
-- Run `bd` from your current checkout. It uses the shared Dolt server.
-- `apps/web`: React, Vite, TanStack Router, Zustand, and the workspace UI.
-- `apps/web/src/components/AppShell.tsx`: owns the single mounted route outlet.
-- `apps/web/src/components/chat`: timeline, messages, activity, composer, and agent details.
-- `apps/web/src/stores/shell.ts`: theme, sidebar, and shell preferences.
-- `apps/web/src/styles.css`: shared tokens and layout. Coordinate edits carefully.
-- `apps/server`: Hono server and WebSocket transport. Tooling uses Bun.
+- BEADS + CODE: the current Forge checkout. Run `bd` here.
+- Edit only your current checkout. A worker must not edit another worktree.
+- `apps/web/src/styles.css`: semantic tokens and shared layout rules. Coordinate edits.
+- `apps/web/src/components/ui`: shared fields, buttons, menus, and selectors.
+- `apps/web/src/components/AppShell.tsx`: one mounted route outlet and global shortcuts.
+- `apps/web/src/routes.tsx`: route tree, root entry, draft, session, and Settings paths.
+- `apps/server`: Hono HTTP, WebSocket, session promotion, uploads, and Bun tooling.
 - `packages/protocol`: Zod wire schemas shared by server, web, and dashboards.
-- `e2e`: Playwright fixtures and desktop, phone, and landscape flows.
-- `.agents/skills/test-forge-app/SKILL.md`: disposable browser QA and teardown.
-
-The release runtime is Node 24. Bun remains the package, test, and development tool.
+- `e2e`: Playwright flows. Use `.agents/skills/test-forge-app/SKILL.md` for live QA.
+- T3 reference: `/home/yiin/Projects/t3code/apps/web/src/components/settings` and draft routes. Keep Forge terms.
 
 ## Check commands from the repo root
 
 - Typecheck: `bun run typecheck`
-- Focused test: `bunx vitest run <file>`
+- Focused tests: `bunx vitest run <file>`
 - Lint: `bun run lint`
-- Format: `bun run fmt:check`
-- Production web build: `(cd apps/web && bunx vite build)`
 - Browser tests: `bun run e2e`
-- Full integration gate: `bash scripts/epic-gate.sh`
-
-Use the `test-forge-app` skill for attended browser QA. Always stop its server
-and remove its temporary directory through the launcher cleanup path.
+- Full gate: `bash scripts/epic-gate.sh`
 
 ## UI and interaction contracts
 
-- Mount one route tree and one `Outlet`. CSS must never hide a second route tree.
-- Use one global shortcut registry. Ignore editable, composing, handled, and modal contexts.
-- Do not bind Command or Control plus `1` through `9`. Browsers own those keys.
-- Keep `Cmd/Ctrl K` for commands, `Cmd/Ctrl \\` for the sidebar, and `G` chords for navigation.
-- Use comfortable density. Primary targets are at least `44px` by `44px`.
-- Keep Forge mint sparse. Use it for focus, connection, progress, and primary actions.
-- Keep Enter to send, Shift Enter for a new line, and IME composition safe.
-- Support System, Light, and Dark themes through one preference source.
-- Test `320x568`, `390x844`, `844x390`, and `1440x900` layouts.
-- Loading, empty, error, saving, and success states need distinct words and controls.
-- Modal layers trap focus, close with Escape, and restore focus to their trigger.
-- Use text or icons with status colors. Do not use color alone.
-- Keep motion between `100ms` and `220ms`. Preserve complete reduced-motion behavior.
-
-The UI redesign is frontend-only unless a child says otherwise. Do not change
-backend domain rules or protocol shapes to simplify a view. The local `.lavish/`
-review is not available in worker worktrees. Child descriptions contain all
-approved values.
+- Shared tokens and `components/ui` own common field visuals. Routes must not fork them.
+- Use type roles from `12/13/14/16/20/24px` and spacing from `4/8/12/16/24/32px`.
+- Fine-pointer controls stay compact. Coarse-pointer targets remain at least `44px`.
+- Project recency uses newest visible user-session activity. It falls back to the newest active project.
+- One active project has one unpromoted draft. Opening it creates no server session.
+- First send promotes once. Failure preserves the prompt, harness, and staged attachments.
+- Upload bytes stay on HTTP. Promotion assigns them to the new session.
+- One shared project-creation flow serves the hero, sidebar, palette, and Settings.
+- Settings uses route pages, vertical navigation, shared sections, and shared rows.
+- Theme is one client preference. Do not save `system` to server config.
+- Styled Select supports arrows, Home, End, typeahead, Enter, Space, Escape, and focus return.
+- Use one shortcut registry. Ignore editable, composing, handled, modal, and capture contexts.
+- Add a skip link. Route changes move focus to the new main heading.
+- Test `320x568`, `390x844`, `620px`, `844x390`, `920px`, `1280px`, and `1440x900`.
+- Loading, empty, error, dirty, saving, saved, and retry states need distinct words and controls.
+- Dialogs and popups manage focus, close with Escape, and restore trigger focus.
 
 ## Vocabulary and data contracts
 
-- A harness is configuration with command, arguments, environment, and `acp` or `pty` protocol.
+- A harness has command, arguments, environment, and an `acp` or `pty` protocol.
 - `seq` is the single global message cursor.
 - Session kinds are `chat`, `subagent`, and `epic_worker`.
-- Use `epic run` and `iteration` for `epic_runs` and `epic_iterations`.
-- `packages/protocol` binds every wire shape. Change schemas and consumers together.
+- Change `packages/protocol` schemas and all consumers together.
 
 ## Do not
 
-- Do not update or delete message rows. Append rows and fold deltas by `item_id`.
-- Do not send uploads over WebSocket. Stream them to disk over HTTP.
-- Do not query Dolt SQL from the epic runner. Use `bd --json`.
-- Do not publish an event before its database row commits.
-- Do not spawn epic workers inside an agent turn. `runner.ts` owns them.
-- Do not add Effect, event sourcing, projections, or permission modes.
-- Do not use Beads IDs in generated session titles.
+- For `forge-lnm`, `.1` owns tokens, feature children scope local CSS, and `.13` owns cross-surface cleanup.
+- Do not add a default-project setting. Draft entry owns project recency.
+- Do not use native Select for production choices without a documented platform reason.
+- Do not change agent runner semantics to implement the draft UI.
+- Do not weaken tests. Main can fail `shell storage > clamps sidebar width`; verify the baseline and fix the contract.
