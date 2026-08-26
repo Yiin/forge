@@ -75,6 +75,46 @@ export const epicStart = z.object({
 export const epicPause = z.object({ runId: id })
 export const epicResume = z.object({ runId: id })
 export const epicCancel = z.object({ runId: id })
+const epicStatus = z.enum([
+  'running',
+  'paused',
+  'completed',
+  'failed',
+  'cancelled',
+])
+export const epicRunResponse = z.object({
+  id: id,
+  projectId: id,
+  epicBeadId: id,
+  title: z.string(),
+  status: epicStatus,
+  mode: z.enum(['pool', 'serial']),
+  workerCount: z.number().int().nonnegative(),
+  baseBranch: z.string(),
+  config: z.record(z.string(), z.unknown()),
+  startedAt: z.number(),
+  endedAt: z.number().nullable(),
+  error: z.string().nullable(),
+  iterationCount: z.number().int().nonnegative(),
+})
+export const epicIterationResponse = z.object({
+  id,
+  beadId: id,
+  title: z.string(),
+  sessionId: id,
+  attempt: z.number().int().positive(),
+  status: z.enum(['running', 'merged', 'failed', 'interrupted']),
+  failureReason: z.string().nullable(),
+  startedAt: z.number(),
+  endedAt: z.number().nullable(),
+})
+export const epicRunDetailResponse = epicRunResponse.extend({
+  iterations: z.array(epicIterationResponse),
+  frontier: z.object({
+    ready: z.array(z.object({ id, title: z.string(), priority: z.number() })),
+    blocked: z.array(z.object({ id, title: z.string(), priority: z.number() })),
+  }),
+})
 export const search = z.object({
   query: z.string().min(1),
   projectId: id.optional(),
@@ -137,5 +177,8 @@ export type EpicStart = z.infer<typeof epicStart>
 export type EpicPause = z.infer<typeof epicPause>
 export type EpicResume = z.infer<typeof epicResume>
 export type EpicCancel = z.infer<typeof epicCancel>
+export type EpicRunResponse = z.infer<typeof epicRunResponse>
+export type EpicIterationResponse = z.infer<typeof epicIterationResponse>
+export type EpicRunDetailResponse = z.infer<typeof epicRunDetailResponse>
 export type Search = z.infer<typeof search>
 export type SearchResponse = z.infer<typeof searchResponse>
