@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import {
   readLastSession,
+  clearLastSession,
   readSidebarWidth,
   readTheme,
   writeLastSession,
@@ -20,6 +21,7 @@ type ShellState = {
   setSidebarWidth: (width: number) => void
   toggleTheme: () => void
   setLastSession: (id: string) => void
+  clearLastSession: () => void
 }
 export const useShellStore = create<ShellState>((set, get) => ({
   sidebarOpen: true,
@@ -43,5 +45,9 @@ export const useShellStore = create<ShellState>((set, get) => ({
   setLastSession: (id) => {
     writeLastSession(id)
     set({ lastSessionId: id })
+  },
+  clearLastSession: () => {
+    clearLastSession()
+    set({ lastSessionId: null })
   },
 }))

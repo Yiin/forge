@@ -32,7 +32,9 @@ const empty =
 const index = createRoute({
   getParentRoute: () => root,
   path: '/',
-  beforeLoad: () => {
+  validateSearch: (value: { new?: string }) => ({ new: value.new }),
+  beforeLoad: ({ search }) => {
+    if (search.new) return
     const id = readLastSession()
     if (id) throw redirect({ to: '/s/$sessionId', params: { sessionId: id } })
   },

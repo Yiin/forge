@@ -8,6 +8,7 @@ import { connectForgeSocket, normalizeServerEvent } from '../lib/socket'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore, type SessionSummary } from '../stores/sessions'
 import { PathSwitcher } from '../components/chat/PathSwitcher'
+import { useShellStore } from '../stores/shell'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
@@ -22,61 +23,86 @@ export function SessionRoute() {
       state.sessions.find((session) => session.id === sessionId)?.status,
   )
   useEffect(() => {
-    const socket = connectForgeSocket({ sessions: [sessionId] })
-    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then(
-        (session: (SessionSummary & { protocol?: 'acp' | 'pty' }) | null) => {
-          if (session) useSessionsStore.getState().upsertSession(session)
-          setHarness(session?.harness)
-          setProtocol(session?.protocol)
-          setLoadedStatus(session?.status)
-          void fetch('/api/status')
-            .then((response) => (response.ok ? response.json() : null))
-            .then(
-              (
-                status: {
-                  harnesses?: Array<{ key: string; protocol: 'acp' | 'pty' }>
-                } | null,
-              ) => {
-                const selected = status?.harnesses?.find(
-                  (entry) => entry.key === session?.harness,
-                )
-                if (selected) setProtocol(selected.protocol)
-              },
-            )
-            .catch(() => undefined)
-        },
-      )
-      .catch(() => undefined)
-    void api
-      .listChildSessions(sessionId)
-      .then((data) => {
-        const children = Array.isArray(data) ? data : (data.sessions ?? [])
-        useSessionsStore
-          .getState()
-          .setSessions([
-            ...useSessionsStore
-              .getState()
-              .sessions.filter(
-                (session) => session.parentSessionId !== sessionId,
-              ),
-            ...children,
-          ])
-      })
-      .catch(() => undefined)
-    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`)
-      .then((response) => (response.ok ? response.json() : []))
-      .then((messages: unknown) => {
-        if (!Array.isArray(messages)) return
-        for (const message of messages) {
-          const event = normalizeServerEvent(message)
-          if (event && typeof event === 'object' && 'msg' in event)
-            useMessagesStore.getState().applyEvent(event as never)
+    let active = true
+    let socket: ReturnType<typeof connectForgeSocket> | undefined
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/sessions/${encodeURIComponent(sessionId)}`,
+        )
+        if (!response.ok) {
+          if (!active) return
+          useShellStore.getState().clearLastSession()
+          await navigate({ to: '/', search: { new: '1' } })
+          return
         }
-      })
-      .catch(() => undefined)
-    return () => socket.stop()
+        const session = (await response.json()) as SessionSummary & {
+          protocol?: 'acp' | 'pty'
+        }
+        if (!active) return
+        useShellStore.getState().setLastSession(session.id)
+        useSessionsStore.getState().upsertSession(session)
+        setHarness(session.harness)
+        setProtocol(session.protocol)
+        setLoadedStatus(session.status)
+        socket = connectForgeSocket({ sessions: [sessionId] })
+        void fetch('/api/status')
+          .then((statusResponse) =>
+            statusResponse.ok ? statusResponse.json() : null,
+          )
+          .then(
+            (
+              status: {
+                harnesses?: Array<{ key: string; protocol: 'acp' | 'pty' }>
+              } | null,
+            ) => {
+              const selected = status?.harnesses?.find(
+                (entry) => entry.key === session.harness,
+              )
+              if (selected) setProtocol(selected.protocol)
+            },
+          )
+          .catch(() => undefined)
+        void api
+          .listChildSessions(sessionId)
+          .then((data) => {
+            const children = Array.isArray(data) ? data : (data.sessions ?? [])
+            useSessionsStore
+              .getState()
+              .setSessions([
+                ...useSessionsStore
+                  .getState()
+                  .sessions.filter(
+                    (item) => item.parentSessionId !== sessionId,
+                  ),
+                ...children,
+              ])
+          })
+          .catch(() => undefined)
+        void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`)
+          .then((messagesResponse) =>
+            messagesResponse.ok ? messagesResponse.json() : [],
+          )
+          .then((messages: unknown) => {
+            if (!Array.isArray(messages)) return
+            for (const message of messages) {
+              const event = normalizeServerEvent(message)
+              if (event && typeof event === 'object' && 'msg' in event)
+                useMessagesStore.getState().applyEvent(event as never)
+            }
+          })
+          .catch(() => undefined)
+      } catch {
+        if (active) {
+          useShellStore.getState().clearLastSession()
+          await navigate({ to: '/', search: { new: '1' } })
+        }
+      }
+    })()
+    return () => {
+      active = false
+      socket?.stop()
+    }
   }, [sessionId])
   const send = async (
     text: string,

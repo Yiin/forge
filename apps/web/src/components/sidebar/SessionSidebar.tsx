@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useNavigate } from '@tanstack/react-router'
+import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import {
   FolderPlus,
   MoreHorizontal,
@@ -29,6 +29,7 @@ function statusLabel(status?: string) {
 
 export function SessionSidebar() {
   const navigate = useNavigate()
+  const location = useLocation()
   const sessions = useSessionsStore((state) => state.sessions)
   const projects = useSessionsStore((state) => state.projects)
   const setSessions = useSessionsStore((state) => state.setSessions)
@@ -106,7 +107,6 @@ export function SessionSidebar() {
   const visibleSettled = settledPage(settled, settledPageNumber)
 
   async function openSession(id: string) {
-    useShellStore.getState().setLastSession(id)
     setDrawerOpen(false)
     await navigate({ to: '/s/$sessionId', params: { sessionId: id } })
   }
@@ -137,6 +137,10 @@ export function SessionSidebar() {
     )
       return
     removeSession(session.id)
+    if (location.pathname === `/s/${encodeURIComponent(session.id)}`) {
+      useShellStore.getState().clearLastSession()
+      await navigate({ to: '/', search: { new: '1' } })
+    }
     try {
       await api.deleteSession(session.id)
     } catch {
@@ -175,7 +179,12 @@ export function SessionSidebar() {
           >
             <Search size={16} />
           </button>
-          <Link className="icon-button" aria-label="New session" to="/">
+          <Link
+            className="icon-button"
+            aria-label="New session"
+            to="/"
+            search={{ new: '1' }}
+          >
             <Plus size={17} />
           </Link>
         </div>
@@ -237,7 +246,10 @@ export function SessionSidebar() {
       <ul className="session-list">
         {active.length === 0 && settled.length === 0 && (
           <li className="sidebar-empty">
-            No sessions yet.<Link to="/">Start a session</Link>
+            No sessions yet.
+            <Link to="/" search={{ new: '1' }}>
+              Start a session
+            </Link>
           </li>
         )}
         {active.map((session, index) => (

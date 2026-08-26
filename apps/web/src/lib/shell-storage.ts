@@ -17,6 +17,8 @@ export const readLastSession = (storage: Storage = localStorage) =>
   storage.getItem(SESSION_KEY)
 export const writeLastSession = (id: string, storage: Storage = localStorage) =>
   storage.setItem(SESSION_KEY, id)
+export const clearLastSession = (storage: Storage = localStorage) =>
+  storage.removeItem(SESSION_KEY)
 export const getStartPath = (storage: Storage = localStorage) => {
   const id = readLastSession(storage)
   return id ? `/s/${encodeURIComponent(id)}` : '/'

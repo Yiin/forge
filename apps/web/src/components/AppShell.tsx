@@ -11,24 +11,18 @@ export function AppShell() {
   const store = useShellStore()
   const isSettings = location.pathname.startsWith('/settings')
   return (
-    <div className={`app-shell ${store.theme}`}>
+    <div className={`app-shell desktop-shell phone-shell ${store.theme}`}>
       <CommandPalette />
-      <div className="desktop-shell">
+      <div className="desktop-chrome">
         <Sidebar width={store.sidebarWidth} onResize={store.setSidebarWidth}>
           {isSettings ? <SettingsNav /> : <SessionSidebar />}
         </Sidebar>
-        <main className="main">
-          <Outlet />
-        </main>
       </div>
-      <div className="phone-shell">
+      <div className="phone-chrome">
         <AppBar
           title={isSettings ? 'Settings' : 'Forge'}
           showBack={location.pathname === '/search'}
         />
-        <main className="main">
-          <Outlet />
-        </main>
         <Drawer.Root
           direction="left"
           open={store.drawerOpen}
@@ -42,6 +36,9 @@ export function AppShell() {
           </Drawer.Portal>
         </Drawer.Root>
       </div>
+      <main className="main">
+        <Outlet />
+      </main>
     </div>
   )
 }

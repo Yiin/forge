@@ -18,10 +18,14 @@
 * {
   box-sizing: border-box;
 }
+.app-shell {
+  display: flex;
+  height: 100dvh;
+}
 body {
   margin: 0;
 }
-.desktop-shell {
+.desktop-chrome {
   display: flex;
   height: 100dvh;
 }
@@ -430,6 +434,9 @@ body {
   overflow-wrap: anywhere;
 }
 @media (max-width: 767px) {
+  .app-shell {
+    flex-direction: column;
+  }
   .settings-layout {
     display: block;
   }
@@ -2026,7 +2033,7 @@ kbd {
     place-items: center;
   }
 }
-.phone-shell {
+.phone-chrome {
   display: none;
 }
 .app-bar {
@@ -2077,15 +2084,13 @@ input:focus-visible,
   }
 }
 @media (max-width: 767px) {
-  .desktop-shell {
+  .desktop-chrome {
     display: none;
   }
-  .phone-shell {
-    display: flex;
-    flex-direction: column;
-    height: 100dvh;
+  .phone-chrome {
+    display: contents;
   }
-  .phone-shell > .main {
+  .app-shell > .main {
     overflow: auto;
   }
   .empty-panel {
@@ -2093,7 +2098,7 @@ input:focus-visible,
   }
 }
 @media (min-width: 768px) and (max-width: 1023px) {
-  .desktop-shell {
+  .desktop-chrome {
     display: flex;
   }
 }
