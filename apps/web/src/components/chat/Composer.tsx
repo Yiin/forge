@@ -32,7 +32,11 @@ export function Composer({
 }: {
   sessionId: string
   harness?: string
-  onSend: (text: string, attachmentIds: string[]) => Promise<void>
+  onSend: (
+    text: string,
+    attachmentIds: string[],
+    harness: string,
+  ) => Promise<void>
   sending?: boolean
 }) {
   const [text, setText] = useState('')
@@ -207,7 +211,7 @@ export function Composer({
   const submit = async () => {
     const value = text.trim()
     if (!value || !canSendUploads(uploads)) return
-    await onSend(value, completedAttachmentIds(uploads))
+    await onSend(value, completedAttachmentIds(uploads), selectedHarness)
     setText('')
     setTrigger(null)
     dispatchUploads(initialAttachmentUploads)

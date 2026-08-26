@@ -21,6 +21,7 @@ export const prompt = z.object({
   sessionId: id,
   text: z.string().min(1),
   attachmentIds: z.array(id).optional(),
+  harness: z.string().min(1).optional(),
 })
 export const interrupt = z.object({ sessionId: id })
 export const fork = z.object({
