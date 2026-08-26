@@ -15,12 +15,43 @@ export function SessionRoute() {
   const targetSeq = Number(new URLSearchParams(window.location.search).get('m'))
   const [sending, setSending] = useState(false)
   const [harness, setHarness] = useState<string>()
+  const [protocol, setProtocol] = useState<'acp' | 'pty'>()
+  const [loadedStatus, setLoadedStatus] = useState<string>()
+  const sessionStatus = useSessionsStore(
+    (state) =>
+      state.sessions.find((session) => session.id === sessionId)?.status,
+  )
   useEffect(() => {
     const socket = connectForgeSocket({ sessions: [sessionId] })
     void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`)
       .then((response) => (response.ok ? response.json() : null))
-      .then((session: { harness?: string } | null) =>
-        setHarness(session?.harness),
+      .then(
+        (
+          session: {
+            harness?: string
+            protocol?: 'acp' | 'pty'
+            status?: string
+          } | null,
+        ) => {
+          setHarness(session?.harness)
+          setProtocol(session?.protocol)
+          setLoadedStatus(session?.status)
+          void fetch('/api/status')
+            .then((response) => (response.ok ? response.json() : null))
+            .then(
+              (
+                status: {
+                  harnesses?: Array<{ key: string; protocol: 'acp' | 'pty' }>
+                } | null,
+              ) => {
+                const selected = status?.harnesses?.find(
+                  (entry) => entry.key === session?.harness,
+                )
+                if (selected) setProtocol(selected.protocol)
+              },
+            )
+            .catch(() => undefined)
+        },
       )
       .catch(() => undefined)
     void api
@@ -111,6 +142,11 @@ export function SessionRoute() {
       <Composer
         sessionId={sessionId}
         harness={harness}
+        protocol={protocol}
+        running={(sessionStatus ?? loadedStatus) === 'running'}
+        onInterrupt={async () => {
+          await api.interrupt({ sessionId })
+        }}
         onSend={send}
         sending={sending}
       />
