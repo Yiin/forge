@@ -376,6 +376,20 @@ body {
   background: var(--panel);
   font: inherit;
 }
+.ui-dialog-description {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.launch-advanced {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.launch-advanced summary {
+  min-height: 44px;
+  cursor: pointer;
+  color: var(--muted);
+}
 .launch-form textarea {
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, monospace;
@@ -744,6 +758,9 @@ body {
   .settings-env-row .settings-env-toggle,
   .settings-env-row .settings-env-remove {
     width: 100%;
+  }
+  .launch-fields {
+    grid-template-columns: 1fr;
   }
 }
 .sidebar-header {

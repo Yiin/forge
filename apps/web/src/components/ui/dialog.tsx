@@ -13,16 +13,19 @@ export function Dialog({
   onOpenChange,
   children,
   title = 'Dialog',
+  description,
   className,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   children: ReactNode
   title?: string
+  description?: string
   className?: string
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   const trigger = useRef<HTMLElement | null>(null)
+  const descriptionId = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-description`
   useEffect(() => {
     const dialog = ref.current
     if (!dialog) return
@@ -67,6 +70,7 @@ export function Dialog({
       ref={ref}
       className={`palette-dialog ui-dialog ${className ?? ''}`}
       aria-label={title}
+      aria-describedby={description ? descriptionId : undefined}
       aria-modal="true"
       onKeyDown={onKeyDown}
       onCancel={() => onOpenChange(false)}
@@ -76,6 +80,30 @@ export function Dialog({
   )
 }
 
-export function DialogTitle({ children }: { children: ReactNode }) {
-  return <h2 className="ui-dialog-title">{children}</h2>
+export function DialogTitle({
+  children,
+  id,
+}: {
+  children: ReactNode
+  id?: string
+}) {
+  return (
+    <h2 id={id} className="ui-dialog-title">
+      {children}
+    </h2>
+  )
+}
+
+export function DialogDescription({
+  children,
+  id,
+}: {
+  children: ReactNode
+  id?: string
+}) {
+  return (
+    <p id={id} className="ui-dialog-description">
+      {children}
+    </p>
+  )
 }

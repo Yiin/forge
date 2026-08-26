@@ -1,7 +1,8 @@
 import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
-import { Dialog } from '../components/ui/dialog'
+import { Dialog, DialogDescription, DialogTitle } from '../components/ui/dialog'
+import { StatusPanel } from '../components/ui/status-panel'
 import { parseEpicOverrides, type LaunchErrors } from './epic-launch-logic'
 import { useNavigate } from '@tanstack/react-router'
 
@@ -73,7 +74,7 @@ export function RunsRoute() {
   )
 }
 
-function EpicLaunchDialog({
+export function EpicLaunchDialog({
   open,
   onOpenChange,
   onStarted,
@@ -96,16 +97,33 @@ function EpicLaunchDialog({
   const [overrides, setOverrides] = useState('')
   const [errors, setErrors] = useState<LaunchErrors>({})
   const [busy, setBusy] = useState(false)
-  useEffect(() => {
-    if (!open) return
-    void Promise.all([api.listProjects(), api.listHarnesses()]).then(
-      ([projectData, harnessData]) => {
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>(
+    'loading',
+  )
+  const [loadError, setLoadError] = useState('')
+  const loadOptions = () => {
+    setLoadState('loading')
+    setLoadError('')
+    void Promise.all([api.listProjects(), api.listHarnesses()])
+      .then(([projectData, harnessData]) => {
         const nextProjects = projectData as Array<{ id: string; name: string }>
         setProjects(nextProjects)
         setProjectId((current) => current || nextProjects[0]?.id || '')
         setHarnesses(harnessData as Record<string, { name?: string }>)
-      },
-    )
+        setLoadState('ready')
+      })
+      .catch((cause) => {
+        setLoadError(
+          cause instanceof Error
+            ? cause.message
+            : 'Could not load launch options.',
+        )
+        setLoadState('error')
+      })
+  }
+  useEffect(() => {
+    if (!open) return
+    loadOptions()
   }, [open])
   const fieldError = (field: string) => errors[field]
   const launch = async (event: React.FormEvent) => {
@@ -141,105 +159,162 @@ function EpicLaunchDialog({
     }
   }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Launch an epic"
+      description="Choose the project and epic. Advanced overrides are optional."
+    >
       <form className="launch-form" onSubmit={(event) => void launch(event)}>
         <div className="launch-heading">
           <p className="eyebrow">Epic runner</p>
-          <h2>Launch an epic</h2>
+          <DialogTitle id="launch-an-epic-title">Launch an epic</DialogTitle>
+          <DialogDescription id="launch-an-epic-description">
+            Choose the project and epic. Advanced overrides are optional.
+          </DialogDescription>
         </div>
-        <label>
-          Project
-          <select
-            value={projectId}
-            onChange={(event) => setProjectId(event.target.value)}
-          >
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-          {fieldError('projectId') && (
-            <small className="field-error">{fieldError('projectId')}</small>
-          )}
-        </label>
-        <label>
-          Epic id
-          <input
-            value={epicBeadId}
-            onChange={(event) => setEpicBeadId(event.target.value)}
-            placeholder="forge-3b7"
+        {loadState === 'loading' && (
+          <StatusPanel
+            status="loading"
+            message="Loading projects and harnesses…"
           />
-          {fieldError('epicBeadId') && (
-            <small className="field-error">{fieldError('epicBeadId')}</small>
-          )}
-        </label>
-        <div className="launch-fields">
-          <label>
-            Mode
-            <select
-              value={mode}
-              onChange={(event) => setMode(event.target.value as typeof mode)}
-            >
-              <option value="pool">Pool</option>
-              <option value="serial">Serial</option>
-              <option value="auto">Auto</option>
-            </select>
-          </label>
-          <label>
-            Workers
-            <input
-              type="number"
-              min="1"
-              max="32"
-              value={workerCount}
-              onChange={(event) => setWorkerCount(event.target.value)}
-            />
-            {fieldError('workerCount') && (
-              <small className="field-error">{fieldError('workerCount')}</small>
-            )}
-          </label>
-          <label>
-            Base branch
-            <input
-              value={baseBranch}
-              onChange={(event) => setBaseBranch(event.target.value)}
-            />
-          </label>
-        </div>
-        <label>
-          <span>.forge/epic-run.json overrides</span>
-          <textarea
-            value={overrides}
-            onChange={(event) => setOverrides(event.target.value)}
-            placeholder={'{"workerCount": 2, "mode": "serial"}'}
-            rows={6}
-          />
-          {Object.entries(errors)
-            .filter(([key]) => key.startsWith('$.forge/epic-run.json'))
-            .map(([key, value]) => (
-              <small className="field-error" key={key}>
-                {key}: {value}
-              </small>
-            ))}
-        </label>
-        {fieldError('submit') && (
-          <p className="field-error" role="alert">
-            {fieldError('submit')}
-          </p>
         )}
-        <div className="launch-actions">
-          <button
-            type="button"
-            className="ui-button"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancel
-          </button>
-          <button type="submit" className="ui-button primary" disabled={busy}>
-            {busy ? 'Launching…' : 'Launch epic'}
-          </button>
-        </div>
+        {loadState === 'error' && (
+          <StatusPanel
+            status="error"
+            message={loadError}
+            onRetry={loadOptions}
+          />
+        )}
+        {loadState === 'ready' && (
+          <>
+            <label>
+              Project
+              <select
+                aria-invalid={Boolean(fieldError('projectId'))}
+                aria-describedby={
+                  fieldError('projectId') ? 'launch-project-error' : undefined
+                }
+                value={projectId}
+                onChange={(event) => setProjectId(event.target.value)}
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+              {fieldError('projectId') && (
+                <small id="launch-project-error" className="field-error">
+                  {fieldError('projectId')}
+                </small>
+              )}
+            </label>
+            <label>
+              Epic id
+              <input
+                aria-invalid={Boolean(fieldError('epicBeadId'))}
+                aria-describedby={
+                  fieldError('epicBeadId') ? 'launch-epic-error' : undefined
+                }
+                value={epicBeadId}
+                onChange={(event) => setEpicBeadId(event.target.value)}
+                placeholder="forge-3b7"
+              />
+              {fieldError('epicBeadId') && (
+                <small id="launch-epic-error" className="field-error">
+                  {fieldError('epicBeadId')}
+                </small>
+              )}
+            </label>
+            <div className="launch-fields">
+              <label>
+                Mode
+                <select
+                  value={mode}
+                  onChange={(event) =>
+                    setMode(event.target.value as typeof mode)
+                  }
+                >
+                  <option value="pool">Pool</option>
+                  <option value="serial">Serial</option>
+                  <option value="auto">Auto</option>
+                </select>
+              </label>
+              <label>
+                Workers
+                <input
+                  type="number"
+                  aria-invalid={Boolean(fieldError('workerCount'))}
+                  aria-describedby={
+                    fieldError('workerCount')
+                      ? 'launch-workers-error'
+                      : undefined
+                  }
+                  min="1"
+                  max="32"
+                  value={workerCount}
+                  onChange={(event) => setWorkerCount(event.target.value)}
+                />
+                {fieldError('workerCount') && (
+                  <small id="launch-workers-error" className="field-error">
+                    {fieldError('workerCount')}
+                  </small>
+                )}
+              </label>
+              <label>
+                Base branch
+                <input
+                  value={baseBranch}
+                  onChange={(event) => setBaseBranch(event.target.value)}
+                />
+              </label>
+            </div>
+            <details className="launch-advanced">
+              <summary>Advanced overrides</summary>
+              <label>
+                <span>.forge/epic-run.json overrides</span>
+                <textarea
+                  value={overrides}
+                  onChange={(event) => setOverrides(event.target.value)}
+                  placeholder={'{"workerCount": 2, "mode": "serial"}'}
+                  rows={6}
+                  aria-invalid={Object.keys(errors).some((key) =>
+                    key.startsWith('$.forge/epic-run.json'),
+                  )}
+                />
+                {Object.entries(errors)
+                  .filter(([key]) => key.startsWith('$.forge/epic-run.json'))
+                  .map(([key, value]) => (
+                    <small className="field-error" key={key}>
+                      {key}: {value}
+                    </small>
+                  ))}
+              </label>
+            </details>
+            {fieldError('submit') && (
+              <p className="field-error" role="alert">
+                {fieldError('submit')}
+              </p>
+            )}
+            <div className="launch-actions">
+              <button
+                type="button"
+                className="ui-button"
+                onClick={() => onOpenChange(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="ui-button primary"
+                disabled={busy}
+              >
+                {busy ? 'Launching…' : 'Launch epic'}
+              </button>
+            </div>
+          </>
+        )}
       </form>
     </Dialog>
   )

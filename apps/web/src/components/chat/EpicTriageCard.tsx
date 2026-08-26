@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '../../lib/api'
 import type { ChatRenderItem } from './render-model'
+import { ConfirmationDialog } from '../ui/confirmation-dialog'
 
 export function EpicTriageCard({
   card,
@@ -10,6 +11,7 @@ export function EpicTriageCard({
   card: Extract<ChatRenderItem, { kind: 'epic-triage' }>['card']
 }) {
   const [busy, setBusy] = useState(false)
+  const [confirmSkip, setConfirmSkip] = useState(false)
   const act = async (skipBead?: string) => {
     setBusy(true)
     try {
@@ -48,10 +50,19 @@ export function EpicTriageCard({
         <button disabled={busy} onClick={() => void act()}>
           <Play size={15} aria-hidden="true" /> Resume
         </button>
-        <button disabled={busy} onClick={() => void act(card.beadId)}>
+        <button disabled={busy} onClick={() => setConfirmSkip(true)}>
           <SkipForward size={15} aria-hidden="true" /> Skip child
         </button>
       </div>
+      <ConfirmationDialog
+        open={confirmSkip}
+        onOpenChange={setConfirmSkip}
+        onConfirm={() => act(card.beadId)}
+        title="Skip failed child?"
+        confirmLabel="Skip child"
+      >
+        This skips child {card.beadId} and resumes the epic run.
+      </ConfirmationDialog>
     </article>
   )
 }
