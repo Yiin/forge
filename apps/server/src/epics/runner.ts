@@ -12,6 +12,7 @@ import {
 import { acquireRunLock } from './worktrees.js'
 import {
   createWorktree,
+  listRunWorktrees,
   mergeBranch,
   removeWorktree,
   trialMerge,
@@ -81,6 +82,10 @@ export class EpicRunner {
   get eventBus() {
     return this.bus
   }
+  private async cleanupRunWorktrees(runId: string, repoPath: string) {
+    for (const worktree of await listRunWorktrees(repoPath, runId))
+      await removeWorktree(repoPath, worktree, false).catch(() => undefined)
+  }
   async startRun(input: StartRunInput) {
     const run = createRun(this.db, {
       projectId: input.projectId,
@@ -114,6 +119,7 @@ export class EpicRunner {
         if (!children.length) {
           if (!(await openChildren(input.repoPath, input.epicBeadId)).length) {
             updateRunStatus(this.db, run.id, 'completed')
+            await this.cleanupRunWorktrees(run.id, input.repoPath)
             this.publish(run.id, 'completed')
             return
           }
@@ -253,6 +259,7 @@ export class EpicRunner {
         }
         if (!(await openChildren(input.repoPath, input.epicBeadId)).length) {
           updateRunStatus(this.db, run.id, 'completed')
+          await this.cleanupRunWorktrees(run.id, input.repoPath)
           this.publish(run.id, 'completed')
           return
         }
@@ -401,8 +408,10 @@ export class EpicRunner {
   }
   async cancel(runId: string) {
     const item = this.active.get(runId)
+    const input = this.inputs.get(runId)
     if (item?.session) await item.session.cancel()
     item?.abort.abort()
+    if (input) await this.cleanupRunWorktrees(runId, input.repoPath)
     updateRunStatus(this.db, runId, 'cancelled')
     this.publish(runId, 'cancelled')
   }
