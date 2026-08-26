@@ -4,6 +4,7 @@ import {
   handleShortcut,
   registerShortcuts,
   resetShortcutRegistry,
+  setShortcutOverrides,
   shortcutCommands,
 } from './shortcuts'
 
@@ -19,7 +20,7 @@ describe('shortcut registry', () => {
     ])
     expect(shortcutCommands()[0]).toMatchObject({
       label: 'Open command palette',
-      ariaKeyshortcuts: 'Meta+K',
+      ariaKeyshortcuts: 'Ctrl+K',
     })
   })
 
@@ -49,5 +50,19 @@ describe('shortcut registry', () => {
     expect(handleShortcut(inputEvent)).toBe(false)
     expect(handleShortcut(composingEvent)).toBe(false)
     expect(action).not.toHaveBeenCalled()
+  })
+
+  it('resolves overrides and supports chords while ignoring handled events', () => {
+    const action = vi.fn()
+    setShortcutOverrides({ 'navigate.chat': 'g x' })
+    registerShortcuts({ 'navigate.chat': action })
+    const first = new KeyboardEvent('keydown', { key: 'g' })
+    const second = new KeyboardEvent('keydown', { key: 'x' })
+    expect(handleShortcut(first)).toBe(true)
+    expect(handleShortcut(second)).toBe(true)
+    expect(action).toHaveBeenCalledOnce()
+    const handled = new KeyboardEvent('keydown', { key: 'x' })
+    Object.defineProperty(handled, 'defaultPrevented', { value: true })
+    expect(handleShortcut(handled)).toBe(false)
   })
 })

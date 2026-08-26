@@ -9,7 +9,12 @@ import { SessionSidebar } from './sidebar/SessionSidebar'
 import { SettingsNav } from './settings/SettingsNav'
 import { Toaster } from 'sonner'
 import { resolveTheme } from '../lib/shell-storage'
-import { handleShortcut, registerShortcuts } from '../lib/shortcuts'
+import {
+  handleShortcut,
+  registerShortcuts,
+  setShortcutOverrides,
+} from '../lib/shortcuts'
+import { useSettingsStore } from '../stores/settings'
 import { useNavigate } from '@tanstack/react-router'
 import { useSessionsStore } from '../stores/sessions'
 import { ProjectCreationDialog } from './ProjectCreationDialog'
@@ -18,6 +23,7 @@ export function AppShell() {
   const location = useLocation()
   const store = useShellStore()
   const navigate = useNavigate()
+  const loadSettings = useSettingsStore((state) => state.load)
   const isSettings = location.pathname.startsWith('/settings')
   const isSearch = location.pathname === '/search'
   const title = isSettings
@@ -27,6 +33,13 @@ export function AppShell() {
       : location.pathname.startsWith('/files')
         ? 'Files'
         : 'Chat'
+  useEffect(() => {
+    void loadSettings()
+      .then(() => {
+        setShortcutOverrides(useSettingsStore.getState().settings.keybindings)
+      })
+      .catch(() => undefined)
+  }, [loadSettings])
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => handleShortcut(event)
     window.addEventListener('keydown', onKeyDown)

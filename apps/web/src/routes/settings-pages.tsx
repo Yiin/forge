@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { harnessConfigSchema, type HarnessConfig } from '@forge/protocol/config'
 import { api } from '../lib/api'
@@ -18,6 +24,14 @@ import {
 } from '../components/ui/select'
 import { validateEpicDefaults, type EpicDefaults } from './epic-settings-logic'
 import { openProjectCreation } from '../components/ProjectCreationDialog'
+import {
+  displayShortcut,
+  setShortcutOverrides,
+  shortcutDefault,
+  shortcutKey,
+  shortcutDefinitions,
+  type ShortcutId,
+} from '../lib/shortcuts'
 
 type Harness = HarnessConfig
 
@@ -714,7 +728,8 @@ export function EpicSettings() {
     },
   }
   const [defaults, setDefaults] = useState<EpicDefaults>(initialDefaults)
-  const [savedDefaults, setSavedDefaults] = useState<EpicDefaults>(initialDefaults)
+  const [savedDefaults, setSavedDefaults] =
+    useState<EpicDefaults>(initialDefaults)
   const [harnesses, setHarnesses] = useState<Record<string, { name: string }>>(
     {},
   )
@@ -729,16 +744,22 @@ export function EpicSettings() {
   const saveSettings = useSettingsStore((state) => state.save)
   const retry = useSettingsStore((state) => state.retry)
   const dirty = JSON.stringify(defaults) !== JSON.stringify(savedDefaults)
-  const setField = <K extends keyof EpicDefaults>(key: K, value: EpicDefaults[K]) =>
-    setDefaults((current) => ({ ...current, [key]: value }))
+  const setField = <K extends keyof EpicDefaults>(
+    key: K,
+    value: EpicDefaults[K],
+  ) => setDefaults((current) => ({ ...current, [key]: value }))
   useEffect(() => {
     void Promise.all([load(), api.listHarnesses()])
       .then(([, available]) => {
         const value = useSettingsStore.getState().settings as {
           epicDefaults?: Partial<EpicDefaults>
         }
-        const next = { ...initialDefaults, ...value.epicDefaults,
-          rolePolicy: value.epicDefaults?.rolePolicy ?? initialDefaults.rolePolicy }
+        const next = {
+          ...initialDefaults,
+          ...value.epicDefaults,
+          rolePolicy:
+            value.epicDefaults?.rolePolicy ?? initialDefaults.rolePolicy,
+        }
         setDefaults(next)
         setSavedDefaults(next)
         setHarnesses(available as Record<string, { name: string }>)
@@ -764,25 +785,60 @@ export function EpicSettings() {
     index: number,
     patch: { harness?: string; model?: string },
   ) =>
-    setDefaults((current) => ({ ...current, rolePolicy: { ...current.rolePolicy,
-      tiers: { ...current.rolePolicy.tiers,
-        [tier]: current.rolePolicy.tiers[tier].map((hop, hopIndex) =>
-          hopIndex === index ? { ...hop, ...patch } : hop) } } }))
+    setDefaults((current) => ({
+      ...current,
+      rolePolicy: {
+        ...current.rolePolicy,
+        tiers: {
+          ...current.rolePolicy.tiers,
+          [tier]: current.rolePolicy.tiers[tier].map((hop, hopIndex) =>
+            hopIndex === index ? { ...hop, ...patch } : hop,
+          ),
+        },
+      },
+    }))
   const addTier = () => {
     const name = newTier.trim()
     if (!name || name in defaults.rolePolicy.tiers) return
-    setDefaults((current) => ({ ...current, rolePolicy: { ...current.rolePolicy,
-      tiers: { ...current.rolePolicy.tiers, [name]: [{ harness: Object.keys(harnesses)[0] ?? '' }] } } }))
+    setDefaults((current) => ({
+      ...current,
+      rolePolicy: {
+        ...current.rolePolicy,
+        tiers: {
+          ...current.rolePolicy.tiers,
+          [name]: [{ harness: Object.keys(harnesses)[0] ?? '' }],
+        },
+      },
+    }))
     setNewTier('')
   }
   const addHop = (tier: string) =>
-    setDefaults((current) => ({ ...current, rolePolicy: { ...current.rolePolicy,
-      tiers: { ...current.rolePolicy.tiers,
-        [tier]: [...current.rolePolicy.tiers[tier], { harness: Object.keys(harnesses)[0] ?? '' }] } } }))
+    setDefaults((current) => ({
+      ...current,
+      rolePolicy: {
+        ...current.rolePolicy,
+        tiers: {
+          ...current.rolePolicy.tiers,
+          [tier]: [
+            ...current.rolePolicy.tiers[tier],
+            { harness: Object.keys(harnesses)[0] ?? '' },
+          ],
+        },
+      },
+    }))
   const removeHop = (tier: string, index: number) =>
-    setDefaults((current) => ({ ...current, rolePolicy: { ...current.rolePolicy,
-      tiers: { ...current.rolePolicy.tiers,
-        [tier]: current.rolePolicy.tiers[tier].filter((_, hopIndex) => hopIndex !== index) } } }))
+    setDefaults((current) => ({
+      ...current,
+      rolePolicy: {
+        ...current.rolePolicy,
+        tiers: {
+          ...current.rolePolicy.tiers,
+          [tier]: current.rolePolicy.tiers[tier].filter(
+            (_, hopIndex) => hopIndex !== index,
+          ),
+        },
+      },
+    }))
   const moveHop = (tier: string, index: number, direction: -1 | 1) => {
     const hops = defaults.rolePolicy.tiers[tier]
     const target = index + direction
@@ -799,82 +855,152 @@ export function EpicSettings() {
       invalidRefs.current[first]?.focus()
       return
     }
-    void saveSettings('epics', { epicDefaults: defaults }).then(() => setSavedDefaults(defaults))
+    void saveSettings('epics', { epicDefaults: defaults }).then(() =>
+      setSavedDefaults(defaults),
+    )
   }
-  const reset = () => { setDefaults(savedDefaults); setValidationErrors({}) }
-  const status = settingsState.status === 'saving'
-    ? 'Saving…' : settingsState.status === 'error' ? settingsState.error : dirty ? 'Unsaved changes' : settingsState.status === 'saved' ? 'Saved.' : null
+  const reset = () => {
+    setDefaults(savedDefaults)
+    setValidationErrors({})
+  }
+  const status =
+    settingsState.status === 'saving'
+      ? 'Saving…'
+      : settingsState.status === 'error'
+        ? settingsState.error
+        : dirty
+          ? 'Unsaved changes'
+          : settingsState.status === 'saved'
+            ? 'Saved.'
+            : null
   return (
     <SettingsPage title="Epics" subtitle="Defaults for the epic runner.">
-      {loadError && <div className="settings-error" role="alert">Could not load epic defaults: {loadError}<Button size="compact" onClick={() => window.location.reload()}>Retry</Button></div>}
-      {settingsState.status === 'error' && <div className="settings-error" role="alert">Could not save: {settingsState.error}<Button size="compact" onClick={() => void retry('epics')}>Retry</Button></div>}
-      <SettingsSection title="Run model" description="Choose how Forge runs an epic.">
-      <SettingsRow label="Worker count" description="Number of workers in the run.">
-        <Input
-          type="number"
-          min="1"
-          value={defaults.workerCount} onChange={(event) => setField('workerCount', Number(event.target.value))}
-        />
-      </SettingsRow>
-      <SettingsRow label="Default mode" description="How workers run by default.">
-        <Select
-          value={defaults.mode}
-          onValueChange={(value) => {
-            if (value === 'pool' || value === 'serial' || value === 'auto') {
-              setField('mode', value)
-            }
-          }}
+      {loadError && (
+        <div className="settings-error" role="alert">
+          Could not load epic defaults: {loadError}
+          <Button size="compact" onClick={() => window.location.reload()}>
+            Retry
+          </Button>
+        </div>
+      )}
+      {settingsState.status === 'error' && (
+        <div className="settings-error" role="alert">
+          Could not save: {settingsState.error}
+          <Button size="compact" onClick={() => void retry('epics')}>
+            Retry
+          </Button>
+        </div>
+      )}
+      <SettingsSection
+        title="Run model"
+        description="Choose how Forge runs an epic."
+      >
+        <SettingsRow
+          label="Worker count"
+          description="Number of workers in the run."
         >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            <SelectItem value="pool">Pool</SelectItem>
-            <SelectItem value="serial">Serial</SelectItem>
-            <SelectItem value="auto">Auto</SelectItem>
-          </SelectPopup>
-        </Select>
-      </SettingsRow>
-      <SettingsRow label="Gate command" description="Command used to check the work.">
-        <Input
-          value={
-            typeof defaults.gateCommand === 'string'
-              ? defaults.gateCommand
-              : (defaults.gateCommand ?? []).join('\n')
-          }
-          placeholder="bun run test"
-          onChange={(event) =>
-            setField('gateCommand', event.target.value || undefined)
-          }
-          ref={(node) => { invalidRefs.current.gateCommand = node }} aria-invalid={Boolean(validationErrors.gateCommand)} aria-describedby={validationErrors.gateCommand ? 'epic-error-gateCommand' : undefined}
-        />
-        {validationErrors.gateCommand && (
-          <small id="epic-error-gateCommand" className="field-error">{validationErrors.gateCommand}</small>
-        )}
-      </SettingsRow>
-      <SettingsRow label="Install command" description="Command used before the gate.">
-        <Input
-          value={
-            typeof defaults.installCommand === 'string'
-              ? defaults.installCommand
-              : (defaults.installCommand ?? []).join('\n')
-          }
-          placeholder="bun install"
-          onChange={(event) =>
-            setField('installCommand', event.target.value || undefined)
-          }
-          ref={(node) => { invalidRefs.current.installCommand = node }} aria-invalid={Boolean(validationErrors.installCommand)} aria-describedby={validationErrors.installCommand ? 'epic-error-installCommand' : undefined}
-        />
-        {validationErrors.installCommand && (
-          <small id="epic-error-installCommand" className="field-error">
-            {validationErrors.installCommand}
-          </small>
-        )}
-      </SettingsRow>
+          <Input
+            type="number"
+            min="1"
+            value={defaults.workerCount}
+            onChange={(event) =>
+              setField('workerCount', Number(event.target.value))
+            }
+          />
+        </SettingsRow>
+        <SettingsRow
+          label="Default mode"
+          description="How workers run by default."
+        >
+          <Select
+            value={defaults.mode}
+            onValueChange={(value) => {
+              if (value === 'pool' || value === 'serial' || value === 'auto') {
+                setField('mode', value)
+              }
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              <SelectItem value="pool">Pool</SelectItem>
+              <SelectItem value="serial">Serial</SelectItem>
+              <SelectItem value="auto">Auto</SelectItem>
+            </SelectPopup>
+          </Select>
+        </SettingsRow>
+        <SettingsRow
+          label="Gate command"
+          description="Command used to check the work."
+        >
+          <Input
+            value={
+              typeof defaults.gateCommand === 'string'
+                ? defaults.gateCommand
+                : (defaults.gateCommand ?? []).join('\n')
+            }
+            placeholder="bun run test"
+            onChange={(event) =>
+              setField('gateCommand', event.target.value || undefined)
+            }
+            ref={(node) => {
+              invalidRefs.current.gateCommand = node
+            }}
+            aria-invalid={Boolean(validationErrors.gateCommand)}
+            aria-describedby={
+              validationErrors.gateCommand
+                ? 'epic-error-gateCommand'
+                : undefined
+            }
+          />
+          {validationErrors.gateCommand && (
+            <small id="epic-error-gateCommand" className="field-error">
+              {validationErrors.gateCommand}
+            </small>
+          )}
+        </SettingsRow>
+        <SettingsRow
+          label="Install command"
+          description="Command used before the gate."
+        >
+          <Input
+            value={
+              typeof defaults.installCommand === 'string'
+                ? defaults.installCommand
+                : (defaults.installCommand ?? []).join('\n')
+            }
+            placeholder="bun install"
+            onChange={(event) =>
+              setField('installCommand', event.target.value || undefined)
+            }
+            ref={(node) => {
+              invalidRefs.current.installCommand = node
+            }}
+            aria-invalid={Boolean(validationErrors.installCommand)}
+            aria-describedby={
+              validationErrors.installCommand
+                ? 'epic-error-installCommand'
+                : undefined
+            }
+          />
+          {validationErrors.installCommand && (
+            <small id="epic-error-installCommand" className="field-error">
+              {validationErrors.installCommand}
+            </small>
+          )}
+        </SettingsRow>
       </SettingsSection>
-      <SettingsSection title="Role policy" description="Each role uses a tier. Hops run from top to bottom until one works.">
+      <SettingsSection
+        title="Role policy"
+        description="Each role uses a tier. Hops run from top to bottom until one works."
+      >
         {Object.entries(defaults.rolePolicy.roles).map(([role, tier]) => (
-          <SettingsRow key={role} label={role} description="Tier used for this role.">
+          <SettingsRow
+            key={role}
+            label={role}
+            description="Tier used for this role."
+          >
             <Select
               value={tier}
               onValueChange={(value) => {
@@ -882,11 +1008,17 @@ export function EpicSettings() {
               }}
             >
               <SelectTrigger
-                ref={(node) => { invalidRefs.current[`rolePolicy.roles.${role}`] = node }}
+                ref={(node) => {
+                  invalidRefs.current[`rolePolicy.roles.${role}`] = node
+                }}
                 aria-invalid={Boolean(
                   validationErrors[`rolePolicy.roles.${role}`],
                 )}
-                aria-describedby={validationErrors[`rolePolicy.roles.${role}`] ? `epic-error-role-${role}` : undefined}
+                aria-describedby={
+                  validationErrors[`rolePolicy.roles.${role}`]
+                    ? `epic-error-role-${role}`
+                    : undefined
+                }
               >
                 <SelectValue />
               </SelectTrigger>
@@ -919,13 +1051,23 @@ export function EpicSettings() {
                   }}
                 >
                   <SelectTrigger
-                    ref={(node) => { invalidRefs.current[`rolePolicy.tiers.${tier}.${index}.harness`] = node }}
+                    ref={(node) => {
+                      invalidRefs.current[
+                        `rolePolicy.tiers.${tier}.${index}.harness`
+                      ] = node
+                    }}
                     aria-invalid={Boolean(
                       validationErrors[
                         `rolePolicy.tiers.${tier}.${index}.harness`
                       ],
                     )}
-                    aria-describedby={validationErrors[`rolePolicy.tiers.${tier}.${index}.harness`] ? `epic-error-hop-${tier}-${index}` : undefined}
+                    aria-describedby={
+                      validationErrors[
+                        `rolePolicy.tiers.${tier}.${index}.harness`
+                      ]
+                        ? `epic-error-hop-${tier}-${index}`
+                        : undefined
+                    }
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -940,7 +1082,10 @@ export function EpicSettings() {
                 {validationErrors[
                   `rolePolicy.tiers.${tier}.${index}.harness`
                 ] && (
-                  <small id={`epic-error-hop-${tier}-${index}`} className="field-error">
+                  <small
+                    id={`epic-error-hop-${tier}-${index}`}
+                    className="field-error"
+                  >
                     {
                       validationErrors[
                         `rolePolicy.tiers.${tier}.${index}.harness`
@@ -958,8 +1103,24 @@ export function EpicSettings() {
                     })
                   }
                 />
-                <Button type="button" size="compact" disabled={index === 0} aria-label={`Move ${tier} hop ${index + 1} up`} onClick={() => moveHop(tier, index, -1)}>Move up</Button>
-                <Button type="button" size="compact" disabled={index === hops.length - 1} aria-label={`Move ${tier} hop ${index + 1} down`} onClick={() => moveHop(tier, index, 1)}>Move down</Button>
+                <Button
+                  type="button"
+                  size="compact"
+                  disabled={index === 0}
+                  aria-label={`Move ${tier} hop ${index + 1} up`}
+                  onClick={() => moveHop(tier, index, -1)}
+                >
+                  Move up
+                </Button>
+                <Button
+                  type="button"
+                  size="compact"
+                  disabled={index === hops.length - 1}
+                  aria-label={`Move ${tier} hop ${index + 1} down`}
+                  onClick={() => moveHop(tier, index, 1)}
+                >
+                  Move down
+                </Button>
                 <Button
                   type="button"
                   size="compact"
@@ -987,15 +1148,44 @@ export function EpicSettings() {
             value={newTier}
             onChange={(event) => setNewTier(event.target.value)}
           />
-          <Button type="button" size="compact" onClick={addTier} disabled={!newTier.trim()}>
+          <Button
+            type="button"
+            size="compact"
+            onClick={addTier}
+            disabled={!newTier.trim()}
+          >
             Add tier
           </Button>
         </div>
       </SettingsSection>
       <div className="settings-actions">
-        {status && <p className={settingsState.status === 'error' ? 'settings-error' : 'settings-status'} role="status">{status}</p>}
-        <Button type="button" variant="secondary" disabled={!dirty || settingsState.status === 'saving'} onClick={reset}>Reset</Button>
-        <Button type="button" disabled={!dirty || settingsState.status === 'saving'} onClick={save}>Save changes</Button>
+        {status && (
+          <p
+            className={
+              settingsState.status === 'error'
+                ? 'settings-error'
+                : 'settings-status'
+            }
+            role="status"
+          >
+            {status}
+          </p>
+        )}
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!dirty || settingsState.status === 'saving'}
+          onClick={reset}
+        >
+          Reset
+        </Button>
+        <Button
+          type="button"
+          disabled={!dirty || settingsState.status === 'saving'}
+          onClick={save}
+        >
+          Save changes
+        </Button>
       </div>
     </SettingsPage>
   )
@@ -1046,18 +1236,133 @@ export function AboutSettings() {
   )
 }
 export function KeybindingsSettings() {
+  const load = useSettingsStore((state) => state.load)
+  const save = useSettingsStore((state) => state.save)
+  const [query, setQuery] = useState('')
+  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [capture, setCapture] = useState<string | null>(null)
+  const [captureError, setCaptureError] = useState<string | null>(null)
+  useEffect(() => {
+    void load().then(() => {
+      const value = useSettingsStore.getState().settings.keybindings
+      setDraft(value)
+      setShortcutOverrides(value)
+    })
+  }, [load])
+  const commands = shortcutDefinitions.map(([id, , label]) => ({
+    id,
+    label,
+    key: shortcutKey(id),
+  }))
+  const visible = commands.filter((command) =>
+    `${command.label} ${command.key} ${displayShortcut(command.key)}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  )
+  const commit = (id: string, value?: string) => {
+    const next = { ...draft }
+    if (value && value !== shortcutDefault(id as ShortcutId)) next[id] = value
+    else delete next[id]
+    setDraft(next)
+    setShortcutOverrides(next)
+    void save('general', { keybindings: next }).catch(() => undefined)
+  }
+  const captureKey = (event: KeyboardEvent) => {
+    if (!capture) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.key === 'Escape') {
+      setCapture(null)
+      return
+    }
+    const parts = [
+      event.ctrlKey || event.metaKey ? 'mod' : '',
+      event.altKey ? 'alt' : '',
+      event.shiftKey ? 'shift' : '',
+      event.key.toLowerCase(),
+    ].filter(Boolean)
+    const value = parts.join('+')
+    if (/^mod\+[1-9]$/.test(value)) {
+      setCaptureError('Browser-owned numeric shortcuts cannot be changed.')
+      return
+    }
+    const conflict = commands.find(
+      (item) => item.id !== capture && item.key === value,
+    )
+    if (conflict) {
+      setCaptureError(`Conflicts with ${conflict.label}.`)
+      return
+    }
+    commit(capture, value)
+    setCapture(null)
+  }
   return (
     <SettingsPage
       title="Keybindings"
       subtitle="Shortcuts for common Forge actions."
     >
-      <SettingsSection title="Keyboard shortcuts">
-        <SettingsRow
-          label="Open settings"
-          description="Go to this Settings page."
+      <SettingsSection
+        title="Keyboard shortcuts"
+        description="Search, edit, or restore shortcuts."
+      >
+        <Input
+          aria-label="Search keybindings"
+          placeholder="Search commands or shortcuts"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        {captureError && (
+          <p className="settings-error" role="alert">
+            {captureError}
+          </p>
+        )}
+        {visible.map((command) => (
+          <SettingsRow
+            key={command.id}
+            label={command.label}
+            description={
+              command.key === shortcutDefault(command.id as ShortcutId)
+                ? 'Default shortcut'
+                : 'Custom shortcut'
+            }
+          >
+            {capture === command.id ? (
+              <Input
+                autoFocus
+                aria-label={`Capture shortcut for ${command.label}`}
+                onKeyDown={captureKey}
+                placeholder="Press a key combination"
+                readOnly
+              />
+            ) : (
+              <kbd aria-keyshortcuts={displayShortcut(command.key)}>
+                {displayShortcut(command.key)}
+              </kbd>
+            )}
+            <Button
+              size="compact"
+              onClick={() => {
+                setCapture(command.id)
+                setCaptureError(null)
+              }}
+            >
+              {capture === command.id ? 'Capturing…' : 'Edit'}
+            </Button>
+            <Button size="compact" onClick={() => commit(command.id)}>
+              Reset
+            </Button>
+          </SettingsRow>
+        ))}
+        {!visible.length && <p className="muted">No matching shortcuts.</p>}
+        <Button
+          onClick={() => {
+            setDraft({})
+            setShortcutOverrides({})
+            void save('general', { keybindings: {} }).catch(() => undefined)
+          }}
         >
-          <kbd>⌘ ,</kbd>
-        </SettingsRow>
+          Restore all defaults
+        </Button>
       </SettingsSection>
     </SettingsPage>
   )

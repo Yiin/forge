@@ -108,6 +108,7 @@ export function defaultConfig(
     settings: {
       defaultProject: '',
       titleGeneration: true,
+      keybindings: {},
       epicDefaults: {
         workerCount: 3,
         mode: 'pool',

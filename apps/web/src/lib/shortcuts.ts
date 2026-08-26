@@ -7,40 +7,77 @@ export type ShortcutCommand = {
 }
 
 export const shortcutDefinitions = [
-  ['palette.open', 'mod+k', 'Open command palette', 'Meta+K'],
-  ['sidebar.toggle', 'mod+\\', 'Toggle sidebar', 'Meta+\\'],
-  ['navigate.chat', 'g c', 'Go to Chat', 'G C'],
-  ['navigate.runs', 'g r', 'Go to Runs', 'G R'],
-  ['navigate.files', 'g f', 'Go to Files', 'G F'],
-  ['navigate.settings', 'g s', 'Go to Settings', 'G S'],
-  ['session.new', 'n', 'New session', 'N'],
-  ['session.previous', 'alt+arrowup', 'Previous session', 'Alt+ArrowUp'],
-  ['session.next', 'alt+arrowdown', 'Next session', 'Alt+ArrowDown'],
-  ['session.rename', 'f2', 'Rename session', 'F2'],
-  ['session.menu', 'shift+f10', 'Open item menu', 'Shift+F10'],
-  ['session.stop', 'mod+.', 'Stop run', 'Meta+.'],
-  ['help.shortcuts', '?', 'Show keyboard shortcuts', '?'],
+  ['palette.open', 'mod+k', 'Open command palette'],
+  ['sidebar.toggle', 'mod+\\', 'Toggle sidebar'],
+  ['navigate.chat', 'g c', 'Go to Chat'],
+  ['navigate.runs', 'g r', 'Go to Runs'],
+  ['navigate.files', 'g f', 'Go to Files'],
+  ['navigate.settings', 'g s', 'Go to Settings'],
+  ['session.new', 'n', 'New session'],
+  ['session.previous', 'alt+arrowup', 'Previous session'],
+  ['session.next', 'alt+arrowdown', 'Next session'],
+  ['session.rename', 'f2', 'Rename session'],
+  ['session.menu', 'shift+f10', 'Open item menu'],
+  ['session.stop', 'mod+.', 'Stop run'],
+  ['help.shortcuts', '?', 'Show keyboard shortcuts'],
 ] as const
+export type ShortcutId = (typeof shortcutDefinitions)[number][0]
+export type ShortcutOverrides = Partial<Record<ShortcutId, string>>
 
 const commands = new Map<string, ShortcutCommand>()
 let chord: string | null = null
 let chordTimer: number | undefined
+let overrides: ShortcutOverrides = {}
+export function setShortcutOverrides(next: ShortcutOverrides) {
+  overrides = { ...next }
+}
+export function shortcutDefault(id: ShortcutId) {
+  return shortcutDefinitions.find((item) => item[0] === id)?.[1] ?? ''
+}
+export function shortcutKey(id: ShortcutId) {
+  return overrides[id] ?? shortcutDefault(id)
+}
+export function displayShortcut(key: string, platform = navigator.platform) {
+  const modifier = /Mac|iPhone|iPad/.test(platform) ? '⌘' : 'Ctrl'
+  return key
+    .split(' ')
+    .map((part) =>
+      part
+        .split('+')
+        .map((token) =>
+          token === 'mod' ? modifier : token[0]?.toUpperCase() + token.slice(1),
+        )
+        .join('+'),
+    )
+    .join('  ')
+}
 
 export function registerShortcuts(
   actions: Partial<Record<(typeof shortcutDefinitions)[number][0], () => void>>,
 ) {
   const added: string[] = []
-  for (const [id, key, label, ariaKeyshortcuts] of shortcutDefinitions) {
+  for (const [id, , label] of shortcutDefinitions) {
     const action = actions[id]
     if (!action) continue
-    commands.set(id, { id, key, label, ariaKeyshortcuts, action })
+    const key = shortcutKey(id)
+    commands.set(id, {
+      id,
+      key,
+      label,
+      ariaKeyshortcuts: displayShortcut(key),
+      action,
+    })
     added.push(id)
   }
   return () => added.forEach((id) => commands.delete(id))
 }
 
 export function shortcutCommands() {
-  return [...commands.values()]
+  return [...commands.values()].map((command) => ({
+    ...command,
+    key: shortcutKey(command.id as ShortcutId),
+    ariaKeyshortcuts: displayShortcut(shortcutKey(command.id as ShortcutId)),
+  }))
 }
 
 export function executeShortcut(id: string) {
@@ -67,14 +104,19 @@ function keyFor(event: KeyboardEvent) {
 }
 
 export function handleShortcut(event: KeyboardEvent) {
-  if (event.isComposing || editable(event.target) || modal(event.target))
+  if (
+    event.defaultPrevented ||
+    event.isComposing ||
+    editable(event.target) ||
+    modal(event.target)
+  )
     return false
   const key = keyFor(event)
   if (chord === 'g') {
     chord = null
     window.clearTimeout(chordTimer)
     const command = [...commands.values()].find(
-      (item) => item.key === `g ${key}`,
+      (item) => shortcutKey(item.id as ShortcutId) === `g ${key}`,
     )
     if (!command) return false
     event.preventDefault()
@@ -86,7 +128,9 @@ export function handleShortcut(event: KeyboardEvent) {
     chordTimer = window.setTimeout(() => (chord = null), 1000)
     return true
   }
-  const command = [...commands.values()].find((item) => item.key === key)
+  const command = [...commands.values()].find(
+    (item) => shortcutKey(item.id as ShortcutId) === key,
+  )
   if (!command) return false
   event.preventDefault()
   command.action()
@@ -95,5 +139,6 @@ export function handleShortcut(event: KeyboardEvent) {
 
 export function resetShortcutRegistry() {
   commands.clear()
+  overrides = {}
   chord = null
 }

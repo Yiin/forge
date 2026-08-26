@@ -1,5 +1,9 @@
 import { create } from 'zustand'
-import type { ForgeSettings, ForgeSettingsPatch } from '@forge/protocol/config'
+import {
+  settingsSchema,
+  type ForgeSettings,
+  type ForgeSettingsPatch,
+} from '@forge/protocol/config'
 import { api } from '../lib/api'
 
 export type SettingsStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
@@ -18,6 +22,7 @@ type SettingsState = {
 const initial: ForgeSettings = {
   defaultProject: '',
   titleGeneration: true,
+  keybindings: {},
   epicDefaults: { workerCount: 3, mode: 'pool' },
 }
 const errorText = (cause: unknown) =>
@@ -33,7 +38,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   scopes: { general: emptyScope(), epics: emptyScope() },
   load: async () => {
     const value = await api.getSettings()
-    set({ settings: { ...initial, ...(value as Partial<ForgeSettings>) } })
+    const parsed = settingsSchema.safeParse({ ...initial, ...value })
+    set({ settings: parsed.success ? parsed.data : initial })
   },
   patch: (scope, patch) => {
     failedPatch.delete(scope)

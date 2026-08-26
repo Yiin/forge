@@ -17,6 +17,7 @@ export const harnessConfigSchema = z
 export const settingsSchema = z.object({
   defaultProject: z.string().default(''),
   titleGeneration: z.boolean().default(true),
+  keybindings: z.record(z.string().min(1), z.string().min(1)).default({}),
   epicDefaults: z
     .object({
       workerCount: z.number().int().positive().max(32).default(3),
@@ -38,6 +39,7 @@ export const forgeConfigSchema = z.object({
   settings: settingsSchema.default({
     defaultProject: '',
     titleGeneration: true,
+    keybindings: {},
     epicDefaults: { workerCount: 3, mode: 'pool' },
   }),
 })
