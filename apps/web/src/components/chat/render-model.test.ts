@@ -111,6 +111,7 @@ describe('chat render model', () => {
         kind: 'system',
         id: 'i',
         text: 'ACP agent exited with code 1',
+        alert: true,
         code: 'command not found',
       },
     ])
