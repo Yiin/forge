@@ -12,13 +12,18 @@ export const hop = z.object({
 })
 export const rolePolicy = z
   .object({
-    roles: z.record(roleName, z.string().trim()),
+    roles: z.partialRecord(roleName, z.string().trim().min(1)),
     tiers: z.record(z.string().trim().min(1), z.array(hop)),
   })
   .strict()
 export const epicRunConfig = z
   .object({
-    workerCount: z.number().int().positive().max(32).optional(),
+    workerCount: z
+      .number()
+      .int('Worker count must be a whole number.')
+      .positive('Worker count must be a positive number.')
+      .max(32, 'Worker count must be 32 or fewer.')
+      .optional(),
     mode: z.enum(['pool', 'serial', 'auto']).optional(),
     gateCommand: z.union([z.string(), z.array(z.string())]).optional(),
     installCommand: z.union([z.string(), z.array(z.string())]).optional(),
