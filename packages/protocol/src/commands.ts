@@ -33,11 +33,25 @@ export const btw = z.object({
   sourceSeq: z.number().int().nonnegative().optional(),
   text: z.string().min(1),
 })
-export const answerQuestion = z.object({
-  sessionId: id,
-  questionId: id,
-  answer: z.string(),
-})
+export const answerQuestion = z
+  .object({
+    sessionId: id,
+    questionId: id,
+    answer: z.string().optional(),
+    answers: z
+      .union([
+        z.string(),
+        z.array(z.string()),
+        z.record(z.string(), z.unknown()),
+      ])
+      .optional(),
+  })
+  .refine(
+    (value) => value.answer !== undefined || value.answers !== undefined,
+    {
+      message: 'answer or answers is required',
+    },
+  )
 // HTTP body for POST /api/sessions/:id/uploads. The 1 GiB ceiling is enforced
 // by the upload store so an oversize init answers 413, not a validation error.
 export const uploadInitSchema = z.object({

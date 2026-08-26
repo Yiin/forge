@@ -12,6 +12,9 @@ import { statusRoutes } from './http/status.js'
 import { migrate } from './db/migrate.js'
 import { EventBus } from './events/bus.js'
 import { searchRoutes } from './http/search.js'
+import { questionRoutes } from './http/questions.js'
+import type { QuestionManager } from './acp/questions.js'
+import { QuestionManager as ServerQuestionManager } from './acp/questions.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -19,6 +22,7 @@ const { version } = require('../package.json') as { version: string }
 export function createApp(
   uploadStore?: UploadStore,
   status?: Parameters<typeof statusRoutes>[0],
+  questions?: QuestionManager,
 ) {
   const app = new Hono()
 
@@ -30,6 +34,7 @@ export function createApp(
     app.route('/', projectFileRoutes(uploadStore.database))
     app.route('/', searchRoutes(uploadStore.database))
   }
+  if (questions) app.route('/', questionRoutes(questions))
 
   return app
 }
@@ -47,13 +52,18 @@ export function startServer(
   const dataDir = process.env.FORGE_DATA_DIR ?? 'data'
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
+  const questions = new ServerQuestionManager({ db, bus })
   return serve({
-    fetch: createApp(uploadStore, {
-      db,
-      bus,
-      version: process.env.FORGE_VERSION ?? version,
-      dataDir,
-    }).fetch,
+    fetch: createApp(
+      uploadStore,
+      {
+        db,
+        bus,
+        version: process.env.FORGE_VERSION ?? version,
+        dataDir,
+      },
+      questions,
+    ).fetch,
     port,
   })
 }
