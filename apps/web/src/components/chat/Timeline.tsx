@@ -98,7 +98,26 @@ function RenderItem({
   if (item.kind === 'subagent') return <SubagentCard child={item.child} />
   if (item.kind === 'epic-triage') return <EpicTriageCard card={item.card} />
   if (item.kind === 'attachment') return <AttachmentItem item={item} />
-  return <div className="chat-system">{item.text}</div>
+  if (item.kind === 'system') return <SystemItem item={item} />
+  return null
+}
+
+function SystemItem({
+  item,
+}: {
+  item: Extract<ChatRenderItem, { kind: 'system' }>
+}) {
+  return (
+    <div className="chat-system">
+      <span>{item.text}</span>
+      {item.code && (
+        <details className="chat-system-details">
+          <summary>Show process details</summary>
+          <pre>{item.code}</pre>
+        </details>
+      )}
+    </div>
+  )
 }
 
 function AttachmentItem({
