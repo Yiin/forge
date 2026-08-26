@@ -19,13 +19,17 @@
     "react-dom": "^19.1.0",
     "react-pdf": "^9.2.1",
     "sonner": "^2.0.3",
+    "streamdown": "^2.6.0",
     "vaul": "^1.1.2",
+    "virtua": "^0.50.5",
     "vite": "^6.3.5",
     "yet-another-react-lightbox": "^3.21.7",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.1.0",
-    "@types/react-dom": "^19.1.0"
+    "@types/react-dom": "^19.1.0",
+    "jsdom": "^30.0.1"
   }
 }
