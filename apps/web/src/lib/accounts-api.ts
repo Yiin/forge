@@ -4,6 +4,7 @@ import {
   type HarnessAccountSnapshot,
 } from '@forge/protocol/accounts'
 import { harnessHealthResponseSchema } from '@forge/protocol/status'
+import { formatAccountDisplayName } from './harness-accounts-logic.js'
 
 export type { HarnessAccountSnapshot }
 
@@ -53,6 +54,7 @@ export type Account = {
   enabled: boolean
   authStatus: 'authenticated' | 'unauthenticated' | 'unknown'
   email: string | null
+  identity?: HarnessAccount['identity']
   cooldownUntil: number | null
   cooldownReason: string | null
   lastUsedAt: number | null
@@ -88,12 +90,17 @@ export class AccountsApi {
     )
     const checkedAt = new Date().toISOString()
     return health.flatMap((entry) =>
-      entry.accounts.map((account) =>
+      entry.accounts.map((account, index) =>
         harnessAccountSnapshotSchema.parse({
           accountId: account.id,
           harnessKind: account.kind,
           harnessKey: entry.key,
-          displayName: account.label,
+          displayName: formatAccountDisplayName({
+            kindLabel: entry.name,
+            ordinal: index + 1,
+            label: account.label,
+            identity: account.identity,
+          }),
           enabled: entry.enabled,
           installed: entry.enabled,
           version: 'unknown',
@@ -106,6 +113,9 @@ export class AccountsApi {
                 : 'warning',
           auth: {
             status: account.authenticated ? 'authenticated' : 'unauthenticated',
+            email: account.identity?.email,
+            label: account.identity?.label,
+            type: account.identity?.type,
           },
           checkedAt,
           limit: account.cooldown
@@ -136,7 +146,11 @@ export class AccountsApi {
     )
     const index = new Map<
       string,
-      { authenticated: boolean; cooldown: AccountLimit | null }
+      {
+        authenticated: boolean
+        cooldown: AccountLimit | null
+        identity: HarnessAccount['identity']
+      }
     >()
     for (const entry of health)
       for (const account of entry.accounts)
@@ -155,6 +169,7 @@ export class AccountsApi {
                 detail: account.cooldown.detail,
               }
             : null,
+          identity: account.identity,
         })
     return index
   }
@@ -166,13 +181,22 @@ export class AccountsApi {
     ])
     return rows.map((row) => {
       const info = health.get(row.id)
+      const ordinal =
+        rows
+          .filter((item) => item.harnessKey === row.harnessKey)
+          .findIndex((item) => item.id === row.id) + 1
       return {
         id: row.id,
         harness: row.harnessKey,
         harnessKey: row.harnessKey,
         kind: row.kind,
         homePath: row.homePath,
-        label: row.label,
+        label: formatAccountDisplayName({
+          kindLabel: row.kind[0]!.toUpperCase() + row.kind.slice(1),
+          ordinal,
+          label: row.label,
+          identity: info?.identity,
+        }),
         storageDir: row.homePath,
         enabled: row.disabledAt === null,
         authStatus: info
@@ -180,7 +204,8 @@ export class AccountsApi {
             ? 'authenticated'
             : 'unauthenticated'
           : 'unknown',
-        email: null,
+        email: info?.identity?.email ?? null,
+        identity: info?.identity ?? null,
         cooldownUntil: info?.cooldown?.resetsAt
           ? Date.parse(info.cooldown.resetsAt)
           : null,

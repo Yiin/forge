@@ -4,6 +4,7 @@ import type { ConfigState } from '../config.js'
 import { clearExpiredLimits } from '../accounts/limits.js'
 import { accountAuthenticated, HarnessAccountStore } from '../accounts/store.js'
 import { clearExpiredUsage, readUsage } from '../accounts/usage.js'
+import { readAccountIdentity } from '../accounts/identity.js'
 import type { SessionManager } from '../sessions/manager.js'
 
 type Db = { prepare(sql: string): any; exec(sql: string): unknown }
@@ -28,6 +29,24 @@ export function createHarnessHealthReader(options: {
           protocol: config.protocol,
           enabled: config.enabled,
           accounts: accounts.list(key).map((account) => {
+            if (
+              account.identity === null &&
+              (accountAuthenticated(account.kind, account.homePath) ||
+                accounts.identityCheckedAt(account.id) === null)
+            )
+              accounts.saveIdentity(
+                account.id,
+                readAccountIdentity(account.kind, account.homePath),
+              )
+            else if (
+              accounts.identityCheckedAt(account.id) !== null &&
+              now - accounts.identityCheckedAt(account.id)! >= 10 * 60 * 1000
+            )
+              accounts.saveIdentity(
+                account.id,
+                readAccountIdentity(account.kind, account.homePath),
+              )
+            const current = accounts.get(account.id) ?? account
             const cooldown = options.db
               .prepare(
                 `SELECT kind, detected_at, resets_at, resets_at_estimated, detail
@@ -49,15 +68,13 @@ export function createHarnessHealthReader(options: {
             )
             return {
               id: account.id,
-              label: account.label,
-              kind: account.kind,
-              homePath: account.homePath,
-              order: account.orderIndex,
-              disabled: account.disabledAt !== null,
-              authenticated: accountAuthenticated(
-                account.kind,
-                account.homePath,
-              ),
+              label: current.label,
+              kind: current.kind,
+              homePath: current.homePath,
+              order: current.orderIndex,
+              disabled: current.disabledAt !== null,
+              authenticated: current.identity?.status === 'authenticated',
+              identity: current.identity,
               cooldown: cooldown
                 ? {
                     kind: cooldown.kind,

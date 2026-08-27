@@ -85,7 +85,7 @@ describe('harness health', () => {
     expect(body[0].accounts[0]).toMatchObject({
       kind: 'claude',
       homePath: homes.claude,
-      authenticated: true,
+      authenticated: false,
       cooldown: { kind: 'usage-limit' },
     })
     expect(body[1].accounts[0]).toMatchObject({

@@ -28,6 +28,21 @@ export const harnessAccountHealthSchema = z.object({
   order: z.number().int(),
   disabled: z.boolean(),
   authenticated: z.boolean(),
+  identity: z
+    .object({
+      status: z.enum(['authenticated', 'unauthenticated', 'unknown']),
+      email: z.string().optional(),
+      displayName: z.string().optional(),
+      plan: z.string().optional(),
+      accountUuid: z.string().optional(),
+      userId: z.string().optional(),
+      providers: z.array(z.string()).optional(),
+      label: z.string().optional(),
+      type: z.string().optional(),
+      expiresAt: z.number().optional(),
+    })
+    .nullable()
+    .optional(),
   cooldown: harnessCooldownSchema.nullable(),
   usage: z.array(accountUsageWindow).optional(),
   tierLabel: z.string().optional(),

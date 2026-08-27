@@ -47,7 +47,7 @@ function fixture(body: string) {
     () => script,
   )
   resources.push({ db, root, script })
-  return { login, account, events }
+  return { login, account, accounts, events }
 }
 async function waitFor(login: LoginManager, id: string, status: string) {
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -74,6 +74,26 @@ describe('LoginManager', () => {
     expect(statuses[0]).toBe('idle')
     expect(statuses).toContain('running')
     expect(statuses.at(-1)).toBe('succeeded')
+  })
+
+  it('captures identity and names an auto-labelled account after login', async () => {
+    const { login, account, accounts } = fixture('exit 0')
+    writeFileSync(
+      join(account.homePath, '.claude.json'),
+      JSON.stringify({ oauthAccount: { emailAddress: 'person@example.com' } }),
+    )
+    writeFileSync(
+      join(account.homePath, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: { accessToken: 'test-token', subscriptionType: 'max' },
+      }),
+    )
+    const id = login.start(account.id)
+    await waitFor(login, id, 'succeeded')
+    expect(accounts.get(account.id)).toMatchObject({
+      label: 'Claude 1 - person@example.com',
+      identity: { email: 'person@example.com', plan: 'max' },
+    })
   })
 
   it('reports non-zero exits and forwards responses without persistence', async () => {

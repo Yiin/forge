@@ -143,6 +143,37 @@ describe('HarnessAccountStore', () => {
     expect(statSync(homePath).isDirectory()).toBe(true)
   })
 
+  it('persists identity and keeps it when a patch omits identity', async () => {
+    const { db } = fixture()
+    const store = new HarnessAccountStore(db)
+    const account = store.create({
+      harnessKey: 'claude',
+      label: 'Work',
+      kind: 'claude',
+    })
+    store.saveIdentity(account.id, {
+      status: 'authenticated',
+      email: 'person@example.com',
+      plan: 'max',
+    })
+    const app = harnessAccountRoutes(db)
+    const response = await app.request(`/api/harness-accounts/${account.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ label: 'Office' }),
+    })
+    expect(await response.json()).toMatchObject({
+      label: 'Office',
+      identity: { email: 'person@example.com' },
+    })
+    const rejected = await app.request(`/api/harness-accounts/${account.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identity: { status: 'unknown', extra: true } }),
+    })
+    expect(rejected.status).toBe(400)
+  })
+
   it('clears credentials on logout, and optionally wipes the whole home', async () => {
     const { db } = fixture()
     const app = harnessAccountRoutes(db)

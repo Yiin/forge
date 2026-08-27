@@ -1,5 +1,20 @@
 import { z } from 'zod'
 
+export const accountIdentitySchema = z
+  .object({
+    status: z.enum(['authenticated', 'unauthenticated', 'unknown']),
+    email: z.string().optional(),
+    displayName: z.string().optional(),
+    plan: z.string().optional(),
+    accountUuid: z.string().optional(),
+    userId: z.string().optional(),
+    providers: z.array(z.string()).optional(),
+    label: z.string().optional(),
+    type: z.string().optional(),
+    expiresAt: z.number().optional(),
+  })
+  .strict()
+
 export const harnessAccountSchema = z.object({
   id: z.string().min(1),
   harnessKey: z.string().min(1),
@@ -10,6 +25,7 @@ export const harnessAccountSchema = z.object({
   disabledAt: z.number().int().nullable(),
   createdAt: z.number().int(),
   lastUsedAt: z.number().int().nullable(),
+  identity: accountIdentitySchema.nullable().optional(),
 })
 
 export const createHarnessAccountSchema = z.object({
@@ -17,6 +33,7 @@ export const createHarnessAccountSchema = z.object({
   label: z.string().trim().min(1),
   kind: z.string().trim().min(1),
   orderIndex: z.number().int().optional(),
+  identity: accountIdentitySchema.nullable().optional(),
 })
 
 export const patchHarnessAccountSchema = z
@@ -24,6 +41,7 @@ export const patchHarnessAccountSchema = z
     label: z.string().trim().min(1).optional(),
     orderIndex: z.number().int().optional(),
     disabled: z.boolean().optional(),
+    identity: accountIdentitySchema.nullable().optional(),
   })
   .strict()
 

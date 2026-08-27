@@ -1,4 +1,5 @@
 import type { HarnessConfig } from '@forge/protocol/config'
+import type { HarnessAccount } from '@forge/protocol/accounts'
 
 export const HARNESS_KINDS = [
   'claude',
@@ -9,6 +10,16 @@ export const HARNESS_KINDS = [
   'pi',
 ] as const
 export type HarnessKind = (typeof HARNESS_KINDS)[number]
+
+export function formatAccountDisplayName(input: {
+  kindLabel: string
+  ordinal: number
+  label: string
+  identity?: HarnessAccount['identity']
+}) {
+  const value = input.identity?.email ?? input.identity?.label
+  return value ? `${input.kindLabel} ${input.ordinal} - ${value}` : input.label
+}
 
 /**
  * Maps a harness config entry to the account kind that owns its credential

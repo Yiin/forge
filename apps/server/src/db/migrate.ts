@@ -42,7 +42,22 @@ export function migrate(sqlite: SqliteLike) {
         // Existing databases predate the migration ledger. Apply the newest
         // idempotent migration before recording the legacy baseline.
         const newest = files.at(-1)
-        if (newest) sqlite.exec(readFileSync(dir + newest, 'utf8'))
+        if (newest) {
+          try {
+            sqlite.exec(readFileSync(dir + newest, 'utf8'))
+          } catch (error) {
+            // A pre-ledger database may already contain the newest columns.
+            // The legacy path executes that migration once before recording
+            // the baseline, so treat those duplicate ALTERs as applied.
+            const hasIdentity = sqlite
+              .prepare(
+                "SELECT 1 FROM pragma_table_info('harness_accounts') WHERE name = 'identity'",
+              )
+              .get()
+            if (!hasIdentity || !String(error).includes('duplicate column'))
+              throw error
+          }
+        }
         const insert = sqlite.prepare(
           'INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)',
         )
