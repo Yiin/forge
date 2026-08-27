@@ -108,6 +108,18 @@ describe('web AccountsApi against the real server routes', () => {
     const patched = await api.updateAccount(first.id, { label: 'Renamed' })
     expect(patched.label).toBe('Renamed')
 
+    const configured = await api.updateAccount(first.id, {
+      config: { provider: 'ignored', model: 'ignored', thinking: 'high' },
+    })
+    expect(configured.config).toEqual({
+      provider: 'ignored',
+      model: 'ignored',
+      thinking: 'high',
+    })
+    expect(
+      (await api.updateAccount(first.id, { label: 'Still configured' })).config,
+    ).toEqual(configured.config)
+
     await api.reorderAccounts([second.id, first.id])
     const reordered = await api.listAccounts()
     expect(reordered.map((account) => account.id)).toEqual([

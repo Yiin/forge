@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   existsSync,
   mkdtempSync,
+  readFileSync,
   statSync,
   rmSync,
   writeFileSync,
@@ -17,7 +18,12 @@ import {
   createSession,
 } from '../db/queries.js'
 import { harnessAccountRoutes } from '../http/harnessAccounts.js'
-import { HarnessAccountStore, accountEnv } from './store.js'
+import {
+  HarnessAccountStore,
+  accountConfigOverlay,
+  accountEnv,
+  deriveAccountHarness,
+} from './store.js'
 
 const resources: Array<{ db: DatabaseSync; root: string }> = []
 afterEach(() => {
@@ -67,6 +73,130 @@ describe('HarnessAccountStore', () => {
       PI_CODING_AGENT_SESSION_DIR: '/tmp/account/sessions',
     })
     expect(accountEnv('unknown', home)).toEqual({})
+  })
+
+  it('derives per-account provider and effort settings without changing isolation', () => {
+    const home = '/tmp/account'
+    expect(
+      deriveAccountHarness(
+        {
+          name: 'Grok',
+          command: 'grok',
+          args: ['agent', 'stdio'],
+          env: { BASE: '1' },
+          protocol: 'acp',
+          enabled: true,
+        },
+        {
+          kind: 'grok',
+          homePath: home,
+          config: { model: 'grok-4.6', thinking: 'high' },
+        },
+      ),
+    ).toMatchObject({
+      args: ['agent', '--model', 'grok-4.6', '--effort', 'high', 'stdio'],
+      env: { BASE: '1', GROK_HOME: home },
+    })
+    const opencode = accountConfigOverlay('opencode', home, {
+      provider: 'anthropic',
+      model: 'claude-sonnet',
+      thinking: 'medium',
+    })
+    expect(JSON.parse(opencode.env.OPENCODE_CONFIG_CONTENT)).toEqual({
+      model: 'anthropic/claude-sonnet',
+      provider: {
+        anthropic: {
+          models: {
+            'claude-sonnet': { options: { reasoningEffort: 'medium' } },
+          },
+        },
+      },
+    })
+    expect(
+      deriveAccountHarness(
+        {
+          name: 'Claude',
+          command: 'claude',
+          args: ['stdio'],
+          env: { CLAUDE_CONFIG_DIR: '/wrong' },
+          protocol: 'acp',
+          enabled: true,
+        },
+        {
+          kind: 'claude',
+          homePath: home,
+          config: { provider: 'ignored', model: 'ignored' },
+        },
+      ).env.CLAUDE_CONFIG_DIR,
+    ).toBe(home)
+  })
+
+  it('preserves unrelated pi settings while applying account defaults', () => {
+    const { db } = fixture()
+    const store = new HarnessAccountStore(db)
+    const account = store.create({
+      harnessKey: 'pi',
+      label: 'Pi',
+      kind: 'pi',
+      config: { provider: 'llama-cpp', model: 'gemma', thinking: 'medium' },
+    })
+    writeFileSync(
+      join(account.homePath, 'settings.json'),
+      JSON.stringify({ quietStartup: true }),
+    )
+    const derived = deriveAccountHarness(
+      {
+        name: 'Pi',
+        command: 'pi-acp',
+        args: ['stdio'],
+        env: {},
+        protocol: 'acp',
+        enabled: true,
+      },
+      account,
+    )
+    expect(derived.args).toEqual([
+      '--provider',
+      'llama-cpp',
+      '--model',
+      'gemma',
+      '--thinking',
+      'medium',
+      'stdio',
+    ])
+    expect(
+      JSON.parse(readFileSync(join(account.homePath, 'settings.json'), 'utf8')),
+    ).toEqual({
+      quietStartup: true,
+      defaultProvider: 'llama-cpp',
+      defaultModel: 'gemma',
+      defaultThinkingLevel: 'medium',
+    })
+  })
+
+  it('keeps empty and ignored configs unchanged', () => {
+    const home = '/tmp/account'
+    const entry = {
+      name: 'Claude',
+      command: 'claude',
+      args: ['stdio'],
+      env: {},
+      protocol: 'acp' as const,
+      enabled: true,
+    }
+    expect(
+      deriveAccountHarness(entry, {
+        kind: 'claude',
+        homePath: home,
+        config: null,
+      }),
+    ).toEqual({
+      ...entry,
+      env: { CLAUDE_CONFIG_DIR: home },
+    })
+    expect(
+      accountConfigOverlay('codex', home, { provider: 'ignored' }),
+    ).toEqual({ env: {}, args: [] })
   })
 
   it('persists account ids on sessions and epic iterations', () => {

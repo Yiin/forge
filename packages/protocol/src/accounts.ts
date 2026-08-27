@@ -15,6 +15,16 @@ export const accountIdentitySchema = z
   })
   .strict()
 
+export const harnessAccountConfigSchema = z
+  .object({
+    provider: z.string().optional(),
+    model: z.string().optional(),
+    thinking: z
+      .enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+      .optional(),
+  })
+  .strict()
+
 export const harnessAccountSchema = z.object({
   id: z.string().min(1),
   harnessKey: z.string().min(1),
@@ -26,6 +36,7 @@ export const harnessAccountSchema = z.object({
   createdAt: z.number().int(),
   lastUsedAt: z.number().int().nullable(),
   identity: accountIdentitySchema.nullable().optional(),
+  config: harnessAccountConfigSchema.nullable().optional(),
 })
 
 export const createHarnessAccountSchema = z.object({
@@ -34,6 +45,7 @@ export const createHarnessAccountSchema = z.object({
   kind: z.string().trim().min(1),
   orderIndex: z.number().int().optional(),
   identity: accountIdentitySchema.nullable().optional(),
+  config: harnessAccountConfigSchema.nullable().optional(),
 })
 
 export const patchHarnessAccountSchema = z
@@ -42,6 +54,7 @@ export const patchHarnessAccountSchema = z
     orderIndex: z.number().int().optional(),
     disabled: z.boolean().optional(),
     identity: accountIdentitySchema.nullable().optional(),
+    config: harnessAccountConfigSchema.nullable().optional(),
   })
   .strict()
 

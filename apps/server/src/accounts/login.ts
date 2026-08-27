@@ -119,17 +119,27 @@ export class LoginManager {
     this.runs.set(loginId, run)
     this.publish(loginId, run.state)
     try {
-      run.pty = spawn(command, argsFor(account.kind, input), {
-        name: 'xterm-256color',
-        cols: 100,
-        rows: 30,
-        cwd: process.cwd(),
-        env: {
-          ...process.env,
-          ...entry.env,
-          ...accountEnv(account.kind, account.homePath),
-        } as Record<string, string>,
-      })
+      run.pty = spawn(
+        command,
+        argsFor(account.kind, {
+          ...input,
+          provider:
+            account.kind === 'opencode'
+              ? account.config?.provider
+              : (account.config?.provider ?? input?.provider),
+        }),
+        {
+          name: 'xterm-256color',
+          cols: 100,
+          rows: 30,
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            ...entry.env,
+            ...accountEnv(account.kind, account.homePath),
+          } as Record<string, string>,
+        },
+      )
     } catch (error) {
       this.finish(
         loginId,

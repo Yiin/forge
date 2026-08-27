@@ -2,6 +2,7 @@ import {
   harnessAccountSnapshotSchema,
   type HarnessAccount,
   type HarnessAccountSnapshot,
+  type PatchHarnessAccount,
 } from '@forge/protocol/accounts'
 import { harnessHealthResponseSchema } from '@forge/protocol/status'
 import { formatAccountDisplayName } from './harness-accounts-logic.js'
@@ -219,10 +220,7 @@ export class AccountsApi {
     return this.post<HarnessAccount>('/api/harness-accounts', input)
   }
 
-  updateAccount(
-    id: string,
-    input: { label?: string; orderIndex?: number; disabled?: boolean },
-  ) {
+  updateAccount(id: string, input: PatchHarnessAccount) {
     return this.patch<HarnessAccount>(
       `/api/harness-accounts/${encodeURIComponent(id)}`,
       input,

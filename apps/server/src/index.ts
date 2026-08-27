@@ -51,7 +51,7 @@ import {
 } from './config.js'
 import { ptyHarness } from './pty/harness.js'
 import { acpHarness } from './acp/harness.js'
-import { HarnessAccountStore, accountEnv } from './accounts/store.js'
+import { HarnessAccountStore, deriveAccountHarness } from './accounts/store.js'
 import { clearExpiredLimits } from './accounts/limits.js'
 import { LoginManager } from './accounts/login.js'
 import { unsupportedUsageProbe, UsagePoller } from './accounts/usagePoller.js'
@@ -255,12 +255,7 @@ export function startServer(
     const account = accountId ? accountStore.get(accountId) : undefined
     if (account && account.harnessKey !== key)
       throw new Error('Account does not belong to harness')
-    const derived = account
-      ? {
-          ...entry,
-          env: { ...entry.env, ...accountEnv(account.kind, account.homePath) },
-        }
-      : entry
+    const derived = account ? deriveAccountHarness(entry, account) : entry
     if (derived?.protocol === 'pty') return ptyHarness(derived)
     if (derived?.protocol === 'acp')
       return acpHarness(derived, { db, bus, questions, accountId })
