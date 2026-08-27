@@ -3,7 +3,8 @@ import { Hono } from 'hono'
 import { createRequire } from 'node:module'
 import { createNodeWebSocket } from '@hono/node-ws'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { dirname, extname, resolve } from 'node:path'
+import { mkdirSync } from 'node:fs'
+import { dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { UploadStore } from './uploads/store.js'
@@ -160,9 +161,10 @@ export function startServer(
   const { DatabaseSync } = require('node:sqlite') as {
     DatabaseSync: new (path: string) => DatabaseSync
   }
-  const db = new DatabaseSync(process.env.FORGE_DB ?? ':memory:')
+  const dataDir = resolve(process.env.FORGE_DATA_DIR ?? 'data')
+  mkdirSync(dataDir, { recursive: true })
+  const db = new DatabaseSync(process.env.FORGE_DB ?? join(dataDir, 'forge.db'))
   migrate(db)
-  const dataDir = process.env.FORGE_DATA_DIR ?? 'data'
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
   const questions = new ServerQuestionManager({ db, bus })
