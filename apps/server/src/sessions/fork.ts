@@ -16,6 +16,7 @@ type Row = {
   harness: string
   cwd: string
   title: string
+  account_id: string | null
 }
 
 function textFor(row: { type: string; content: string }) {
@@ -87,6 +88,7 @@ export function createFork(
     contextMethod: 'synthetic',
     contextConfidence: 'reduced',
     retention: input.retention,
+    accountId: parent.account_id,
   })
   const rows = db
     .prepare(

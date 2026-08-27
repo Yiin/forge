@@ -45,7 +45,7 @@ import {
 } from './config.js'
 import { ptyHarness } from './pty/harness.js'
 import { acpHarness } from './acp/harness.js'
-import { HarnessAccountStore } from './accounts/store.js'
+import { HarnessAccountStore, accountEnv } from './accounts/store.js'
 import { LoginManager } from './accounts/login.js'
 
 const require = createRequire(import.meta.url)
@@ -222,17 +222,28 @@ export function startServer(
     }
   }
   const configState: ConfigState = { current: config, path: configPath }
-  const factory: HarnessFactory = (key) => {
+  const accountStore = new HarnessAccountStore(db)
+  const factory: HarnessFactory = (key, accountId) => {
     const entry = configState.current.harness[key]
-    if (entry?.protocol === 'pty') return ptyHarness(entry)
-    if (entry?.protocol === 'acp')
-      return acpHarness(entry, { db, bus, questions })
+    if (!entry) throw new Error(`Harness ${key} is not configured`)
+    const account = accountId ? accountStore.get(accountId) : undefined
+    if (account && account.harnessKey !== key)
+      throw new Error('Account does not belong to harness')
+    const derived = account
+      ? {
+          ...entry,
+          env: { ...entry.env, ...accountEnv(account.kind, account.homePath) },
+        }
+      : entry
+    if (derived?.protocol === 'pty') return ptyHarness(derived)
+    if (derived?.protocol === 'acp')
+      return acpHarness(derived, { db, bus, questions })
     throw new Error(`Harness ${key} is not configured`)
   }
   const manager = new SessionManager(db, bus, factory)
   const runner = new EpicRunner(db, createEpicSessionAdapter(manager), bus)
   const loginManager = new LoginManager(
-    new HarnessAccountStore(db),
+    accountStore,
     bus,
     (key) => configState.current.harness[key],
   )

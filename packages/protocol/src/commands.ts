@@ -16,12 +16,14 @@ export const createSession = z.object({
   title: z.string().optional(),
   kind: z.enum(['chat', 'subagent', 'epic_worker']).default('chat'),
   parentSessionId: id.nullable().optional(),
+  accountId: id.nullable().optional(),
 })
 export const prompt = z.object({
   sessionId: id,
   text: z.string().min(1),
   attachmentIds: z.array(id).optional(),
   harness: z.string().min(1).optional(),
+  accountId: id.nullable().optional(),
 })
 export const promoteDraft = z.object({
   draftId: id,
@@ -29,6 +31,7 @@ export const promoteDraft = z.object({
   harness: z.string().min(1),
   text: z.string().min(1),
   attachmentIds: z.array(id).optional(),
+  accountId: id.nullable().optional(),
 })
 export const interrupt = z.object({ sessionId: id })
 export const fork = z.object({

@@ -44,4 +44,7 @@ export type HarnessProcess = {
   ) => Promise<{ handle: HarnessHandle; proven: boolean }>
 }
 
-export type HarnessFactory = (harness: string) => HarnessProcess
+export type HarnessFactory = (
+  harness: string,
+  accountId?: string | null,
+) => HarnessProcess

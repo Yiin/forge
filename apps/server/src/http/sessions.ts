@@ -80,6 +80,7 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
         c.req.header('Idempotency-Key'),
         value.data.attachmentIds,
         value.data.harness,
+        value.data.accountId,
       )
       return c.json({ ok: true })
     } catch (error) {

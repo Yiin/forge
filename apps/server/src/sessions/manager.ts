@@ -12,6 +12,7 @@ export type SessionRow = {
   id: string
   project_id: string
   harness: string
+  account_id: string | null
   cwd: string
   provider_session_id: string | null
   status: string
@@ -61,13 +62,41 @@ export class SessionManager {
     parentSessionId?: string | null
     retention?: 'permanent' | 'discardable'
     epicRunId?: string | null
+    accountId?: string | null
   }) {
+    const accountId = this.resolveAccount(input.harness, input.accountId)
     return createSession(this.db, {
       ...input,
+      accountId,
       title: input.title?.trim() || 'New session',
       retention: input.retention,
       epicRunId: input.epicRunId,
     })
+  }
+
+  private resolveAccount(harness: string, accountId?: string | null) {
+    if (accountId) {
+      const row = this.db
+        .prepare(
+          'SELECT id FROM harness_accounts WHERE id = ? AND harness_key = ? AND disabled_at IS NULL',
+        )
+        .get(accountId, harness) as { id: string } | undefined
+      if (!row) throw new Error('Account not found for harness')
+      return row.id
+    }
+    const row = this.db
+      .prepare(
+        'SELECT id FROM harness_accounts WHERE harness_key = ? AND disabled_at IS NULL ORDER BY order_index, created_at LIMIT 1',
+      )
+      .get(harness) as { id: string } | undefined
+    return row?.id ?? null
+  }
+
+  private markAccountUsed(accountId: string | null) {
+    if (accountId)
+      this.db
+        .prepare('UPDATE harness_accounts SET last_used_at = ? WHERE id = ?')
+        .run(Date.now(), accountId)
   }
 
   list(projectId?: string, parentSessionId?: string) {
@@ -134,7 +163,8 @@ export class SessionManager {
       )
         this.status(row.id, 'errored')
     }
-    const handle = await this.factory(row.harness).spawn(
+    this.markAccountUsed(row.account_id)
+    const handle = await this.factory(row.harness, row.account_id).spawn(
       {
         id: row.id,
         cwd: row.cwd,
@@ -150,7 +180,7 @@ export class SessionManager {
   }
 
   canLoad(row: SessionRow) {
-    const process = this.factory(row.harness)
+    const process = this.factory(row.harness, row.account_id)
     return Boolean(
       process.capabilities?.loadSession &&
       process.loadSession &&
@@ -159,7 +189,7 @@ export class SessionManager {
   }
 
   async recover(row: SessionRow, recap?: string) {
-    const process = this.factory(row.harness)
+    const process = this.factory(row.harness, row.account_id)
     const onItem = (item: HarnessItem) => {
       appendMessage(this.db, {
         sessionId: row.id,
@@ -216,6 +246,7 @@ export class SessionManager {
       })
     }
     this.handles.set(row.id, result.handle)
+    this.markAccountUsed(row.account_id)
     if (recap) await result.handle.prompt(recap)
     await result.handle.prompt('The server restarted mid-turn. Continue.')
   }
@@ -263,6 +294,7 @@ export class SessionManager {
     requestId?: string,
     attachmentIds?: string[],
     harness?: string,
+    accountId?: string | null,
   ) {
     let row = getSession(this.db, id) as SessionRow | undefined
     if (!row) throw new Error('Session not found')
@@ -274,7 +306,14 @@ export class SessionManager {
         .get(id, requestId)
       if (seen) return
     }
-    if (harness && harness !== row.harness) {
+    const nextHarness = harness ?? row.harness
+    const nextAccount =
+      accountId === undefined
+        ? harness && harness !== row.harness
+          ? this.resolveAccount(nextHarness)
+          : row.account_id
+        : this.resolveAccount(nextHarness, accountId)
+    if (nextHarness !== row.harness || nextAccount !== row.account_id) {
       if (this.turns.has(id))
         throw new Error('Cannot change harness during a turn')
       const oldHandle = this.handles.get(id)
@@ -287,10 +326,15 @@ export class SessionManager {
       this.reapTimers.delete(id)
       this.db
         .prepare(
-          "UPDATE sessions SET harness = ?, provider_session_id = NULL, status = 'idle', last_activity_at = ? WHERE id = ?",
+          "UPDATE sessions SET harness = ?, account_id = ?, provider_session_id = NULL, status = 'idle', last_activity_at = ? WHERE id = ?",
         )
-        .run(harness, Date.now(), id)
-      row = { ...row, harness, provider_session_id: null }
+        .run(nextHarness, nextAccount, Date.now(), id)
+      row = {
+        ...row,
+        harness: nextHarness,
+        account_id: nextAccount,
+        provider_session_id: null,
+      }
     }
     const handle = this.handles.get(id) ?? (await this.spawn(row))
     const turnId = makeId('turn_')
@@ -393,6 +437,7 @@ export class SessionManager {
       harness: string
       text: string
       attachmentIds?: string[]
+      accountId?: string | null
     },
     requestId: string,
     uploads?: UploadStore,
@@ -410,6 +455,7 @@ export class SessionManager {
     const session = this.create({
       projectId: input.projectId,
       harness: input.harness,
+      accountId: input.accountId,
       cwd: project.path,
       title: 'New session',
     })
@@ -437,6 +483,7 @@ export class SessionManager {
         requestId,
         input.attachmentIds,
         input.harness,
+        input.accountId,
       )
       return { sessionId: session.id }
     } catch (error) {
