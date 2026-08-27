@@ -30,3 +30,55 @@ export const patchHarnessAccountSchema = z
 export type HarnessAccount = z.infer<typeof harnessAccountSchema>
 export type CreateHarnessAccount = z.infer<typeof createHarnessAccountSchema>
 export type PatchHarnessAccount = z.infer<typeof patchHarnessAccountSchema>
+
+export const harnessAccountSnapshotSchema = z.object({
+  accountId: z.string(),
+  harnessKind: z.string(),
+  displayName: z.string().optional(),
+  enabled: z.boolean(),
+  installed: z.boolean(),
+  version: z.string(),
+  status: z.enum(['ready', 'warning', 'error', 'disabled']),
+  auth: z.object({
+    status: z.enum(['authenticated', 'unauthenticated', 'unknown']),
+    email: z.string().optional(),
+    label: z.string().optional(),
+    type: z.string().optional(),
+  }),
+  checkedAt: z.string(),
+  message: z.string().optional(),
+  availability: z.enum(['available', 'unavailable']).optional(),
+  unavailableReason: z.string().optional(),
+  usage: z
+    .array(
+      z.object({
+        window: z.string(),
+        utilization: z.number(),
+        resetsAt: z.string().nullable(),
+        source: z.string(),
+        observedAt: z.string(),
+      }),
+    )
+    .optional(),
+  limit: z
+    .object({
+      kind: z.enum([
+        'usage-limit',
+        'spend-limit',
+        'credits-depleted',
+        'auth',
+        'unavailable',
+      ]),
+      detectedAt: z.string(),
+      resetsAt: z.string().nullable(),
+      resetsAtEstimated: z.boolean(),
+      source: z.string(),
+      detail: z.string().nullable(),
+    })
+    .nullable()
+    .optional(),
+})
+
+export type HarnessAccountSnapshot = z.infer<
+  typeof harnessAccountSnapshotSchema
+>

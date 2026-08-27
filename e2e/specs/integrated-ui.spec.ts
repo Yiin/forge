@@ -31,6 +31,10 @@ async function wireIsolatedServer(
       await route.fulfill({ json: {} })
       return
     }
+    if (requestUrl.pathname === '/api/accounts') {
+      await route.fulfill({ json: [] })
+      return
+    }
     if (requestUrl.pathname === '/api/epics') {
       await route.fulfill({ json: [] })
       return
