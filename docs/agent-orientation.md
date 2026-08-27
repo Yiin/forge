@@ -35,11 +35,14 @@ defines product limits. `docs/architecture.md` is historical.
 
 ## Server runtime facts
 
-- Production boot uses `defaultConfig()` only. `loadConfig` is never called, and `harnessRoutes` gets no `configPath`, so harness and settings edits are memory-only today (`apps/server/src/index.ts:118-121,169`).
-- `FORGE_DB` defaults to `:memory:` (`apps/server/src/index.ts:163`). The deployed service never sets it, so all SQLite state dies on restart.
-- The production `HarnessFactory` stubs ACP harnesses (`apps/server/src/index.ts:170-182`). `spawnAcpClient` runs only from `POST /api/harnesses/test`.
-- `EpicRunner` is never constructed; `/api/epics` routes do not mount in the real server.
-- The e2e server (`FORGE_E2E=1`, `apps/server/src/index.ts:262`) is a separate Bun fake. e2e does not cover `startServer` code.
+- Boot loads `~/.forge/forge.toml` (override `FORGE_CONFIG`) via `loadConfigSync`. The file REPLACES the harness map wholesale; new defaults never merge into an existing file, so deployed hosts keep old entries until a reconcile exists.
+- The database defaults to `<dataDir>/forge.db` and migrations are ledgered (re-runnable). The deployed unit sets `FORGE_DATA_DIR=~/.local/share/forge`.
+- ACP sessions run through `acpHarness` (`apps/server/src/acp/harness.ts`); PTY through `pty/harness.ts`. The per-spawn account overlay (env, and later args) is derived in `startServer`'s factory (`apps/server/src/index.ts:243-259`).
+- Accounts: SQLite `harness_accounts` + homes at `~/.forge/accounts/<kind>/<id>` (0700). Login PTY runs the provider CLI (`apps/server/src/accounts/login.ts`), never the harness adapter command.
+- Usage sources that exist: Claude `GET https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer <accessToken from .credentials.json>` and header `anthropic-beta: oauth-2025-04-20` (buckets `five_hour`, `seven_day_oauth_apps`, plus model-scoped `limits[]` incl. Fable). Codex: spawn `codex -s read-only -a untrusted app-server`, JSON-RPC `account/read` + `account/rateLimits/read` with per-account `CODEX_HOME`. Kimi, grok, gemini, pi, and opencode expose no usage API; their limits are reactive only.
+- Isolation env vars: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `KIMI_SHARE_DIR`, `XDG_DATA_HOME`(+`OPENCODE_DB`), `GROK_HOME` (grok), `PI_CODING_AGENT_DIR` (pi).
+- On laptops, `grok`/`opencode`/`pi` are mise shims under `~/.local/share/mise/shims`; a service PATH without it marks them unavailable.
+- The e2e server (`FORGE_E2E=1`) is a separate Bun fake. e2e does not cover `startServer` code; the accounts contract test (`apps/server/test/accounts-contract.test.ts`) covers the real routes.
 
 ## Release and deploy
 
