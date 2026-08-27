@@ -5,38 +5,24 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
-import { AlertCircle, ArrowLeft, Eye, EyeOff, X } from 'lucide-react'
-import { harnessConfigSchema, type HarnessConfig } from '@forge/protocol/config'
+import { AlertCircle, ArrowLeft } from 'lucide-react'
 import { api } from '../lib/api'
 import { useShellStore } from '../stores/shell'
 import { useSettingsStore } from '../stores/settings'
 import { Button } from '@/components/ui/button'
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -46,7 +32,6 @@ import {
 } from '@/components/ui/select'
 import { validateEpicDefaults, type EpicDefaults } from './epic-settings-logic'
 import { openProjectCreation } from '../components/ProjectCreationDialog'
-import { AddHarnessDialog } from '../components/settings/AddHarnessDialog'
 import {
   displayShortcut,
   setShortcutOverrides,
@@ -55,8 +40,6 @@ import {
   shortcutDefinitions,
   type ShortcutId,
 } from '../lib/shortcuts'
-
-type Harness = HarnessConfig
 
 export function ErrorRow({
   children,
@@ -298,136 +281,84 @@ export function GeneralSettings() {
 }
 
 export function HarnessSettings() {
+  /*
   const [draft, setDraft] = useState<Record<string, Harness>>({})
-  const [results, setResults] = useState<Record<string, string>>({})
-  const [saveState, setSaveState] = useState<
-    Record<string, 'loading' | 'dirty' | 'saving' | 'saved' | 'error'>
-  >({})
-  const [saveError, setSaveError] = useState<Record<string, string | null>>({})
-  const [testing, setTesting] = useState<Record<string, boolean>>({})
-  const [revealed, setRevealed] = useState<Record<string, boolean>>({})
-  const [deleteKey, setDeleteKey] = useState<string | null>(null)
-  const [deletePending, setDeletePending] = useState(false)
+  const [snapshots, setSnapshots] = useState<HarnessAccountSnapshot[]>([])
+  const [checkedAt, setCheckedAt] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [mutations, setMutations] = useState<Set<string>>(new Set())
+  const [loginTarget, setLoginTarget] = useState<{ id: string; name: string; start: Awaited<ReturnType<typeof loginStart>> } | null>(null)
+  const [signOutTarget, setSignOutTarget] = useState<{ id: string; name: string; kind: string; home: string | null } | null>(null)
+  const [accountsDir, setAccountsDir] = useState<string | null>(null)
+  const [reorderError, setReorderError] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
-  const saveQueue = useRef<Record<string, Promise<void>>>({})
-  useEffect(() => {
-    void api
-      .listHarnesses()
-      .then((value) => {
-        setDraft(value as Record<string, Harness>)
-        setSaveState(
-          Object.fromEntries(Object.keys(value).map((key) => [key, 'saved'])),
-        )
-      })
-      .catch((error: unknown) => {
-        setSaveError({
-          _page: error instanceof Error ? error.message : String(error),
-        })
-      })
-  }, [])
-  const update = (key: string, patch: Partial<Harness>) => {
-    setDraft((current) => ({
-      ...current,
-      [key]: { ...current[key], ...patch },
-    }))
-    setSaveState((current) => ({ ...current, [key]: 'dirty' }))
-    setSaveError((current) => ({ ...current, [key]: null }))
-  }
-  const saveDraft = (next: Record<string, Harness>, key: string) => {
-    const parsed = Object.fromEntries(
-      Object.entries(next).map(([key, value]) => [
-        key,
-        harnessConfigSchema.safeParse(value),
-      ]),
-    )
-    const invalid = Object.values(parsed).find((result) => !result.success)
-    if (invalid && !invalid.success) {
-      setSaveError((current) => ({
-        ...current,
-        [key]: invalid.error.issues[0]?.message ?? 'Invalid harness',
-      }))
-      setSaveState((current) => ({ ...current, [key]: 'error' }))
-      return
+  const setBusy = (key: string, busy: boolean) => setMutations((current) => { const next = new Set(current); busy ? next.add(key) : next.delete(key); return next })
+  const readStatus = async (initial = false) => {
+    try {
+      const value = await listHarnessStatus()
+      setSnapshots(value)
+      setCheckedAt(value.reduce<string | null>((latest, item) => !latest || item.checkedAt > latest ? item.checkedAt : latest, null))
+      setLoadError(null)
+    } catch (error) {
+      if (initial) setLoadError(error instanceof Error ? error.message : String(error))
+      else toast.error('Could not refresh harness status')
     }
-    const snapshot = Object.fromEntries(
-      Object.entries(parsed).map(([key, result]) => [
-        key,
-        result.success ? result.data : undefined,
-      ]),
-    ) as Record<string, Harness>
-    setSaveState((current) => ({ ...current, [key]: 'saving' }))
-    setSaveError((current) => ({ ...current, [key]: null }))
-    saveQueue.current[key] = (saveQueue.current[key] ?? Promise.resolve())
-      .then(() => api.saveHarnesses(snapshot))
-      .then(() => setSaveState((current) => ({ ...current, [key]: 'saved' })))
-      .catch((error: unknown) => {
-        setSaveError((current) => ({
-          ...current,
-          [key]: error instanceof Error ? error.message : String(error),
-        }))
-        setSaveState((current) => ({ ...current, [key]: 'error' }))
-      })
   }
-  const save = (key: string) => {
-    if (draft[key]) saveDraft(draft, key)
+  const load = async () => {
+    setLoading(true)
+    try {
+      const [config] = await Promise.all([api.listHarnesses(), readStatus(true)])
+      setDraft(config as Record<string, Harness>)
+      setAccountsDir(await import('../lib/accounts-api').then(({ getAccountsDir }) => getAccountsDir()).catch(() => null))
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : String(error))
+    } finally { setLoading(false) }
   }
-  const validationError = (value: Harness) => {
-    const parsed = harnessConfigSchema.safeParse(value)
-    return parsed.success
-      ? null
-      : (parsed.error.issues[0]?.message ??
-          'Enter a valid harness configuration.')
+  useEffect(() => { void load(); const timer = window.setInterval(() => void readStatus(), 30_000); return () => window.clearInterval(timer) }, [])
+  const save = async (next: Record<string, Harness>, errorText = 'Could not save harness settings') => {
+    const parsed = Object.fromEntries(Object.entries(next).map(([key, value]) => [key, harnessConfigSchema.parse(value)]))
+    try { await api.saveHarnesses(parsed); setDraft(parsed); return true } catch (error) { toast.error(errorText, { description: error instanceof Error ? error.message : String(error) }); return false }
   }
-  const formatResult = (result: unknown) => {
-    if (!result || typeof result !== 'object') return String(result)
-    const value = result as {
-      ok?: boolean
-      agentName?: string | null
-      stderrTail?: string
-      capabilities?: Record<string, unknown>
-    }
-    if (!value.ok) return `Failed\n${value.stderrTail ?? 'Unknown error'}`
-    const capabilities = Object.entries(value.capabilities ?? {})
-      .map(([key, enabled]) => `${key}: ${enabled ? 'yes' : 'no'}`)
-      .join('\n')
-    return [
-      'Connection succeeded',
-      value.agentName ? `Agent: ${value.agentName}` : null,
-      capabilities ? `Capabilities:\n${capabilities}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n')
+  const update = (id: string, next: Harness) => { const all = { ...draft, [id]: next }; setDraft(all); void save(all) }
+  const snapshotFor = (id: string) => snapshots.find((item) => item.accountId === id)
+  const displayName = (id: string, value: Harness) => value.name.trim() || snapshotFor(id)?.displayName || id
+  const addManagedAccount = async (kind: HarnessKind) => {
+    if (mutations.has(`add:${kind}`) || [...mutations].some((key) => key.startsWith('add:'))) return
+    setBusy(`add:${kind}`, true)
+    const occupied = new Set([...Object.keys(draft), ...snapshots.map((item) => item.accountId)])
+    const identity = nextAccountIdentity(kind, occupied)
+    const name = `${kind[0].toUpperCase()}${kind.slice(1)} ${identity.displayName}`
+    try {
+      const allocated = await allocateAccountHome({ harnessKind: kind, accountId: identity.accountId })
+      const base = draft[kind]
+      if (!base) throw new Error('This harness has no managed credential home.')
+      const withHome = withAccountHome({ ...base, harnessKind: kind }, allocated.homePath) as Harness
+      const current = await api.listHarnesses() as Record<string, Harness>
+      if (current[identity.accountId]) throw new Error('Another account used this ID. Try Add account again.')
+      const next = { ...current, [identity.accountId]: { ...withHome, name } }
+      if (!await save(next, `Could not save ${name}`)) return
+      try { const start = await loginStart({ accountId: identity.accountId }); setLoginTarget({ id: identity.accountId, name, start }) }
+      catch { toast.error(`${name} was added, but sign-in did not start`, { description: 'Open the account card and try Sign in again.' }) }
+      await readStatus()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`Could not add ${name}`, { description: message.includes('managed credential') ? message : 'The server could not allocate an account home.' })
+    } finally { setBusy(`add:${kind}`, false) }
   }
-  const add = (key: string, harness: Harness) => {
-    const next = { ...draft, [key]: harness }
-    setDraft(next)
-    setSaveState((current) => ({ ...current, [key]: 'saving' }))
-    setSaveError((current) => ({ ...current, [key]: null }))
-    void api
-      .saveHarnesses(next)
-      .then(() => setSaveState((current) => ({ ...current, [key]: 'saved' })))
-      .catch((error: unknown) => {
-        setSaveError((current) => ({
-          ...current,
-          [key]: error instanceof Error ? error.message : String(error),
-        }))
-        setSaveState((current) => ({ ...current, [key]: 'error' }))
-      })
+  const reorder = async (kind: string, rows: Array<{ accountId: string; harness: Harness }>, id: string, direction: 'up' | 'down') => {
+    const nextRows = moveAccount(rows, id, direction); if (!nextRows) return
+    const previous = draft; const patch = buildAccountReorderPatch({ config: { harness: draft }, groupOrder: nextRows })
+    setDraft(patch.harness); setReorderError(null)
+    if (!await save(patch.harness)) { setDraft(previous); setReorderError('Could not save account order.'); toast.error('Could not save account order') }
   }
-  const confirmDelete = async () => {
-    if (!deleteKey) return
-    const next = { ...draft }
-    delete next[deleteKey]
-    await api.saveHarnesses(next)
-    setDraft((current) => {
-      const next = { ...current }
-      delete next[deleteKey]
-      return next
-    })
-    setSaveState((current) => ({ ...current, [deleteKey]: 'saved' }))
-    setDeleteKey(null)
-  }
-  return (
+  const signIn = async (id: string, name: string) => { setBusy(`sign-in:${id}`, true); try { setLoginTarget({ id, name, start: await loginStart({ accountId: id }) }) } catch { toast.error(`Could not sign in to ${name}`) } finally { setBusy(`sign-in:${id}`, false) } }
+  const signOut = (id: string, name: string, kind: string, home: string | null) => setSignOutTarget({ id, name, kind, home })
+  const lastChecked = checkedAt ? (Number.isNaN(Date.parse(checkedAt)) ? 'unavailable' : `${Math.max(0, Math.floor((Date.now() - Date.parse(checkedAt)) / 1000))}s ago`) : null
+  const groups = [...new Set([...Object.keys(draft).map((id) => id === 'claude' || id === 'codex' || id === 'kimi' || id === 'opencode' ? id : id.split('_account_')[0]), ...snapshots.map((item) => item.harnessKind)])]
+  const rowsFor = (kind: string) => orderAccountRows([...new Set([kind, ...Object.keys(draft).filter((id) => id !== kind && (snapshots.find((item) => item.accountId === id)?.harnessKind === kind || id.startsWith(`${kind}_`))), ...snapshots.filter((item) => item.harnessKind === kind).map((item) => item.accountId)])].map((id) => ({ accountId: id, harness: draft[id] ?? draft[kind], availability: snapshotFor(id)?.availability ?? 'available' })).filter((row): row is { accountId: string; harness: Harness; availability: string } => Boolean(row.harness)), Object.keys(draft))
+  return null
     <SettingsPage
       title="Harnesses"
       subtitle="A harness is a command and its runtime settings."
@@ -751,6 +682,7 @@ export function HarnessSettings() {
       </AlertDialog>
     </SettingsPage>
   )
+*/
 }
 
 export function ProjectSettings() {

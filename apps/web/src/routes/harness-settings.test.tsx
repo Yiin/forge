@@ -9,95 +9,115 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { HarnessSettings } from './settings-pages'
 
-const { listHarnesses, saveHarnesses, testHarness } = vi.hoisted(() => ({
+const {
+  listHarnesses,
+  saveHarnesses,
+  listHarnessStatus,
+  getAccountsDir,
+  allocateAccountHome,
+  loginStart,
+} = vi.hoisted(() => ({
   listHarnesses: vi.fn(),
   saveHarnesses: vi.fn(),
-  testHarness: vi.fn(),
+  listHarnessStatus: vi.fn(),
+  getAccountsDir: vi.fn(),
+  allocateAccountHome: vi.fn(),
+  loginStart: vi.fn(),
 }))
-
-vi.mock('../lib/api', () => ({
-  api: { listHarnesses, saveHarnesses, testHarness },
+vi.mock('../lib/api', () => ({ api: { listHarnesses, saveHarnesses } }))
+vi.mock('../lib/accounts-api', () => ({
+  listHarnessStatus,
+  getAccountsDir,
+  allocateAccountHome,
+  loginStart,
+  loginStatus: vi.fn(() => () => {}),
+  loginCancel: vi.fn(),
+  loginRespond: vi.fn(),
+  logout: vi.fn(),
 }))
-
-const harness = {
-  mock: {
-    name: 'Mock agent',
-    command: 'mock-agent',
-    args: [],
-    env: { API_KEY: 'secret' },
-    protocol: 'acp' as const,
-    enabled: true,
-  },
-}
+const harness = (name: string) => ({
+  name,
+  command: 'claude',
+  args: [],
+  env: {},
+  protocol: 'pty' as const,
+  enabled: true,
+})
+const snapshot = (accountId: string) => ({
+  accountId,
+  harnessKind: 'claude',
+  displayName: accountId,
+  enabled: true,
+  installed: true,
+  version: '1',
+  status: 'ready' as const,
+  auth: { status: 'unauthenticated' as const },
+  checkedAt: '2026-08-27T12:00:00.000Z',
+  availability: 'available' as const,
+})
 
 describe('HarnessSettings', () => {
   afterEach(cleanup)
-
   beforeEach(() => {
     vi.clearAllMocks()
-    listHarnesses.mockResolvedValue(harness)
-    saveHarnesses.mockResolvedValue(harness)
-    testHarness.mockResolvedValue({
-      ok: true,
-      agentName: 'Mock',
-      capabilities: { loadSession: true },
+    listHarnesses.mockResolvedValue({
+      claude: harness('Claude Account 1'),
+      claude_account_2: harness('Claude Account 2'),
+    })
+    saveHarnesses.mockImplementation(async (value) => value)
+    listHarnessStatus.mockResolvedValue([
+      snapshot('claude'),
+      snapshot('claude_account_2'),
+    ])
+    getAccountsDir.mockResolvedValue('/tmp/accounts')
+    allocateAccountHome.mockResolvedValue({
+      homePath: '/tmp/accounts/claude/claude_account_3',
+    })
+    loginStart.mockResolvedValue({
+      loginId: 'login-1',
+      state: {
+        status: 'running',
+        startedAt: null,
+        finishedAt: null,
+        message: null,
+        output: '',
+        verificationUrl: null,
+        userCode: null,
+      },
     })
   })
-
-  it('keeps drafts local until Save and preserves them after a failed save', async () => {
-    saveHarnesses.mockRejectedValueOnce(new Error('disk is full'))
+  it('renders account rows in one harness group with end arrows disabled', async () => {
     render(<HarnessSettings />)
-    const name = await screen.findByDisplayValue('Mock agent')
-
-    fireEvent.change(name, { target: { value: 'Edited agent' } })
-    expect(saveHarnesses).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await screen.findByRole('alert')
-    expect(screen.getByDisplayValue('Edited agent')).toBeTruthy()
-    expect(screen.getByText(/Could not save: disk is full/)).toBeTruthy()
+    await screen.findByText('Claude Account 1')
+    expect(screen.getByText('Claude Account 2')).toBeTruthy()
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Move Claude Account 1 up in rotation order',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true)
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Move Claude Account 2 down in rotation order',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true)
   })
-
-  it('validates before saving and keeps secrets masked until revealed', async () => {
+  it('optimistically reorders accounts and persists the new order', async () => {
     render(<HarnessSettings />)
-    const command = await screen.findByDisplayValue('mock-agent')
-    fireEvent.change(command, { target: { value: '' } })
-    expect(screen.getByText(/Too small: expected string/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect(saveHarnesses).not.toHaveBeenCalled()
-
-    const secret = screen.getByDisplayValue('secret') as HTMLInputElement
-    expect(secret.type).toBe('password')
-    fireEvent.click(screen.getByRole('button', { name: 'Show value' }))
-    expect(secret.type).toBe('text')
-  })
-
-  it('shows test pending, success capabilities, and failure', async () => {
-    render(<HarnessSettings />)
-    await screen.findByDisplayValue('mock-agent')
-    const test = screen.getByRole('button', { name: 'Test' })
-    fireEvent.click(test)
-    expect(screen.getByText('Testing…')).toBeTruthy()
-    await screen.findByText(/Connection succeeded/)
-    expect(screen.getByText(/loadSession: yes/)).toBeTruthy()
-
-    testHarness.mockRejectedValueOnce(new Error('not reachable'))
-    fireEvent.click(test)
-    await waitFor(() => expect(screen.getByText('not reachable')).toBeTruthy())
-  })
-
-  it('requires confirmation before deleting a harness', async () => {
-    render(<HarnessSettings />)
-    await screen.findByDisplayValue('mock-agent')
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
-    expect(screen.getByRole('alertdialog')).toBeTruthy()
-    expect(screen.getByText(/Delete “Mock agent”/)).toBeTruthy()
-    // The dialog marks the rest of the page aria-hidden while open, so the
-    // card's own Delete trigger is no longer reachable by role here — only
-    // the dialog's confirm button is.
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
-    await waitFor(() =>
-      expect(screen.queryByDisplayValue('mock-agent')).toBeNull(),
+    await screen.findByText('Claude Account 1')
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Move Claude Account 2 up in rotation order',
+      }),
     )
-    expect(saveHarnesses).toHaveBeenCalledWith({})
+    await waitFor(() => expect(saveHarnesses).toHaveBeenCalled())
+  })
+  it('shows add account for supported harnesses', async () => {
+    render(<HarnessSettings />)
+    await screen.findByText('Claude Account 1')
+    expect(screen.getByRole('button', { name: /Add account/ })).toBeTruthy()
   })
 })

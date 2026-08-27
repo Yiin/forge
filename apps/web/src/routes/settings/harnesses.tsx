@@ -1,1 +1,1 @@
-export { HarnessSettings } from '../settings-pages-implementation'
+export { HarnessSettings } from './HarnessSettings'
