@@ -46,7 +46,7 @@ class MockAgent implements acp.Agent {
   async initialize(
     params: acp.InitializeRequest,
   ): Promise<acp.InitializeResponse> {
-    logRequest('initialize', params)
+    logRequest('initialize', { ...params, processCwd: process.cwd() })
     const result: acp.InitializeResponse = {
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: {
@@ -124,6 +124,15 @@ class MockAgent implements acp.Agent {
     } finally {
       this.active.delete(params.sessionId)
     }
+  }
+
+  async extMethod(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    logRequest(method, params)
+    if (method === 'session/fork') return { sessionId }
+    return {}
   }
 
   async cancel(params: acp.CancelNotification): Promise<void> {

@@ -26,6 +26,8 @@ export class AgentProcessDiedError extends Error {
 }
 
 export type ClientHandlers = {
+  /** Working directory for the ACP child process itself. */
+  cwd?: string
   onSessionUpdate?: (
     notification: acp.SessionNotification,
   ) => void | Promise<void>
@@ -170,6 +172,7 @@ export async function spawnAcpClient(
   const process: any = bun
     ? bun.spawn([entry.command, ...entry.args], {
         env: { ...globalThis.process.env, ...entry.env },
+        cwd: handlers.cwd,
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
@@ -177,6 +180,7 @@ export async function spawnAcpClient(
     : (() => {
         const child = spawnNode(entry.command, entry.args, {
           env: { ...globalThis.process.env, ...entry.env },
+          cwd: handlers.cwd,
           stdio: ['pipe', 'pipe', 'pipe'],
         })
         return {

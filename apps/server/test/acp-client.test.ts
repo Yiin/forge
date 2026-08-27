@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { mkdtemp, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   spawnAcpClient,
   AgentProcessDiedError,
@@ -47,6 +50,25 @@ describe('ACP client', () => {
     await new Promise((resolve) => setTimeout(resolve, 350))
     expect(updates.join('')).toContain('hello')
     expect(updates.join('')).toContain('unsolicited')
+  })
+
+  it('forwards the working directory to the child process', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'forge-acp-cwd-'))
+    const requestLogPath = join(cwd, 'requests.jsonl')
+    const client = await spawnAcpClient(
+      entry({ REQUEST_LOG_PATH: requestLogPath }),
+      { cwd },
+    )
+    clients.push(client)
+    await client.newSession(cwd)
+
+    const lines = (await readFile(requestLogPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { params?: { processCwd?: string } })
+    expect(
+      lines.find((line) => line.params?.processCwd)?.params?.processCwd,
+    ).toBe(cwd)
   })
 
   it('rejects unadvertised load sessions and overlapping prompts', async () => {

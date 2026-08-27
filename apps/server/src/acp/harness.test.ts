@@ -1,4 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
+import { mkdtemp, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { migrate } from '../db/migrate.js'
 import { createProject, createSession } from '../db/queries.js'
@@ -52,5 +55,66 @@ describe('ACP harness adapter', () => {
         .prepare('SELECT provider_session_id FROM sessions WHERE id = ?')
         .get(session.id),
     ).toMatchObject({ provider_session_id: 'forge-mock-session' })
+  })
+
+  it('uses the session cwd for every ACP lifecycle operation', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const cwd = await mkdtemp(join(tmpdir(), 'forge-acp-harness-'))
+    const requestLogPath = join(cwd, 'requests.jsonl')
+    const command = spawnMockAgent({
+      ADVERTISE_SESSION_FORK: '1',
+      REQUEST_LOG_PATH: requestLogPath,
+    })
+    const process = acpHarness(
+      {
+        name: 'mock',
+        command: command.command,
+        args: command.args,
+        env: command.env as Record<string, string>,
+        protocol: 'acp',
+        enabled: true,
+      },
+      { db, bus: new EventBus(), questions: new QuestionManager({ db }) },
+    )
+    const makeSession = (providerSessionId?: string) => {
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'Chat',
+        cwd,
+      })
+      return { id: session.id, cwd, harness: 'mock', providerSessionId }
+    }
+    const onItem = () => undefined
+    const onExit = () => undefined
+
+    const spawned = await process.spawn(makeSession(), onItem, onExit)
+    handles.push(spawned)
+    const created = await process.newSession!(makeSession(), onItem, onExit)
+    handles.push(created.handle)
+    const loaded = await process.loadSession!(
+      makeSession('forge-mock-session'),
+      onItem,
+      onExit,
+    )
+    handles.push(loaded.handle)
+    const forked = await process.fork!(
+      makeSession('forge-mock-session'),
+      onItem,
+      onExit,
+    )
+    handles.push(forked.handle)
+
+    const lines = (await readFile(requestLogPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { params?: { processCwd?: string } })
+    expect(
+      lines
+        .filter((line) => line.params?.processCwd)
+        .map((line) => line.params?.processCwd),
+    ).toEqual([cwd, cwd, cwd, cwd])
   })
 })

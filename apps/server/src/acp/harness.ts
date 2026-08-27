@@ -111,6 +111,7 @@ export function acpHarness(
     })
     const client = await spawnAcpClient(entry, {
       ...services,
+      cwd: session.cwd,
       onSessionUpdate: (notification) => normalizer.handle(notification),
       capabilityStore: {
         db: deps.db,

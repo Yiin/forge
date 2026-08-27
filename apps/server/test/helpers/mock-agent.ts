@@ -18,6 +18,7 @@ export function spawnMockAgent(flags: Record<string, string | undefined> = {}) {
           value,
         ]),
       ),
+      FORGE_MOCK_REQUEST_LOG_PATH: flags.REQUEST_LOG_PATH,
     },
   }
 }
