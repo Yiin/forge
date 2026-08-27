@@ -103,6 +103,7 @@ describe('default harness configuration', () => {
       'codex-acp',
       'kimi',
       'gemini',
+      'grok',
     ])
     expect(
       reconcileConfig(

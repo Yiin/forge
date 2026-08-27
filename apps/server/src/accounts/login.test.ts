@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { migrate } from '../db/migrate.js'
 import { EventBus } from '../events/bus.js'
 import { HarnessAccountStore } from './store.js'
-import { LoginManager } from './login.js'
+import { argsFor, cliFor, LoginManager } from './login.js'
 
 const resources: Array<{ db: DatabaseSync; root: string; script: string }> = []
 afterEach(() => {
@@ -58,6 +58,11 @@ async function waitFor(login: LoginManager, id: string, status: string) {
 }
 
 describe('LoginManager', () => {
+  it('uses Grok device-code login', () => {
+    expect(cliFor('grok')).toBe('grok')
+    expect(argsFor('grok')).toEqual(['login', '--device-auth'])
+  })
+
   it('publishes idle, running, and succeeded with clean bounded output and extracted values', async () => {
     const { login, account, events } = fixture(
       'printf "\\033[31mhttps://example.test/device\\033[0m code: AB12-XY\\n"',

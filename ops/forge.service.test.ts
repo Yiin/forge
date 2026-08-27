@@ -13,11 +13,12 @@ describe('forge service environment', () => {
       .find((line) => line.startsWith('Environment=PATH='))
 
     expect(pathLine).toBe(
-      'Environment=PATH=%h/.vite-plus/js_runtime/node/24.20.0/bin:%h/.local/bin:%h/.vite-plus/bin:%h/.kimi-code/bin:%h/.opencode/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin',
+      'Environment=PATH=%h/.vite-plus/js_runtime/node/24.20.0/bin:%h/.local/bin:%h/.local/share/mise/shims:%h/.vite-plus/bin:%h/.kimi-code/bin:%h/.opencode/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin',
     )
 
     for (const directory of [
       '%h/.local/bin',
+      '%h/.local/share/mise/shims',
       '%h/.vite-plus/bin',
       '%h/.kimi-code/bin',
       '%h/.opencode/bin',

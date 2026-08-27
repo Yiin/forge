@@ -38,6 +38,15 @@ describe('account limits', () => {
     expect(detectProviderError('ordinary task text')).toBeNull()
   })
 
+  it('classifies Grok usage and credit limit messages', () => {
+    expect(detectProviderError('You hit your weekly limit.')).toMatchObject({
+      category: 'usage-limit',
+    })
+    expect(detectProviderError('You may run out of credits')).toMatchObject({
+      category: 'spend-limit',
+    })
+  })
+
   it('normalizes seconds and milliseconds and rejects invalid values', () => {
     expect(normalizeEpochResetsAt(1787207826)).toBe(1787207826000)
     expect(normalizeEpochResetsAt(1787207826000)).toBe(1787207826000)

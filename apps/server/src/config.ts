@@ -92,6 +92,7 @@ export function defaultConfig(
     ]),
     kimi: defaultEntry('Kimi', 'kimi', ['acp']),
     gemini: defaultEntry('Gemini', 'gemini', ['--experimental-acp']),
+    grok: defaultEntry('Grok', 'grok', ['agent', 'stdio']),
   }
   if (dev)
     harness.mock = {

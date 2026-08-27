@@ -30,6 +30,12 @@ export type UsageProbe = (ctx: {
   db: Db
 }) => Promise<UsageProbeResult>
 
+export const unsupportedUsageProbe: UsageProbe = async () => ({
+  status: 'unsupported',
+  windows: [],
+  detail: 'No usage data is available for this provider',
+})
+
 export type UsagePollerOptions = {
   db: Db
   probes?: Map<string, UsageProbe>

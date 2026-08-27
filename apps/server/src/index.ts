@@ -54,7 +54,7 @@ import { acpHarness } from './acp/harness.js'
 import { HarnessAccountStore, accountEnv } from './accounts/store.js'
 import { clearExpiredLimits } from './accounts/limits.js'
 import { LoginManager } from './accounts/login.js'
-import { UsagePoller } from './accounts/usagePoller.js'
+import { unsupportedUsageProbe, UsagePoller } from './accounts/usagePoller.js'
 import { codexUsageProbe } from './accounts/probes/codex.js'
 import { claudeUsageProbe } from './accounts/probes/claude.js'
 
@@ -278,6 +278,7 @@ export function startServer(
     probes: new Map([
       ['claude', claudeUsageProbe],
       ['codex', codexUsageProbe],
+      ['grok', unsupportedUsageProbe],
     ]),
   })
   const harnessHealth = createHarnessHealthReader({ db, configState, manager })

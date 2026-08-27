@@ -6,6 +6,14 @@ export type ProviderErrorMatch = { category: LimitCategory; excerpt: string }
 
 const patterns: ReadonlyArray<{ category: LimitCategory; pattern: RegExp }> = [
   { category: 'spend-limit', pattern: /monthly spend limit/i },
+  {
+    category: 'spend-limit',
+    pattern: /(?:run out of credits|purchase credits)/i,
+  },
+  {
+    category: 'usage-limit',
+    pattern: /hit your (?:weekly|free usage) limit/i,
+  },
   { category: 'usage-limit', pattern: /usage limit/i },
   { category: 'auth', pattern: /invalid api key/i },
   { category: 'auth', pattern: /authentication/i },

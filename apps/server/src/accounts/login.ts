@@ -32,7 +32,7 @@ const emptyState = (): LoginState => ({
   verificationUrl: null,
   userCode: null,
 })
-const cliFor = (kind: string) =>
+export const cliFor = (kind: string) =>
   kind === 'claude'
     ? 'claude'
     : kind === 'codex'
@@ -41,9 +41,11 @@ const cliFor = (kind: string) =>
         ? 'kimi'
         : kind === 'opencode'
           ? 'opencode'
-          : null
+          : kind === 'grok'
+            ? 'grok'
+            : null
 
-const argsFor = (
+export const argsFor = (
   kind: string,
   input?: { provider?: string; method?: string },
 ) =>
@@ -53,12 +55,14 @@ const argsFor = (
       ? ['login', '--device-auth']
       : kind === 'kimi'
         ? ['login']
-        : [
-            'auth',
-            'login',
-            ...(input?.provider ? ['--provider', input.provider] : []),
-            ...(input?.method ? ['--method', input.method] : []),
-          ]
+        : kind === 'grok'
+          ? ['login', '--device-auth']
+          : [
+              'auth',
+              'login',
+              ...(input?.provider ? ['--provider', input.provider] : []),
+              ...(input?.method ? ['--method', input.method] : []),
+            ]
 
 function tail(value: string) {
   return value.length <= 10_000 ? value : value.slice(-10_000)
