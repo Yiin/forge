@@ -1,10 +1,16 @@
-import { existsSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
-import { parse } from 'smol-toml'
+import { parse, stringify } from 'smol-toml'
 import { z } from 'zod'
 import {
   forgeConfigSchema,
@@ -32,6 +38,7 @@ type CapabilityRow = {
 
 export type ConfigProvenance = Record<string, 'input' | 'repo' | 'default'>
 export type ResolvedRunConfig = EpicRunConfig & { provenance: ConfigProvenance }
+export type ConfigState = { current: ForgeConfig; path?: string }
 
 export const defaultRolePolicy = {
   roles: {
@@ -167,17 +174,21 @@ export function getHarness(
   return value
 }
 
-export async function loadConfig(path?: string): Promise<ForgeConfig> {
+export function loadConfigSync(path?: string): ForgeConfig {
   const file = resolve(
     path ?? process.env.FORGE_CONFIG ?? resolve(homedir(), '.forge/forge.toml'),
   )
   let source: string
   try {
-    source = await readFile(file, 'utf8')
+    source = readFileSync(file, 'utf8')
   } catch (error) {
-    throw new Error(
+    const wrapped = new Error(
       `${file}: unable to read config: ${error instanceof Error ? error.message : String(error)}`,
     )
+    ;(wrapped as NodeJS.ErrnoException).code = (
+      error as NodeJS.ErrnoException
+    ).code
+    throw wrapped
   }
   let parsed: unknown
   try {
@@ -208,7 +219,10 @@ export async function loadConfig(path?: string): Promise<ForgeConfig> {
         formatIssue(file, key, field, issue?.message ?? 'invalid value'),
       )
     }
-    result[key] = checked.data
+    result[key] = {
+      ...checked.data,
+      enabled: commandAvailable(checked.data.command),
+    }
   }
   const checked = forgeConfigSchema.safeParse({
     dataDir: document.dataDir ?? resolve(dirname(file), 'data'),
@@ -222,6 +236,43 @@ export async function loadConfig(path?: string): Promise<ForgeConfig> {
     )
   activeConfig = checked.data
   return activeConfig
+}
+
+export async function loadConfig(path?: string): Promise<ForgeConfig> {
+  return loadConfigSync(path)
+}
+
+const configBody = (config: ForgeConfig) => ({
+  dataDir: config.dataDir,
+  port: config.port,
+  harness: config.harness,
+  settings: config.settings,
+})
+
+export async function saveConfig(path: string, config: ForgeConfig) {
+  const file = resolve(path)
+  const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`
+  await mkdir(dirname(file), { recursive: true })
+  await writeFile(temporary, stringify(stripUndefined(configBody(config))))
+  await rename(temporary, file)
+}
+
+export function saveConfigSync(path: string, config: ForgeConfig) {
+  const file = resolve(path)
+  const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(temporary, stringify(stripUndefined(configBody(config))))
+  renameSync(temporary, file)
+}
+
+function stripUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripUndefined)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .map(([key, entry]) => [key, stripUndefined(entry)]),
+  )
 }
 
 export function upsertHarnessCapabilities(

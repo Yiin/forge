@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -48,6 +48,56 @@ describe('health endpoint', () => {
       if (previousDb === undefined) delete process.env.FORGE_DB
       else process.env.FORGE_DB = previousDb
       await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('loads harnesses from FORGE_CONFIG during boot', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-config-boot-'))
+    const configPath = join(dir, 'forge.toml')
+    const dataDir = join(dir, 'data')
+    await writeFile(
+      configPath,
+      `dataDir = "${dataDir}"\n[harness.custom]\nname = "Custom"\ncommand = "sh"\nargs = ["-i"]\nenv = {}\nprotocol = "pty"\nenabled = true\n`,
+    )
+    const previousConfig = process.env.FORGE_CONFIG
+    process.env.FORGE_CONFIG = configPath
+    try {
+      const server = startServer(0)
+      servers.push(server)
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('no address')
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/harnesses`,
+      )
+      expect(Object.keys(await response.json())).toEqual(['custom'])
+    } finally {
+      if (previousConfig === undefined) delete process.env.FORGE_CONFIG
+      else process.env.FORGE_CONFIG = previousConfig
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps malformed config files unchanged and serves defaults', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-config-invalid-'))
+    const configPath = join(dir, 'forge.toml')
+    const source = '[harness.custom]\nname = "broken"\n'
+    await writeFile(configPath, source)
+    const previousConfig = process.env.FORGE_CONFIG
+    process.env.FORGE_CONFIG = configPath
+    try {
+      const server = startServer(0)
+      servers.push(server)
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('no address')
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/harnesses`,
+      )
+      expect(Object.keys(await response.json())).toContain('shell')
+      expect(await readFile(configPath, 'utf8')).toBe(source)
+    } finally {
+      if (previousConfig === undefined) delete process.env.FORGE_CONFIG
+      else process.env.FORGE_CONFIG = previousConfig
+      await rm(dir, { recursive: true, force: true })
     }
   })
 })

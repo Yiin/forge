@@ -5,6 +5,7 @@ import { createNodeWebSocket } from '@hono/node-ws'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { mkdirSync } from 'node:fs'
 import { dirname, extname, join, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { UploadStore } from './uploads/store.js'
@@ -31,7 +32,12 @@ import { epicRoutes } from './http/epics.js'
 import type { EpicRunner } from './epics/runner.js'
 import { recoverSessions } from './sessions/recovery.js'
 import { harnessRoutes } from './http/harnesses.js'
-import { defaultConfig } from './config.js'
+import {
+  defaultConfig,
+  loadConfigSync,
+  saveConfigSync,
+  type ConfigState,
+} from './config.js'
 import { ptyHarness } from './pty/harness.js'
 
 const require = createRequire(import.meta.url)
@@ -99,6 +105,7 @@ export function createApp(
   manager?: SessionManager,
   runner?: EpicRunner,
   webDir?: string,
+  configState?: ConfigState,
 ) {
   const app = new Hono()
 
@@ -116,10 +123,7 @@ export function createApp(
     app.route('/', projectFileRoutes(uploadStore.database))
     app.route('/', fsBrowseRoutes())
     app.route('/', searchRoutes(uploadStore.database))
-    app.route(
-      '/',
-      harnessRoutes({ config: undefined, db: uploadStore.database }),
-    )
+    app.route('/', harnessRoutes({ configState, db: uploadStore.database }))
   }
   if (questions) app.route('/', questionRoutes(questions))
   if (status) app.route('/', workspaceRoutes(status.db, uploadStore))
@@ -168,9 +172,24 @@ export function startServer(
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
   const questions = new ServerQuestionManager({ db, bus })
-  const configuredHarnesses = defaultConfig().harness
+  const configPath = resolve(
+    process.env.FORGE_CONFIG ?? resolve(homedir(), '.forge/forge.toml'),
+  )
+  let config: ReturnType<typeof defaultConfig>
+  try {
+    config = loadConfigSync(configPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      config = defaultConfig()
+      saveConfigSync(configPath, config)
+    } else {
+      console.error(error instanceof Error ? error.message : String(error))
+      config = defaultConfig()
+    }
+  }
+  const configState: ConfigState = { current: config, path: configPath }
   const factory: HarnessFactory = (key) => {
-    const entry = configuredHarnesses[key]
+    const entry = configState.current.harness[key]
     if (entry?.protocol === 'pty') return ptyHarness(entry)
     return {
       spawn: async (_session, _onItem, onExit) => ({
@@ -198,6 +217,7 @@ export function startServer(
     manager,
     undefined,
     productionWebDir(),
+    configState,
   )
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
   app.get('/ws', websocketRoute(upgradeWebSocket, db, bus))

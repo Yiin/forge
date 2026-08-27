@@ -1,12 +1,14 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   getHarness,
   getHarnessCapabilities,
   loadConfig,
+  saveConfig,
   upsertHarnessCapabilities,
+  defaultConfig,
 } from '../src/config.js'
 
 const dirs: string[] = []
@@ -84,5 +86,17 @@ wat = true
       agentName: 'Mock',
       updatedAt: 42,
     })
+  })
+
+  it('creates parent directories and omits undefined optional values when saving', async () => {
+    const dir = `/tmp/forge-config-save-${crypto.randomUUID()}`
+    dirs.push(dir)
+    const file = join(dir, 'nested', 'forge.toml')
+    const config = defaultConfig(true)
+    config.settings.epicDefaults.gateCommand = undefined
+    await saveConfig(file, config)
+    const source = await readFile(file, 'utf8')
+    expect(source).toContain('[harness.shell]')
+    expect(source).not.toContain('gateCommand')
   })
 })
