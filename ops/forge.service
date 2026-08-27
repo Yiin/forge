@@ -8,6 +8,7 @@ Restart=on-failure
 RestartSec=3
 Environment=FORGE_PORT=3900
 Environment=FORGE_DATA_DIR=%h/.local/share/forge
+Environment=PATH=%h/.vite-plus/js_runtime/node/24.20.0/bin:%h/.local/bin:%h/.vite-plus/bin:%h/.kimi-code/bin:%h/.opencode/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
 
 [Install]
 WantedBy=default.target
