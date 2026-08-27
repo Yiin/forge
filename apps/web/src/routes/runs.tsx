@@ -11,28 +11,13 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useSessionsStore } from '../stores/sessions'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Spinner } from '@/components/ui/spinner'
+import {
+  EpicLaunchDialog as ExtractedEpicLaunchDialog,
+} from '../components/epics/EpicLaunchDialog'
+export { EpicLaunchDialog } from '../components/epics/EpicLaunchDialog'
 import {
   Empty,
   EmptyDescription,
@@ -40,7 +25,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
-import { parseEpicOverrides, type LaunchErrors } from './epic-launch-logic'
 
 type Run = {
   id: string
@@ -183,7 +167,7 @@ export function RunsRoute() {
             </p>
           )}
       </section>
-      <EpicLaunchDialog
+      <ExtractedEpicLaunchDialog
         open={launchOpen}
         onOpenChange={setLaunchOpen}
         onStarted={(id) =>
@@ -194,298 +178,6 @@ export function RunsRoute() {
   )
 }
 
-export function EpicLaunchDialog({
-  open,
-  onOpenChange,
-  onStarted,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onStarted: (runId: string) => void
-}) {
-  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>(
-    [],
-  )
-  const [harnesses, setHarnesses] = useState<Record<string, { name?: string }>>(
-    {},
-  )
-  const [projectId, setProjectId] = useState('')
-  const [epicBeadId, setEpicBeadId] = useState('')
-  const [mode, setMode] = useState<'pool' | 'serial' | 'auto'>('pool')
-  const [workerCount, setWorkerCount] = useState('3')
-  const [baseBranch, setBaseBranch] = useState('main')
-  const [overrides, setOverrides] = useState('')
-  const [errors, setErrors] = useState<LaunchErrors>({})
-  const [busy, setBusy] = useState(false)
-  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>(
-    'loading',
-  )
-  const [loadError, setLoadError] = useState('')
-  const loadOptions = () => {
-    setLoadState('loading')
-    setLoadError('')
-    void Promise.all([api.listProjects(), api.listHarnesses()])
-      .then(([projectData, harnessData]) => {
-        const nextProjects = projectData as Array<{ id: string; name: string }>
-        setProjects(nextProjects)
-        setProjectId((current) => current || nextProjects[0]?.id || '')
-        setHarnesses(harnessData as Record<string, { name?: string }>)
-        setLoadState('ready')
-      })
-      .catch((cause) => {
-        setLoadError(
-          cause instanceof Error
-            ? cause.message
-            : 'Could not load launch options.',
-        )
-        setLoadState('error')
-      })
-  }
-  useEffect(() => {
-    if (!open) return
-    loadOptions()
-  }, [open])
-  const fieldError = (field: string) => errors[field]
-  const launch = async (event: React.FormEvent) => {
-    event.preventDefault()
-    const nextErrors: LaunchErrors = {}
-    if (!projectId) nextErrors.projectId = 'Choose a project.'
-    if (!epicBeadId.trim()) nextErrors.epicBeadId = 'Enter an epic id.'
-    const count = Number(workerCount)
-    if (!Number.isInteger(count) || count < 1 || count > 32)
-      nextErrors.workerCount = 'Use a whole number from 1 to 32.'
-    const parsed = parseEpicOverrides(overrides, Object.keys(harnesses))
-    Object.assign(nextErrors, parsed.errors)
-    setErrors(nextErrors)
-    if (Object.keys(nextErrors).length) return
-    setBusy(true)
-    try {
-      const result = (await api.startRun({
-        projectId,
-        epicBeadId: epicBeadId.trim(),
-        mode,
-        workerCount: count,
-        baseBranch: baseBranch.trim() || 'main',
-        config: parsed.value ?? {},
-      })) as { id: string }
-      onOpenChange(false)
-      onStarted(result.id)
-    } catch (cause) {
-      setErrors({
-        submit: cause instanceof Error ? cause.message : String(cause),
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Epic runner
-          </p>
-          <DialogTitle>Launch an epic</DialogTitle>
-          <DialogDescription>
-            Choose the project and epic. Advanced overrides are optional.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => void launch(event)}
-        >
-          {loadState === 'loading' && (
-            <div
-              className="flex items-center gap-2 text-sm text-muted-foreground"
-              role="status"
-            >
-              <Spinner />
-              Loading projects and harnesses…
-            </div>
-          )}
-          {loadState === 'error' && (
-            <div className="flex flex-col gap-2" role="alert">
-              <p className="text-sm text-destructive">{loadError}</p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-fit"
-                onClick={loadOptions}
-              >
-                Retry
-              </Button>
-            </div>
-          )}
-          {loadState === 'ready' && (
-            <>
-              <div className="grid gap-2">
-                <Label htmlFor="launch-project">Project</Label>
-                <Select
-                  value={projectId}
-                  onValueChange={(value) => setProjectId(value)}
-                >
-                  <SelectTrigger
-                    id="launch-project"
-                    aria-invalid={Boolean(fieldError('projectId'))}
-                    aria-describedby={
-                      fieldError('projectId')
-                        ? 'launch-project-error'
-                        : undefined
-                    }
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projects.map((project) => (
-                      <SelectItem key={project.id} value={project.id}>
-                        {project.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {fieldError('projectId') && (
-                  <p
-                    id="launch-project-error"
-                    className="text-sm text-destructive"
-                  >
-                    {fieldError('projectId')}
-                  </p>
-                )}
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="launch-epic-id">Epic id</Label>
-                <Input
-                  id="launch-epic-id"
-                  aria-invalid={Boolean(fieldError('epicBeadId'))}
-                  aria-describedby={
-                    fieldError('epicBeadId') ? 'launch-epic-error' : undefined
-                  }
-                  value={epicBeadId}
-                  onChange={(event) => setEpicBeadId(event.target.value)}
-                  placeholder="forge-3b7"
-                />
-                {fieldError('epicBeadId') && (
-                  <p
-                    id="launch-epic-error"
-                    className="text-sm text-destructive"
-                  >
-                    {fieldError('epicBeadId')}
-                  </p>
-                )}
-              </div>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="grid gap-2">
-                  <Label htmlFor="launch-mode">Mode</Label>
-                  <Select
-                    value={mode}
-                    onValueChange={(value) => {
-                      if (
-                        value === 'pool' ||
-                        value === 'serial' ||
-                        value === 'auto'
-                      ) {
-                        setMode(value)
-                      }
-                    }}
-                  >
-                    <SelectTrigger id="launch-mode">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pool">Pool</SelectItem>
-                      <SelectItem value="serial">Serial</SelectItem>
-                      <SelectItem value="auto">Auto</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="launch-workers">Workers</Label>
-                  <Input
-                    id="launch-workers"
-                    type="number"
-                    aria-invalid={Boolean(fieldError('workerCount'))}
-                    aria-describedby={
-                      fieldError('workerCount')
-                        ? 'launch-workers-error'
-                        : undefined
-                    }
-                    min="1"
-                    max="32"
-                    value={workerCount}
-                    onChange={(event) => setWorkerCount(event.target.value)}
-                  />
-                  {fieldError('workerCount') && (
-                    <p
-                      id="launch-workers-error"
-                      className="text-sm text-destructive"
-                    >
-                      {fieldError('workerCount')}
-                    </p>
-                  )}
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="launch-branch">Base branch</Label>
-                  <Input
-                    id="launch-branch"
-                    value={baseBranch}
-                    onChange={(event) => setBaseBranch(event.target.value)}
-                  />
-                </div>
-              </div>
-              <details className="rounded-lg border px-3 py-2">
-                <summary className="cursor-pointer text-sm font-medium">
-                  Advanced overrides
-                </summary>
-                <div className="mt-3 grid gap-2">
-                  <Label htmlFor="launch-overrides">
-                    .forge/epic-run.json overrides
-                  </Label>
-                  <Textarea
-                    id="launch-overrides"
-                    className="font-mono text-xs"
-                    value={overrides}
-                    onChange={(event) => setOverrides(event.target.value)}
-                    placeholder={'{"workerCount": 2, "mode": "serial"}'}
-                    rows={6}
-                    aria-invalid={Object.keys(errors).some((key) =>
-                      key.startsWith('$.forge/epic-run.json'),
-                    )}
-                  />
-                  {Object.entries(errors)
-                    .filter(([key]) => key.startsWith('$.forge/epic-run.json'))
-                    .map(([key, value]) => (
-                      <p className="text-sm text-destructive" key={key}>
-                        {key}: {value}
-                      </p>
-                    ))}
-                </div>
-              </details>
-              {fieldError('submit') && (
-                <p className="text-sm text-destructive" role="alert">
-                  {fieldError('submit')}
-                </p>
-              )}
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => onOpenChange(false)}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={busy}>
-                  {busy && <Spinner />}
-                  {busy ? 'Launching…' : 'Launch epic'}
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
 function RunCard({ run }: { run: Run }) {
   const projects = useSessionsStore((state) => state.projects)
   const project = projects.find((item) => item.id === run.projectId)
