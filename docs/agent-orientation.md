@@ -12,11 +12,16 @@ defines product limits. `docs/architecture.md` is historical.
 - `apps/web/src/components/ui`: real shadcn/ui components. Do not hand-roll controls; import from `@/components/ui/*`.
 - `apps/web/src/components/AppShell.tsx`: one mounted route outlet and global shortcuts.
 - `apps/web/src/routes.tsx`: route tree, root entry, draft, session, and Settings paths.
-- `apps/server`: Hono HTTP, WebSocket, session promotion, uploads, and Bun tooling.
+- `apps/server`: Hono HTTP, WebSocket, sessions, and uploads. Account logic is in
+  `apps/server/src/accounts/`.
 - `apps/server/drizzle`: raw SQL migrations. `src/db/migrate.ts` replays every file on each boot.
 - `packages/protocol`: Zod wire schemas shared by server, web, and dashboards.
 - `packages/protocol/src/status.ts` is vendored into `packages/forge-client` with a drift check. Change it and run the sync.
 - `e2e`: Playwright flows. Use `.agents/skills/test-forge-app/SKILL.md` for live QA.
+- Account UI: `apps/web/src/components/settings/HarnessAccountCard.tsx`,
+  `apps/web/src/components/settings/AccountLoginDialog.tsx`, and
+  `apps/web/src/lib/harness-accounts-logic.ts`.
+- Account API client: `apps/web/src/lib/accounts-api.ts`.
 - T3 reference: `/home/yiin/Projects/t3code/apps/web/src/components/settings` and draft routes. Keep Forge terms.
 
 ## Check commands from the repo root
@@ -67,6 +72,14 @@ defines product limits. `docs/architecture.md` is historical.
 ## Vocabulary and data contracts
 
 - A harness has command, arguments, environment, and an `acp` or `pty` protocol.
+- A harness kind has one or more accounts. Each has a credential home at
+  `~/.forge/accounts/<harnessKind>/<accountId>`.
+- Child isolation uses one env var per kind: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+  `KIMI_SHARE_DIR`, or `XDG_DATA_HOME`.
+- Rotation follows config key order. Settings renders this order, and arrows rewrite it.
+- A rate limit is a structured `AccountLimit`. `resetsAt: null` means no reset time.
+  Never invent one.
+- Epic fallback tries other accounts in the same harness kind, then the next hop.
 - `seq` is the single global message cursor.
 - Session kinds are `chat`, `subagent`, and `epic_worker`.
 - Change `packages/protocol` schemas and all consumers together.
