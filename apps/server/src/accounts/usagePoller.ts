@@ -24,8 +24,10 @@ export type UsageProbeResult = {
 export type UsageProbe = (ctx: {
   accountId: string
   kind: string
+  harnessKey: string
   homePath: string
   env: Record<string, string>
+  db: Db
 }) => Promise<UsageProbeResult>
 
 export type UsagePollerOptions = {
@@ -142,8 +144,10 @@ export class UsagePoller {
       result = await probe({
         accountId: account.id,
         kind: account.kind,
+        harnessKey: account.harnessKey,
         homePath: account.homePath,
         env: accountEnv(account.kind, account.homePath),
+        db: this.options.db,
       })
     } catch (error) {
       updateUsageStatus(

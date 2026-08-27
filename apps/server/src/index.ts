@@ -55,6 +55,7 @@ import { HarnessAccountStore, accountEnv } from './accounts/store.js'
 import { clearExpiredLimits } from './accounts/limits.js'
 import { LoginManager } from './accounts/login.js'
 import { UsagePoller } from './accounts/usagePoller.js'
+import { codexUsageProbe } from './accounts/probes/codex.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -271,7 +272,10 @@ export function startServer(
     bus,
     (key) => configState.current.harness[key],
   )
-  const usagePoller = new UsagePoller({ db })
+  const usagePoller = new UsagePoller({
+    db,
+    probes: new Map([['codex', codexUsageProbe]]),
+  })
   const harnessHealth = createHarnessHealthReader({ db, configState, manager })
   // Settle persisted turns before exposing the port. Respawn work continues
   // from the settled state without delaying health checks.
