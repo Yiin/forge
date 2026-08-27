@@ -11,6 +11,8 @@ import { SubagentCard } from './SubagentCard'
 import { ActivityStack } from './ActivityStack'
 import { EpicTriageCard } from './EpicTriageCard'
 import { useSessionsStore } from '../../stores/sessions'
+import { cn } from '../../lib/utils'
+import { Button } from '../ui/button'
 
 const EMPTY_MESSAGES: never[] = []
 
@@ -49,10 +51,10 @@ export function Timeline({
     }
   }, [items, targetSeq])
   return (
-    <section className="chat-timeline-shell">
+    <section className="chat-timeline-shell relative mx-auto min-h-0 w-full max-w-[900px] flex-1">
       <div
         ref={scrollRef}
-        className="chat-timeline"
+        className="chat-timeline h-full overflow-auto overscroll-contain px-4 py-5 [-webkit-overflow-scrolling:touch] sm:px-6"
         onScroll={(event) => {
           const node = event.currentTarget
           setAtBottom(
@@ -67,8 +69,10 @@ export function Timeline({
         </Virtualizer>
       </div>
       {!atBottom && (
-        <button
-          className="chat-jump"
+        <Button
+          className="chat-jump absolute bottom-7 left-1/2 -translate-x-1/2 rounded-full shadow-lg"
+          variant="secondary"
+          size="sm"
           onClick={() => {
             scrollRef.current?.scrollTo({
               top: scrollRef.current.scrollHeight,
@@ -77,8 +81,8 @@ export function Timeline({
             setAtBottom(true)
           }}
         >
-          <ChevronDown size={16} /> Jump to latest
-        </button>
+          <ChevronDown className="size-4" /> Jump to latest
+        </Button>
       )}
     </section>
   )
@@ -110,12 +114,22 @@ function SystemItem({
   item: Extract<ChatRenderItem, { kind: 'system' }>
 }) {
   return (
-    <div className="chat-system" role={item.alert ? 'alert' : undefined}>
+    <div
+      className={cn(
+        'chat-system mx-auto mb-3 max-w-[760px] px-2 py-2 text-center text-xs',
+        item.alert ? 'text-destructive' : 'text-muted-foreground',
+      )}
+      role={item.alert ? 'alert' : undefined}
+    >
       <span>{item.text}</span>
       {item.code && (
-        <details className="chat-system-details">
-          <summary>Show process details</summary>
-          <pre>{item.code}</pre>
+        <details className="chat-system-details mt-1 text-left">
+          <summary className="cursor-pointer text-muted-foreground">
+            Show process details
+          </summary>
+          <pre className="mt-1 overflow-auto rounded-lg border border-border bg-card p-2 whitespace-pre-wrap">
+            {item.code}
+          </pre>
         </details>
       )}
     </div>
@@ -142,23 +156,27 @@ function AttachmentItem({
   }, [item.id])
   if (removed)
     return (
-      <span className="chat-attachment">{item.filename} · file removed</span>
+      <span className="chat-attachment mx-auto mb-3 flex w-fit max-w-[760px] items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground">
+        {item.filename} · file removed
+      </span>
     )
   return (
     <a
-      className="chat-attachment"
+      className="chat-attachment mx-auto mb-3 flex w-fit max-w-[760px] items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm text-foreground no-underline hover:bg-accent"
       href={`/api/attachments/${encodeURIComponent(item.id)}`}
       target={item.mime?.startsWith('image/') ? '_blank' : undefined}
       rel="noreferrer"
     >
       {item.mime?.startsWith('image/') ? (
-        <FileImage size={15} />
+        <FileImage className="size-3.5 text-muted-foreground" />
       ) : (
-        <File size={15} />
-      )}{' '}
+        <File className="size-3.5 text-muted-foreground" />
+      )}
       {item.filename}
       {item.sizeBytes !== undefined && (
-        <small>{formatBytes(item.sizeBytes)}</small>
+        <small className="text-muted-foreground">
+          {formatBytes(item.sizeBytes)}
+        </small>
       )}
     </a>
   )

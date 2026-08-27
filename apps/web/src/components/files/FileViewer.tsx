@@ -1,8 +1,24 @@
-import { Download, File as FileIcon, X } from 'lucide-react'
-import { lazy, useEffect, useState } from 'react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  File as FileIcon,
+  X,
+} from 'lucide-react'
+import { lazy, useEffect, useRef, useState } from 'react'
 import { fileViewerKind, languageForFilename } from './fileViewerKind'
-import './file-viewer.css'
 import 'yet-another-react-lightbox/styles.css'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
+import { Kbd } from '@/components/ui/kbd'
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty'
 
 export type FileViewerProps = {
   url: string
@@ -23,23 +39,76 @@ const PdfDocument = lazy(() =>
     return {
       default: function Pdf({ url }: { url: string }) {
         const [pages, setPages] = useState(0)
+        const [page, setPage] = useState(1)
         const [error, setError] = useState<string | null>(null)
+        const scrollRef = useRef<HTMLDivElement | null>(null)
+        const goToPage = (next: number) => {
+          const target = Math.min(Math.max(next, 1), pages)
+          setPage(target)
+          scrollRef.current
+            ?.querySelector(`[data-pdf-page="${target}"]`)
+            ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        }
         return error ? (
           <ViewerError message={error} onRetry={() => setError(null)} />
         ) : (
-          <Document
-            file={url}
-            loading={<p>Loading PDF…</p>}
-            onLoadSuccess={({ numPages }) => setPages(numPages)}
-            onLoadError={() => setError('Could not load PDF')}
-          >
-            <div className="file-viewer-pdf-pages">
-              {Array.from({ length: pages }, (_, index) => (
-                <LazyPdfPage key={index} Page={Page} pageNumber={index + 1} />
-              ))}
-              {pages === 0 && <p>Loading pages…</p>}
-            </div>
-          </Document>
+          <div className="flex h-full flex-col">
+            {pages > 0 && (
+              <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="pointer-coarse:size-11"
+                  disabled={page <= 1}
+                  onClick={() => goToPage(page - 1)}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft size={16} />
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Page {page} of {pages}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="pointer-coarse:size-11"
+                  disabled={page >= pages}
+                  onClick={() => goToPage(page + 1)}
+                  aria-label="Next page"
+                >
+                  <ChevronRight size={16} />
+                </Button>
+                <span className="ml-auto hidden items-center gap-1 text-xs text-muted-foreground sm:flex">
+                  <Kbd>↑</Kbd>
+                  <Kbd>↓</Kbd> to scroll
+                </span>
+              </div>
+            )}
+            <Document
+              file={url}
+              loading={
+                <p className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+                  <Spinner /> Loading PDF…
+                </p>
+              }
+              onLoadSuccess={({ numPages }) => setPages(numPages)}
+              onLoadError={() => setError('Could not load PDF')}
+            >
+              <div
+                ref={scrollRef}
+                className="flex flex-1 flex-col items-center gap-4 overflow-auto p-4"
+              >
+                {Array.from({ length: pages }, (_, index) => (
+                  <LazyPdfPage key={index} Page={Page} pageNumber={index + 1} />
+                ))}
+                {pages === 0 && (
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Spinner /> Loading pages…
+                  </p>
+                )}
+              </div>
+            </Document>
+          </div>
         )
       },
     }
@@ -70,7 +139,11 @@ function LazyPdfPage({
     return () => observer.disconnect()
   }, [element, visible])
   return (
-    <div ref={setElement} className="file-viewer-pdf-page">
+    <div
+      ref={setElement}
+      data-pdf-page={pageNumber}
+      className="rounded-lg border border-border shadow-sm"
+    >
       {visible ? (
         <Page
           pageNumber={pageNumber}
@@ -78,7 +151,9 @@ function LazyPdfPage({
           loading={null}
         />
       ) : (
-        <span>Page {pageNumber}</span>
+        <span className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+          Page {pageNumber}
+        </span>
       )}
     </div>
   )
@@ -98,23 +173,23 @@ function formatBytes(value: number) {
 
 function DownloadCard({ file, href }: { file: FileViewerProps; href: string }) {
   return (
-    <div className="file-viewer-download">
-      <FileIcon aria-hidden="true" size={28} />
-      <div>
-        <strong>{file.filename}</strong>
-        <span>
+    <Empty className="h-full">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <FileIcon aria-hidden="true" />
+        </EmptyMedia>
+        <EmptyTitle>{file.filename}</EmptyTitle>
+        <EmptyDescription>
           {formatBytes(file.sizeBytes)}
           {file.sha256 ? ` · ${file.sha256}` : ''}
-        </span>
-      </div>
-      <a
-        href={href}
-        download={file.filename}
-        className="file-viewer-download-button"
-      >
-        <Download size={16} /> Download
-      </a>
-    </div>
+        </EmptyDescription>
+      </EmptyHeader>
+      <Button asChild className="pointer-coarse:h-11 pointer-coarse:px-5">
+        <a href={href} download={file.filename}>
+          <Download size={16} /> Download
+        </a>
+      </Button>
+    </Empty>
   )
 }
 
@@ -150,24 +225,34 @@ function TextViewer({ file }: { file: FileViewerProps }) {
         }}
       />
     )
-  if (text === null) return <p>Loading file…</p>
+  if (text === null)
+    return (
+      <p className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+        <Spinner /> Loading file…
+      </p>
+    )
   const truncated = file.sizeBytes > 1024 * 1024
   return (
-    <>
+    <div className="flex h-full flex-col gap-2">
       <pre
-        className={`file-viewer-code language-${languageForFilename(file.filename)}`}
+        data-language={languageForFilename(file.filename)}
+        className="max-h-[70vh] flex-1 overflow-auto rounded-lg border border-border bg-card p-4 font-mono text-sm whitespace-pre-wrap break-words"
       >
         <code>{text}</code>
       </pre>
       {truncated && (
-        <div className="file-viewer-download-bar">
+        <div className="rounded-lg border border-border bg-card px-4 py-2.5 text-sm text-muted-foreground">
           Showing the first 1 MiB.{' '}
-          <a href={file.downloadUrl ?? file.url} download={file.filename}>
+          <a
+            href={file.downloadUrl ?? file.url}
+            download={file.filename}
+            className="text-foreground underline underline-offset-4"
+          >
             Download full file
           </a>
         </div>
       )}
-    </>
+    </div>
   )
 }
 
@@ -179,11 +264,18 @@ function ViewerError({
   onRetry: () => void
 }) {
   return (
-    <div className="file-state">
-      <p role="alert">{message}</p>
-      <button onClick={onRetry}>
+    <div className="flex flex-col items-start gap-3 p-4">
+      <p role="alert" className="text-sm text-destructive">
+        {message}
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        className="pointer-coarse:h-11 pointer-coarse:px-4"
+        onClick={onRetry}
+      >
         <span aria-hidden="true">↻</span> Retry
-      </button>
+      </Button>
     </div>
   )
 }
@@ -211,7 +303,10 @@ function MediaViewer({
   return (
     <Tag
       key={attempt}
-      className="file-viewer-media"
+      className={cn(
+        'block w-full max-h-[70vh]',
+        kind === 'video' && 'rounded-lg bg-black',
+      )}
       src={file.url}
       controls
       preload="metadata"
@@ -237,7 +332,7 @@ function ImageViewer({ file }: { file: FileViewerProps }) {
   return (
     <>
       <button
-        className="file-viewer-image-button"
+        className="flex h-full w-full cursor-zoom-in items-center justify-center rounded-lg border-0 bg-muted p-4"
         onClick={() => setOpen(true)}
         aria-label={`Open ${file.filename}`}
       >
@@ -246,6 +341,7 @@ function ImageViewer({ file }: { file: FileViewerProps }) {
           src={file.url}
           alt={file.filename}
           onError={() => setFailed(true)}
+          className="block max-h-[70vh] max-w-full rounded-md object-contain"
         />
       </button>
       {open && (
@@ -273,8 +369,14 @@ export function FileViewer(file: FileViewerProps) {
 
 export function FileViewerClose({ onClick }: { onClick: () => void }) {
   return (
-    <button className="file-viewer-close" onClick={onClick} aria-label="Close">
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      className="absolute right-3 top-3 pointer-coarse:size-11"
+      onClick={onClick}
+      aria-label="Close"
+    >
       <X size={18} />
-    </button>
+    </Button>
   )
 }

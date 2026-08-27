@@ -18,8 +18,19 @@ import {
   type SubagentSession,
 } from './subagent'
 import { SubagentTranscript } from './SubagentTranscript'
+import { cn } from '../../lib/utils'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
 
 const EMPTY_MESSAGES: Message[] = []
+
+const STATUS_BADGE: Record<string, string> = {
+  running: 'border-primary/40 bg-primary/10 text-primary',
+  done: 'border-primary/40 bg-primary/10 text-primary',
+  errored: 'border-destructive/40 bg-destructive/10 text-destructive',
+  interrupted: 'border-destructive/40 bg-destructive/10 text-destructive',
+  unknown: 'border-border bg-muted text-muted-foreground',
+}
 
 export function SubagentCard({ child }: { child: SubagentSession }) {
   const [expanded, setExpanded] = useState(false)
@@ -84,49 +95,82 @@ export function SubagentCard({ child }: { child: SubagentSession }) {
         : CircleAlert
   const statusText = status === 'unknown' ? 'status unknown' : status
   return (
-    <article className={`subagent-card subagent-${status}`}>
+    <article
+      className={cn(
+        'subagent-card mx-auto mb-3 max-w-[760px] overflow-hidden rounded-lg border bg-card',
+        status === 'running' ? 'border-primary/40' : 'border-border',
+      )}
+    >
       <button
-        className="subagent-summary"
+        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
+        type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
-        <Icon size={16} className={status === 'running' ? 'spin' : undefined} />
-        <span className="subagent-copy">
-          <strong>{child.title || 'Subagent'}</strong>
-          <span>
-            {statusText}
-            {tools ? ` · ${tools} tools` : ''}
+        <Icon
+          className={cn(
+            'size-4 shrink-0 text-muted-foreground',
+            status === 'running' && 'animate-spin text-primary',
+          )}
+        />
+        <span className="grid min-w-0 flex-1 gap-1">
+          <span className="flex items-center gap-2">
+            <strong className="truncate text-sm font-medium text-foreground">
+              {child.title || 'Subagent'}
+            </strong>
+            <Badge
+              variant="outline"
+              className={cn('shrink-0 capitalize', STATUS_BADGE[status])}
+            >
+              {statusText}
+            </Badge>
+          </span>
+          <span className="truncate text-xs text-muted-foreground">
+            {tools ? `${tools} tools` : 'No tool calls'}
             {preview ? ` · ${preview}` : ''}
           </span>
         </span>
         {status === 'running' && (
-          <span className="subagent-elapsed">
-            <Clock3 size={14} aria-hidden="true" />{' '}
+          <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+            <Clock3 className="size-3.5" aria-hidden="true" />
             {elapsedSeconds(messages, now)}s
           </span>
         )}
-        {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        {expanded ? (
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        )}
       </button>
       {expanded && loadError ? (
-        <div className="subagent-load-error" role="alert">
+        <div
+          className="flex items-center justify-between gap-3 border-t border-border p-3 text-xs text-muted-foreground"
+          role="alert"
+        >
           <span>Could not load transcript.</span>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="xs"
             onClick={() => {
               setLoadError(false)
               setLoaded(false)
             }}
           >
             Retry
-          </button>
+          </Button>
         </div>
       ) : expanded && !loaded && messages.length === 0 ? (
-        <div className="subagent-load-state">Loading transcript…</div>
+        <div className="border-t border-border p-3 text-xs text-muted-foreground">
+          Loading transcript…
+        </div>
       ) : expanded ? (
         messages.length ? (
           <SubagentTranscript messages={messages} />
         ) : (
-          <div className="subagent-load-state">No transcript items.</div>
+          <div className="border-t border-border p-3 text-xs text-muted-foreground">
+            No transcript items.
+          </div>
         )
       ) : null}
     </article>

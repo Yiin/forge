@@ -10,7 +10,10 @@ import { AttachmentItem } from './TranscriptItems'
 export function SubagentTranscript({ messages }: { messages: Message[] }) {
   const items = useMemo(() => toRenderModel(messages), [messages])
   return (
-    <div className="subagent-transcript" aria-label="Subagent transcript">
+    <div
+      className="subagent-transcript h-[min(60vh,460px)] overflow-auto border-t border-border p-3 [&_.chat-row]:max-w-none [&_.chat-tool]:max-w-none [&_.subagent-card]:max-w-none [&_.activity-stack]:max-w-none"
+      aria-label="Subagent transcript"
+    >
       <Virtualizer<ChatRenderItem> data={items}>
         {(item: ChatRenderItem) => {
           if (item.kind === 'message')
@@ -23,19 +26,28 @@ export function SubagentTranscript({ messages }: { messages: Message[] }) {
             return <AttachmentItem key={item.id} item={item} />
           if (item.kind === 'answered-question')
             return (
-              <div key={item.id} className="chat-system">
+              <div
+                key={item.id}
+                className="py-2 text-center text-xs text-muted-foreground"
+              >
                 Answered: {String(item.answer)}
               </div>
             )
           if (item.kind === 'epic-triage')
             return (
-              <div key={item.id} className="chat-system">
+              <div
+                key={item.id}
+                className="py-2 text-center text-xs text-muted-foreground"
+              >
                 Epic triage: {item.card.classification}
               </div>
             )
           if (item.kind === 'system')
             return (
-              <div key={item.id} className="chat-system">
+              <div
+                key={item.id}
+                className="py-2 text-center text-xs text-muted-foreground"
+              >
                 {item.text}
               </div>
             )

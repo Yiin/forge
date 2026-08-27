@@ -1,4 +1,7 @@
-import { File, FileImage, LoaderCircle, RotateCcw, X } from 'lucide-react'
+import { File, FileImage, RotateCcw, X } from 'lucide-react'
+import { Button } from '../ui/button'
+import { Spinner } from '../ui/spinner'
+import { cn } from '@/lib/utils'
 import type { UploadAttachment } from './attachmentUploads'
 
 export function AttachmentChips({
@@ -11,23 +14,29 @@ export function AttachmentChips({
   onRemove: (id: string) => void
 }) {
   return (
-    <div className="composer-attachments" aria-live="polite">
+    <div className="flex flex-wrap gap-1.5 px-2 pt-2" aria-live="polite">
       {items.map((item) => {
         const Icon = item.mime.startsWith('image/') ? FileImage : File
         return (
           <div
-            className={`attachment-chip attachment-${item.state}`}
+            className={cn(
+              'relative flex max-w-64 items-center gap-1.5 overflow-hidden rounded-md border bg-muted/50 py-1 pr-1 pl-2 text-xs',
+              item.state === 'failed' && 'border-destructive/50',
+            )}
             key={item.id}
           >
             {item.state === 'uploading' ? (
-              <LoaderCircle className="attachment-spinner" size={16} />
+              <Spinner className="size-3.5 shrink-0 text-muted-foreground" />
             ) : (
-              <Icon size={16} />
+              <Icon
+                className="size-3.5 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
             )}
-            <span className="attachment-chip-name" title={item.name}>
+            <span className="min-w-0 truncate font-medium" title={item.name}>
               {item.name}
             </span>
-            <span className="attachment-chip-meta">
+            <span className="shrink-0 text-muted-foreground">
               {item.state === 'uploading'
                 ? `${Math.round(item.progress * 100)}%`
                 : item.state === 'failed'
@@ -36,6 +45,7 @@ export function AttachmentChips({
             </span>
             {item.state === 'uploading' && (
               <progress
+                className="absolute inset-x-0 bottom-0 h-0.5 w-full appearance-none border-none bg-transparent [&::-moz-progress-bar]:bg-primary [&::-webkit-progress-bar]:bg-transparent [&::-webkit-progress-value]:bg-primary"
                 max="1"
                 value={item.progress}
                 aria-label={`Uploading ${item.name}`}
@@ -44,25 +54,34 @@ export function AttachmentChips({
             )}
             {item.state === 'failed' && (
               <>
-                <span className="attachment-chip-error" role="status">
+                <span
+                  className="min-w-0 truncate text-destructive"
+                  role="status"
+                >
                   {item.error || 'Upload failed'}
                 </span>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-6"
                   onClick={() => onRetry(item.id)}
                   aria-label={`Retry ${item.name}`}
                 >
-                  <RotateCcw size={16} />
-                </button>
+                  <RotateCcw className="size-3.5" />
+                </Button>
               </>
             )}
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
+              className="size-6"
               onClick={() => onRemove(item.id)}
               aria-label={`Remove ${item.name}`}
             >
-              <X size={16} />
-            </button>
+              <X className="size-3.5" />
+            </Button>
           </div>
         )
       })}

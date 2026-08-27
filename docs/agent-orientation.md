@@ -7,8 +7,9 @@ defines product limits. `docs/architecture.md` is historical.
 
 - BEADS + CODE: the current Forge checkout. Run `bd` here.
 - Edit only your current checkout. A worker must not edit another worktree.
-- `apps/web/src/styles.css`: semantic tokens and shared layout rules. Coordinate edits.
-- `apps/web/src/components/ui`: shared shadcn/ui-style and Base UI controls.
+- `apps/web/src/app.css`: shadcn/ui tokens and the Tailwind theme. Dark is the default, set via `html[data-theme]`. Coordinate edits.
+- `apps/web/src/styles.css`: minimal base rules only. Tokens live in `app.css`.
+- `apps/web/src/components/ui`: real shadcn/ui components. Do not hand-roll controls; import from `@/components/ui/*`.
 - `apps/web/src/components/AppShell.tsx`: one mounted route outlet and global shortcuts.
 - `apps/web/src/routes.tsx`: route tree, root entry, draft, session, and Settings paths.
 - `apps/server`: Hono HTTP, WebSocket, session promotion, uploads, and Bun tooling.
@@ -26,8 +27,8 @@ defines product limits. `docs/architecture.md` is historical.
 
 ## UI and interaction contracts
 
-- Shared shadcn/ui-style and Base UI components own every control. Routes must not hand-roll controls.
-- Use type roles from `12/13/14/16/20/24px` and spacing from `4/8/12/16/24/32px`.
+- Real shadcn/ui components own every control. Routes must not hand-roll controls; import via `@/components/ui/*`.
+- Use type roles from the Tailwind scale (`text-xs/sm/base/xl/2xl`) and spacing from `4/8/12/16/24/32px`.
 - Fine-pointer controls stay compact. Coarse-pointer targets remain at least `44px`.
 - Project recency uses newest visible user-session activity. It falls back to the newest active project.
 - One active project has one unpromoted draft. Opening it creates no server session.

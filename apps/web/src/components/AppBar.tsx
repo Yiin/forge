@@ -1,5 +1,12 @@
 import { ArrowLeft, Menu, Search } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
+import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { useShellStore } from '../stores/shell'
 export function AppBar({
   title = 'Forge',
@@ -13,26 +20,51 @@ export function AppBar({
   const navigate = useNavigate()
   const setDrawerOpen = useShellStore((s) => s.setDrawerOpen)
   return (
-    <header className="app-bar">
-      <button
-        className="icon-button"
-        onClick={() => (showBack ? window.history.back() : setDrawerOpen(true))}
-        aria-label={showBack ? 'Go back' : 'Open navigation'}
-      >
-        {showBack ? <ArrowLeft size={20} /> : <Menu size={20} />}
-      </button>
-      <strong>{title}</strong>
-      <span className="app-bar-spacer" />
-      {children}
-      <button
-        className="icon-button"
-        onClick={() =>
-          navigate({ to: '/search', search: { q: '', scope: 'all' } })
-        }
-        aria-label="Search"
-      >
-        <Search size={19} />
-      </button>
-    </header>
+    <TooltipProvider delayDuration={300}>
+      <header className="flex h-12 items-center gap-1 border-b border-border bg-background px-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-11 shrink-0"
+              onClick={() =>
+                showBack ? window.history.back() : setDrawerOpen(true)
+              }
+              aria-label={showBack ? 'Go back' : 'Open navigation'}
+            >
+              {showBack ? (
+                <ArrowLeft className="size-5" />
+              ) : (
+                <Menu className="size-5" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {showBack ? 'Go back' : 'Open navigation'}
+          </TooltipContent>
+        </Tooltip>
+        <strong className="min-w-0 flex-1 truncate px-1 text-sm font-semibold">
+          {title}
+        </strong>
+        {children}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-11 shrink-0"
+              onClick={() =>
+                navigate({ to: '/search', search: { q: '', scope: 'all' } })
+              }
+              aria-label="Search"
+            >
+              <Search className="size-5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Search</TooltipContent>
+        </Tooltip>
+      </header>
+    </TooltipProvider>
   )
 }

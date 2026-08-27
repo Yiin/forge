@@ -5,24 +5,45 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
-import { ArrowLeft } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Eye, EyeOff, X } from 'lucide-react'
 import { harnessConfigSchema, type HarnessConfig } from '@forge/protocol/config'
 import { api } from '../lib/api'
 import { useShellStore } from '../stores/shell'
 import { useSettingsStore } from '../stores/settings'
-import { Button } from '../components/ui/button'
-import { ConfirmationDialog } from '../components/ui/confirmation-dialog'
-import { Field } from '../components/ui/field'
-import { Input } from '../components/ui/input'
-import { Switch } from '../components/ui/switch'
-import { Textarea } from '../components/ui/textarea'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '../components/ConfirmDialog'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
+import { Kbd } from '@/components/ui/kbd'
+import { Spinner } from '@/components/ui/spinner'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
+  SelectContent,
   SelectItem,
-  SelectPopup,
   SelectTrigger,
   SelectValue,
-} from '../components/ui/select'
+} from '@/components/ui/select'
 import { validateEpicDefaults, type EpicDefaults } from './epic-settings-logic'
 import { openProjectCreation } from '../components/ProjectCreationDialog'
 import {
@@ -36,6 +57,34 @@ import {
 
 type Harness = HarnessConfig
 
+function ErrorRow({
+  children,
+  onRetry,
+}: {
+  children: ReactNode
+  onRetry?: () => void
+}) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 text-sm text-destructive"
+      role="alert"
+    >
+      <AlertCircle className="size-4 shrink-0" />
+      <span>{children}</span>
+      {onRetry && (
+        <Button
+          variant="link"
+          size="sm"
+          className="h-auto p-0 text-destructive"
+          onClick={onRetry}
+        >
+          Retry
+        </Button>
+      )}
+    </div>
+  )
+}
+
 function RequestState({
   state,
   error,
@@ -45,28 +94,24 @@ function RequestState({
   error?: string | null
   onRetry?: () => void
 }) {
-  if (state === 'loading') return <p className="settings-status">Loading…</p>
+  if (state === 'loading')
+    return <p className="text-sm text-muted-foreground">Loading…</p>
   if (state === 'saving')
     return (
-      <p className="settings-status" role="status">
+      <p className="text-sm text-muted-foreground" role="status">
         Saving…
       </p>
     )
   if (state === 'saved')
     return (
-      <p className="settings-status" role="status">
+      <p className="text-sm text-muted-foreground" role="status">
         Saved.
       </p>
     )
   return (
-    <div className="settings-error" role="alert">
-      <span>Could not load or save{error ? `: ${error}` : '.'}</span>
-      {onRetry && (
-        <Button size="compact" onClick={onRetry}>
-          Retry
-        </Button>
-      )}
-    </div>
+    <ErrorRow onRetry={onRetry}>
+      Could not load or save{error ? `: ${error}` : '.'}
+    </ErrorRow>
   )
 }
 
@@ -131,12 +176,8 @@ export function GeneralSettings() {
       title="General"
       subtitle="Preferences for your Forge workspace."
     >
-      {loading && <p className="settings-status">Loading…</p>}
-      {loadError && (
-        <p className="settings-error" role="alert">
-          Could not load: {loadError}
-        </p>
-      )}
+      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {loadError && <ErrorRow>Could not load: {loadError}</ErrorRow>}
       {!loading && !loadError && settingsState.status !== 'idle' && (
         <RequestState
           state={
@@ -153,13 +194,26 @@ export function GeneralSettings() {
       <SettingsSection
         title="Workspace preferences"
         description="Changes apply to this Forge workspace."
+        footer={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRestoreOpen(true)}
+          >
+            Restore defaults
+          </Button>
+        }
       >
         <SettingsRow
           label="Theme"
           description="Choose the color theme for Forge."
           reset={
             shellTheme !== 'system' && (
-              <Button size="compact" onClick={() => setShellTheme('system')}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShellTheme('system')}
+              >
                 Reset
               </Button>
             )
@@ -172,14 +226,14 @@ export function GeneralSettings() {
                 setShellTheme(value)
             }}
           >
-            <SelectTrigger aria-label="Theme">
+            <SelectTrigger className="w-36" aria-label="Theme">
               <SelectValue />
             </SelectTrigger>
-            <SelectPopup>
+            <SelectContent>
               <SelectItem value="system">System</SelectItem>
               <SelectItem value="light">Light</SelectItem>
               <SelectItem value="dark">Dark</SelectItem>
-            </SelectPopup>
+            </SelectContent>
           </Select>
         </SettingsRow>
         <SettingsRow
@@ -188,7 +242,7 @@ export function GeneralSettings() {
           reset={
             settings.titleGeneration !==
               defaultGeneralSettings.titleGeneration && (
-              <Button size="compact" onClick={resetTitleGeneration}>
+              <Button variant="ghost" size="sm" onClick={resetTitleGeneration}>
                 Reset
               </Button>
             )
@@ -200,9 +254,6 @@ export function GeneralSettings() {
             onCheckedChange={(checked) => commit({ titleGeneration: checked })}
           />
         </SettingsRow>
-        <div className="settings-actions">
-          <Button onClick={() => setRestoreOpen(true)}>Restore defaults</Button>
-        </div>
       </SettingsSection>
       <SettingsSection title="About" description="Forge runtime information.">
         <RequestState
@@ -211,25 +262,27 @@ export function GeneralSettings() {
           onRetry={loadAbout}
         />
         <SettingsRow label="Version" description="The running Forge version.">
-          <code>{about.version ?? 'unknown'}</code>
+          <code className="font-mono text-sm">
+            {about.version ?? 'unknown'}
+          </code>
         </SettingsRow>
         <SettingsRow
           label="Boot ID"
           description="The identifier for this server start."
         >
-          <code>{about.bootId ?? 'unknown'}</code>
+          <code className="font-mono text-sm">{about.bootId ?? 'unknown'}</code>
         </SettingsRow>
         <SettingsRow
           label="Uptime"
           description="Time since the server started."
         >
-          <span>{about.uptimeSec ?? 0}s</span>
+          <span className="text-sm">{about.uptimeSec ?? 0}s</span>
         </SettingsRow>
-        <p className="muted">
+        <p className="text-sm text-muted-foreground">
           Updates will be available through the release pipeline.
         </p>
       </SettingsSection>
-      <ConfirmationDialog
+      <ConfirmDialog
         open={restoreOpen}
         onOpenChange={setRestoreOpen}
         onConfirm={restoreDefaults}
@@ -238,7 +291,7 @@ export function GeneralSettings() {
       >
         This restores the theme and title generation settings. Other settings
         stay unchanged.
-      </ConfirmationDialog>
+      </ConfirmDialog>
     </SettingsPage>
   )
 }
@@ -253,6 +306,7 @@ export function HarnessSettings() {
   const [testing, setTesting] = useState<Record<string, boolean>>({})
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [deleteKey, setDeleteKey] = useState<string | null>(null)
+  const [deletePending, setDeletePending] = useState(false)
   const saveQueue = useRef<Record<string, Promise<void>>>({})
   useEffect(() => {
     void api
@@ -357,266 +411,335 @@ export function HarnessSettings() {
     }))
     setSaveState((current) => ({ ...current, [key]: 'dirty' }))
   }
+  const confirmDelete = async () => {
+    if (!deleteKey) return
+    const next = { ...draft }
+    delete next[deleteKey]
+    await api.saveHarnesses(next)
+    setDraft((current) => {
+      const next = { ...current }
+      delete next[deleteKey]
+      return next
+    })
+    setSaveState((current) => ({ ...current, [deleteKey]: 'saved' }))
+    setDeleteKey(null)
+  }
   return (
     <SettingsPage
       title="Harnesses"
       subtitle="A harness is a command and its runtime settings."
     >
-      <div className="settings-stack">
+      <div className="flex flex-col gap-6">
         {Object.values(saveState).some((state) => state === 'loading') && (
-          <p className="settings-status" role="status">
+          <p className="text-sm text-muted-foreground" role="status">
             Loading harnesses…
           </p>
         )}
         {Object.entries(draft).map(([key, value]) => (
-          <article className="settings-card" key={key}>
-            <div className="settings-card-head">
-              <strong>{value.name || key}</strong>
-              <span className="settings-status" role="status">
-                {saveState[key] === 'dirty'
-                  ? 'Unsaved changes'
-                  : saveState[key] === 'saving'
-                    ? 'Saving…'
-                    : saveState[key] === 'error'
-                      ? 'Error'
-                      : 'Saved.'}
-              </span>
-            </div>
-            <SettingsSection
-              title="Connection"
-              description="Choose how Forge starts this harness."
-            >
-              <Field
-                label="Name"
-                htmlFor={`${key}-name`}
-                description="A label shown in session controls."
-              >
-                <Input
-                  id={`${key}-name`}
-                  value={value.name}
-                  onChange={(event) =>
-                    update(key, { name: event.target.value })
-                  }
-                />
-              </Field>
-              <Field
-                label="Command"
-                htmlFor={`${key}-command`}
-                description="The executable Forge starts."
-              >
-                <Input
-                  id={`${key}-command`}
-                  value={value.command}
-                  onChange={(event) =>
-                    update(key, { command: event.target.value })
-                  }
-                />
-              </Field>
-              <Field
-                label="Arguments"
-                htmlFor={`${key}-args`}
-                description="Enter one argument per line."
-              >
-                <Textarea
-                  id={`${key}-args`}
-                  value={value.args.join('\n')}
-                  onChange={(e) =>
-                    update(key, {
-                      args: e.target.value.split('\n').filter(Boolean),
-                    })
-                  }
-                />
-              </Field>
-            </SettingsSection>
-            <SettingsSection
-              title="Environment"
-              description="Secret values stay hidden until you reveal them."
-            >
-              <fieldset className="settings-env">
-                <legend>Environment variables</legend>
-                {Object.entries(value.env).map(([name, envValue]) => (
-                  <div className="settings-env-row" key={name}>
-                    <Input
-                      aria-label="Environment variable name"
-                      value={name}
-                      placeholder="NAME"
-                      autoCapitalize="characters"
-                      autoComplete="off"
-                      onChange={(event) => {
-                        const next = { ...value.env }
-                        delete next[name]
-                        if (event.target.value)
-                          next[event.target.value] = envValue
-                        update(key, { env: next })
-                      }}
-                    />
-                    <Input
-                      aria-label={`Value for ${name}`}
-                      type={revealed[`${key}:${name}`] ? 'text' : 'password'}
-                      value={envValue}
-                      placeholder="Value"
-                      autoComplete="new-password"
-                      onChange={(event) =>
-                        update(key, {
-                          env: { ...value.env, [name]: event.target.value },
-                        })
-                      }
-                    />
-                    <button
-                      type="button"
-                      className="settings-env-toggle"
-                      aria-label={
-                        revealed[`${key}:${name}`] ? 'Hide value' : 'Show value'
-                      }
-                      onClick={() =>
-                        setRevealed((current) => ({
-                          ...current,
-                          [`${key}:${name}`]: !current[`${key}:${name}`],
-                        }))
-                      }
+          <Card key={key}>
+            <CardHeader>
+              <CardTitle className="text-base">{value.name || key}</CardTitle>
+              <CardAction>
+                <span className="text-xs text-muted-foreground" role="status">
+                  {saveState[key] === 'dirty'
+                    ? 'Unsaved changes'
+                    : saveState[key] === 'saving'
+                      ? 'Saving…'
+                      : saveState[key] === 'error'
+                        ? 'Error'
+                        : 'Saved.'}
+                </span>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-6">
+              <div className="flex flex-col gap-4">
+                <Field>
+                  <FieldLabel htmlFor={`${key}-name`}>Name</FieldLabel>
+                  <Input
+                    id={`${key}-name`}
+                    value={value.name}
+                    onChange={(event) =>
+                      update(key, { name: event.target.value })
+                    }
+                  />
+                  <FieldDescription>
+                    A label shown in session controls.
+                  </FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor={`${key}-command`}>Command</FieldLabel>
+                  <Input
+                    id={`${key}-command`}
+                    className="font-mono text-sm"
+                    value={value.command}
+                    onChange={(event) =>
+                      update(key, { command: event.target.value })
+                    }
+                  />
+                  <FieldDescription>
+                    The executable Forge starts.
+                  </FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor={`${key}-args`}>Arguments</FieldLabel>
+                  <Textarea
+                    id={`${key}-args`}
+                    className="font-mono text-sm"
+                    value={value.args.join('\n')}
+                    onChange={(e) =>
+                      update(key, {
+                        args: e.target.value.split('\n').filter(Boolean),
+                      })
+                    }
+                  />
+                  <FieldDescription>
+                    Enter one argument per line.
+                  </FieldDescription>
+                </Field>
+              </div>
+              <fieldset className="rounded-md border p-3">
+                <legend className="px-1 text-xs font-medium text-muted-foreground">
+                  Environment variables
+                </legend>
+                <div className="flex flex-col gap-2">
+                  {Object.entries(value.env).map(([name, envValue]) => (
+                    <div
+                      className="flex flex-wrap items-center gap-2"
+                      key={name}
                     >
-                      {revealed[`${key}:${name}`] ? 'Hide' : 'Show'}
-                    </button>
-                    <button
-                      type="button"
-                      className="settings-env-remove"
-                      aria-label={`Remove ${name}`}
-                      onClick={() => {
-                        const next = { ...value.env }
-                        delete next[name]
-                        update(key, { env: next })
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => {
-                    let name = 'NEW_VARIABLE'
-                    let suffix = 1
-                    while (name in value.env) name = `NEW_VARIABLE_${suffix++}`
-                    update(key, { env: { ...value.env, [name]: '' } })
+                      <Input
+                        className="min-w-32 flex-1 font-mono text-sm"
+                        aria-label="Environment variable name"
+                        value={name}
+                        placeholder="NAME"
+                        autoCapitalize="characters"
+                        autoComplete="off"
+                        onChange={(event) => {
+                          const next = { ...value.env }
+                          delete next[name]
+                          if (event.target.value)
+                            next[event.target.value] = envValue
+                          update(key, { env: next })
+                        }}
+                      />
+                      <Input
+                        className="min-w-32 flex-1 font-mono text-sm"
+                        aria-label={`Value for ${name}`}
+                        type={revealed[`${key}:${name}`] ? 'text' : 'password'}
+                        value={envValue}
+                        placeholder="Value"
+                        autoComplete="new-password"
+                        onChange={(event) =>
+                          update(key, {
+                            env: { ...value.env, [name]: event.target.value },
+                          })
+                        }
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={
+                          revealed[`${key}:${name}`]
+                            ? 'Hide value'
+                            : 'Show value'
+                        }
+                        onClick={() =>
+                          setRevealed((current) => ({
+                            ...current,
+                            [`${key}:${name}`]: !current[`${key}:${name}`],
+                          }))
+                        }
+                      >
+                        {revealed[`${key}:${name}`] ? (
+                          <EyeOff className="size-4" />
+                        ) : (
+                          <Eye className="size-4" />
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Remove ${name}`}
+                        onClick={() => {
+                          const next = { ...value.env }
+                          delete next[name]
+                          update(key, { env: next })
+                        }}
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-fit"
+                    onClick={() => {
+                      let name = 'NEW_VARIABLE'
+                      let suffix = 1
+                      while (name in value.env)
+                        name = `NEW_VARIABLE_${suffix++}`
+                      update(key, { env: { ...value.env, [name]: '' } })
+                    }}
+                  >
+                    Add variable
+                  </Button>
+                </div>
+              </fieldset>
+              <Field>
+                <FieldLabel>Protocol</FieldLabel>
+                <Select
+                  value={value.protocol}
+                  onValueChange={(selected) => {
+                    if (selected === 'acp' || selected === 'pty') {
+                      update(key, { protocol: selected })
+                    }
                   }}
                 >
-                  Add variable
-                </button>
-              </fieldset>
-            </SettingsSection>
-            <Field
-              label="Protocol"
-              description="ACP uses structured messages. PTY uses terminal output."
-            >
-              <Select
-                value={value.protocol}
-                onValueChange={(selected) => {
-                  if (selected === 'acp' || selected === 'pty') {
-                    update(key, { protocol: selected })
+                  <SelectTrigger
+                    className="w-32"
+                    aria-label={`${key} protocol`}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="acp">ACP</SelectItem>
+                    <SelectItem value="pty">PTY</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldDescription>
+                  ACP uses structured messages. PTY uses terminal output.
+                </FieldDescription>
+              </Field>
+              {results[key] && (
+                <pre
+                  className="max-h-40 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap"
+                  role="status"
+                >
+                  {results[key]}
+                </pre>
+              )}
+              {validationError(value) && (
+                <p
+                  className="flex items-center gap-2 text-sm text-destructive"
+                  role="alert"
+                >
+                  <AlertCircle className="size-4 shrink-0" />
+                  {validationError(value)}
+                </p>
+              )}
+            </CardContent>
+            <CardFooter className="justify-between gap-2 border-t pt-6">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => save(key)}
+                  disabled={Boolean(validationError(value))}
+                >
+                  Save
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setResults((current) => ({ ...current, [key]: 'Testing…' }))
+                    setTesting((current) => ({ ...current, [key]: true }))
+                    void api
+                      .testHarness(key, value)
+                      .then((result) =>
+                        setResults((current) => ({
+                          ...current,
+                          [key]: formatResult(result),
+                        })),
+                      )
+                      .catch((error: unknown) =>
+                        setResults((current) => ({
+                          ...current,
+                          [key]:
+                            error instanceof Error
+                              ? error.message
+                              : String(error),
+                        })),
+                      )
+                      .finally(() =>
+                        setTesting((current) => ({ ...current, [key]: false })),
+                      )
+                  }}
+                  disabled={
+                    Boolean(validationError(value)) ||
+                    testing[key] ||
+                    saveState[key] === 'saving'
                   }
-                }}
-              >
-                <SelectTrigger aria-label={`${key} protocol`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectPopup>
-                  <SelectItem value="acp">ACP</SelectItem>
-                  <SelectItem value="pty">PTY</SelectItem>
-                </SelectPopup>
-              </Select>
-            </Field>
-            {results[key] && (
-              <pre className="settings-result" role="status">
-                {results[key]}
-              </pre>
-            )}
-            {validationError(value) && (
-              <p className="settings-error" role="alert">
-                {validationError(value)}
-              </p>
-            )}
-            <div className="settings-actions">
+                >
+                  {testing[key] && <Spinner className="size-4" />}
+                  Test
+                </Button>
+              </div>
               <Button
-                variant="primary"
-                onClick={() => save(key)}
-                disabled={Boolean(validationError(value))}
+                size="sm"
+                variant="destructive"
+                onClick={() => setDeleteKey(key)}
               >
-                Save
-              </Button>
-              <Button
-                onClick={() => {
-                  setResults((current) => ({ ...current, [key]: 'Testing…' }))
-                  setTesting((current) => ({ ...current, [key]: true }))
-                  void api
-                    .testHarness(key, value)
-                    .then((result) =>
-                      setResults((current) => ({
-                        ...current,
-                        [key]: formatResult(result),
-                      })),
-                    )
-                    .catch((error: unknown) =>
-                      setResults((current) => ({
-                        ...current,
-                        [key]:
-                          error instanceof Error
-                            ? error.message
-                            : String(error),
-                      })),
-                    )
-                    .finally(() =>
-                      setTesting((current) => ({ ...current, [key]: false })),
-                    )
-                }}
-                disabled={
-                  Boolean(validationError(value)) ||
-                  testing[key] ||
-                  saveState[key] === 'saving'
-                }
-              >
-                Test
-              </Button>
-              <Button variant="danger" onClick={() => setDeleteKey(key)}>
                 Delete
               </Button>
-            </div>
-          </article>
+            </CardFooter>
+          </Card>
         ))}
       </div>
       {Object.entries(saveError)
         .filter(([, error]) => error)
         .map(([key, error]) => (
-          <p className="settings-error" role="alert" key={key}>
+          <p
+            className="mt-4 flex items-center gap-2 text-sm text-destructive"
+            role="alert"
+            key={key}
+          >
+            <AlertCircle className="size-4 shrink-0" />
             Could not save: {error}
           </p>
         ))}
-      <div className="settings-actions">
+      <div className="mt-6">
         <Button onClick={add}>Add harness</Button>
       </div>
-      <ConfirmationDialog
+      <AlertDialog
         open={deleteKey !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteKey(null)
         }}
-        title="Delete harness?"
-        confirmLabel="Delete"
-        onConfirm={async () => {
-          if (!deleteKey) return
-          const next = { ...draft }
-          delete next[deleteKey]
-          await api.saveHarnesses(next)
-          setDraft((current) => {
-            const next = { ...current }
-            delete next[deleteKey]
-            return next
-          })
-          setDeleteKey(null)
-          setSaveState((current) => ({ ...current, [deleteKey]: 'saved' }))
-        }}
       >
-        Delete “{deleteKey ? draft[deleteKey]?.name || deleteKey : ''}”? Save
-        the remaining harnesses to apply this change.
-      </ConfirmationDialog>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete harness?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete “{deleteKey ? draft[deleteKey]?.name || deleteKey : ''}”?
+              Save the remaining harnesses to apply this change.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletePending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deletePending}
+              onClick={async (event) => {
+                event.preventDefault()
+                setDeletePending(true)
+                try {
+                  await confirmDelete()
+                } finally {
+                  setDeletePending(false)
+                }
+              }}
+            >
+              {deletePending ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsPage>
   )
 }
@@ -661,14 +784,14 @@ export function ProjectSettings() {
       title="Projects"
       subtitle="Rename or archive projects. Sessions stay safe when you archive one."
     >
-      <Button variant="primary" onClick={openProjectCreation}>
-        Add project
-      </Button>
+      <div className="mb-6">
+        <Button onClick={openProjectCreation}>Add project</Button>
+      </div>
       {loadState === 'loading' && <RequestState state="loading" />}
       {loadState === 'error' && (
         <RequestState state="error" error={error} onRetry={load} />
       )}
-      <div className="settings-stack">
+      <div className="flex flex-col gap-6">
         {projects.map((project) => (
           <SettingsSection key={project.id} title={project.name}>
             <SettingsRow label="Name" description="The project display name.">
@@ -693,13 +816,20 @@ export function ProjectSettings() {
                 }}
               />
               {saveState[project.id] === 'saved' && (
-                <span role="status">Saved.</span>
+                <span className="text-sm text-muted-foreground" role="status">
+                  Saved.
+                </span>
               )}
               {saveState[project.id] === 'error' && (
-                <span role="alert">
-                  Could not save.{' '}
+                <span
+                  className="flex items-center gap-2 text-sm text-destructive"
+                  role="alert"
+                >
+                  Could not save.
                   <Button
-                    size="compact"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-destructive"
                     onClick={() => void renameProject(project)}
                   >
                     Retry
@@ -711,20 +841,25 @@ export function ProjectSettings() {
               label="Path"
               description="The selected project folder."
             >
-              <span>{project.path}</span>
+              <span className="text-sm text-muted-foreground">
+                {project.path}
+              </span>
             </SettingsRow>
             <SettingsRow
               label="State"
               description="Archived projects cannot start new work."
             >
               <Button
-                loading={saving[project.id]}
-                disabled={Boolean(project.archived_at)}
+                variant="outline"
+                size="sm"
+                disabled={Boolean(project.archived_at) || saving[project.id]}
+                aria-busy={saving[project.id] || undefined}
                 onClick={() => {
                   setArchiveError(null)
                   setArchiveProject(project)
                 }}
               >
+                {saving[project.id] && <Spinner className="size-4" />}
                 {project.archived_at ? 'Archived' : 'Archive'}
               </Button>
             </SettingsRow>
@@ -732,14 +867,12 @@ export function ProjectSettings() {
         ))}
       </div>
       {loadState === 'saved' && projects.length === 0 && (
-        <p className="settings-status">No projects yet.</p>
+        <p className="text-sm text-muted-foreground">No projects yet.</p>
       )}
       {archiveError && (
-        <p className="settings-error" role="alert">
-          Could not archive project: {archiveError}
-        </p>
+        <ErrorRow>Could not archive project: {archiveError}</ErrorRow>
       )}
-      <ConfirmationDialog
+      <ConfirmDialog
         open={archiveProject !== null}
         onOpenChange={(open) => {
           if (!open) setArchiveProject(null)
@@ -769,7 +902,7 @@ export function ProjectSettings() {
         {archiveProject
           ? `${archiveProject.name} will be archived. Sessions will be kept.`
           : ''}
-      </ConfirmationDialog>
+      </ConfirmDialog>
     </SettingsPage>
   )
 
@@ -958,20 +1091,14 @@ export function EpicSettings() {
   return (
     <SettingsPage title="Epics" subtitle="Defaults for the epic runner.">
       {loadError && (
-        <div className="settings-error" role="alert">
+        <ErrorRow onRetry={() => window.location.reload()}>
           Could not load epic defaults: {loadError}
-          <Button size="compact" onClick={() => window.location.reload()}>
-            Retry
-          </Button>
-        </div>
+        </ErrorRow>
       )}
       {settingsState.status === 'error' && (
-        <div className="settings-error" role="alert">
+        <ErrorRow onRetry={() => void retry('epics')}>
           Could not save: {settingsState.error}
-          <Button size="compact" onClick={() => void retry('epics')}>
-            Retry
-          </Button>
-        </div>
+        </ErrorRow>
       )}
       <SettingsSection
         title="Run model"
@@ -982,6 +1109,7 @@ export function EpicSettings() {
           description="Number of workers in the run."
         >
           <Input
+            className="w-24"
             aria-label="Worker count"
             type="number"
             min="1"
@@ -1003,77 +1131,89 @@ export function EpicSettings() {
               }
             }}
           >
-            <SelectTrigger aria-label="Default mode">
+            <SelectTrigger className="w-32" aria-label="Default mode">
               <SelectValue />
             </SelectTrigger>
-            <SelectPopup>
+            <SelectContent>
               <SelectItem value="pool">Pool</SelectItem>
               <SelectItem value="serial">Serial</SelectItem>
               <SelectItem value="auto">Auto</SelectItem>
-            </SelectPopup>
+            </SelectContent>
           </Select>
         </SettingsRow>
         <SettingsRow
           label="Gate command"
           description="Command used to check the work."
         >
-          <Input
-            aria-label="Gate command"
-            value={
-              typeof defaults.gateCommand === 'string'
-                ? defaults.gateCommand
-                : (defaults.gateCommand ?? []).join('\n')
-            }
-            placeholder="bun run test"
-            onChange={(event) =>
-              setField('gateCommand', event.target.value || undefined)
-            }
-            ref={(node) => {
-              invalidRefs.current.gateCommand = node
-            }}
-            aria-invalid={Boolean(validationErrors.gateCommand)}
-            aria-describedby={
-              validationErrors.gateCommand
-                ? 'epic-error-gateCommand'
-                : undefined
-            }
-          />
-          {validationErrors.gateCommand && (
-            <small id="epic-error-gateCommand" className="field-error">
-              {validationErrors.gateCommand}
-            </small>
-          )}
+          <div className="flex flex-col gap-1">
+            <Input
+              className="w-64 font-mono text-sm"
+              aria-label="Gate command"
+              value={
+                typeof defaults.gateCommand === 'string'
+                  ? defaults.gateCommand
+                  : (defaults.gateCommand ?? []).join('\n')
+              }
+              placeholder="bun run test"
+              onChange={(event) =>
+                setField('gateCommand', event.target.value || undefined)
+              }
+              ref={(node) => {
+                invalidRefs.current.gateCommand = node
+              }}
+              aria-invalid={Boolean(validationErrors.gateCommand)}
+              aria-describedby={
+                validationErrors.gateCommand
+                  ? 'epic-error-gateCommand'
+                  : undefined
+              }
+            />
+            {validationErrors.gateCommand && (
+              <small
+                id="epic-error-gateCommand"
+                className="text-sm text-destructive"
+              >
+                {validationErrors.gateCommand}
+              </small>
+            )}
+          </div>
         </SettingsRow>
         <SettingsRow
           label="Install command"
           description="Command used before the gate."
         >
-          <Input
-            aria-label="Install command"
-            value={
-              typeof defaults.installCommand === 'string'
-                ? defaults.installCommand
-                : (defaults.installCommand ?? []).join('\n')
-            }
-            placeholder="bun install"
-            onChange={(event) =>
-              setField('installCommand', event.target.value || undefined)
-            }
-            ref={(node) => {
-              invalidRefs.current.installCommand = node
-            }}
-            aria-invalid={Boolean(validationErrors.installCommand)}
-            aria-describedby={
-              validationErrors.installCommand
-                ? 'epic-error-installCommand'
-                : undefined
-            }
-          />
-          {validationErrors.installCommand && (
-            <small id="epic-error-installCommand" className="field-error">
-              {validationErrors.installCommand}
-            </small>
-          )}
+          <div className="flex flex-col gap-1">
+            <Input
+              className="w-64 font-mono text-sm"
+              aria-label="Install command"
+              value={
+                typeof defaults.installCommand === 'string'
+                  ? defaults.installCommand
+                  : (defaults.installCommand ?? []).join('\n')
+              }
+              placeholder="bun install"
+              onChange={(event) =>
+                setField('installCommand', event.target.value || undefined)
+              }
+              ref={(node) => {
+                invalidRefs.current.installCommand = node
+              }}
+              aria-invalid={Boolean(validationErrors.installCommand)}
+              aria-describedby={
+                validationErrors.installCommand
+                  ? 'epic-error-installCommand'
+                  : undefined
+              }
+            />
+            {validationErrors.installCommand && (
+              <small
+                id="epic-error-installCommand"
+                className="text-sm text-destructive"
+              >
+                {validationErrors.installCommand}
+              </small>
+            )}
+          </div>
         </SettingsRow>
       </SettingsSection>
       <SettingsSection
@@ -1086,150 +1226,174 @@ export function EpicSettings() {
             label={role}
             description="Tier used for this role."
           >
-            <Select
-              value={tier}
-              onValueChange={(value) => {
-                if (typeof value === 'string') updateRole(role, value)
-              }}
-            >
-              <SelectTrigger
-                aria-label={`${role} tier`}
-                ref={(node) => {
-                  invalidRefs.current[`rolePolicy.roles.${role}`] = node
+            <div className="flex flex-col gap-1">
+              <Select
+                value={tier}
+                onValueChange={(value) => {
+                  if (typeof value === 'string') updateRole(role, value)
                 }}
-                aria-invalid={Boolean(
-                  validationErrors[`rolePolicy.roles.${role}`],
-                )}
-                aria-describedby={
-                  validationErrors[`rolePolicy.roles.${role}`]
-                    ? `epic-error-role-${role}`
-                    : undefined
-                }
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectPopup>
-                {Object.keys(defaults.rolePolicy.tiers).map((name) => (
-                  <SelectItem key={name} value={name}>
-                    {name}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-            {validationErrors[`rolePolicy.roles.${role}`] && (
-              <small id={`epic-error-role-${role}`} className="field-error">
-                {validationErrors[`rolePolicy.roles.${role}`]}
-              </small>
-            )}
+                <SelectTrigger
+                  className="w-40"
+                  aria-label={`${role} tier`}
+                  ref={(node) => {
+                    invalidRefs.current[`rolePolicy.roles.${role}`] = node
+                  }}
+                  aria-invalid={Boolean(
+                    validationErrors[`rolePolicy.roles.${role}`],
+                  )}
+                  aria-describedby={
+                    validationErrors[`rolePolicy.roles.${role}`]
+                      ? `epic-error-role-${role}`
+                      : undefined
+                  }
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.keys(defaults.rolePolicy.tiers).map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {validationErrors[`rolePolicy.roles.${role}`] && (
+                <small
+                  id={`epic-error-role-${role}`}
+                  className="text-sm text-destructive"
+                >
+                  {validationErrors[`rolePolicy.roles.${role}`]}
+                </small>
+              )}
+            </div>
           </SettingsRow>
         ))}
         {Object.entries(defaults.rolePolicy.tiers).map(([tier, hops]) => (
-          <div className="settings-card settings-fallback-list" key={tier}>
-            <strong>{tier} fallback order</strong>
-            {hops.map((hop, index) => (
-              <div className="settings-env-row" key={`${tier}-${index}`}>
-                <Select
-                  aria-label={`${tier} hop ${index + 1} harness`}
-                  value={hop.harness}
-                  onValueChange={(value) => {
-                    if (typeof value === 'string')
-                      updateHop(tier, index, { harness: value })
-                  }}
+          <div className="rounded-md border p-3" key={tier}>
+            <p className="mb-2 text-sm font-medium">{tier} fallback order</p>
+            <div className="flex flex-col gap-2">
+              {hops.map((hop, index) => (
+                <div
+                  className="flex flex-wrap items-center gap-2"
+                  key={`${tier}-${index}`}
                 >
-                  <SelectTrigger
-                    aria-label={`${tier} hop ${index + 1} harness`}
-                    ref={(node) => {
-                      invalidRefs.current[
-                        `rolePolicy.tiers.${tier}.${index}.harness`
-                      ] = node
-                    }}
-                    aria-invalid={Boolean(
-                      validationErrors[
-                        `rolePolicy.tiers.${tier}.${index}.harness`
-                      ],
+                  <div className="flex flex-col gap-1">
+                    <Select
+                      value={hop.harness}
+                      onValueChange={(value) => {
+                        if (typeof value === 'string')
+                          updateHop(tier, index, { harness: value })
+                      }}
+                    >
+                      <SelectTrigger
+                        className="w-40"
+                        aria-label={`${tier} hop ${index + 1} harness`}
+                        ref={(node) => {
+                          invalidRefs.current[
+                            `rolePolicy.tiers.${tier}.${index}.harness`
+                          ] = node
+                        }}
+                        aria-invalid={Boolean(
+                          validationErrors[
+                            `rolePolicy.tiers.${tier}.${index}.harness`
+                          ],
+                        )}
+                        aria-describedby={
+                          validationErrors[
+                            `rolePolicy.tiers.${tier}.${index}.harness`
+                          ]
+                            ? `epic-error-hop-${tier}-${index}`
+                            : undefined
+                        }
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.keys(harnesses).map((name) => (
+                          <SelectItem key={name} value={name}>
+                            {name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {validationErrors[
+                      `rolePolicy.tiers.${tier}.${index}.harness`
+                    ] && (
+                      <small
+                        id={`epic-error-hop-${tier}-${index}`}
+                        className="text-sm text-destructive"
+                      >
+                        {
+                          validationErrors[
+                            `rolePolicy.tiers.${tier}.${index}.harness`
+                          ]
+                        }
+                      </small>
                     )}
-                    aria-describedby={
-                      validationErrors[
-                        `rolePolicy.tiers.${tier}.${index}.harness`
-                      ]
-                        ? `epic-error-hop-${tier}-${index}`
-                        : undefined
+                  </div>
+                  <Input
+                    className="w-40 font-mono text-sm"
+                    aria-label={`${tier} hop ${index + 1} model`}
+                    placeholder="Model (optional)"
+                    value={hop.model ?? ''}
+                    onChange={(event) =>
+                      updateHop(tier, index, {
+                        model: event.target.value || undefined,
+                      })
                     }
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={index === 0}
+                    aria-label={`Move ${tier} hop ${index + 1} up`}
+                    onClick={() => moveHop(tier, index, -1)}
                   >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectPopup>
-                    {Object.keys(harnesses).map((name) => (
-                      <SelectItem key={name} value={name}>
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-                {validationErrors[
-                  `rolePolicy.tiers.${tier}.${index}.harness`
-                ] && (
-                  <small
-                    id={`epic-error-hop-${tier}-${index}`}
-                    className="field-error"
+                    Move up
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={index === hops.length - 1}
+                    aria-label={`Move ${tier} hop ${index + 1} down`}
+                    onClick={() => moveHop(tier, index, 1)}
                   >
-                    {
-                      validationErrors[
-                        `rolePolicy.tiers.${tier}.${index}.harness`
-                      ]
-                    }
-                  </small>
-                )}
-                <Input
-                  aria-label={`${tier} hop ${index + 1} model`}
-                  placeholder="Model (optional)"
-                  value={hop.model ?? ''}
-                  onChange={(event) =>
-                    updateHop(tier, index, {
-                      model: event.target.value || undefined,
-                    })
-                  }
-                />
-                <Button
-                  type="button"
-                  size="compact"
-                  disabled={index === 0}
-                  aria-label={`Move ${tier} hop ${index + 1} up`}
-                  onClick={() => moveHop(tier, index, -1)}
-                >
-                  Move up
-                </Button>
-                <Button
-                  type="button"
-                  size="compact"
-                  disabled={index === hops.length - 1}
-                  aria-label={`Move ${tier} hop ${index + 1} down`}
-                  onClick={() => moveHop(tier, index, 1)}
-                >
-                  Move down
-                </Button>
-                <Button
-                  type="button"
-                  size="compact"
-                  aria-label={`Remove ${tier} hop ${index + 1}`}
-                  onClick={() => removeHop(tier, index)}
-                >
-                  Remove
-                </Button>
-              </div>
-            ))}
-            {validationErrors[`rolePolicy.tiers.${tier}`] && (
-              <p className="field-error">
-                {validationErrors[`rolePolicy.tiers.${tier}`]}
-              </p>
-            )}
-            <Button type="button" size="compact" onClick={() => addHop(tier)}>
-              Add fallback hop
-            </Button>
+                    Move down
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Remove ${tier} hop ${index + 1}`}
+                    onClick={() => removeHop(tier, index)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+              {validationErrors[`rolePolicy.tiers.${tier}`] && (
+                <p className="text-sm text-destructive">
+                  {validationErrors[`rolePolicy.tiers.${tier}`]}
+                </p>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                onClick={() => addHop(tier)}
+              >
+                Add fallback hop
+              </Button>
+            </div>
           </div>
         ))}
-        <div className="settings-env-row settings-add-tier">
+        <div className="flex flex-wrap items-center gap-2">
           <Input
+            className="w-48"
             aria-label="New tier name"
             placeholder="New tier name"
             value={newTier}
@@ -1237,7 +1401,8 @@ export function EpicSettings() {
           />
           <Button
             type="button"
-            size="compact"
+            variant="outline"
+            size="sm"
             onClick={addTier}
             disabled={!newTier.trim()}
           >
@@ -1245,13 +1410,13 @@ export function EpicSettings() {
           </Button>
         </div>
       </SettingsSection>
-      <div className="settings-actions">
+      <div className="flex flex-wrap items-center justify-end gap-3">
         {status && (
           <p
             className={
               settingsState.status === 'error'
-                ? 'settings-error'
-                : 'settings-status'
+                ? 'text-sm text-destructive'
+                : 'text-sm text-muted-foreground'
             }
             role="status"
           >
@@ -1260,7 +1425,8 @@ export function EpicSettings() {
         )}
         <Button
           type="button"
-          variant="secondary"
+          variant="outline"
+          size="sm"
           disabled={!dirty || settingsState.status === 'saving'}
           onClick={reset}
         >
@@ -1268,6 +1434,7 @@ export function EpicSettings() {
         </Button>
         <Button
           type="button"
+          size="sm"
           disabled={!dirty || settingsState.status === 'saving'}
           onClick={save}
         >
@@ -1346,6 +1513,19 @@ export function KeybindingsSettings() {
       <SettingsSection
         title="Keyboard shortcuts"
         description="Search, edit, or restore shortcuts."
+        footer={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setDraft({})
+              setShortcutOverrides({})
+              void save('general', { keybindings: {} }).catch(() => undefined)
+            }}
+          >
+            Restore all defaults
+          </Button>
+        }
       >
         <Input
           aria-label="Search keybindings"
@@ -1353,11 +1533,7 @@ export function KeybindingsSettings() {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        {captureError && (
-          <p className="settings-error" role="alert">
-            {captureError}
-          </p>
-        )}
+        {captureError && <ErrorRow>{captureError}</ErrorRow>}
         {visible.map((command) => (
           <SettingsRow
             key={command.id}
@@ -1371,18 +1547,20 @@ export function KeybindingsSettings() {
             {capture === command.id ? (
               <Input
                 autoFocus
+                className="w-48"
                 aria-label={`Capture shortcut for ${command.label}`}
                 onKeyDown={captureKey}
                 placeholder="Press a key combination"
                 readOnly
               />
             ) : (
-              <kbd aria-keyshortcuts={displayShortcut(command.key)}>
+              <Kbd aria-keyshortcuts={displayShortcut(command.key)}>
                 {displayShortcut(command.key)}
-              </kbd>
+              </Kbd>
             )}
             <Button
-              size="compact"
+              variant="outline"
+              size="sm"
               onClick={() => {
                 setCapture(command.id)
                 setCaptureError(null)
@@ -1390,21 +1568,20 @@ export function KeybindingsSettings() {
             >
               {capture === command.id ? 'Capturing…' : 'Edit'}
             </Button>
-            <Button size="compact" onClick={() => commit(command.id)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => commit(command.id)}
+            >
               Reset
             </Button>
           </SettingsRow>
         ))}
-        {!visible.length && <p className="muted">No matching shortcuts.</p>}
-        <Button
-          onClick={() => {
-            setDraft({})
-            setShortcutOverrides({})
-            void save('general', { keybindings: {} }).catch(() => undefined)
-          }}
-        >
-          Restore all defaults
-        </Button>
+        {!visible.length && (
+          <p className="text-sm text-muted-foreground">
+            No matching shortcuts.
+          </p>
+        )}
       </SettingsSection>
     </SettingsPage>
   )
@@ -1414,19 +1591,28 @@ export function SettingsSection({
   title,
   description,
   children,
+  footer,
 }: {
   title: string
   description?: string
   children: ReactNode
+  footer?: ReactNode
 }) {
   return (
-    <section className="settings-section">
-      <div className="settings-section-heading">
-        <h2>{title}</h2>
-        {description && <p className="muted">{description}</p>}
-      </div>
-      <div className="settings-rows">{children}</div>
-    </section>
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{title}</CardTitle>
+        {description && <CardDescription>{description}</CardDescription>}
+      </CardHeader>
+      <CardContent className="flex flex-col divide-y divide-border p-0 [&>*]:px-6 [&>*]:py-3">
+        {children}
+      </CardContent>
+      {footer && (
+        <CardFooter className="justify-end gap-2 border-t pt-6">
+          {footer}
+        </CardFooter>
+      )}
+    </Card>
   )
 }
 
@@ -1444,12 +1630,14 @@ export function SettingsRow({
   reset?: ReactNode
 }) {
   return (
-    <div className="settings-row">
-      <div className="settings-row-copy">
-        <strong>{label}</strong>
-        {description && <span className="muted">{description}</span>}
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{label}</p>
+        {description && (
+          <p className="text-sm text-muted-foreground">{description}</p>
+        )}
       </div>
-      <div className="settings-row-control">
+      <div className="flex flex-none flex-wrap items-center justify-end gap-2">
         {children}
         {status}
         {reset}
@@ -1470,24 +1658,27 @@ export function SettingsPage({
   const headingRef = useRef<HTMLHeadingElement>(null)
   useEffect(() => headingRef.current?.focus(), [title])
   return (
-    <section className="settings-page">
-      <p className="eyebrow">Settings</p>
-      <div className="settings-page-heading">
-        <button
-          type="button"
-          className="settings-back"
-          onClick={() => window.history.back()}
-          aria-label="Back to workspace"
-        >
-          <ArrowLeft size={16} />
-          Back
-        </button>
-        <h1 ref={headingRef} tabIndex={-1}>
-          {title}
-        </h1>
-      </div>
-      <p className="muted">{subtitle}</p>
-      <div className="settings-form">{children}</div>
+    <section className="mx-auto max-w-3xl px-4 py-6 sm:px-6 md:py-10">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="-ml-2 mb-2"
+        onClick={() => window.history.back()}
+        aria-label="Back to workspace"
+      >
+        <ArrowLeft className="size-4" />
+        Back
+      </Button>
+      <h1
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-xl font-semibold tracking-tight outline-none"
+        style={{ outline: 'none', boxShadow: 'none' }}
+      >
+        {title}
+      </h1>
+      <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+      <div className="mt-6 flex flex-col gap-6">{children}</div>
     </section>
   )
 }

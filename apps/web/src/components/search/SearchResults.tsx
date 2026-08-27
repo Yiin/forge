@@ -1,5 +1,7 @@
 import { Link } from '@tanstack/react-router'
-import { FileText, MessageSquare, Play } from 'lucide-react'
+import { FileText, MessageSquare, Play, SearchX } from 'lucide-react'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
 import {
   messageHitUrl,
   parseSnippet,
@@ -21,10 +23,15 @@ export type SearchResultsData = {
 
 function Snippet({ value }: { value: string }) {
   return (
-    <span className="search-snippet">
+    <span className="block truncate text-sm text-muted-foreground">
       {parseSnippet(value).map((segment, index) =>
         segment.highlighted ? (
-          <mark key={index}>{segment.text}</mark>
+          <mark
+            key={index}
+            className="rounded-xs bg-primary/20 px-0.5 text-foreground"
+          >
+            {segment.text}
+          </mark>
         ) : (
           <span key={index}>{segment.text}</span>
         ),
@@ -41,12 +48,22 @@ function ResultGroup({
   children: React.ReactNode
 }) {
   return (
-    <section className="search-group" aria-labelledby={`search-${title}`}>
-      <h2 id={`search-${title}`}>{title}</h2>
-      <div className="search-group-list">{children}</div>
+    <section aria-labelledby={`search-${title}`} className="space-y-1">
+      <h2
+        id={`search-${title}`}
+        className="px-2 text-xs font-medium tracking-wide text-muted-foreground uppercase"
+      >
+        {title}
+      </h2>
+      <div className="flex flex-col gap-0.5">{children}</div>
     </section>
   )
 }
+
+// The `search-result` class is a behavior hook: search.tsx drives keyboard
+// navigation with querySelectorAll('.search-result').
+const resultClass =
+  'search-result flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none'
 
 export function SearchResults({
   results,
@@ -65,49 +82,67 @@ export function SearchResults({
     results.sessions.length + results.messages.length + results.runs.length > 0
   if (status === 'loading') {
     return (
-      <p className="search-empty" role="status">
+      <p
+        className="px-2 py-8 text-center text-sm text-muted-foreground"
+        role="status"
+      >
         Searching…
       </p>
     )
   }
   if (status === 'error') {
     return (
-      <div className="search-empty search-error" role="alert">
-        <p>Search is unavailable.</p>
-        <button type="button" onClick={onRetry}>
+      <div
+        className="flex flex-col items-center gap-2 px-2 py-8 text-center"
+        role="alert"
+      >
+        <p className="text-sm text-destructive">Search is unavailable.</p>
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
           Try again
-        </button>
+        </Button>
       </div>
     )
   }
   if (!query.trim()) {
-    return <p className="search-empty">Recent sessions appear here.</p>
+    return (
+      <p className="px-2 py-8 text-center text-sm text-muted-foreground">
+        Recent sessions appear here.
+      </p>
+    )
   }
   if (!hasResults) {
     return (
-      <p className="search-empty">
-        No {scope} results for “{query.trim()}”.
-      </p>
+      <div className="flex flex-col items-center gap-2 px-2 py-8 text-center text-sm text-muted-foreground">
+        <SearchX className="size-5" aria-hidden="true" />
+        <p>
+          No {scope} results for “{query.trim()}”.
+        </p>
+      </div>
     )
   }
   const count =
     results.sessions.length + results.messages.length + results.runs.length
   return (
-    <div className="search-results">
-      <p className="search-result-count" role="status">
+    <div className="space-y-5">
+      <p className="px-2 text-xs text-muted-foreground" role="status">
         {count} {count === 1 ? 'result' : 'results'} · {scope}
       </p>
       {results.sessions.length > 0 && (
         <ResultGroup title="Sessions">
           {results.sessions.map((hit) => (
             <Link
-              className="search-result"
+              className={resultClass}
               key={hit.sessionId}
               to={sessionHitUrl(hit.sessionId) as never}
             >
-              <FileText size={18} aria-hidden="true" />
-              <span className="search-result-copy">
-                <strong>{hit.title || 'Untitled session'}</strong>
+              <FileText
+                className="size-4 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <span className="min-w-0 flex-1">
+                <strong className="block truncate text-sm font-medium">
+                  {hit.title || 'Untitled session'}
+                </strong>
                 <Snippet value={hit.snippet} />
               </span>
             </Link>
@@ -118,13 +153,18 @@ export function SearchResults({
         <ResultGroup title="Messages">
           {results.messages.map((hit) => (
             <Link
-              className="search-result"
+              className={resultClass}
               key={`${hit.sessionId}-${hit.seq}-${hit.itemId}`}
               to={messageHitUrl(hit.sessionId, hit.seq) as never}
             >
-              <MessageSquare size={18} aria-hidden="true" />
-              <span className="search-result-copy">
-                <strong>{hit.sessionTitle || 'Session message'}</strong>
+              <MessageSquare
+                className="size-4 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <span className="min-w-0 flex-1">
+                <strong className="block truncate text-sm font-medium">
+                  {hit.sessionTitle || 'Session message'}
+                </strong>
                 <Snippet value={hit.snippet} />
               </span>
             </Link>
@@ -135,16 +175,23 @@ export function SearchResults({
         <ResultGroup title="Runs">
           {results.runs.map((hit) => (
             <Link
-              className="search-result"
+              className={resultClass}
               key={hit.runId}
               to={runHitUrl(hit.runId) as never}
             >
-              <Play size={18} aria-hidden="true" />
-              <span className="search-result-copy">
-                <strong>{hit.title}</strong>
+              <Play
+                className="size-4 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <span className="min-w-0 flex-1">
+                <strong className="block truncate text-sm font-medium">
+                  {hit.title}
+                </strong>
                 <Snippet value={hit.snippet} />
               </span>
-              <span className="search-status">{hit.status}</span>
+              <Badge variant="secondary" className="shrink-0 capitalize">
+                {hit.status}
+              </Badge>
             </Link>
           ))}
         </ResultGroup>

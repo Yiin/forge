@@ -113,9 +113,17 @@ test('general settings save, theme, and Select keyboard behavior persist', async
     await page.goto('/settings/general')
     const theme = page.getByRole('combobox', { name: 'Theme' })
     await theme.click()
+    // Radix mounts the listbox and moves roving focus to the selected option
+    // asynchronously, and it opens with the CURRENT value highlighted, so a
+    // fixed arrow count lands on different items depending on the start value.
+    // Exercise the keyboard contract with one arrow step plus typeahead.
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute('role') === 'option',
+    )
     await page.keyboard.press('ArrowDown')
-    await page.keyboard.press('ArrowDown')
-    await page.keyboard.press('ArrowDown')
+    await page.waitForTimeout(50)
+    await page.keyboard.press('d')
+    await page.waitForTimeout(50)
     await page.keyboard.press('Enter')
     await expect(theme).toContainText(/dark/i)
     await expect(theme).toBeFocused()

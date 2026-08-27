@@ -1,16 +1,42 @@
 import { Link, useParams } from '@tanstack/react-router'
 import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Pause,
   Play,
   Square,
-  ChevronDown,
-  ChevronRight,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { toast } from 'sonner'
-import { Dialog } from '../components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Spinner } from '@/components/ui/spinner'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { statusMeta } from './runs'
 
 type Iteration = {
   id: string
@@ -69,24 +95,47 @@ export function RunRoute() {
     const timer = setInterval(load, 2000)
     return () => clearInterval(timer)
   }, [runId])
+  const backLink = (
+    <Link
+      className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      to="/runs"
+    >
+      <ArrowLeft className="size-4" />
+      All runs
+    </Link>
+  )
   if (loading && !run)
     return (
-      <section className="run-page">
-        <p className="muted">Loading run…</p>
+      <section className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
+        <p
+          className="flex items-center gap-2 text-sm text-muted-foreground"
+          role="status"
+        >
+          <Spinner />
+          Loading run…
+        </p>
       </section>
     )
   if (error && !run)
     return (
-      <section className="run-page">
-        <Link className="back-link" to="/runs">
-          ← All runs
-        </Link>
-        <div className="state-card state-error" role="alert">
-          <strong>Could not load this run</strong>
-          <p>{error}</p>
-          <button className="ui-button" onClick={() => void load()}>
+      <section className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
+        {backLink}
+        <div
+          className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-4"
+          role="alert"
+        >
+          <strong className="text-sm font-medium text-destructive">
+            Could not load this run
+          </strong>
+          <p className="text-sm text-muted-foreground">{error}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-fit"
+            onClick={() => void load()}
+          >
             Retry
-          </button>
+          </Button>
         </div>
       </section>
     )
@@ -116,112 +165,148 @@ export function RunRoute() {
   ) => {
     const state = actionState[name]
     return (
-      <button
-        className="icon-button"
-        aria-label={label}
-        disabled={state === 'pending'}
-        onClick={() =>
-          name === 'cancel' ? setConfirmCancel(true) : void action(name)
-        }
-      >
-        {state === 'pending' ? '…' : icon}
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={label}
+            disabled={state === 'pending'}
+            onClick={() =>
+              name === 'cancel' ? setConfirmCancel(true) : void action(name)
+            }
+          >
+            {state === 'pending' ? <Spinner /> : icon}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
     )
   }
+  const { icon: StatusIcon, variant: statusVariant } = statusMeta(run.status)
   return (
-    <section className="run-page">
-      <Link className="back-link" to="/runs">
-        ← All runs
-      </Link>
-      <header className="run-header">
+    <section className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
+      {backLink}
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="eyebrow">Epic run</p>
-          <h1>{run.title || 'Untitled run'}</h1>
-          <p className="run-meta">
-            <span className={`status-dot ${run.status}`} />
-            {run.status} · {run.mode} · {run.workerCount} workers ·{' '}
-            {run.baseBranch}
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Epic run
           </p>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {run.title || 'Untitled run'}
+          </h1>
+          <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+            <Badge variant={statusVariant} className="gap-1">
+              <StatusIcon className="size-3" />
+              {run.status}
+            </Badge>
+            <span>
+              {run.mode} · {run.workerCount} workers · {run.baseBranch}
+            </span>
+          </div>
         </div>
-        <div className="run-actions">
-          {run.status === 'running'
-            ? actionButton('pause', 'Pause run', <Pause size={17} />)
-            : run.status === 'paused'
-              ? actionButton('resume', 'Resume run', <Play size={17} />)
-              : null}
-          {['running', 'paused'].includes(run.status) &&
-            actionButton('cancel', 'Cancel run', <Square size={17} />)}
-        </div>
+        <TooltipProvider delayDuration={300}>
+          <div className="flex items-center gap-1">
+            {run.status === 'running'
+              ? actionButton('pause', 'Pause run', <Pause />)
+              : run.status === 'paused'
+                ? actionButton('resume', 'Resume run', <Play />)
+                : null}
+            {['running', 'paused'].includes(run.status) &&
+              actionButton('cancel', 'Cancel run', <Square />)}
+          </div>
+        </TooltipProvider>
       </header>
       {(['pause', 'resume', 'cancel'] as const).map((name) =>
         actionState[name] === 'failed' ? (
-          <p className="failure action-failure" role="alert" key={name}>
+          <p className="text-sm text-destructive" role="alert" key={name}>
             Could not {name} the run. Try again.
           </p>
         ) : null,
       )}
       {error && (
-        <div className="state-card state-warning" role="status">
-          <strong>Live updates paused</strong>
-          <p>{error} Showing the last saved data.</p>
-          <button className="ui-button" onClick={() => void load()}>
+        <div
+          className="flex flex-col gap-2 rounded-lg border p-4"
+          role="status"
+        >
+          <strong className="text-sm font-medium">Live updates paused</strong>
+          <p className="text-sm text-muted-foreground">
+            {error} Showing the last saved data.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-fit"
+            onClick={() => void load()}
+          >
             Retry
-          </button>
+          </Button>
         </div>
       )}
-      <div className="provenance">
-        {Object.keys(run.config).length ? (
-          Object.keys(run.config).map((key) => (
-            <span key={key}>
-              {key}: {run.provenance[key] ?? 'default'}
-            </span>
-          ))
-        ) : (
-          <span>Defaults</span>
-        )}
-      </div>
-      <section className="frontier">
-        <h2>Frontier</h2>
-        <div className="frontier-columns">
-          <div>
-            <strong>Ready</strong>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Configuration</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          {Object.keys(run.config).length ? (
+            Object.keys(run.config).map((key) => (
+              <span key={key} className="text-muted-foreground">
+                {key}:{' '}
+                <span className="text-foreground">
+                  {run.provenance[key] ?? 'default'}
+                </span>
+              </span>
+            ))
+          ) : (
+            <span className="text-muted-foreground">Defaults</span>
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Frontier</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <strong className="text-sm">Ready</strong>
             {run.frontier.ready.map((item) => (
-              <p key={item.id}>{item.title}</p>
+              <p key={item.id} className="text-sm text-muted-foreground">
+                {item.title}
+              </p>
             ))}
             {!run.frontier.ready.length && (
-              <p className="muted">No ready children.</p>
+              <p className="text-sm text-muted-foreground">
+                No ready children.
+              </p>
             )}
           </div>
-          <div>
-            <strong>Blocked</strong>
+          <div className="flex flex-col gap-1">
+            <strong className="text-sm">Blocked</strong>
             {run.frontier.blocked.map((item) => (
-              <p key={item.id}>{item.title}</p>
+              <p key={item.id} className="text-sm text-muted-foreground">
+                {item.title}
+              </p>
             ))}
             {!run.frontier.blocked.length && (
-              <p className="muted">No blocked children.</p>
+              <p className="text-sm text-muted-foreground">
+                No blocked children.
+              </p>
             )}
           </div>
-        </div>
-      </section>
-      <Dialog
-        open={confirmCancel}
-        onOpenChange={setConfirmCancel}
-        title="Cancel run"
-      >
-        <div className="confirm-dialog">
-          <h2>Cancel this run?</h2>
-          <p>
-            The run will stop. Existing iteration data will remain available.
-          </p>
-          <div className="launch-actions">
-            <button
-              className="ui-button"
-              onClick={() => setConfirmCancel(false)}
-            >
-              Keep running
-            </button>
-            <button
-              className="ui-button danger"
+        </CardContent>
+      </Card>
+      <AlertDialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel this run?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The run will stop. Existing iteration data will remain available.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep running</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
               disabled={actionState.cancel === 'pending'}
               onClick={() => {
                 setConfirmCancel(false)
@@ -229,26 +314,35 @@ export function RunRoute() {
               }}
             >
               Cancel run
-            </button>
-          </div>
-        </div>
-      </Dialog>
-      <section className="iterations">
-        <h2>
-          Iterations <small>{run.iterationCount}</small>
-        </h2>
-        {run.iterations.map((item) => (
-          <IterationRow
-            key={item.id}
-            item={item}
-            expanded={open === item.id}
-            onToggle={() => setOpen(open === item.id ? null : item.id)}
-          />
-        ))}
-        {run.iterations.length === 0 && (
-          <p className="muted">Workers have not started.</p>
-        )}
-      </section>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-baseline gap-2 text-sm">
+            Iterations
+            <span className="text-xs font-normal text-muted-foreground">
+              {run.iterationCount}
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {run.iterations.map((item) => (
+            <IterationRow
+              key={item.id}
+              item={item}
+              expanded={open === item.id}
+              onToggle={() => setOpen(open === item.id ? null : item.id)}
+            />
+          ))}
+          {run.iterations.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Workers have not started.
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </section>
   )
 }
@@ -269,35 +363,56 @@ function IterationRow({
       toast.error('Could not copy session id.')
     }
   }
+  const { icon: StatusIcon, variant } = statusMeta(item.status)
   return (
-    <article className="iteration">
-      <button
-        className="iteration-summary"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        aria-label={`${item.title || 'Untitled iteration'}, ${item.status}, attempt ${item.attempt}`}
-      >
-        <span className={`status-dot ${item.status}`} />
-        <span className="iteration-title">{item.title}</span>
-        <span className="iteration-attempt">attempt {item.attempt}</span>
-        {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-      </button>
-      <div className="iteration-meta">
-        <code title="Worker session id">{item.sessionId}</code>
+    <Collapsible
+      open={expanded}
+      onOpenChange={onToggle}
+      className="rounded-lg border p-3"
+    >
+      <CollapsibleTrigger asChild>
         <button
-          className="copy-chip"
+          type="button"
+          className="flex w-full items-center gap-2 text-left"
+          aria-label={`${item.title || 'Untitled iteration'}, ${item.status}, attempt ${item.attempt}`}
+        >
+          <Badge variant={variant} className="gap-1">
+            <StatusIcon className="size-3" />
+          </Badge>
+          <span className="flex-1 truncate font-medium">{item.title}</span>
+          <span className="text-xs text-muted-foreground">
+            attempt {item.attempt}
+          </span>
+          {expanded ? (
+            <ChevronDown className="size-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="size-4 text-muted-foreground" />
+          )}
+        </button>
+      </CollapsibleTrigger>
+      <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <code title="Worker session id" className="font-mono">
+          {item.sessionId}
+        </code>
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={(event) => {
             event.stopPropagation()
             void copy()
           }}
           aria-label="Copy session id"
         >
-          <Copy size={14} /> Copy
-        </button>
+          <Copy className="size-3" /> Copy
+        </Button>
       </div>
-      {item.failureReason && <p className="failure">{item.failureReason}</p>}
-      {expanded && <Transcript sessionId={item.sessionId} />}
-    </article>
+      {item.failureReason && (
+        <p className="mt-2 text-sm text-destructive">{item.failureReason}</p>
+      )}
+      <CollapsibleContent className="mt-2">
+        <Transcript sessionId={item.sessionId} />
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 function Transcript({ sessionId }: { sessionId: string }) {
@@ -332,7 +447,7 @@ function Transcript({ sessionId }: { sessionId: string }) {
   return (
     <>
       <div
-        className="iteration-transcript"
+        className="max-h-64 overflow-y-auto rounded-lg border bg-card p-3 font-mono text-sm"
         ref={transcriptRef}
         onScroll={(event) => {
           const element = event.currentTarget
@@ -350,16 +465,26 @@ function Transcript({ sessionId }: { sessionId: string }) {
           </p>
         ))}
       </div>
-      {loading && <p className="muted">Loading transcript…</p>}
+      {loading && (
+        <p className="mt-1 text-sm text-muted-foreground">
+          Loading transcript…
+        </p>
+      )}
       {!loading && error && (
-        <p className="failure">Transcript unavailable. Retrying…</p>
+        <p className="mt-1 text-sm text-destructive">
+          Transcript unavailable. Retrying…
+        </p>
       )}
       {!loading && !error && messages.length === 0 && (
-        <p className="muted">No transcript messages yet.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          No transcript messages yet.
+        </p>
       )}
       {!following && (
-        <button
-          className="transcript-latest"
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-2"
           onClick={() => {
             setFollowing(true)
             transcriptRef.current?.scrollTo({
@@ -369,7 +494,7 @@ function Transcript({ sessionId }: { sessionId: string }) {
           }}
         >
           Jump to latest
-        </button>
+        </Button>
       )}
     </>
   )

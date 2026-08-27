@@ -89,9 +89,12 @@ describe('HarnessSettings', () => {
     render(<HarnessSettings />)
     await screen.findByDisplayValue('mock-agent')
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
-    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(screen.getByRole('alertdialog')).toBeTruthy()
     expect(screen.getByText(/Delete “Mock agent”/)).toBeTruthy()
-    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[1]!)
+    // The dialog marks the rest of the page aria-hidden while open, so the
+    // card's own Delete trigger is no longer reachable by role here — only
+    // the dialog's confirm button is.
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     await waitFor(() =>
       expect(screen.queryByDisplayValue('mock-agent')).toBeNull(),
     )

@@ -27,6 +27,15 @@ export type ProjectSummary = {
   createdAt?: number
   archivedAt?: number | null
 }
+// Callers merge session lists from multiple sources (REST fetch, child-session
+// lookups, websocket replay); a mis-scoped filter upstream can hand back the
+// same id twice. Dedupe here so the store's invariant (unique ids) always
+// holds, keeping the last occurrence since it reflects the newest data.
+export function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  const byId = new Map(items.map((item) => [item.id, item]))
+  return [...byId.values()]
+}
+
 type SessionsState = {
   sessions: SessionSummary[]
   projects: ProjectSummary[]
@@ -38,7 +47,7 @@ type SessionsState = {
 export const useSessionsStore = create<SessionsState>((set) => ({
   sessions: [],
   projects: [],
-  setSessions: (sessions) => set({ sessions }),
+  setSessions: (sessions) => set({ sessions: dedupeById(sessions) }),
   setProjects: (projects) => set({ projects }),
   upsertSession: (session) =>
     set((state) => ({

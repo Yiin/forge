@@ -42,9 +42,9 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
       window.WebSocket = ForgeWebSocket
     }, forge.baseUrl)
     await page.goto(baseURL ?? '/')
-    const shell = test.info().project.name.startsWith('phone')
-      ? '.phone-shell'
-      : '.desktop-shell'
+    // The shadcn rebuild collapsed the desktop/phone shell classes into one
+    // `.phone-shell` hook on the app root; both viewports use it now.
+    const shell = '.phone-shell'
     await page
       .locator(shell)
       .getByRole('button', { name: 'Add project' })

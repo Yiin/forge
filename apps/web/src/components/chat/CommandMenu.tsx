@@ -1,9 +1,11 @@
+import { File, SlashSquare, Sparkles, Wrench } from 'lucide-react'
 import {
   Command,
   CommandEmpty,
   CommandGroup,
   CommandItem,
   CommandList,
+  CommandShortcut,
 } from '../ui/command'
 import type { ComposerTriggerKind } from './composer-triggers'
 import { groupComposerCommands } from './command-menu-logic'
@@ -14,6 +16,14 @@ export type ComposerCommand = {
   group: 'Built-in' | 'Harness' | 'Skills' | 'Files'
   value?: string
 }
+
+const groupIcons: Record<ComposerCommand['group'], typeof File> = {
+  'Built-in': SlashSquare,
+  Harness: Wrench,
+  Skills: Sparkles,
+  Files: File,
+}
+
 export function CommandMenu({
   commands,
   kind,
@@ -30,7 +40,8 @@ export function CommandMenu({
   const groups = groupComposerCommands(commands, kind)
   return (
     <Command
-      className="composer-command-menu"
+      data-composer-menu=""
+      className="absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-10 h-auto rounded-lg border shadow-md duration-150 animate-in fade-in-0 zoom-in-95"
       shouldFilter={false}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
@@ -47,15 +58,22 @@ export function CommandMenu({
               .filter((item) =>
                 item.label.toLowerCase().includes(query.toLowerCase()),
               )
-              .map((item) => (
-                <CommandItem
-                  key={item.id}
-                  value={item.id}
-                  onSelect={() => onSelect(item)}
-                >
-                  {item.label}
-                </CommandItem>
-              ))}
+              .map((item) => {
+                const Icon = groupIcons[item.group]
+                return (
+                  <CommandItem
+                    key={item.id}
+                    value={item.id}
+                    onSelect={() => onSelect(item)}
+                  >
+                    <Icon />
+                    <span>{item.label}</span>
+                    {item.value && item.value.trim() !== item.label.trim() && (
+                      <CommandShortcut>{item.value}</CommandShortcut>
+                    )}
+                  </CommandItem>
+                )
+              })}
           </CommandGroup>
         ))}
       </CommandList>

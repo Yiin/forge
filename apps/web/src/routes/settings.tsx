@@ -25,10 +25,8 @@ export function SettingsLayout() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
   return (
-    <div className="settings-layout">
-      <div className="settings-content">
-        <Outlet />
-      </div>
+    <div className="h-full min-h-0 overflow-auto">
+      <Outlet />
     </div>
   )
 }

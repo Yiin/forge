@@ -1,11 +1,21 @@
-import { Paperclip, Send } from 'lucide-react'
+import { ArrowUp, Paperclip } from 'lucide-react'
 import {
   Select,
+  SelectContent,
   SelectItem,
-  SelectPopup,
   SelectTrigger,
   SelectValue,
-} from '../ui/select'
+} from '@/components/ui/select'
+import { Button, buttonVariants } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { Spinner } from '@/components/ui/spinner'
+import { Kbd } from '@/components/ui/kbd'
+import { cn } from '@/lib/utils'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ClipboardEvent } from 'react'
 import { api } from '../../lib/api'
@@ -212,7 +222,7 @@ export function Composer({
     const over = (event: DragEvent) => {
       if (
         hasFiles(event) &&
-        !(event.target as Element | null)?.closest('.composer')
+        !(event.target as Element | null)?.closest('.composer-root')
       ) {
         event.preventDefault()
         setDragging(true)
@@ -222,7 +232,7 @@ export function Composer({
     const drop = (event: DragEvent) => {
       if (
         !hasFiles(event) ||
-        (event.target as Element | null)?.closest('.composer')
+        (event.target as Element | null)?.closest('.composer-root')
       )
         return
       event.preventDefault()
@@ -269,11 +279,16 @@ export function Composer({
     const files = [...event.clipboardData.files]
     if (files.length) addFiles(files)
   }
+  const canSubmit = !sending && !!text.trim() && canSendUploads(uploads)
   return (
-    <div className="composer-wrap">
+    <div className="flex-none px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6">
       <AskUserQuestionPanel sessionId={sessionId} />
       <form
-        className={`composer ${dragging ? 'composer-dragging' : ''}`}
+        className={cn(
+          'composer-root relative mx-auto flex w-full max-w-3xl flex-col rounded-xl border border-border bg-card p-2 shadow-sm transition-colors',
+          'focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/50',
+          dragging && 'border-primary ring-2 ring-primary/50',
+        )}
         onSubmit={(event) => {
           event.preventDefault()
           void submit()
@@ -293,7 +308,9 @@ export function Composer({
         }}
       >
         {dragging && (
-          <div className="composer-drop-overlay">Drop files to upload</div>
+          <div className="pointer-events-none absolute -inset-3 z-5 grid place-items-center rounded-xl border-2 border-dashed border-primary bg-primary/10 text-sm font-medium text-primary">
+            Drop files to upload
+          </div>
         )}
         {uploads.items.length > 0 && (
           <AttachmentChips
@@ -325,6 +342,7 @@ export function Composer({
           placeholder={harness ? `Message ${harness}…` : 'Send a message…'}
           value={text}
           rows={1}
+          className="w-full resize-none overflow-y-auto border-0 bg-transparent px-2 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none"
           onPaste={paste}
           onChange={(event) => update(event.target.value)}
           onKeyDown={(event) => {
@@ -339,7 +357,7 @@ export function Composer({
             ) {
               event.preventDefault()
               const item = document.querySelector<HTMLElement>(
-                '.composer-command-menu [cmdk-item]',
+                '[data-composer-menu] [cmdk-item]',
               )
               item?.focus()
               return
@@ -349,7 +367,7 @@ export function Composer({
               if (trigger) {
                 event.preventDefault()
                 const item = document.querySelector<HTMLElement>(
-                  '.composer-command-menu [cmdk-item]',
+                  '[data-composer-menu] [cmdk-item]',
                 )
                 item?.click()
                 return
@@ -360,58 +378,81 @@ export function Composer({
           }}
         />
         {sendError && (
-          <div className="composer-error" role="alert">
+          <p className="px-2 pb-1 text-xs text-destructive" role="alert">
             {sendError}
-          </div>
+          </p>
         )}
-        <div className="composer-footer">
-          <label className="composer-file">
-            <Paperclip size={17} />
-            <input
-              aria-label="Attach files"
-              type="file"
-              multiple
-              onChange={(event) => {
-                addFiles(event.target.files ?? [])
-                event.target.value = ''
-              }}
-            />
-          </label>
+        <div className="flex items-center gap-1 px-1 pb-1">
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <label
+                  className={cn(
+                    buttonVariants({ variant: 'ghost', size: 'icon' }),
+                    'size-8 shrink-0 cursor-pointer pointer-coarse:size-11',
+                  )}
+                >
+                  <Paperclip className="size-4" />
+                  <input
+                    aria-label="Attach files"
+                    type="file"
+                    multiple
+                    className="sr-only"
+                    onChange={(event) => {
+                      addFiles(event.target.files ?? [])
+                      event.target.value = ''
+                    }}
+                  />
+                </label>
+              </TooltipTrigger>
+              <TooltipContent side="top">Attach files</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {harnesses.length > 0 && (
             <Select
               value={selectedHarness}
-              onValueChange={(value) => {
-                if (typeof value === 'string') setSelectedHarness(value)
-              }}
+              onValueChange={(value) => setSelectedHarness(value)}
             >
-              <SelectTrigger className="composer-harness" aria-label="Harness">
+              <SelectTrigger
+                size="sm"
+                aria-label="Harness"
+                className="h-8 max-w-[9rem] gap-1 border-transparent bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-accent hover:text-accent-foreground pointer-coarse:h-11 pointer-coarse:max-w-none"
+              >
                 <SelectValue />
               </SelectTrigger>
-              <SelectPopup>
+              <SelectContent>
                 {harnesses.map((entry) => (
                   <SelectItem key={entry} value={entry}>
                     {entry}
                   </SelectItem>
                 ))}
-              </SelectPopup>
+              </SelectContent>
             </Select>
           )}
-          <span className="composer-footer-spacer" />
+          <span className="flex-1" />
+          <span className="hidden items-center gap-1 pr-1 text-[11px] text-muted-foreground pointer-fine:flex">
+            <Kbd>Enter</Kbd> to send
+          </span>
           {protocol === 'pty' && running && onInterrupt && (
-            <button
+            <Button
               type="button"
-              className="composer-end-turn"
+              variant="outline"
+              size="sm"
+              className="h-8 pointer-coarse:h-11"
               disabled={interrupting}
               aria-label="End turn"
               title="End the current PTY turn without closing the process"
               onClick={() => void endTurn()}
             >
+              {interrupting && <Spinner className="size-3.5" />}
               {interrupting ? 'Ending…' : 'End turn'}
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="submit"
-            disabled={sending || !text.trim() || !canSendUploads(uploads)}
+            size="icon"
+            className="size-8 shrink-0 rounded-lg pointer-coarse:size-11"
+            disabled={!canSubmit}
             title={
               !canSendUploads(uploads)
                 ? 'Wait for uploads to finish or remove failed files'
@@ -419,11 +460,12 @@ export function Composer({
             }
             aria-label="Send"
           >
-            <Send size={17} />
-            <span className="composer-send-label">
-              {sending ? 'Sending…' : 'Send'}
-            </span>
-          </button>
+            {sending ? (
+              <Spinner className="size-4" />
+            ) : (
+              <ArrowUp className="size-4" />
+            )}
+          </Button>
         </div>
       </form>
     </div>

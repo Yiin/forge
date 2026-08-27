@@ -10,6 +10,9 @@ import {
   SEARCH_ROUTE_DEBOUNCE_MS,
   type SearchScope,
 } from '../components/search/search-logic'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const emptyResults: SearchResultsData = { sessions: [], messages: [], runs: [] }
 
@@ -128,24 +131,29 @@ export function SearchRoute() {
     })
   }
   return (
-    <div className="search-page" onKeyDown={onSearchKeyDown}>
-      <div className="search-header">
-        <button
-          className="search-back"
+    <div className="flex flex-col gap-4 p-4" onKeyDown={onSearchKeyDown}>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={() => window.history.back()}
           aria-label="Go back"
         >
-          <ArrowLeft size={19} />
-        </button>
-        <div className="search-input-wrap">
-          <SearchIcon size={18} aria-hidden="true" />
-          <input
+          <ArrowLeft className="size-4" />
+        </Button>
+        <div className="relative flex-1">
+          <SearchIcon
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <Input
             autoFocus
             type="search"
             enterKeyHint="search"
             value={input}
             placeholder="Search everywhere"
             aria-label="Search everywhere"
+            className="h-10 rounded-lg pl-9"
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') updateSearch(input)
@@ -153,63 +161,52 @@ export function SearchRoute() {
           />
         </div>
       </div>
-      <div className="search-scopes" role="tablist" aria-label="Search scope">
-        {(['all', 'sessions', 'messages', 'runs'] as SearchScope[]).map(
-          (value) => (
-            <button
-              key={value}
-              role="tab"
-              tabIndex={scope === value ? 0 : -1}
-              aria-selected={scope === value}
-              className={scope === value ? 'active' : ''}
-              onClick={() => updateSearch(input || q, value)}
-              onKeyDown={(event) => {
-                if (
-                  !['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(
-                    event.key,
-                  )
-                )
-                  return
-                event.preventDefault()
-                const index = ['all', 'sessions', 'messages', 'runs'].indexOf(
-                  value,
-                )
-                const next =
-                  event.key === 'Home'
-                    ? 0
-                    : event.key === 'End'
-                      ? 3
-                      : (index + (event.key === 'ArrowRight' ? 1 : -1) + 4) % 4
-                const nextScope = ['all', 'sessions', 'messages', 'runs'][
-                  next
-                ] as SearchScope
-                updateSearch(input || q, nextScope)
-              }}
-            >
-              {value[0].toUpperCase() + value.slice(1)}
-            </button>
-          ),
-        )}
-      </div>
+      <Tabs
+        value={scope}
+        onValueChange={(value) =>
+          updateSearch(input || q, value as SearchScope)
+        }
+      >
+        <TabsList aria-label="Search scope">
+          {(['all', 'sessions', 'messages', 'runs'] as SearchScope[]).map(
+            (value) => (
+              <TabsTrigger key={value} value={value}>
+                {value[0].toUpperCase() + value.slice(1)}
+              </TabsTrigger>
+            ),
+          )}
+        </TabsList>
+      </Tabs>
       {!q.trim() ? (
-        <div className="search-results search-recent" ref={resultsRef}>
-          <h2>Recent sessions</h2>
+        <div className="flex flex-col gap-1" ref={resultsRef}>
+          <h2 className="px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Recent sessions
+          </h2>
           {sessions.slice(0, 20).map((session) => (
             <a
-              className="search-result"
+              className="search-result flex items-center gap-3 rounded-lg p-3 hover:bg-accent/50"
               tabIndex={0}
               href={`/s/${encodeURIComponent(session.id)}`}
               key={session.id}
             >
-              <SearchIcon size={18} aria-hidden="true" />
-              <span className="search-result-copy">
-                <strong>{session.title || 'Untitled session'}</strong>
-                <span>{session.snippet || 'No messages yet'}</span>
+              <SearchIcon
+                className="size-[18px] shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <span className="flex min-w-0 flex-col">
+                <strong className="truncate font-medium">
+                  {session.title || 'Untitled session'}
+                </strong>
+                <span className="truncate text-sm text-muted-foreground">
+                  {session.snippet || 'No messages yet'}
+                </span>
               </span>
             </a>
           ))}
           {sessions.length === 0 && (
-            <p className="search-empty">No recent sessions.</p>
+            <p className="px-1 text-sm text-muted-foreground">
+              No recent sessions.
+            </p>
           )}
         </div>
       ) : (

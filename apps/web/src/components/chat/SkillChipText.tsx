@@ -16,7 +16,10 @@ export function SkillChipText({
     const start = (match.index ?? 0) + (match[1]?.length ?? 0)
     nodes.push(
       text.slice(cursor, start),
-      <span className="skill-chip" key={`${start}-${name}`}>
+      <span
+        className="inline-block rounded-md border border-primary/35 bg-primary/10 px-1.5 py-px text-[0.9em] text-primary"
+        key={`${start}-${name}`}
+      >
         ${name}
       </span>,
     )

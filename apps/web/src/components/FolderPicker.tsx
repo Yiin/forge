@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ArrowUp, Folder } from 'lucide-react'
+import { Button } from './ui/button'
+import { ScrollArea } from './ui/scroll-area'
 import { api } from '../lib/api'
 import { folderName } from '../lib/folder-name'
 
@@ -40,66 +42,72 @@ export function FolderPicker({
   }, [load, initialPath])
 
   return (
-    <div className="folder-picker">
-      <div className="folder-picker-path" title={listing?.path}>
+    <div className="flex flex-col gap-2 rounded-md border p-2">
+      <p
+        className="truncate text-xs text-muted-foreground"
+        title={listing?.path}
+      >
         {listing?.path ?? '…'}
-      </div>
-      <div className="folder-picker-list">
-        {listing?.parent && (
-          <button
-            type="button"
-            className="folder-picker-row"
-            aria-label="Parent folder"
-            onClick={() => void load(listing.parent ?? undefined)}
-          >
-            <ArrowUp size={15} />
-            <span>..</span>
-          </button>
-        )}
-        {loading && (
-          <div className="folder-picker-status" role="status">
-            Loading…
-          </div>
-        )}
-        {error && (
-          <div className="folder-picker-status" role="alert">
-            {error}
-          </div>
-        )}
-        {!loading &&
-          !error &&
-          listing?.entries.map((entry) => (
+      </p>
+      <ScrollArea className="h-48 rounded-md border">
+        <div className="flex flex-col p-1">
+          {listing?.parent && (
             <button
               type="button"
-              key={entry.path}
-              className="folder-picker-row"
-              onClick={() => void load(entry.path)}
+              className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+              aria-label="Parent folder"
+              onClick={() => void load(listing.parent ?? undefined)}
             >
-              <Folder size={15} />
-              <span>{entry.name}</span>
+              <ArrowUp className="size-4 text-muted-foreground" />
+              <span>..</span>
             </button>
-          ))}
-        {!loading && !error && listing?.entries.length === 0 && (
-          <div className="folder-picker-status">No subfolders</div>
-        )}
-      </div>
-      <div className="folder-picker-footer">
-        <button
+          )}
+          {loading && (
+            <div
+              className="px-2 py-1.5 text-sm text-muted-foreground"
+              role="status"
+            >
+              Loading…
+            </div>
+          )}
+          {error && (
+            <div className="px-2 py-1.5 text-sm text-destructive" role="alert">
+              {error}
+            </div>
+          )}
+          {!loading &&
+            !error &&
+            listing?.entries.map((entry) => (
+              <button
+                type="button"
+                key={entry.path}
+                className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+                onClick={() => void load(entry.path)}
+              >
+                <Folder className="size-4 text-muted-foreground" />
+                <span className="truncate">{entry.name}</span>
+              </button>
+            ))}
+          {!loading && !error && listing?.entries.length === 0 && (
+            <div className="px-2 py-1.5 text-sm text-muted-foreground">
+              No subfolders
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+      <div className="flex items-center justify-between gap-2">
+        <Button
           type="button"
-          className="folder-picker-select"
+          size="sm"
           disabled={!listing}
           onClick={() => listing && onSelect(listing.path)}
         >
           Select “{folderName(listing?.path ?? '')}”
-        </button>
+        </Button>
         {onCancel && (
-          <button
-            type="button"
-            className="folder-picker-cancel"
-            onClick={onCancel}
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
         )}
       </div>
     </div>

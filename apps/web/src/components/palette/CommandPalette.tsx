@@ -23,8 +23,16 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
+  CommandShortcut,
 } from '../ui/command'
-import { Dialog } from '../ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog'
+import { Kbd } from '../ui/kbd'
 import { openProjectCreation } from '../ProjectCreationDialog'
 import { messageHitUrl, runHitUrl, searchUrl } from './palette-logic'
 import { parseSnippet } from '../search/search-logic'
@@ -132,149 +140,160 @@ export function CommandPalette() {
   }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <Command
-        loop
-        shouldFilter={!results.messages.length && !results.runs.length}
-      >
-        <CommandInput
-          value={query}
-          onValueChange={(value: string) => {
-            setQuery(value)
-            setChangedAt(Date.now())
-          }}
-          placeholder="Search actions, sessions, and messages…"
-          autoFocus
-        />
-        <CommandList>
-          <CommandEmpty>No matching commands.</CommandEmpty>
-          <CommandGroup heading="Actions">
-            <CommandItem onSelect={newDraft}>
-              <Plus />
-              New session{projects.size > 1 ? ' in a project' : ''}
-            </CommandItem>
-            <CommandItem
-              onSelect={() => {
-                close()
-                openProjectCreation()
-              }}
-            >
-              <FolderPlus />
-              New project
-            </CommandItem>
-            <CommandItem onSelect={() => go('/runs')}>
-              <Play />
-              Go to Runs
-            </CommandItem>
-            <CommandItem onSelect={() => go('/files')}>
-              <File />
-              Go to Files
-            </CommandItem>
-            <CommandItem onSelect={() => go('/settings')}>
-              <Settings />
-              Go to Settings
-            </CommandItem>
-            <CommandItem
-              onSelect={() => {
-                useShellStore.getState().toggleTheme()
-                close()
-              }}
-            >
-              {useShellStore.getState().theme === 'dark' ? <Sun /> : <Moon />}
-              Toggle theme
-            </CommandItem>
-            {sessionId && (
-              <CommandItem onSelect={() => void copySession()}>
-                <Copy />
-                Copy current session id
+      <DialogHeader className="sr-only">
+        <DialogTitle>Command palette</DialogTitle>
+        <DialogDescription>
+          Search actions, sessions, and messages
+        </DialogDescription>
+      </DialogHeader>
+      <DialogContent className="overflow-hidden p-0" showCloseButton={false}>
+        <Command
+          loop
+          shouldFilter={!results.messages.length && !results.runs.length}
+          className="**:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5"
+        >
+          <CommandInput
+            value={query}
+            onValueChange={(value: string) => {
+              setQuery(value)
+              setChangedAt(Date.now())
+            }}
+            placeholder="Search actions, sessions, and messages…"
+            autoFocus
+          />
+          <CommandList>
+            <CommandEmpty>No matching commands.</CommandEmpty>
+            <CommandGroup heading="Actions">
+              <CommandItem onSelect={newDraft}>
+                <Plus />
+                New session{projects.size > 1 ? ' in a project' : ''}
               </CommandItem>
-            )}
-          </CommandGroup>
-          {shortcutHelp && (
-            <CommandGroup heading="Keyboard shortcuts" forceMount>
-              {shortcutCommands().map((command) => (
-                <CommandItem
-                  key={command.id}
-                  value={`${command.label} ${command.ariaKeyshortcuts}`}
-                >
-                  <kbd>{command.ariaKeyshortcuts}</kbd>
-                  {command.label}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )}
-          <CommandGroup heading="Sessions">
-            {sessions.map((session) => (
               <CommandItem
-                key={session.id}
-                value={`${session.title} ${session.id}`}
-                onSelect={() => go(`/s/${session.id}`)}
+                onSelect={() => {
+                  close()
+                  openProjectCreation()
+                }}
               >
-                <Search />
-                {session.title || 'Untitled session'}
+                <FolderPlus />
+                New project
               </CommandItem>
-            ))}
-          </CommandGroup>
-          {query.trim() && searchState === 'loading' && (
-            <CommandGroup heading="Search status" forceMount>
-              <CommandItem disabled>Searching…</CommandItem>
+              <CommandItem onSelect={() => go('/runs')}>
+                <Play />
+                Go to Runs
+              </CommandItem>
+              <CommandItem onSelect={() => go('/files')}>
+                <File />
+                Go to Files
+              </CommandItem>
+              <CommandItem onSelect={() => go('/settings')}>
+                <Settings />
+                Go to Settings
+              </CommandItem>
+              <CommandItem
+                onSelect={() => {
+                  useShellStore.getState().toggleTheme()
+                  close()
+                }}
+              >
+                {useShellStore.getState().theme === 'dark' ? <Sun /> : <Moon />}
+                Toggle theme
+              </CommandItem>
+              {sessionId && (
+                <CommandItem onSelect={() => void copySession()}>
+                  <Copy />
+                  Copy current session id
+                </CommandItem>
+              )}
             </CommandGroup>
-          )}
-          {query.trim() && searchState === 'error' && (
-            <CommandGroup heading="Search status" forceMount>
-              <CommandItem disabled role="alert">
-                Search is unavailable. Commands remain available.
-              </CommandItem>
-              <CommandItem onSelect={() => setChangedAt(Date.now())}>
-                Try search again
-              </CommandItem>
-            </CommandGroup>
-          )}
-          {(results.messages.length > 0 || results.runs.length > 0) && (
-            <CommandGroup heading="Search results" forceMount>
-              {results.messages.map((hit) => (
+            {shortcutHelp && (
+              <CommandGroup heading="Keyboard shortcuts" forceMount>
+                {shortcutCommands().map((command) => (
+                  <CommandItem
+                    key={command.id}
+                    value={`${command.label} ${command.ariaKeyshortcuts}`}
+                  >
+                    <span>{command.label}</span>
+                    <CommandShortcut>
+                      <Kbd>{command.ariaKeyshortcuts}</Kbd>
+                    </CommandShortcut>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+            <CommandGroup heading="Sessions">
+              {sessions.map((session) => (
                 <CommandItem
-                  key={`message-${hit.sessionId}-${hit.seq}`}
-                  value={hit.snippet}
-                  onSelect={() => go(messageHitUrl(hit.sessionId, hit.seq))}
+                  key={session.id}
+                  value={`${session.title} ${session.id}`}
+                  onSelect={() => go(`/s/${session.id}`)}
                 >
                   <Search />
-                  <span>
-                    {parseSnippet(hit.snippet).map((segment, index) =>
-                      segment.highlighted ? (
-                        <mark key={index}>{segment.text}</mark>
-                      ) : (
-                        <span key={index}>{segment.text}</span>
-                      ),
-                    )}
-                  </span>
-                </CommandItem>
-              ))}
-              {results.runs.map((hit) => (
-                <CommandItem
-                  key={`run-${hit.runId}`}
-                  value={hit.title}
-                  onSelect={() => go(runHitUrl(hit.runId))}
-                >
-                  <Play />
-                  {hit.title}
+                  {session.title || 'Untitled session'}
                 </CommandItem>
               ))}
             </CommandGroup>
-          )}
-          {query.trim() && (
-            <>
-              <CommandSeparator />
-              <CommandItem
-                value="search everywhere"
-                onSelect={() => go(searchUrl(query.trim()))}
-              >
-                <Check />
-                Search everywhere for “{query.trim()}”
-              </CommandItem>
-            </>
-          )}
-        </CommandList>
-      </Command>
+            {query.trim() && searchState === 'loading' && (
+              <CommandGroup heading="Search status" forceMount>
+                <CommandItem disabled>Searching…</CommandItem>
+              </CommandGroup>
+            )}
+            {query.trim() && searchState === 'error' && (
+              <CommandGroup heading="Search status" forceMount>
+                <CommandItem disabled role="alert">
+                  Search is unavailable. Commands remain available.
+                </CommandItem>
+                <CommandItem onSelect={() => setChangedAt(Date.now())}>
+                  Try search again
+                </CommandItem>
+              </CommandGroup>
+            )}
+            {(results.messages.length > 0 || results.runs.length > 0) && (
+              <CommandGroup heading="Search results" forceMount>
+                {results.messages.map((hit) => (
+                  <CommandItem
+                    key={`message-${hit.sessionId}-${hit.seq}`}
+                    value={hit.snippet}
+                    onSelect={() => go(messageHitUrl(hit.sessionId, hit.seq))}
+                  >
+                    <Search />
+                    <span>
+                      {parseSnippet(hit.snippet).map((segment, index) =>
+                        segment.highlighted ? (
+                          <mark key={index}>{segment.text}</mark>
+                        ) : (
+                          <span key={index}>{segment.text}</span>
+                        ),
+                      )}
+                    </span>
+                  </CommandItem>
+                ))}
+                {results.runs.map((hit) => (
+                  <CommandItem
+                    key={`run-${hit.runId}`}
+                    value={hit.title}
+                    onSelect={() => go(runHitUrl(hit.runId))}
+                  >
+                    <Play />
+                    {hit.title}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+            {query.trim() && (
+              <>
+                <CommandSeparator />
+                <CommandItem
+                  value="search everywhere"
+                  onSelect={() => go(searchUrl(query.trim()))}
+                >
+                  <Check />
+                  Search everywhere for “{query.trim()}”
+                </CommandItem>
+              </>
+            )}
+          </CommandList>
+        </Command>
+      </DialogContent>
     </Dialog>
   )
 }

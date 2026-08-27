@@ -1,13 +1,13 @@
 import { Outlet, useLocation } from '@tanstack/react-router'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type CSSProperties } from 'react'
 import { Drawer } from 'vaul'
-import { Sidebar } from './ui/sidebar'
 import { AppBar } from './AppBar'
+import { cn } from '@/lib/utils'
+import { Toaster } from '@/components/ui/sonner'
 import { useShellStore } from '../stores/shell'
 import { CommandPalette } from './palette/CommandPalette'
 import { SessionSidebar } from './sidebar/SessionSidebar'
 import { SettingsNav } from './settings/SettingsNav'
-import { Toaster } from 'sonner'
 import { resolveTheme } from '../lib/shell-storage'
 import {
   handleShortcut,
@@ -105,23 +105,68 @@ export function AppShell() {
   }, [])
   return (
     <div
-      className={`app-shell desktop-shell phone-shell ${resolveTheme(store.theme)}`}
+      className={cn(
+        // phone-shell is a bare hook for the e2e specs, not a styled class.
+        'phone-shell flex h-dvh flex-col md:flex-row',
+        resolveTheme(store.theme),
+      )}
     >
-      <a className="skip-link" href="#main-content">
+      <a
+        className="fixed top-2 left-2 z-50 -translate-y-[150%] rounded-md bg-primary px-3 py-2 text-primary-foreground focus:translate-y-0"
+        href="#main-content"
+      >
         Skip to main content
       </a>
       <CommandPalette />
       <ProjectCreationDialog />
-      <div className="desktop-chrome">
-        <Sidebar
-          width={store.sidebarWidth}
-          open={store.sidebarOpen}
-          onResize={store.setSidebarWidth}
-        >
+      <aside
+        className={cn(
+          'relative hidden shrink-0 border-r border-sidebar-border bg-sidebar md:flex',
+          !store.sidebarOpen && 'md:w-14',
+        )}
+        style={
+          store.sidebarOpen
+            ? ({
+                '--sidebar-width': `${store.sidebarWidth}px`,
+                width: 'var(--sidebar-width)',
+              } as CSSProperties)
+            : undefined
+        }
+      >
+        <div className="h-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-3">
           {isSettings ? <SettingsNav /> : <SessionSidebar />}
-        </Sidebar>
-      </div>
-      <div className={`phone-chrome ${isSearch ? 'phone-chrome-hidden' : ''}`}>
+        </div>
+        <div
+          role="separator"
+          aria-label="Resize sidebar"
+          aria-orientation="vertical"
+          aria-valuenow={store.sidebarWidth}
+          aria-valuemin={216}
+          aria-valuemax={360}
+          tabIndex={0}
+          className="absolute top-0 -right-[3px] h-full w-1.5 cursor-ew-resize outline-none focus-visible:bg-ring/50"
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            event.preventDefault()
+            store.setSidebarWidth(
+              store.sidebarWidth + (event.key === 'ArrowRight' ? 16 : -16),
+            )
+          }}
+          onPointerDown={(event) => {
+            const start = event.clientX
+            const initial = store.sidebarWidth
+            const move = (e: PointerEvent) =>
+              store.setSidebarWidth(initial + e.clientX - start)
+            const stop = () => {
+              window.removeEventListener('pointermove', move)
+              window.removeEventListener('pointerup', stop)
+            }
+            window.addEventListener('pointermove', move)
+            window.addEventListener('pointerup', stop)
+          }}
+        />
+      </aside>
+      <div className={cn('contents md:hidden', isSearch && 'hidden')}>
         <AppBar title={title} />
         <Drawer.Root
           direction="left"
@@ -129,14 +174,19 @@ export function AppShell() {
           onOpenChange={store.setDrawerOpen}
         >
           <Drawer.Portal>
-            <Drawer.Overlay className="drawer-overlay" />
-            <Drawer.Content className="drawer">
+            <Drawer.Overlay className="fixed inset-0 z-40 bg-black/50" />
+            <Drawer.Content className="drawer fixed inset-y-0 left-0 z-50 w-[min(86vw,320px)] bg-sidebar p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] outline-none">
               {isSettings ? <SettingsNav /> : <SessionSidebar />}
             </Drawer.Content>
           </Drawer.Portal>
         </Drawer.Root>
       </div>
-      <main id="main-content" className="main" ref={mainRef} tabIndex={-1}>
+      <main
+        id="main-content"
+        className="min-w-0 flex-1 overflow-auto md:overflow-hidden"
+        ref={mainRef}
+        tabIndex={-1}
+      >
         <Outlet />
       </main>
       <Toaster theme={resolveTheme(store.theme)} />

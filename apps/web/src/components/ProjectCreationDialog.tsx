@@ -1,8 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { Dialog, DialogDescription, DialogTitle } from './ui/dialog'
+import { AlertCircle, FolderSearch } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
+import { Label } from './ui/label'
+import { Spinner } from './ui/spinner'
 import { FolderPicker } from './FolderPicker'
 import { api } from '../lib/api'
 import { folderName } from '../lib/folder-name'
@@ -70,71 +80,87 @@ export function ProjectCreationDialog() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen} title="Create project">
-      <DialogTitle>Create project</DialogTitle>
-      <DialogDescription>
-        Choose a folder. Forge will use its name until you edit it.
-      </DialogDescription>
-      <form
-        className="project-create-form"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void create()
-        }}
-      >
-        <label>
-          Name
-          <Input
-            required
-            value={name}
-            onChange={(event) => {
-              setNameTouched(true)
-              setName(event.target.value)
-            }}
-          />
-        </label>
-        <label>
-          Folder path
-          <Input
-            required
-            value={path}
-            onChange={(event) => setPath(event.target.value)}
-          />
-        </label>
-        <Button
-          type="button"
-          size="compact"
-          onClick={() => setBrowsing((value) => !value)}
-          aria-expanded={browsing}
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create project</DialogTitle>
+          <DialogDescription>
+            Choose a folder. Forge will use its name until you edit it.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void create()
+          }}
         >
-          {browsing ? 'Hide folders' : 'Browse folders'}
-        </Button>
-        {browsing && (
-          <FolderPicker
-            initialPath={path || undefined}
-            onSelect={choosePath}
-            onCancel={() => setBrowsing(false)}
-          />
-        )}
-        {error && (
-          <p className="settings-error" role="alert">
-            Could not create project: {error}
-          </p>
-        )}
-        <div className="project-create-actions">
-          <Button type="button" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            loading={busy}
-            disabled={!name.trim() || !path.trim()}
-          >
-            Create project
-          </Button>
-        </div>
-      </form>
+          <div className="grid gap-2">
+            <Label htmlFor="project-name">Name</Label>
+            <Input
+              id="project-name"
+              required
+              value={name}
+              onChange={(event) => {
+                setNameTouched(true)
+                setName(event.target.value)
+              }}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="project-path">Folder path</Label>
+            <Input
+              id="project-path"
+              required
+              value={path}
+              onChange={(event) => setPath(event.target.value)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-fit"
+              onClick={() => setBrowsing((value) => !value)}
+              aria-expanded={browsing}
+            >
+              <FolderSearch />
+              {browsing ? 'Hide folders' : 'Browse folders'}
+            </Button>
+            {browsing && (
+              <FolderPicker
+                initialPath={path || undefined}
+                onSelect={choosePath}
+                onCancel={() => setBrowsing(false)}
+              />
+            )}
+          </div>
+          {error && (
+            <p
+              className="flex items-center gap-1.5 text-sm text-destructive"
+              role="alert"
+            >
+              <AlertCircle className="size-4 shrink-0" />
+              Could not create project: {error}
+            </p>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={busy || !name.trim() || !path.trim()}
+            >
+              {busy && <Spinner />}
+              Create project
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
     </Dialog>
   )
 }

@@ -1,7 +1,17 @@
-import { Button } from '../components/ui/button'
-import { openProjectCreation } from '../components/ProjectCreationDialog'
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
+import { FolderPlus, RotateCw } from 'lucide-react'
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty'
+import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
+import { openProjectCreation } from '../components/ProjectCreationDialog'
 import { openNewDraft } from '../lib/draft-entry'
 
 export function HomeRoute() {
@@ -16,27 +26,48 @@ export function HomeRoute() {
   useEffect(() => open(), [])
   if (state === 'loading')
     return (
-      <section className="empty-panel" role="status">
-        <p>Loading projects…</p>
-      </section>
+      <Empty className="h-full" role="status">
+        <EmptyHeader>
+          <EmptyMedia>
+            <Spinner className="size-6" />
+          </EmptyMedia>
+          <EmptyTitle>Loading projects…</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
     )
   if (state === 'error')
     return (
-      <section className="empty-panel">
-        <h1>Forge could not load</h1>
-        <p>Try again to open a draft.</p>
-        <Button variant="primary" onClick={open}>
-          Try again
-        </Button>
-      </section>
+      <Empty className="h-full">
+        <EmptyHeader>
+          <EmptyTitle>Forge could not load</EmptyTitle>
+          <EmptyDescription>Try again to open a draft.</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button onClick={open}>
+            <RotateCw />
+            Try again
+          </Button>
+        </EmptyContent>
+      </Empty>
     )
   return (
-    <section className="empty-panel">
-      <h1>Welcome to Forge</h1>
-      <p>Add a project to start a session.</p>
-      <Button variant="primary" onClick={openProjectCreation}>
-        Add project
-      </Button>
-    </section>
+    <Empty className="h-full">
+      <EmptyHeader>
+        <EmptyTitle
+          role="heading"
+          aria-level={1}
+          className="text-2xl font-semibold tracking-tight"
+        >
+          Welcome to Forge
+        </EmptyTitle>
+        <EmptyDescription>Add a project to start a session.</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button onClick={openProjectCreation}>
+          <FolderPlus />
+          Add project
+        </Button>
+      </EmptyContent>
+    </Empty>
   )
 }

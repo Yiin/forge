@@ -39,11 +39,9 @@ async function openQuestion(page: Page, mode = 'single') {
       window.WebSocket = ForgeWebSocket
     }, forge.baseUrl)
     await page.goto('/')
-    const shell = page.locator(
-      test.info().project.name.startsWith('phone')
-        ? '.phone-shell'
-        : '.desktop-shell',
-    )
+    // The shadcn rebuild collapsed the desktop/phone shell classes into one
+    // `.phone-shell` hook on the app root; both viewports use it now.
+    const shell = page.locator('.phone-shell')
     await shell.getByRole('button', { name: 'Add project' }).click()
     const projectDialog = page.getByRole('dialog', { name: 'Create project' })
     await projectDialog.getByLabel('Name').fill('Question project')
