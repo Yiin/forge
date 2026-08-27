@@ -61,6 +61,11 @@ describe('HarnessAccountStore', () => {
       XDG_DATA_HOME: home,
       OPENCODE_DB: '/tmp/account/opencode/opencode.db',
     })
+    expect(accountEnv('grok', home)).toEqual({ GROK_HOME: home })
+    expect(accountEnv('pi', home)).toEqual({
+      PI_CODING_AGENT_DIR: home,
+      PI_CODING_AGENT_SESSION_DIR: '/tmp/account/sessions',
+    })
     expect(accountEnv('unknown', home)).toEqual({})
   })
 

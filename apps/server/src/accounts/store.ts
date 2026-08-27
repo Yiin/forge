@@ -170,6 +170,13 @@ export function accountEnv(
         XDG_DATA_HOME: homePath,
         OPENCODE_DB: join(homePath, 'opencode', 'opencode.db'),
       }
+    case 'grok':
+      return { GROK_HOME: homePath }
+    case 'pi':
+      return {
+        PI_CODING_AGENT_DIR: homePath,
+        PI_CODING_AGENT_SESSION_DIR: join(homePath, 'sessions'),
+      }
     default:
       return {}
   }
@@ -185,6 +192,9 @@ function credentialFiles(kind: string): string[] {
       return ['credentials/kimi-code.json']
     case 'opencode':
       return ['opencode/auth.json']
+    case 'grok':
+    case 'pi':
+      return ['auth.json']
     default:
       return []
   }

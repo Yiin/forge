@@ -1,6 +1,13 @@
 import type { HarnessConfig } from '@forge/protocol/config'
 
-export const HARNESS_KINDS = ['claude', 'codex', 'kimi', 'opencode'] as const
+export const HARNESS_KINDS = [
+  'claude',
+  'codex',
+  'kimi',
+  'opencode',
+  'grok',
+  'pi',
+] as const
 export type HarnessKind = (typeof HARNESS_KINDS)[number]
 
 /**
@@ -12,10 +19,16 @@ export function accountKindForHarness(
   key: string,
   harness?: { command?: string; args?: string[] },
 ): HarnessKind | null {
-  const haystack = [key, harness?.command ?? '', ...(harness?.args ?? [])]
+  const tokens = [key, harness?.command ?? '', ...(harness?.args ?? [])]
     .join(' ')
     .toLowerCase()
-  for (const kind of HARNESS_KINDS) if (haystack.includes(kind)) return kind
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+  for (const kind of [...HARNESS_KINDS].sort(
+    (left, right) => right.length - left.length,
+  )) {
+    if (tokens.includes(kind)) return kind
+  }
   return null
 }
 
@@ -24,6 +37,8 @@ const ISOLATION_ENV: Record<HarnessKind, string> = {
   codex: 'CODEX_HOME',
   kimi: 'KIMI_SHARE_DIR',
   opencode: 'XDG_DATA_HOME',
+  grok: 'GROK_HOME',
+  pi: 'PI_CODING_AGENT_DIR',
 }
 
 const ACCOUNT_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/

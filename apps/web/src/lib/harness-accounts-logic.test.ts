@@ -168,6 +168,19 @@ describe('accountKindForHarness', () => {
     expect(accountKindForHarness('my-oc', { command: 'opencode' })).toBe(
       'opencode',
     )
+    expect(
+      accountKindForHarness('claude-acp', {
+        command: 'npx',
+        args: ['@zed-industries/claude-code-acp'],
+      }),
+    ).toBe('claude')
+    expect(
+      accountKindForHarness('pi', { command: 'npx', args: ['-y', 'pi-acp'] }),
+    ).toBe('pi')
+    expect(accountKindForHarness('grok', { command: 'grok' })).toBe('grok')
+    expect(accountKindForHarness('opencode', { command: 'opencode' })).toBe(
+      'opencode',
+    )
   })
   it('returns null for harnesses with no managed accounts', () => {
     expect(accountKindForHarness('shell', { command: 'bash' })).toBeNull()
