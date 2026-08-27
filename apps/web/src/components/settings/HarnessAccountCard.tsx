@@ -1,0 +1,408 @@
+import { type ReactNode } from 'react'
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  Cpu,
+  LogIn,
+  LogOut,
+  Trash2,
+  X,
+} from 'lucide-react'
+import type { HarnessConfig } from '@forge/protocol/config'
+import type { HarnessAccountSnapshot } from '@forge/protocol/accounts'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
+import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
+import {
+  deriveAccountLimitState,
+  formatResetCountdown,
+  readAccountHome,
+  resolveAccountAuthAction,
+} from '@/lib/harness-accounts-logic'
+import { useRelativeTimeTick } from './settings-layout'
+import { RedactedSensitiveText } from './RedactedSensitiveText'
+
+type Props = {
+  accountId: string
+  harness: HarnessConfig
+  snapshot: HarnessAccountSnapshot | undefined
+  isExpanded: boolean
+  onExpandedChange: (open: boolean) => void
+  onUpdate: (next: HarnessConfig) => void
+  onDelete?: () => void
+  headerAction?: ReactNode
+  isSettingsDisabled?: boolean
+  authActionBusy?: 'sign-in' | 'sign-out' | null
+  onSignIn?: () => void
+  onSignOut?: () => void
+  reorder?: {
+    onMoveUp: (() => void) | undefined
+    onMoveDown: (() => void) | undefined
+  }
+}
+
+const statusDot: Record<HarnessAccountSnapshot['status'], string> = {
+  ready: 'bg-success',
+  warning: 'bg-warning',
+  error: 'bg-destructive',
+  disabled: 'bg-amber-400',
+}
+
+export function HarnessAccountCard({
+  accountId,
+  harness,
+  snapshot,
+  isExpanded,
+  onExpandedChange,
+  onUpdate,
+  onDelete,
+  headerAction,
+  isSettingsDisabled = false,
+  authActionBusy = null,
+  onSignIn,
+  onSignOut,
+  reorder,
+}: Props) {
+  const tick = useRelativeTimeTick(30_000)
+  const enabled = harness.enabled ?? true
+  const kind = snapshot?.harnessKind ?? accountId
+  const displayName = harness.name.trim() || snapshot?.displayName || accountId
+  const authStatus = snapshot?.auth.status ?? 'unknown'
+  const authAction = resolveAccountAuthAction({
+    harnessKind: kind,
+    authStatus,
+    serverMessage: snapshot?.message,
+  })
+  const limit = deriveAccountLimitState({
+    usage: snapshot?.usage,
+    limit: snapshot?.limit
+      ? { kind: snapshot.limit.kind, resetsAt: snapshot.limit.resetsAt }
+      : null,
+    nowMs: tick,
+  })
+  const authBadge =
+    authStatus === 'authenticated'
+      ? ['Authenticated', 'success']
+      : authStatus === 'unauthenticated'
+        ? ['Sign-in needed', 'warning']
+        : ['Auth unknown', 'secondary']
+  const home = readAccountHome({ harnessKind: kind, env: harness.env })
+  const status = snapshot?.status ?? (enabled ? 'warning' : 'disabled')
+  const email = snapshot?.auth.email
+  const update = (patch: Partial<HarnessConfig>) =>
+    onUpdate({ ...harness, ...patch })
+  const iconName = `harness ${kind} account ${accountId}`
+
+  return (
+    <div
+      className="border-t border-border/60 first:border-t-0"
+      aria-busy={isSettingsDisabled || authActionBusy !== null || undefined}
+      inert={isSettingsDisabled || authActionBusy !== null || undefined}
+    >
+      <div className="px-4 py-3.5 sm:px-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span
+                className="relative inline-flex size-5 shrink-0 items-center justify-center"
+                aria-label={iconName}
+              >
+                <Cpu className="size-4 text-foreground/80" aria-hidden />
+                <span
+                  className={cn(
+                    'absolute -left-0.5 -top-0.5 size-2 rounded-full ring-2 ring-card',
+                    statusDot[status],
+                  )}
+                  aria-hidden
+                />
+              </span>
+              <h3 className="truncate text-[13px] font-semibold tracking-[-0.01em]">
+                {displayName}
+              </h3>
+              {accountId !== kind && (
+                <code className="truncate rounded bg-muted/60 px-1 py-0.5 text-[10px] text-muted-foreground">
+                  {accountId}
+                </code>
+              )}
+              <Badge
+                variant={authBadge[1] as 'success' | 'warning' | 'secondary'}
+              >
+                {authBadge[0]}
+              </Badge>
+              {snapshot?.version && (
+                <code className="text-xs text-muted-foreground">
+                  {snapshot.version}
+                </code>
+              )}
+              {headerAction}
+              {onDelete && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      className="size-5 p-0 text-muted-foreground hover:text-destructive"
+                      onClick={onDelete}
+                      aria-label={`Delete account ${accountId}`}
+                    >
+                      <Trash2 className="size-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Delete account</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+            <p className="flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-muted-foreground/80">
+              {authStatus === 'authenticated' && email ? (
+                <>
+                  Authenticated as{' '}
+                  <RedactedSensitiveText
+                    value={email}
+                    ariaLabel={`Toggle ${accountId} email visibility`}
+                    revealTooltip="Click to reveal email"
+                    hideTooltip="Click to hide email"
+                  />
+                  {snapshot?.auth.label && <> · {snapshot.auth.label}</>}
+                </>
+              ) : authStatus === 'authenticated' && snapshot?.auth.label ? (
+                <>
+                  Authenticated as{' '}
+                  <span className="font-medium text-foreground/80">
+                    {snapshot.auth.label}
+                  </span>
+                </>
+              ) : (
+                <>
+                  {snapshot?.message ?? 'Authentication status unavailable'}
+                  {email && (
+                    <>
+                      {' '}
+                      · Email{' '}
+                      <RedactedSensitiveText
+                        value={email}
+                        ariaLabel={`Toggle ${accountId} email visibility`}
+                        revealTooltip="Click to reveal email"
+                        hideTooltip="Click to hide email"
+                      />
+                    </>
+                  )}
+                </>
+              )}
+            </p>
+            {home && (
+              <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                <span className="shrink-0">Credential home</span>
+                <code className="truncate" title={home}>
+                  {home}
+                </code>
+              </p>
+            )}
+            {authAction.kind === 'manual' && (
+              <p className="text-xs text-muted-foreground">
+                {authAction.command ? (
+                  <>
+                    Run{' '}
+                    <code className="break-all text-foreground/80">
+                      {authAction.command}
+                    </code>{' '}
+                    on the server to sign in.
+                  </>
+                ) : (
+                  "Use this provider's CLI on the server to sign in."
+                )}
+              </p>
+            )}
+            {limit && (
+              <p className="flex min-w-0 flex-wrap items-center gap-x-1 text-xs">
+                {limit.blocked && (
+                  <span className="font-medium text-warning">
+                    {snapshot?.limit
+                      ? (
+                          {
+                            'usage-limit': 'Usage limit reached',
+                            'spend-limit': 'Spend limit reached',
+                            'credits-depleted': 'Credits depleted',
+                            auth: 'Sign-in required',
+                            unavailable: 'Account unavailable',
+                          } as const
+                        )[snapshot.limit.kind]
+                      : 'Usage limit reached'}
+                    {limit.blocked.resetsAt &&
+                      ` · resets in ${formatResetCountdown(limit.blocked.resetsAt, tick)}`}
+                  </span>
+                )}
+                {limit.utilization && (
+                  <span className="text-muted-foreground/80">
+                    {limit.blocked && '· '}Usage {limit.utilization.percent}% ·{' '}
+                    {limit.utilization.windowLabel}
+                    {!limit.blocked &&
+                      limit.utilization.resetsAt &&
+                      ` · resets in ${formatResetCountdown(limit.utilization.resetsAt, tick)}`}
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+            {authAction.kind === 'sign-in' && onSignIn && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 min-h-7 px-2 text-xs"
+                onClick={onSignIn}
+                disabled={isSettingsDisabled || authActionBusy === 'sign-in'}
+              >
+                <LogIn className="size-3.5" />
+                {authActionBusy === 'sign-in' ? 'Signing in' : 'Sign in'}
+              </Button>
+            )}
+            {authAction.kind === 'sign-out' && onSignOut && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 min-h-7 px-2 text-xs"
+                onClick={onSignOut}
+                disabled={isSettingsDisabled || authActionBusy === 'sign-out'}
+              >
+                <LogOut className="size-3.5" />
+                {authActionBusy === 'sign-out' ? 'Signing out' : 'Sign out'}
+              </Button>
+            )}
+            {reorder && (
+              <div className="flex items-center">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-1.5"
+                  disabled={!reorder.onMoveUp}
+                  onClick={reorder.onMoveUp}
+                  aria-label={`Move ${displayName} up in rotation order`}
+                >
+                  <ArrowUp className="size-3.5" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-1.5"
+                  disabled={!reorder.onMoveDown}
+                  onClick={reorder.onMoveDown}
+                  aria-label={`Move ${displayName} down in rotation order`}
+                >
+                  <ArrowDown className="size-3.5" />
+                </Button>
+              </div>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={() => onExpandedChange(!isExpanded)}
+              aria-label={`Toggle ${displayName} details`}
+            >
+              <ChevronDown
+                className={cn(
+                  'size-3.5 transition-transform',
+                  isExpanded && 'rotate-180',
+                )}
+              />
+            </Button>
+            <Switch
+              checked={enabled}
+              disabled={isSettingsDisabled}
+              onCheckedChange={(checked) =>
+                update({ enabled: Boolean(checked) })
+              }
+              aria-label={`Enable ${displayName}`}
+            />
+          </div>
+        </div>
+      </div>
+      <Collapsible open={isExpanded} onOpenChange={onExpandedChange}>
+        <CollapsibleContent>
+          <div className="space-y-3 border-t border-border/60 px-4 py-3 sm:px-5">
+            <label className="grid gap-1 text-xs font-medium">
+              Display name
+              <Input
+                value={harness.name}
+                onChange={(event) => update({ name: event.target.value })}
+              />
+            </label>
+            <label className="grid gap-1 text-xs font-medium">
+              Command
+              <Input
+                className="font-mono"
+                value={harness.command}
+                onChange={(event) => update({ command: event.target.value })}
+              />
+            </label>
+            <label className="grid gap-1 text-xs font-medium">
+              Arguments
+              <Input
+                className="font-mono"
+                value={harness.args.join('\n')}
+                onChange={(event) =>
+                  update({
+                    args: event.target.value.split('\n').filter(Boolean),
+                  })
+                }
+              />
+            </label>
+            <fieldset className="grid gap-2">
+              <legend className="text-xs font-medium">
+                Environment variables
+              </legend>
+              {Object.entries(harness.env).map(([name, value]) => (
+                <div className="flex min-w-0 items-center gap-2" key={name}>
+                  <Input
+                    className="min-w-0 flex-1 font-mono"
+                    aria-label={`Environment variable ${name}`}
+                    value={name}
+                    readOnly
+                  />
+                  <Input
+                    className="min-w-0 flex-1 font-mono"
+                    aria-label={`Value for ${name}`}
+                    value={value}
+                    onChange={(event) =>
+                      update({
+                        env: { ...harness.env, [name]: event.target.value },
+                      })
+                    }
+                  />
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => {
+                      const env = { ...harness.env }
+                      delete env[name]
+                      update({ env })
+                    }}
+                    aria-label={`Remove environment variable ${name}`}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+              ))}
+            </fieldset>
+            <label className="grid gap-1 text-xs font-medium">
+              Protocol
+              <Input value={harness.protocol.toUpperCase()} readOnly />
+            </label>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  )
+}
