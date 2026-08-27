@@ -6,6 +6,7 @@ import type { HarnessFactory, HarnessHandle, HarnessItem } from './harness.js'
 import { isDefaultTitle, titleFromPrompt } from './titles.js'
 import { appendForkContext, createFork } from './fork.js'
 import type { UploadStore } from '../uploads/store.js'
+import { detectProviderError, recordLimit } from '../accounts/limits.js'
 
 type Db = DatabaseSync
 export type SessionRow = {
@@ -397,6 +398,18 @@ export class SessionManager {
       await handle.prompt(text)
     } catch (error) {
       this.turns.delete(id)
+      const message = error instanceof Error ? error.message : String(error)
+      const match = detectProviderError(message)
+      if (match && row.account_id) {
+        recordLimit(this.db, {
+          accountId: row.account_id,
+          kind: match.category,
+          harnessKey: row.harness,
+          detectedAt: Date.now(),
+          source: 'session.prompt',
+          detail: match.excerpt,
+        })
+      }
       appendMessage(this.db, {
         sessionId: id,
         turnId,
@@ -405,7 +418,7 @@ export class SessionManager {
         type: 'error',
         content: {
           type: 'error',
-          message: error instanceof Error ? error.message : String(error),
+          message,
         },
         eventBus: this.bus,
       })

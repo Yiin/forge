@@ -2,6 +2,7 @@ import { Readable } from 'node:stream'
 import { spawn as spawnNode } from 'node:child_process'
 import * as acp from '@zed-industries/agent-client-protocol'
 import type { HarnessConfig } from '@forge/protocol/config'
+import { detectProviderError, recordLimit } from '../accounts/limits.js'
 
 type Db = { prepare(sql: string): { run(...params: unknown[]): unknown } }
 
@@ -62,7 +63,12 @@ export type ClientHandlers = {
   ) => void | Promise<void>
   onExit?: (error: AgentProcessDiedError) => void | Promise<void>
   /** Optional persistence hook until the server database is wired to this module. */
-  capabilityStore?: { db: Db; harnessKey: string; agentName?: string }
+  capabilityStore?: {
+    db: Db
+    harnessKey: string
+    accountId?: string | null
+    agentName?: string
+  }
 }
 
 export type AcpCapabilities = {
@@ -204,6 +210,17 @@ export async function spawnAcpClient(
   void death.catch(() => undefined)
   void process.exited.then((exitCode: number) => {
     dead = new AgentProcessDiedError(exitCode, stderr.toString())
+    const match = detectProviderError(dead.stderrTail)
+    const accountId = handlers.capabilityStore?.accountId
+    if (match && accountId)
+      recordLimit(handlers.capabilityStore!.db, {
+        accountId,
+        kind: match.category,
+        harnessKey: handlers.capabilityStore!.harnessKey,
+        detectedAt: Date.now(),
+        source: 'acp.stderr',
+        detail: match.excerpt,
+      })
     rejectDeath(dead)
     void handlers.onExit?.(dead)
   })

@@ -7,6 +7,38 @@ import { SessionManager } from './manager.js'
 import type { HarnessFactory, HarnessHandle } from './harness.js'
 
 describe('session harness selection', () => {
+  it('records a usage limit from a failed prompt', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    db.prepare(
+      "INSERT INTO harness_accounts (id, harness_key, label, kind, home_path, created_at) VALUES ('acct', 'claude', 'Test', 'claude', '/tmp/acct', 1)",
+    ).run()
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'claude',
+      title: 'Chat',
+      cwd: '/tmp',
+      accountId: 'acct',
+    })
+    const factory: HarnessFactory = () => ({
+      spawn: async () => ({
+        prompt: async () => {
+          throw new Error('Claude AI usage limit reached')
+        },
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    })
+    const manager = new SessionManager(db, new EventBus(), factory)
+    await expect(manager.prompt(session.id, 'one')).rejects.toThrow(
+      'usage limit',
+    )
+    expect(
+      db.prepare('SELECT account_id, kind FROM harness_account_limits').get(),
+    ).toMatchObject({ account_id: 'acct', kind: 'usage-limit' })
+  })
+
   it('uses the selected harness and persists it before the prompt', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)

@@ -24,6 +24,7 @@ export type AcpHarnessDeps = {
   db: Db
   bus: EventBus
   questions: QuestionManager
+  accountId?: string | null
 }
 
 const providerId = (response: { sessionId?: unknown }) =>
@@ -36,9 +37,13 @@ export function acpHarness(
   deps: AcpHarnessDeps,
 ): HarnessProcess {
   const stored = getHarnessCapabilities(deps.db as never, entry.name)
-  const capabilities = stored?.capabilities as Record<string, unknown> | undefined
+  const capabilities = stored?.capabilities as
+    Record<string, unknown> | undefined
   const process: HarnessProcess = {
-    capabilities: { loadSession: capabilities?.loadSession === true, sessionFork: capabilities?.sessionFork === true },
+    capabilities: {
+      loadSession: capabilities?.loadSession === true,
+      sessionFork: capabilities?.sessionFork === true,
+    },
     async spawn(session, onItem, onExit) {
       const { client, normalizer } = await createClient(session, onItem, onExit)
       const response = await client.newSession(session.cwd)
@@ -56,22 +61,36 @@ export function acpHarness(
       return { handle: handle(client, normalizer, id), proven: true }
     },
     async loadSession(session, onItem, onExit) {
-      if (!session.providerSessionId) return { handle: emptyHandle(), proven: false }
+      if (!session.providerSessionId)
+        return { handle: emptyHandle(), proven: false }
       const { client, normalizer } = await createClient(session, onItem, onExit)
       await client.loadSession(session.providerSessionId, session.cwd)
       const id = session.providerSessionId
-      if (!id) return { handle: handle(client, normalizer, session.providerSessionId), proven: false }
+      if (!id)
+        return {
+          handle: handle(client, normalizer, session.providerSessionId),
+          proven: false,
+        }
       saveProviderSession(deps.db, session.id, id)
       return { handle: handle(client, normalizer, id), proven: true }
     },
     async fork(session, onItem, onExit) {
-      if (!session.providerSessionId) return { handle: emptyHandle(), proven: false }
+      if (!session.providerSessionId)
+        return { handle: emptyHandle(), proven: false }
       const { client, normalizer } = await createClient(session, onItem, onExit)
       const response = await client.fork(session.providerSessionId, session.cwd)
       const id = providerId(response)
-      if (!id) return { handle: handle(client, normalizer, session.providerSessionId), proven: false }
+      if (!id)
+        return {
+          handle: handle(client, normalizer, session.providerSessionId),
+          proven: false,
+        }
       saveProviderSession(deps.db, session.id, id)
-      return { handle: handle(client, normalizer, id), proven: true, providerSessionId: id }
+      return {
+        handle: handle(client, normalizer, id),
+        proven: true,
+        providerSessionId: id,
+      }
     },
   }
 
@@ -93,6 +112,11 @@ export function acpHarness(
     const client = await spawnAcpClient(entry, {
       ...services,
       onSessionUpdate: (notification) => normalizer.handle(notification),
+      capabilityStore: {
+        db: deps.db,
+        harnessKey: entry.name,
+        accountId: deps.accountId,
+      },
       onExit: (error) => {
         normalizer.processDied(session.id, error)
         onExit(error)
@@ -108,7 +132,9 @@ export function acpHarness(
   ): HarnessHandle {
     return {
       prompt: async (content) => {
-        await normalizer.promptTurn(client, sessionId ?? '', [{ type: 'text', text: content }])
+        await normalizer.promptTurn(client, sessionId ?? '', [
+          { type: 'text', text: content },
+        ])
       },
       cancel: () => client.cancel(sessionId ?? ''),
       kill: () => client.kill(),
@@ -118,10 +144,21 @@ export function acpHarness(
   return process
 }
 
-function saveProviderSession(db: Db, sessionId: string, providerSessionId: string) {
-  db.prepare('UPDATE sessions SET provider_session_id = ? WHERE id = ?').run(providerSessionId, sessionId)
+function saveProviderSession(
+  db: Db,
+  sessionId: string,
+  providerSessionId: string,
+) {
+  db.prepare('UPDATE sessions SET provider_session_id = ? WHERE id = ?').run(
+    providerSessionId,
+    sessionId,
+  )
 }
 
 function emptyHandle(): HarnessHandle {
-  return { prompt: () => undefined, cancel: () => undefined, kill: () => undefined }
+  return {
+    prompt: () => undefined,
+    cancel: () => undefined,
+    kill: () => undefined,
+  }
 }

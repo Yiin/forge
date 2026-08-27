@@ -46,6 +46,7 @@ import {
 import { ptyHarness } from './pty/harness.js'
 import { acpHarness } from './acp/harness.js'
 import { HarnessAccountStore, accountEnv } from './accounts/store.js'
+import { clearExpiredLimits } from './accounts/limits.js'
 import { LoginManager } from './accounts/login.js'
 
 const require = createRequire(import.meta.url)
@@ -203,6 +204,7 @@ export function startServer(
   mkdirSync(dataDir, { recursive: true })
   const db = new DatabaseSync(process.env.FORGE_DB ?? join(dataDir, 'forge.db'))
   migrate(db)
+  clearExpiredLimits(db, Date.now())
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
   const questions = new ServerQuestionManager({ db, bus })
@@ -237,7 +239,7 @@ export function startServer(
       : entry
     if (derived?.protocol === 'pty') return ptyHarness(derived)
     if (derived?.protocol === 'acp')
-      return acpHarness(derived, { db, bus, questions })
+      return acpHarness(derived, { db, bus, questions, accountId })
     throw new Error(`Harness ${key} is not configured`)
   }
   const manager = new SessionManager(db, bus, factory)
