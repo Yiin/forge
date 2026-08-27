@@ -29,7 +29,11 @@ import { SessionManager } from './sessions/manager.js'
 import type { HarnessFactory } from './sessions/harness.js'
 import { workspaceRoutes } from './http/workspace.js'
 import { epicRoutes } from './http/epics.js'
-import type { EpicRunner } from './epics/runner.js'
+import {
+  EpicRunner,
+  type EpicSessionInput,
+  type WorkerSession,
+} from './epics/runner.js'
 import { recoverSessions } from './sessions/recovery.js'
 import { harnessRoutes } from './http/harnesses.js'
 import {
@@ -158,6 +162,23 @@ export function createApp(
   return app
 }
 
+export function createEpicSessionAdapter(manager: SessionManager) {
+  return {
+    async create(input: EpicSessionInput) {
+      const session = manager.create(input)
+      const worker: WorkerSession = {
+        id: session.id,
+        prompt: (text) => manager.prompt(session.id, text),
+        cancel: async () => {
+          await manager.interrupt(session.id)
+          await manager.discard(session.id)
+        },
+      }
+      return worker
+    },
+  }
+}
+
 export function startServer(
   port = Number(process.env.FORGE_PORT ?? 3900),
 ): ServerType {
@@ -196,6 +217,7 @@ export function startServer(
     throw new Error(`Harness ${key} is not configured`)
   }
   const manager = new SessionManager(db, bus, factory)
+  const runner = new EpicRunner(db, createEpicSessionAdapter(manager), bus)
   // Settle persisted turns before exposing the port. Respawn work continues
   // from the settled state without delaying health checks.
   void recoverSessions(db, manager, bus)
@@ -209,7 +231,7 @@ export function startServer(
     },
     questions,
     manager,
-    undefined,
+    runner,
     productionWebDir(),
     configState,
   )

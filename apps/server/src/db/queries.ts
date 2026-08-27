@@ -160,14 +160,15 @@ export function createSession(
     forkRequestId?: string | null
     contextMethod?: string | null
     contextConfidence?: string | null
+    epicRunId?: string | null
     now?: number
   },
 ) {
   const now = input.now ?? Date.now()
   const value = { id: id('ses_'), ...input, kind: input.kind ?? 'chat', now }
   db.prepare(
-    `INSERT INTO sessions (id, project_id, harness, title, cwd, kind, retention, parent_session_id, forked_at_seq, fork_request_id, context_method, context_confidence, status, auto_resume, created_at, last_activity_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
+    `INSERT INTO sessions (id, project_id, harness, title, cwd, kind, retention, parent_session_id, forked_at_seq, fork_request_id, context_method, context_confidence, epic_run_id, status, auto_resume, created_at, last_activity_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
   ).run(
     value.id,
     value.projectId,
@@ -181,6 +182,7 @@ export function createSession(
     input.forkRequestId ?? null,
     input.contextMethod ?? null,
     input.contextConfidence ?? null,
+    input.epicRunId ?? null,
     now,
     now,
   )

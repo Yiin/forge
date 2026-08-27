@@ -60,11 +60,13 @@ export class SessionManager {
     kind?: string
     parentSessionId?: string | null
     retention?: 'permanent' | 'discardable'
+    epicRunId?: string | null
   }) {
     return createSession(this.db, {
       ...input,
       title: input.title?.trim() || 'New session',
       retention: input.retention,
+      epicRunId: input.epicRunId,
     })
   }
 

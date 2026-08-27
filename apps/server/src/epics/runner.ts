@@ -54,14 +54,15 @@ export type WorkerSession = {
   cancel(): Promise<void>
 }
 export type SessionManager = {
-  create(input: {
-    projectId: string
-    harness: string
-    cwd: string
-    title: string
-    kind: 'epic_worker'
-    epicRunId: string
-  }): Promise<WorkerSession>
+  create(input: EpicSessionInput): Promise<WorkerSession>
+}
+export type EpicSessionInput = {
+  projectId: string
+  harness: string
+  cwd: string
+  title: string
+  kind: 'epic_worker'
+  epicRunId: string
 }
 export type StartRunInput = {
   projectId: string
