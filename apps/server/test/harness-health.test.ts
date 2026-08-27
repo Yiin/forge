@@ -83,6 +83,8 @@ describe('harness health', () => {
     const body = await response.json()
     expect(body).toHaveLength(2)
     expect(body[0].accounts[0]).toMatchObject({
+      kind: 'claude',
+      homePath: homes.claude,
       authenticated: true,
       cooldown: { kind: 'usage-limit' },
     })

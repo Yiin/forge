@@ -4,6 +4,7 @@ import { harnessAccountSnapshotSchema } from './accounts-api'
 const base = {
   accountId: 'claude-primary',
   harnessKind: 'claude',
+  harnessKey: 'claude-code-acp',
   enabled: true,
   installed: true,
   version: '1.2.3',

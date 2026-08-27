@@ -353,6 +353,13 @@ export function HarnessSettings() {
                         accountId={row.accountId}
                         harness={row.harness}
                         snapshot={snapshotFor(row.accountId)}
+                        accountKind={
+                          isBase
+                            ? kind
+                            : (accounts.find((a) => a.id === row.accountId)
+                                ?.kind ?? snapshotFor(row.accountId)?.harnessKind)
+                                ?? kind
+                        }
                         homePath={
                           isBase
                             ? undefined
@@ -395,7 +402,11 @@ export function HarnessSettings() {
                           setSignOut({
                             id: row.accountId,
                             name,
-                            kind,
+                            kind:
+                              accounts.find((a) => a.id === row.accountId)
+                                ?.kind ??
+                              snapshotFor(row.accountId)?.harnessKind ??
+                              kind,
                             home:
                               accounts.find((a) => a.id === row.accountId)
                                 ?.storageDir ?? null,

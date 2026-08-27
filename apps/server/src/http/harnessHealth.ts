@@ -44,6 +44,8 @@ export function createHarnessHealthReader(options: {
             return {
               id: account.id,
               label: account.label,
+              kind: account.kind,
+              homePath: account.homePath,
               order: account.orderIndex,
               disabled: account.disabledAt !== null,
               authenticated: accountAuthenticated(

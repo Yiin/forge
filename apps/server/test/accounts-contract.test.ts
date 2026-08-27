@@ -97,6 +97,13 @@ describe('web AccountsApi against the real server routes', () => {
     const status = await api.listHarnessStatus()
     expect(status).toHaveLength(2)
     expect(status.every((entry) => entry.harnessKind === 'claude')).toBe(true)
+    expect(status.every((entry) => entry.harnessKey === 'claude')).toBe(true)
+    expect(
+      accounts.every(
+        (account) =>
+          account.kind === 'claude' && account.harnessKey === 'claude',
+      ),
+    ).toBe(true)
 
     const patched = await api.updateAccount(first.id, { label: 'Renamed' })
     expect(patched.label).toBe('Renamed')

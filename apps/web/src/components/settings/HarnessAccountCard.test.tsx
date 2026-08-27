@@ -20,6 +20,7 @@ const snapshot = (
 ): HarnessAccountSnapshot => ({
   accountId: 'work',
   harnessKind: 'claude',
+  harnessKey: 'claude',
   enabled: true,
   installed: true,
   version: '1.0.0',
@@ -43,6 +44,7 @@ function renderCard(
     <TooltipProvider>
       <HarnessAccountCard
         accountId="work"
+        accountKind="claude"
         harness={harness}
         snapshot={current}
         isExpanded={false}

@@ -96,8 +96,11 @@ describe('Composer', () => {
       {
         id: 'work',
         harness: 'claude',
+        harnessKey: 'claude-code-acp',
+        kind: 'claude',
         label: 'Work',
         storageDir: '/tmp/work',
+        homePath: '/tmp/work',
         enabled: true,
         authStatus: 'authenticated',
         email: null,

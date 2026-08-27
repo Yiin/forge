@@ -34,6 +34,7 @@ export type PatchHarnessAccount = z.infer<typeof patchHarnessAccountSchema>
 export const harnessAccountSnapshotSchema = z.object({
   accountId: z.string(),
   harnessKind: z.string(),
+  harnessKey: z.string(),
   displayName: z.string().optional(),
   enabled: z.boolean(),
   installed: z.boolean(),

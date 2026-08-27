@@ -34,6 +34,7 @@ import { RedactedSensitiveText } from './RedactedSensitiveText'
 
 type Props = {
   accountId: string
+  accountKind: string
   harness: HarnessConfig
   snapshot: HarnessAccountSnapshot | undefined
   isExpanded: boolean
@@ -62,6 +63,7 @@ const statusDot: Record<HarnessAccountSnapshot['status'], string> = {
 
 export function HarnessAccountCard({
   accountId,
+  accountKind,
   harness,
   snapshot,
   isExpanded,
@@ -78,7 +80,7 @@ export function HarnessAccountCard({
 }: Props) {
   const tick = useRelativeTimeTick(30_000)
   const enabled = harness.enabled ?? true
-  const kind = snapshot?.harnessKind ?? accountId
+  const kind = accountKind
   // `harness` is the shared config for the whole kind (command/args/env), so
   // every row in a group carries the same `harness.name`. A real account row
   // (accountId !== kind) must show its own label first, or every row in the

@@ -15,6 +15,8 @@ export const harnessCooldownSchema = z.object({
 export const harnessAccountHealthSchema = z.object({
   id: z.string(),
   label: z.string(),
+  kind: z.string(),
+  homePath: z.string(),
   order: z.number().int(),
   disabled: z.boolean(),
   authenticated: z.boolean(),

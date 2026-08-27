@@ -47,6 +47,9 @@ export type Account = {
   harness: string
   label: string
   storageDir: string
+  harnessKey: string
+  kind: string
+  homePath: string
   enabled: boolean
   authStatus: 'authenticated' | 'unauthenticated' | 'unknown'
   email: string | null
@@ -88,7 +91,8 @@ export class AccountsApi {
       entry.accounts.map((account) =>
         harnessAccountSnapshotSchema.parse({
           accountId: account.id,
-          harnessKind: entry.key,
+          harnessKind: account.kind,
+          harnessKey: entry.key,
           displayName: account.label,
           enabled: entry.enabled,
           installed: entry.enabled,
@@ -165,6 +169,9 @@ export class AccountsApi {
       return {
         id: row.id,
         harness: row.harnessKey,
+        harnessKey: row.harnessKey,
+        kind: row.kind,
+        homePath: row.homePath,
         label: row.label,
         storageDir: row.homePath,
         enabled: row.disabledAt === null,

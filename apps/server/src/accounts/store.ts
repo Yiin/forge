@@ -182,7 +182,7 @@ function credentialFiles(kind: string): string[] {
     case 'codex':
       return ['auth.json']
     case 'kimi':
-      return ['credentials.json', 'auth.json']
+      return ['credentials/kimi-code.json']
     case 'opencode':
       return ['opencode/auth.json']
     default:

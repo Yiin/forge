@@ -9,8 +9,11 @@ import type { Account } from '@/lib/accounts-api'
 const account = (patch: Partial<Account> = {}): Account => ({
   id: 'main',
   harness: 'claude',
+  harnessKey: 'claude',
+  kind: 'claude',
   label: 'Main',
   storageDir: '/tmp/main',
+  homePath: '/tmp/main',
   enabled: true,
   authStatus: 'authenticated',
   email: null,
