@@ -46,6 +46,7 @@ import {
 } from '@/components/ui/select'
 import { validateEpicDefaults, type EpicDefaults } from './epic-settings-logic'
 import { openProjectCreation } from '../components/ProjectCreationDialog'
+import { AddHarnessDialog } from '../components/settings/AddHarnessDialog'
 import {
   displayShortcut,
   setShortcutOverrides,
@@ -307,6 +308,7 @@ export function HarnessSettings() {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [deleteKey, setDeleteKey] = useState<string | null>(null)
   const [deletePending, setDeletePending] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const saveQueue = useRef<Record<string, Promise<void>>>({})
   useEffect(() => {
     void api
@@ -396,20 +398,21 @@ export function HarnessSettings() {
       .filter(Boolean)
       .join('\n')
   }
-  const add = () => {
-    const key = `harness-${Object.keys(draft).length + 1}`
-    setDraft((current) => ({
-      ...current,
-      [key]: {
-        name: 'New harness',
-        command: '',
-        args: [],
-        env: {},
-        protocol: 'acp',
-        enabled: true,
-      },
-    }))
-    setSaveState((current) => ({ ...current, [key]: 'dirty' }))
+  const add = (key: string, harness: Harness) => {
+    const next = { ...draft, [key]: harness }
+    setDraft(next)
+    setSaveState((current) => ({ ...current, [key]: 'saving' }))
+    setSaveError((current) => ({ ...current, [key]: null }))
+    void api
+      .saveHarnesses(next)
+      .then(() => setSaveState((current) => ({ ...current, [key]: 'saved' })))
+      .catch((error: unknown) => {
+        setSaveError((current) => ({
+          ...current,
+          [key]: error instanceof Error ? error.message : String(error),
+        }))
+        setSaveState((current) => ({ ...current, [key]: 'error' }))
+      })
   }
   const confirmDelete = async () => {
     if (!deleteKey) return
@@ -702,8 +705,14 @@ export function HarnessSettings() {
           </p>
         ))}
       <div className="mt-6">
-        <Button onClick={add}>Add harness</Button>
+        <Button onClick={() => setAddOpen(true)}>Add harness</Button>
       </div>
+      <AddHarnessDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        existingIds={Object.keys(draft)}
+        onAdd={add}
+      />
       <AlertDialog
         open={deleteKey !== null}
         onOpenChange={(open) => {
