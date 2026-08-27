@@ -76,6 +76,7 @@ describe('health endpoint', () => {
         'kimi',
         'gemini',
         'grok',
+        'pi',
         'mock',
       ])
     } finally {

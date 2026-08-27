@@ -43,7 +43,9 @@ export const cliFor = (kind: string) =>
           ? 'opencode'
           : kind === 'grok'
             ? 'grok'
-            : null
+            : kind === 'pi'
+              ? 'pi'
+              : null
 
 export const argsFor = (
   kind: string,
@@ -57,12 +59,14 @@ export const argsFor = (
         ? ['login']
         : kind === 'grok'
           ? ['login', '--device-auth']
-          : [
-              'auth',
-              'login',
-              ...(input?.provider ? ['--provider', input.provider] : []),
-              ...(input?.method ? ['--method', input.method] : []),
-            ]
+          : kind === 'pi'
+            ? []
+            : [
+                'auth',
+                'login',
+                ...(input?.provider ? ['--provider', input.provider] : []),
+                ...(input?.method ? ['--method', input.method] : []),
+              ]
 
 function tail(value: string) {
   return value.length <= 10_000 ? value : value.slice(-10_000)

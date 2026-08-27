@@ -36,4 +36,14 @@ describe('account credentials', () => {
     clearAccountCredentials('grok', home)
     expect(accountAuthenticated('grok', home)).toBe(false)
   })
+
+  it('recognizes a Pi auth file', () => {
+    const root = mkdtempSync(join(tmpdir(), 'forge-pi-'))
+    const home = join(root, 'account')
+    mkdirSync(home)
+    roots.push(root)
+    expect(accountAuthenticated('pi', home)).toBe(false)
+    writeFileSync(join(home, 'auth.json'), '{}')
+    expect(accountAuthenticated('pi', home)).toBe(true)
+  })
 })

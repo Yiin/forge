@@ -274,6 +274,7 @@ export function startServer(
       ['claude', claudeUsageProbe],
       ['codex', codexUsageProbe],
       ['grok', unsupportedUsageProbe],
+      ['pi', unsupportedUsageProbe],
     ]),
   })
   const harnessHealth = createHarnessHealthReader({ db, configState, manager })

@@ -61,6 +61,15 @@ describe('default harness configuration', () => {
     expect(defaultConfig(true).harness).toHaveProperty('mock')
   })
 
+  test('includes the Pi ACP adapter harness', () => {
+    expect(defaultConfig(false).harness.pi).toMatchObject({
+      name: 'Pi',
+      command: 'npx',
+      args: ['-y', 'pi-acp'],
+      protocol: 'acp',
+    })
+  })
+
   test('merges defaults and preserves user harness fields', async () => {
     const root = await mkdtemp(join(tmpdir(), 'forge-config-'))
     const file = join(root, 'forge.toml')
@@ -104,6 +113,7 @@ describe('default harness configuration', () => {
       'kimi',
       'gemini',
       'grok',
+      'pi',
     ])
     expect(
       reconcileConfig(

@@ -63,6 +63,11 @@ describe('LoginManager', () => {
     expect(argsFor('grok')).toEqual(['login', '--device-auth'])
   })
 
+  it('starts Pi so the operator can use its /login command', () => {
+    expect(cliFor('pi')).toBe('pi')
+    expect(argsFor('pi')).toEqual([])
+  })
+
   it('publishes idle, running, and succeeded with clean bounded output and extracted values', async () => {
     const { login, account, events } = fixture(
       'printf "\\033[31mhttps://example.test/device\\033[0m code: AB12-XY\\n"',

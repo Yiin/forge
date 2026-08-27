@@ -47,6 +47,8 @@ const labels: Record<string, string> = {
   codex: 'Codex',
   kimi: 'Kimi',
   opencode: 'OpenCode',
+  grok: 'Grok',
+  pi: 'Pi',
 }
 
 export function HarnessSettings() {
@@ -316,6 +318,11 @@ export function HarnessSettings() {
                 <SettingsSection
                   key={kind}
                   title={config[kind]?.name ?? labels[kind] ?? kind}
+                  description={
+                    kind === 'pi'
+                      ? 'Pi ACP adapter limits: no filesystem, terminal, or MCP delegation. Assistant text has no separate thought stream. Requires Node 22+ and pi 0.80.4+.'
+                      : undefined
+                  }
                   headerAction={
                     accountKindForHarness(kind, config[kind]) ? (
                       <Button
@@ -357,8 +364,9 @@ export function HarnessSettings() {
                           isBase
                             ? kind
                             : (accounts.find((a) => a.id === row.accountId)
-                                ?.kind ?? snapshotFor(row.accountId)?.harnessKind)
-                                ?? kind
+                                ?.kind ??
+                              snapshotFor(row.accountId)?.harnessKind ??
+                              kind)
                         }
                         homePath={
                           isBase
