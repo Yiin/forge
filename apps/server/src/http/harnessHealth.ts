@@ -3,9 +3,10 @@ import { harnessHealthResponseSchema } from '@forge/protocol/status'
 import type { ConfigState } from '../config.js'
 import { clearExpiredLimits } from '../accounts/limits.js'
 import { accountAuthenticated, HarnessAccountStore } from '../accounts/store.js'
+import { clearExpiredUsage, readUsage } from '../accounts/usage.js'
 import type { SessionManager } from '../sessions/manager.js'
 
-type Db = { prepare(sql: string): any }
+type Db = { prepare(sql: string): any; exec(sql: string): unknown }
 
 export function createHarnessHealthReader(options: {
   db: Db
@@ -16,6 +17,7 @@ export function createHarnessHealthReader(options: {
   const read = () => {
     const now = Date.now()
     clearExpiredLimits(options.db, now)
+    clearExpiredUsage(options.db, now)
     return harnessHealthResponseSchema.parse(
       Object.entries(options.configState.current.harness).map(
         ([key, config]) => ({
@@ -41,6 +43,10 @@ export function createHarnessHealthReader(options: {
                   detail: string | null
                 }
               | undefined
+            const usageRows = readUsage(options.db, account.id)
+            const visibleUsage = usageRows.filter(
+              (row) => row.windowKey !== '__status',
+            )
             return {
               id: account.id,
               label: account.label,
@@ -61,6 +67,19 @@ export function createHarnessHealthReader(options: {
                     detail: cooldown.detail,
                   }
                 : null,
+              usage: visibleUsage.length
+                ? visibleUsage.map((row) => ({
+                    windowKey: row.windowKey,
+                    label: row.label,
+                    percent: row.percent,
+                    resetsAt: row.resetsAt,
+                    source: row.source,
+                    observedAt: row.observedAt!,
+                  }))
+                : undefined,
+              tierLabel: usageRows.find((row) => row.tierLabel)?.tierLabel,
+              usageStatus: usageRows.find((row) => row.status !== 'ok')
+                ?.status as 'auth' | 'unavailable' | 'unsupported' | undefined,
             }
           }),
           liveProcesses: options.manager.liveProcessCount(key),

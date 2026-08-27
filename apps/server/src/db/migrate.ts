@@ -39,6 +39,10 @@ export function migrate(sqlite: SqliteLike) {
     if (hasExistingSchema) {
       sqlite.exec('BEGIN')
       try {
+        // Existing databases predate the migration ledger. Apply the newest
+        // idempotent migration before recording the legacy baseline.
+        const newest = files.at(-1)
+        if (newest) sqlite.exec(readFileSync(dir + newest, 'utf8'))
         const insert = sqlite.prepare(
           'INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)',
         )

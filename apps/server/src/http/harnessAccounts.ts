@@ -10,6 +10,7 @@ import {
 } from '../accounts/store.js'
 import { clearAccountLimits } from '../accounts/limits.js'
 import { LoginManager } from '../accounts/login.js'
+import type { UsagePoller } from '../accounts/usagePoller.js'
 import type { EventBus } from '../events/bus.js'
 import type { ConfigState } from '../config.js'
 
@@ -19,6 +20,7 @@ export function harnessAccountRoutes(
     bus?: EventBus
     configState?: ConfigState
     loginManager?: LoginManager
+    usagePoller?: UsagePoller
   },
 ) {
   const store = new HarnessAccountStore(db)
@@ -88,6 +90,14 @@ export function harnessAccountRoutes(
     const account = store.get(c.req.param('id'))
     if (!account) return c.json({ error: 'Account not found' }, 404)
     clearAccountLimits(db, account.id)
+    return c.json({ ok: true })
+  })
+  app.post('/api/harnesses/accounts/:id/usage/refresh', async (c) => {
+    if (!options?.usagePoller)
+      return c.json({ error: 'Usage polling is unavailable' }, 503)
+    if (!store.get(c.req.param('id')))
+      return c.json({ error: 'Account not found' }, 404)
+    await options.usagePoller.refresh(c.req.param('id'))
     return c.json({ ok: true })
   })
   app.post('/api/harness-accounts/:id/login', async (c) => {

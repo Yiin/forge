@@ -54,6 +54,7 @@ import { acpHarness } from './acp/harness.js'
 import { HarnessAccountStore, accountEnv } from './accounts/store.js'
 import { clearExpiredLimits } from './accounts/limits.js'
 import { LoginManager } from './accounts/login.js'
+import { UsagePoller } from './accounts/usagePoller.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -122,6 +123,7 @@ export function createApp(
   webDir?: string,
   configState?: ConfigState,
   loginManager?: LoginManager,
+  usagePoller?: UsagePoller,
 ) {
   const app = new Hono()
 
@@ -155,6 +157,7 @@ export function createApp(
         bus: status?.bus,
         configState,
         loginManager,
+        usagePoller,
       }),
     )
     app.route('/', serverConfigRoutes())
@@ -268,6 +271,7 @@ export function startServer(
     bus,
     (key) => configState.current.harness[key],
   )
+  const usagePoller = new UsagePoller({ db })
   const harnessHealth = createHarnessHealthReader({ db, configState, manager })
   // Settle persisted turns before exposing the port. Respawn work continues
   // from the settled state without delaying health checks.
@@ -292,12 +296,17 @@ export function startServer(
     productionWebDir(),
     configState,
     loginManager,
+    usagePoller,
   )
+  usagePoller.start()
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
   app.get('/ws', websocketRoute(upgradeWebSocket, db, bus))
   const server = serve({ fetch: app.fetch, port })
   injectWebSocket(server)
-  server.on('close', () => loginManager.close())
+  server.on('close', () => {
+    loginManager.close()
+    usagePoller.stop()
+  })
   return server
 }
 

@@ -12,6 +12,14 @@ export const harnessCooldownSchema = z.object({
   resetsAtEstimated: z.boolean(),
   detail: z.string().nullable(),
 })
+export const accountUsageWindow = z.object({
+  windowKey: z.string(),
+  label: z.string(),
+  percent: z.number().min(0).max(1),
+  resetsAt: z.number().int().nullable(),
+  source: z.string(),
+  observedAt: z.number().int(),
+})
 export const harnessAccountHealthSchema = z.object({
   id: z.string(),
   label: z.string(),
@@ -21,6 +29,9 @@ export const harnessAccountHealthSchema = z.object({
   disabled: z.boolean(),
   authenticated: z.boolean(),
   cooldown: harnessCooldownSchema.nullable(),
+  usage: z.array(accountUsageWindow).optional(),
+  tierLabel: z.string().optional(),
+  usageStatus: z.enum(['ok', 'auth', 'unavailable', 'unsupported']).optional(),
 })
 export const harnessStatusSchema = z.object({
   key: z.string(),
