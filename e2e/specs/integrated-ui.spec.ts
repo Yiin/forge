@@ -96,8 +96,9 @@ test('settings routes expose stable navigation, focus, and accessible controls',
       ['/settings/epics', 'Epics'],
     ] as const) {
       await page.goto(path)
-      await expect(page.getByRole('heading', { name: heading })).toBeVisible()
-      await expect(page.getByRole('heading', { name: heading })).toBeFocused()
+      const pageHeading = page.getByRole('heading', { name: heading, level: 1 })
+      await expect(pageHeading).toBeVisible()
+      await expect(pageHeading).toBeFocused()
       await expectAccessible(page)
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth),

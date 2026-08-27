@@ -24,7 +24,11 @@ describe('harness picker logic', () => {
   it('groups zero, one, and several accounts', () => {
     const options = buildHarnessOptions(
       ['claude', 'codex', 'kimi'],
-      [account(), account({ id: 'other', label: 'Other' }), account({ id: 'codex', harness: 'codex' })],
+      [
+        account(),
+        account({ id: 'other', label: 'Other' }),
+        account({ id: 'codex', harness: 'codex' }),
+      ],
       0,
     )
     expect(options.map((option) => option.accounts.length)).toEqual([2, 1, 0])
@@ -46,14 +50,19 @@ describe('harness picker logic', () => {
   it('skips a cooling first account and falls back from stale selection', () => {
     const options: HarnessOption[] = buildHarnessOptions(
       ['claude', 'codex'],
-      [account({ cooldownUntil: 60_001 }), account({ id: 'ready', harness: 'codex' })],
+      [
+        account({ cooldownUntil: 60_001 }),
+        account({ id: 'ready', harness: 'codex' }),
+      ],
       0,
     )
     expect(defaultSelection(options, { harness: 'missing' })).toEqual({
       harness: 'codex',
       accountId: 'ready',
     })
-    expect(defaultSelection(options, { harness: 'claude', accountId: 'main' })).toEqual({
+    expect(
+      defaultSelection(options, { harness: 'claude', accountId: 'main' }),
+    ).toEqual({
       harness: 'codex',
       accountId: 'ready',
     })

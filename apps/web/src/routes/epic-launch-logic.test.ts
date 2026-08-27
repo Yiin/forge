@@ -11,9 +11,7 @@ describe('epic launch overrides', () => {
 
   it('reports the file and field for invalid values', () => {
     const result = buildEpicLaunchConfig({ workerCount: 0 }, ['mock'])
-    expect(result.errors.workerCount).toContain(
-      'positive',
-    )
+    expect(result.errors.workerCount).toContain('positive')
   })
 
   it('rejects harnesses that are not configured', () => {
@@ -24,9 +22,9 @@ describe('epic launch overrides', () => {
       },
       ['mock'],
     )
-    expect(
-      result.errors['rolePolicy.tiers.fast.0.harness'],
-    ).toContain('Unknown harness')
+    expect(result.errors['rolePolicy.tiers.fast.0.harness']).toContain(
+      'Unknown harness',
+    )
   })
 
   it('accepts known harness overrides', () => {

@@ -48,7 +48,9 @@ describe('ACP harness adapter', () => {
     expect(items.filter((item) => item.type === 'text_delta')).toHaveLength(1)
     expect(items.filter((item) => item.type === 'turn_end')).toHaveLength(1)
     expect(
-      db.prepare('SELECT provider_session_id FROM sessions WHERE id = ?').get(session.id),
+      db
+        .prepare('SELECT provider_session_id FROM sessions WHERE id = ?')
+        .get(session.id),
     ).toMatchObject({ provider_session_id: 'forge-mock-session' })
   })
 })

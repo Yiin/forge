@@ -256,7 +256,7 @@ export function HarnessSettings() {
       >
         <div className="flex flex-col gap-6">
           <div className="flex items-center justify-between px-1">
-            <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/60">
               Harnesses
             </h2>
             <div className="flex items-center gap-1.5">

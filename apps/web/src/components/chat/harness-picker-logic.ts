@@ -52,7 +52,9 @@ export function defaultSelection(
   options: ReadonlyArray<HarnessOption>,
   current: HarnessSelection,
 ): HarnessSelection {
-  const currentOption = options.find((option) => option.harness === current.harness)
+  const currentOption = options.find(
+    (option) => option.harness === current.harness,
+  )
   const currentAccount = currentOption?.accounts.find(
     (account) => account.id === current.accountId,
   )
@@ -66,6 +68,7 @@ export function defaultSelection(
     const account = option.accounts[0]
     return account && !account.cooling && !account.disabled
   })
-  if (usable) return { harness: usable.harness, accountId: usable.accounts[0]!.id }
+  if (usable)
+    return { harness: usable.harness, accountId: usable.accounts[0]!.id }
   return options[0] ? { harness: options[0].harness } : current
 }

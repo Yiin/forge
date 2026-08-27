@@ -14,9 +14,7 @@ import { useSessionsStore } from '../stores/sessions'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  EpicLaunchDialog as ExtractedEpicLaunchDialog,
-} from '../components/epics/EpicLaunchDialog'
+import { EpicLaunchDialog as ExtractedEpicLaunchDialog } from '../components/epics/EpicLaunchDialog'
 export { EpicLaunchDialog } from '../components/epics/EpicLaunchDialog'
 import {
   Empty,

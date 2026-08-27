@@ -133,11 +133,11 @@ describe('Composer', () => {
   })
 
   it('keeps status harnesses when accounts are unavailable', async () => {
-    vi.spyOn(accountsApi, 'listAccounts').mockRejectedValue(new Error('offline'))
-    const onSend = vi.fn().mockResolvedValue(undefined)
-    render(
-      <Composer sessionId="session-1" harness="codex" onSend={onSend} />,
+    vi.spyOn(accountsApi, 'listAccounts').mockRejectedValue(
+      new Error('offline'),
     )
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    render(<Composer sessionId="session-1" harness="codex" onSend={onSend} />)
     await waitFor(() =>
       expect(screen.getByRole('combobox', { name: 'Harness' })).toBeTruthy(),
     )

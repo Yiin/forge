@@ -1,5 +1,5 @@
 import { AlertCircle, ArrowLeft, Undo2Icon } from 'lucide-react'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -196,6 +196,8 @@ export function SettingsPage({
   subtitle: string
   children: ReactNode
 }) {
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => headingRef.current?.focus(), [title])
   return (
     <section className="mx-auto max-w-3xl px-4 py-6 sm:px-6 md:py-10">
       <Button
@@ -209,6 +211,7 @@ export function SettingsPage({
         Back
       </Button>
       <h1
+        ref={headingRef}
         tabIndex={-1}
         className="text-xl font-semibold tracking-tight outline-none"
         style={{ outline: 'none', boxShadow: 'none' }}

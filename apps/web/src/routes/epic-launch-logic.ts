@@ -46,9 +46,8 @@ export function buildEpicLaunchConfig(
   )) {
     hops.forEach((hop, index) => {
       if (!knownHarnesses.includes(hop.harness))
-        errors[
-          `rolePolicy.tiers.${tier}.${index}.harness`
-        ] = `Unknown harness “${hop.harness}”. Choose a configured harness.`
+        errors[`rolePolicy.tiers.${tier}.${index}.harness`] =
+          `Unknown harness “${hop.harness}”. Choose a configured harness.`
     })
   }
   return Object.keys(errors).length

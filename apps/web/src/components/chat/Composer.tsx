@@ -160,7 +160,10 @@ export function Composer({
       .catch(() => undefined)
   }, [])
   useEffect(() => {
-    void accountsApi.listAccounts().then(setAccounts).catch(() => undefined)
+    void accountsApi
+      .listAccounts()
+      .then(setAccounts)
+      .catch(() => undefined)
   }, [])
   const harnessOptions = buildHarnessOptions(harnesses, accounts, Date.now())
   const selected = defaultSelection(harnessOptions, selection)
@@ -463,7 +466,9 @@ export function Composer({
                   <SelectGroup key={option.harness}>
                     <SelectLabel>{option.label}</SelectLabel>
                     {option.accounts.length === 0 ? (
-                      <SelectItem value={option.harness}>{option.label}</SelectItem>
+                      <SelectItem value={option.harness}>
+                        {option.label}
+                      </SelectItem>
                     ) : (
                       option.accounts.map((account) => (
                         <SelectItem
