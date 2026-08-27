@@ -56,6 +56,7 @@ import { clearExpiredLimits } from './accounts/limits.js'
 import { LoginManager } from './accounts/login.js'
 import { UsagePoller } from './accounts/usagePoller.js'
 import { codexUsageProbe } from './accounts/probes/codex.js'
+import { claudeUsageProbe } from './accounts/probes/claude.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -274,7 +275,10 @@ export function startServer(
   )
   const usagePoller = new UsagePoller({
     db,
-    probes: new Map([['codex', codexUsageProbe]]),
+    probes: new Map([
+      ['claude', claudeUsageProbe],
+      ['codex', codexUsageProbe],
+    ]),
   })
   const harnessHealth = createHarnessHealthReader({ db, configState, manager })
   // Settle persisted turns before exposing the port. Respawn work continues
