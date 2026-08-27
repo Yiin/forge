@@ -11,6 +11,7 @@ export type LocalDraft = {
   id: string
   projectId: string
   harness: string
+  accountId?: string
   prompt: string
   createdAt: number
   updatedAt: number
@@ -18,13 +19,20 @@ export type LocalDraft = {
   promotionState: 'unpromoted' | 'promoting' | 'promoted' | 'failed'
 }
 type DraftPatch = Partial<
-  Pick<LocalDraft, 'harness' | 'prompt' | 'attachments' | 'promotionState'>
+  Pick<
+    LocalDraft,
+    'harness' | 'accountId' | 'prompt' | 'attachments' | 'promotionState'
+  >
 >
 type DraftState = {
   drafts: Record<string, LocalDraft>
   hydrated: boolean
   hydrate: () => void
-  getOrCreate: (projectId: string, harness?: string) => LocalDraft
+  getOrCreate: (
+    projectId: string,
+    harness?: string,
+    accountId?: string,
+  ) => LocalDraft
   update: (id: string, patch: DraftPatch) => void
   remove: (id: string) => void
   removeInvalid: (projectIds: Iterable<string>) => void
@@ -77,7 +85,7 @@ export const useDraftsStore = create<DraftState>((set, get) => ({
   hydrate: () => {
     if (!get().hydrated) set({ drafts: readStorage(), hydrated: true })
   },
-  getOrCreate: (projectId, harness = '') => {
+  getOrCreate: (projectId, harness = '', accountId) => {
     const stored = readStorage()
     const id = draftIdFor(projectId)
     const existing = get().drafts[id] ?? stored[id]
@@ -93,6 +101,7 @@ export const useDraftsStore = create<DraftState>((set, get) => ({
       id,
       projectId,
       harness,
+      accountId,
       prompt: '',
       createdAt: now,
       updatedAt: now,

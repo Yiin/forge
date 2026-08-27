@@ -112,12 +112,17 @@ export function DraftRoute() {
           sessionId={draft.id}
           draftProjectId={draft.projectId}
           harness={draft.harness}
+          accountId={draft.accountId}
           draftMode
           initialText={draft.prompt}
           onTextChange={(prompt) =>
             useDraftsStore.getState().update(draft.id, { prompt })
           }
           onSend={async (text, attachmentIds, selectedHarness) => {
+            useDraftsStore.getState().update(draft.id, {
+              harness: selectedHarness.harness,
+              accountId: selectedHarness.accountId,
+            })
             useDraftsStore
               .getState()
               .update(draft.id, { promotionState: 'promoting' })
@@ -125,7 +130,8 @@ export function DraftRoute() {
               const result = (await api.promoteDraft({
                 draftId: draft.id,
                 projectId: draft.projectId,
-                harness: selectedHarness || draft.harness,
+                harness: selectedHarness.harness || draft.harness,
+                accountId: selectedHarness.accountId,
                 text,
                 attachmentIds,
               })) as { sessionId: string }

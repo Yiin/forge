@@ -12,6 +12,7 @@ import { useShellStore } from '../stores/shell'
 import { registerShortcuts } from '../lib/shortcuts'
 import { ChatLifecycle } from '../components/chat/ChatLifecycle'
 import type { ConnectionState } from '../lib/socket'
+import type { HarnessSelection } from '../components/chat/harness-picker-logic'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
@@ -19,6 +20,7 @@ export function SessionRoute() {
   const targetSeq = Number(new URLSearchParams(window.location.search).get('m'))
   const [sending, setSending] = useState(false)
   const [harness, setHarness] = useState<string>()
+  const [accountId, setAccountId] = useState<string>()
   const [protocol, setProtocol] = useState<'acp' | 'pty'>()
   const [loadedStatus, setLoadedStatus] = useState<string>()
   const [loading, setLoading] = useState(true)
@@ -50,11 +52,13 @@ export function SessionRoute() {
         }
         const session = (await response.json()) as SessionSummary & {
           protocol?: 'acp' | 'pty'
+          accountId?: string | null
         }
         if (!active) return
         useShellStore.getState().setLastSession(session.id)
         useSessionsStore.getState().upsertSession(session)
         setHarness(session.harness)
+        setAccountId(session.accountId ?? undefined)
         setProtocol(session.protocol)
         setLoadedStatus(session.status)
         setLoading(false)
@@ -128,7 +132,7 @@ export function SessionRoute() {
   const send = async (
     text: string,
     attachmentIds: string[],
-    selectedHarness: string,
+    selection: HarnessSelection,
   ) => {
     if (!text.trim()) return
     setSending(true)
@@ -166,9 +170,11 @@ export function SessionRoute() {
           sessionId,
           text: value,
           attachmentIds,
-          harness: selectedHarness || harness,
+          harness: selection.harness || harness,
+          accountId: selection.accountId,
         })
-        setHarness(selectedHarness || harness)
+        setHarness(selection.harness || harness)
+        setAccountId(selection.accountId)
       }
     } finally {
       setSending(false)
@@ -199,6 +205,7 @@ export function SessionRoute() {
         <Composer
           sessionId={sessionId}
           harness={harness}
+          accountId={accountId}
           protocol={protocol}
           running={(sessionStatus ?? loadedStatus) === 'running'}
           onInterrupt={async () => {

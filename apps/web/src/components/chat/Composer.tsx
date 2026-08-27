@@ -2,7 +2,9 @@ import { ArrowUp, Paperclip } from 'lucide-react'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -34,6 +36,12 @@ import {
   type ComposerTrigger,
 } from './composer-triggers'
 import { AskUserQuestionPanel } from './AskUserQuestionPanel'
+import { accountsApi, type Account } from '../../lib/accounts-api'
+import {
+  buildHarnessOptions,
+  defaultSelection,
+  type HarnessSelection,
+} from './harness-picker-logic'
 
 const commandDefaults: ComposerCommand[] = [
   { id: 'btw', label: '/btw', group: 'Built-in', value: '/btw ' },
@@ -44,6 +52,7 @@ const commandDefaults: ComposerCommand[] = [
 export function Composer({
   sessionId,
   harness,
+  accountId,
   protocol,
   running = false,
   onInterrupt,
@@ -56,13 +65,14 @@ export function Composer({
 }: {
   sessionId: string
   harness?: string
+  accountId?: string
   protocol?: 'acp' | 'pty'
   running?: boolean
   onInterrupt?: () => Promise<void>
   onSend: (
     text: string,
     attachmentIds: string[],
-    harness: string,
+    selection: HarnessSelection,
   ) => Promise<void>
   sending?: boolean
   draftMode?: boolean
@@ -75,7 +85,10 @@ export function Composer({
   const [uploads, dispatchUploads] = useState(initialAttachmentUploads)
   const [dragging, setDragging] = useState(false)
   const [commands, setCommands] = useState(commandDefaults)
-  const [selectedHarness, setSelectedHarness] = useState(harness ?? '')
+  const [selection, setSelection] = useState<HarnessSelection>({
+    harness: harness ?? '',
+    accountId,
+  })
   const [interrupting, setInterrupting] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
@@ -136,6 +149,7 @@ export function Composer({
       .catch(() => undefined)
   }, [draftMode, sessionId])
   const [harnesses, setHarnesses] = useState<string[]>(harness ? [harness] : [])
+  const [accounts, setAccounts] = useState<Account[]>([])
   useEffect(() => {
     void fetch('/api/status')
       .then((response) => (response.ok ? response.json() : null))
@@ -145,6 +159,18 @@ export function Composer({
       })
       .catch(() => undefined)
   }, [])
+  useEffect(() => {
+    void accountsApi.listAccounts().then(setAccounts).catch(() => undefined)
+  }, [])
+  const harnessOptions = buildHarnessOptions(harnesses, accounts, Date.now())
+  const selected = defaultSelection(harnessOptions, selection)
+  useEffect(() => {
+    if (
+      selected.harness !== selection.harness ||
+      selected.accountId !== selection.accountId
+    )
+      setSelection(selected)
+  }, [selected, selection])
   const update = (
     value: string,
     cursor = textarea.current?.selectionStart ?? value.length,
@@ -253,7 +279,7 @@ export function Composer({
     if (!value || !canSendUploads(uploads)) return
     setSendError(null)
     try {
-      await onSend(value, completedAttachmentIds(uploads), selectedHarness)
+      await onSend(value, completedAttachmentIds(uploads), selection)
       setText('')
       setTrigger(null)
       dispatchUploads(initialAttachmentUploads)
@@ -410,8 +436,20 @@ export function Composer({
           </TooltipProvider>
           {harnesses.length > 0 && (
             <Select
-              value={selectedHarness}
-              onValueChange={(value) => setSelectedHarness(value)}
+              value={
+                selection.accountId
+                  ? `${selection.harness}:${selection.accountId}`
+                  : selection.harness
+              }
+              onValueChange={(value) => {
+                const separator = value.indexOf(':')
+                if (separator < 0) setSelection({ harness: value })
+                else
+                  setSelection({
+                    harness: value.slice(0, separator),
+                    accountId: value.slice(separator + 1),
+                  })
+              }}
             >
               <SelectTrigger
                 size="sm"
@@ -421,10 +459,26 @@ export function Composer({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {harnesses.map((entry) => (
-                  <SelectItem key={entry} value={entry}>
-                    {entry}
-                  </SelectItem>
+                {harnessOptions.map((option) => (
+                  <SelectGroup key={option.harness}>
+                    <SelectLabel>{option.label}</SelectLabel>
+                    {option.accounts.length === 0 ? (
+                      <SelectItem value={option.harness}>{option.label}</SelectItem>
+                    ) : (
+                      option.accounts.map((account) => (
+                        <SelectItem
+                          key={`${option.harness}:${account.id}`}
+                          value={`${option.harness}:${account.id}`}
+                          disabled={account.disabled}
+                        >
+                          {account.label}
+                          {account.cooling && account.coolingLabel
+                            ? ` Cooling - ${account.coolingLabel}`
+                            : ''}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectGroup>
                 ))}
               </SelectContent>
             </Select>

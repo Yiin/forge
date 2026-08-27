@@ -270,3 +270,5 @@ export function formatResetCountdown(
   if (hours) return mins ? `${hours}h ${mins}m` : `${hours}h`
   return `${mins}m`
 }
+
+export const formatCooldown = formatResetCountdown
