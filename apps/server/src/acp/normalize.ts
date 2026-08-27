@@ -29,6 +29,7 @@ export type NormalizerOptions = {
   bus?: EventBus
   logger?: Logger
   now?: () => number
+  sink?: (input: AppendMessage) => void
 }
 
 const textOf = (content: acp.ContentBlock | undefined) =>
@@ -101,7 +102,8 @@ export class AcpNormalizer {
       createdAt: this.now(),
       eventBus: this.options.bus,
     }
-    appendMessage(this.options.db, input)
+    if (this.options.sink) this.options.sink(input)
+    else appendMessage(this.options.db, input)
   }
 
   private flushKey(key: BufferKey) {

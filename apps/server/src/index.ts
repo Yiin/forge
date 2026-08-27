@@ -39,6 +39,7 @@ import {
   type ConfigState,
 } from './config.js'
 import { ptyHarness } from './pty/harness.js'
+import { acpHarness } from './acp/harness.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -191,15 +192,8 @@ export function startServer(
   const factory: HarnessFactory = (key) => {
     const entry = configState.current.harness[key]
     if (entry?.protocol === 'pty') return ptyHarness(entry)
-    return {
-      spawn: async (_session, _onItem, onExit) => ({
-        prompt: async () => {
-          onExit(new Error('No harness adapter configured'))
-        },
-        cancel: () => undefined,
-        kill: () => undefined,
-      }),
-    }
+    if (entry?.protocol === 'acp') return acpHarness(entry, { db, bus, questions })
+    throw new Error(`Harness ${key} is not configured`)
   }
   const manager = new SessionManager(db, bus, factory)
   // Settle persisted turns before exposing the port. Respawn work continues
