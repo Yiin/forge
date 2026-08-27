@@ -27,6 +27,12 @@ import {
   updateRunConfig,
 } from '../db/queries.js'
 import {
+  blockedAccounts,
+  detectProviderError,
+  recordLimit,
+  type LimitCategory,
+} from '../accounts/limits.js'
+import {
   appendTriageCard,
   classifyGate,
   failureSignature,
@@ -63,6 +69,7 @@ export type EpicSessionInput = {
   title: string
   kind: 'epic_worker'
   epicRunId: string
+  accountId?: string | null
 }
 export type StartRunInput = {
   projectId: string
@@ -83,7 +90,59 @@ type IterationResult = {
   beadId: string
   worktreePath: string
 }
-type ProviderHop = { harness: string; model?: string }
+export type ProviderHop = { harness: string; model?: string }
+export type AttemptAccount = {
+  id: string
+  harnessKey: string
+  orderIndex: number
+  disabledAt?: number | null
+}
+export type PlannedAttempt = ProviderHop & { accountId?: string }
+
+export function planAttempts(
+  hops: readonly ProviderHop[],
+  accounts: readonly AttemptAccount[],
+  blocked: ReadonlySet<string>,
+): PlannedAttempt[] {
+  return hops.flatMap((hop) => {
+    const candidates = accounts
+      .filter(
+        (account) =>
+          account.harnessKey === hop.harness &&
+          !account.disabledAt &&
+          !blocked.has(account.id),
+      )
+      .sort((a, b) => a.orderIndex - b.orderIndex)
+    if (candidates.length)
+      return candidates.map((account) => ({ ...hop, accountId: account.id }))
+    if (accounts.some((account) => account.harnessKey === hop.harness))
+      return []
+    return [hop]
+  })
+}
+
+export type PromptFailureDecision = {
+  category: LimitCategory | null
+  recordCooldown: boolean
+  detectedAt: number
+}
+
+export function classifyPromptFailure(
+  error: unknown,
+  now: number,
+): PromptFailureDecision {
+  const match = detectProviderError(
+    error instanceof Error ? error.message : String(error),
+  )
+  return {
+    category: match?.category ?? null,
+    recordCooldown:
+      match?.category === 'usage-limit' ||
+      match?.category === 'spend-limit' ||
+      match?.category === 'rate-limit',
+    detectedAt: now,
+  }
+}
 
 function providerHops(config: unknown): ProviderHop[] {
   const value = config as {
@@ -100,6 +159,128 @@ type DispatchResult =
   | { kind: 'ready'; item: IterationResult }
   | { kind: 'failed'; beadId: string; reason: string }
   | { kind: 'cancelled'; beadId: string }
+
+const ACCOUNT_LIMIT_TTL_MS = 24 * 60 * 60 * 1000
+
+type PromptAttemptsInput = {
+  run: any
+  input: StartRunInput
+  bead: any
+  cwd: string
+  branch: string
+  signal: AbortSignal
+  setActive?: (session: WorkerSession) => void
+  setWorker?: (iterationId: string, session: WorkerSession) => void
+  clearWorker?: (iterationId: string) => void
+}
+
+type PromptAttemptsResult = {
+  session?: WorkerSession
+  iteration?: ReturnType<typeof createIteration>
+  promptError?: unknown
+}
+
+async function runPromptAttempts(
+  db: Db,
+  sessions: SessionManager,
+  value: PromptAttemptsInput,
+): Promise<PromptAttemptsResult> {
+  const hops = providerHops(value.input.config)
+  let lastIteration: ReturnType<typeof createIteration> | undefined
+  let lastSession: WorkerSession | undefined
+  let promptError: unknown
+  const attemptedKeys = new Set<string>()
+  const exhaustedHarnesses = new Set<string>()
+  let attemptNumber = 0
+  while (!value.signal.aborted) {
+    const rows = db
+      .prepare(
+        'SELECT id, harness_key AS harnessKey, order_index AS orderIndex, disabled_at AS disabledAt FROM harness_accounts WHERE disabled_at IS NULL ORDER BY order_index, created_at',
+      )
+      .all() as AttemptAccount[]
+    const attempts = planAttempts(
+      hops,
+      rows,
+      blockedAccounts(db, Date.now(), ACCOUNT_LIMIT_TTL_MS),
+    )
+    const next = attempts.find((candidate) => {
+      const key = `${candidate.harness}\0${candidate.model ?? ''}\0${candidate.accountId ?? ''}`
+      return (
+        !exhaustedHarnesses.has(candidate.harness) && !attemptedKeys.has(key)
+      )
+    })
+    if (!next) {
+      if (!lastIteration)
+        promptError = new Error('No available fallback account')
+      break
+    }
+    const nextKey = `${next.harness}\0${next.model ?? ''}\0${next.accountId ?? ''}`
+    attemptedKeys.add(nextKey)
+    attemptNumber += 1
+    const session = await sessions.create({
+      projectId: value.input.projectId,
+      harness: next.harness,
+      accountId: next.accountId ?? null,
+      cwd: value.cwd,
+      title: value.bead.title,
+      kind: 'epic_worker',
+      epicRunId: value.run.id,
+    })
+    lastSession = session
+    value.setActive?.(session)
+    const iteration = createIteration(db, {
+      runId: value.run.id,
+      beadId: value.bead.id,
+      sessionId: session.id,
+      worktreePath: value.cwd,
+      branch: value.branch,
+      attempt: attemptNumber,
+      harness: next.harness,
+      model: next.model ?? null,
+      accountId: next.accountId ?? null,
+    })
+    lastIteration = iteration
+    value.setWorker?.(iteration.id, session)
+    try {
+      await session.prompt(
+        workerPrompt(
+          await show(value.input.repoPath, value.bead.id),
+          value.cwd,
+          value.branch,
+        ),
+      )
+      return { session, iteration }
+    } catch (error) {
+      promptError = error
+      const detectedAt = Date.now()
+      const decision = classifyPromptFailure(error, detectedAt)
+      if (!decision.recordCooldown) exhaustedHarnesses.add(next.harness)
+      if (decision.recordCooldown && next.accountId) {
+        const match = detectProviderError(
+          error instanceof Error ? error.message : String(error),
+        )
+        recordLimit(db, {
+          accountId: next.accountId,
+          kind: decision.category!,
+          harnessKey: next.harness,
+          detectedAt: decision.detectedAt,
+          source: 'epic.runner',
+          detail: match?.excerpt,
+        })
+      }
+      settleIteration(
+        db,
+        iteration.id,
+        'failed',
+        `Fallback attempt ${attemptNumber} (${next.harness}${next.accountId ? `/${next.accountId}` : ''}) failed: ${String(error)}`,
+      )
+      await session.cancel().catch(() => undefined)
+    } finally {
+      value.clearWorker?.(lastIteration.id)
+    }
+  }
+  return { session: lastSession, iteration: lastIteration, promptError }
+}
 export class EpicRunner {
   private active = new Map<
     string,
@@ -169,60 +350,19 @@ export class EpicRunner {
           input.baseBranch,
         ])
         await claim(input.repoPath, bead.id)
-        let session = await this.sessions.create({
-          projectId: input.projectId,
-          harness: providerHops(input.config)[0]!.harness,
+        const attempts = await runPromptAttempts(this.db, this.sessions, {
+          run,
+          input,
+          bead,
           cwd: input.repoPath,
-          title: bead.title,
-          kind: 'epic_worker',
-          epicRunId: run.id,
+          branch: input.baseBranch,
+          signal,
+          setActive: (session) => {
+            this.active.get(run.id)!.session = session
+          },
         })
-        this.active.get(run.id)!.session = session
-        const hops = providerHops(input.config)
-        let iteration: ReturnType<typeof createIteration> | undefined
-        let promptError: unknown
-        for (const [hopIndex, hop] of hops.entries()) {
-          if (hopIndex > 0) {
-            // Each fallback gets a fresh session so the failed provider cannot
-            // retain a half-open process or provider session.
-            const fallbackSession = await this.sessions.create({
-              projectId: input.projectId,
-              harness: hop.harness,
-              cwd: input.repoPath,
-              title: bead.title,
-              kind: 'epic_worker',
-              epicRunId: run.id,
-            })
-            this.active.get(run.id)!.session = fallbackSession
-            session = fallbackSession
-          }
-          iteration = createIteration(this.db, {
-            runId: run.id,
-            beadId: bead.id,
-            sessionId: session.id,
-            worktreePath: input.repoPath,
-            branch: input.baseBranch,
-            attempt: hopIndex + 1,
-            harness: hop.harness,
-            model: hop.model ?? null,
-          })
-          try {
-            await session.prompt(
-              workerPrompt(
-                await show(input.repoPath, bead.id),
-                input.repoPath,
-                input.baseBranch,
-              ),
-            )
-            promptError = undefined
-            break
-          } catch (error) {
-            promptError = error
-            const reason = `Fallback hop ${hopIndex + 1} (${hop.harness}) failed: ${String(error)}${hops[hopIndex + 1] ? `; trying hop ${hopIndex + 2} (${hops[hopIndex + 1]!.harness})` : ''}`
-            settleIteration(this.db, iteration!.id, 'failed', reason)
-            await session.cancel().catch(() => undefined)
-          }
-        }
+        const iteration = attempts.iteration
+        const promptError = attempts.promptError
         if (promptError) {
           if (signal.aborted) {
             if (iteration)
@@ -509,59 +649,18 @@ export class EpicRunner {
     )
     const before = await git(worktree.worktreePath, ['rev-parse', 'HEAD'])
     await claim(input.repoPath, bead.id)
-    let session = await this.sessions.create({
-      projectId: input.projectId,
-      harness: providerHops(input.config)[0]!.harness,
+    const attempts = await runPromptAttempts(this.db, this.sessions, {
+      run,
+      input,
+      bead,
       cwd: worktree.worktreePath,
-      title: bead.title,
-      kind: 'epic_worker',
-      epicRunId: run.id,
+      branch: worktree.branch,
+      signal,
+      setWorker: (id, session) => this.workerSessions.set(id, session),
+      clearWorker: (id) => this.workerSessions.delete(id),
     })
-    const hops = providerHops(input.config)
-    let iteration: ReturnType<typeof createIteration> | undefined
-    let promptError: unknown
-    for (const [hopIndex, hop] of hops.entries()) {
-      if (hopIndex > 0) {
-        const fallbackSession = await this.sessions.create({
-          projectId: input.projectId,
-          harness: hop.harness,
-          cwd: worktree.worktreePath,
-          title: bead.title,
-          kind: 'epic_worker',
-          epicRunId: run.id,
-        })
-        session = fallbackSession
-      }
-      iteration = createIteration(this.db, {
-        runId: run.id,
-        beadId: bead.id,
-        sessionId: session.id,
-        worktreePath: worktree.worktreePath,
-        branch: worktree.branch,
-        attempt: hopIndex + 1,
-        harness: hop.harness,
-        model: hop.model ?? null,
-      })
-      this.workerSessions.set(iteration.id, session)
-      try {
-        await session.prompt(
-          workerPrompt(
-            await show(input.repoPath, bead.id),
-            worktree.worktreePath,
-            worktree.branch,
-          ),
-        )
-        promptError = undefined
-        break
-      } catch (error) {
-        promptError = error
-        const reason = `Fallback hop ${hopIndex + 1} (${hop.harness}) failed: ${String(error)}${hops[hopIndex + 1] ? `; trying hop ${hopIndex + 2} (${hops[hopIndex + 1]!.harness})` : ''}`
-        settleIteration(this.db, iteration!.id, 'failed', reason)
-        await session.cancel().catch(() => undefined)
-      } finally {
-        this.workerSessions.delete(iteration.id)
-      }
-    }
+    const iteration = attempts.iteration
+    const promptError = attempts.promptError
     try {
       if (promptError) {
         if (signal.aborted) {
