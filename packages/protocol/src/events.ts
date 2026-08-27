@@ -52,5 +52,19 @@ export const Ephemeral = z.discriminatedUnion('type', [
     seq: z.null(),
     repoPath: z.string(),
   }),
+  z.object({
+    type: z.literal('harnessLoginUpdate'),
+    seq: z.null(),
+    loginId: z.string(),
+    state: z.object({
+      status: z.enum(['idle', 'running', 'succeeded', 'failed', 'cancelled']),
+      startedAt: z.string().nullable(),
+      finishedAt: z.string().nullable(),
+      message: z.string().nullable(),
+      output: z.string(),
+      verificationUrl: z.string().nullable(),
+      userCode: z.string().nullable(),
+    }),
+  }),
 ])
 export type Ephemeral = z.infer<typeof Ephemeral>

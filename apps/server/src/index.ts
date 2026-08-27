@@ -45,6 +45,8 @@ import {
 } from './config.js'
 import { ptyHarness } from './pty/harness.js'
 import { acpHarness } from './acp/harness.js'
+import { HarnessAccountStore } from './accounts/store.js'
+import { LoginManager } from './accounts/login.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -112,6 +114,7 @@ export function createApp(
   runner?: EpicRunner,
   webDir?: string,
   configState?: ConfigState,
+  loginManager?: LoginManager,
 ) {
   const app = new Hono()
 
@@ -130,7 +133,14 @@ export function createApp(
     app.route('/', fsBrowseRoutes())
     app.route('/', searchRoutes(uploadStore.database))
     app.route('/', harnessRoutes({ configState, db: uploadStore.database }))
-    app.route('/', harnessAccountRoutes(uploadStore.database))
+    app.route(
+      '/',
+      harnessAccountRoutes(uploadStore.database, {
+        bus: status?.bus,
+        configState,
+        loginManager,
+      }),
+    )
   }
   if (questions) app.route('/', questionRoutes(questions))
   if (status) app.route('/', workspaceRoutes(status.db, uploadStore))
@@ -215,11 +225,17 @@ export function startServer(
   const factory: HarnessFactory = (key) => {
     const entry = configState.current.harness[key]
     if (entry?.protocol === 'pty') return ptyHarness(entry)
-    if (entry?.protocol === 'acp') return acpHarness(entry, { db, bus, questions })
+    if (entry?.protocol === 'acp')
+      return acpHarness(entry, { db, bus, questions })
     throw new Error(`Harness ${key} is not configured`)
   }
   const manager = new SessionManager(db, bus, factory)
   const runner = new EpicRunner(db, createEpicSessionAdapter(manager), bus)
+  const loginManager = new LoginManager(
+    new HarnessAccountStore(db),
+    bus,
+    (key) => configState.current.harness[key],
+  )
   // Settle persisted turns before exposing the port. Respawn work continues
   // from the settled state without delaying health checks.
   void recoverSessions(db, manager, bus)
@@ -236,11 +252,13 @@ export function startServer(
     runner,
     productionWebDir(),
     configState,
+    loginManager,
   )
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
   app.get('/ws', websocketRoute(upgradeWebSocket, db, bus))
   const server = serve({ fetch: app.fetch, port })
   injectWebSocket(server)
+  server.on('close', () => loginManager.close())
   return server
 }
 
