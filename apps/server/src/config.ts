@@ -92,6 +92,7 @@ export function defaultConfig(
     ]),
     kimi: defaultEntry('Kimi', 'kimi', ['acp']),
     gemini: defaultEntry('Gemini', 'gemini', ['--experimental-acp']),
+    opencode: defaultEntry('OpenCode', 'opencode', ['acp']),
     grok: defaultEntry('Grok', 'grok', ['agent', 'stdio']),
     pi: defaultEntry('Pi', 'npx', ['-y', 'pi-acp']),
   }

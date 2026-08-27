@@ -46,4 +46,13 @@ describe('account credentials', () => {
     writeFileSync(join(home, 'auth.json'), '{}')
     expect(accountAuthenticated('pi', home)).toBe(true)
   })
+
+  it('recognizes the OpenCode auth file under its XDG data home', () => {
+    const home = mkdtempSync(join(tmpdir(), 'forge-opencode-'))
+    roots.push(home)
+    expect(accountAuthenticated('opencode', home)).toBe(false)
+    mkdirSync(join(home, 'opencode'))
+    writeFileSync(join(home, 'opencode', 'auth.json'), '{}')
+    expect(accountAuthenticated('opencode', home)).toBe(true)
+  })
 })

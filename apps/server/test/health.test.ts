@@ -75,6 +75,7 @@ describe('health endpoint', () => {
         'codex-acp',
         'kimi',
         'gemini',
+        'opencode',
         'grok',
         'pi',
         'mock',

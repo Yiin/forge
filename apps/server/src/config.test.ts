@@ -70,6 +70,15 @@ describe('default harness configuration', () => {
     })
   })
 
+  test('includes the native OpenCode ACP harness', () => {
+    expect(defaultConfig(false).harness.opencode).toMatchObject({
+      name: 'OpenCode',
+      command: 'opencode',
+      args: ['acp'],
+      protocol: 'acp',
+    })
+  })
+
   test('merges defaults and preserves user harness fields', async () => {
     const root = await mkdtemp(join(tmpdir(), 'forge-config-'))
     const file = join(root, 'forge.toml')
@@ -112,6 +121,7 @@ describe('default harness configuration', () => {
       'codex-acp',
       'kimi',
       'gemini',
+      'opencode',
       'grok',
       'pi',
     ])
