@@ -96,7 +96,8 @@ wat = true
     config.settings.epicDefaults.gateCommand = undefined
     await saveConfig(file, config)
     const source = await readFile(file, 'utf8')
-    expect(source).toContain('[harness.shell]')
+    expect(source).not.toContain('[harness.shell]')
+    expect(source).toContain('[harness.mock]')
     expect(source).not.toContain('gateCommand')
   })
 })

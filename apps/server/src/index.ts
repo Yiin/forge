@@ -45,6 +45,7 @@ import { serverConfigRoutes } from './http/config.js'
 import {
   defaultConfig,
   loadConfigSync,
+  reconcileConfig,
   saveConfigSync,
   type ConfigState,
 } from './config.js'
@@ -228,7 +229,10 @@ export function startServer(
   )
   let config: ReturnType<typeof defaultConfig>
   try {
-    config = loadConfigSync(configPath)
+    const loaded = loadConfigSync(configPath)
+    config = reconcileConfig(loaded, defaultConfig())
+    if (JSON.stringify(loaded.harness) !== JSON.stringify(config.harness))
+      saveConfigSync(configPath, config)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       config = defaultConfig()

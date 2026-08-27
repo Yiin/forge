@@ -84,7 +84,6 @@ export function defaultConfig(
   dev = process.env.NODE_ENV !== 'production',
 ): ForgeConfig {
   const harness: Record<string, HarnessConfig> = {
-    shell: defaultEntry('Shell PTY', 'bash', ['-i'], 'pty'),
     'claude-code-acp': defaultEntry('Claude Code ACP', 'npx', [
       '@zed-industries/claude-code-acp',
     ]),
@@ -122,6 +121,55 @@ export function defaultConfig(
       },
     },
   }
+}
+
+function isStockShell(entry: HarnessConfig) {
+  return (
+    entry.name === 'Shell PTY' &&
+    entry.command === 'bash' &&
+    JSON.stringify(entry.args) === JSON.stringify(['-i']) &&
+    entry.protocol === 'pty'
+  )
+}
+
+function isStockMock(entry: HarnessConfig) {
+  return (
+    entry.name === 'Mock ACP agent' &&
+    entry.command === 'bun' &&
+    entry.args.length === 1 &&
+    basename(entry.args[0] ?? '') === 'acp-mock-agent.ts' &&
+    entry.protocol === 'acp'
+  )
+}
+
+function mockIsUnavailable(entry: HarnessConfig) {
+  return (
+    !commandAvailable(entry.command) ||
+    entry.args.some((arg) => arg.endsWith('.ts') && !existsSync(arg))
+  )
+}
+
+export function reconcileConfig(
+  config: ForgeConfig,
+  defaults = defaultConfig(),
+): ForgeConfig {
+  const harness = { ...config.harness }
+
+  if (harness.shell && isStockShell(harness.shell)) delete harness.shell
+
+  const mock = harness.mock
+  if (
+    mock &&
+    isStockMock(mock) &&
+    (!defaults.harness.mock || mockIsUnavailable(mock))
+  )
+    delete harness.mock
+
+  for (const [key, entry] of Object.entries(defaults.harness)) {
+    if (!harness[key]) harness[key] = entry
+  }
+
+  return { ...config, harness }
 }
 
 /** Resolve input over repo config over server defaults. */

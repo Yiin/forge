@@ -69,7 +69,14 @@ describe('health endpoint', () => {
       const response = await fetch(
         `http://127.0.0.1:${address.port}/api/harnesses`,
       )
-      expect(Object.keys(await response.json())).toEqual(['custom'])
+      expect(Object.keys(await response.json())).toEqual([
+        'custom',
+        'claude-code-acp',
+        'codex-acp',
+        'kimi',
+        'gemini',
+        'mock',
+      ])
     } finally {
       if (previousConfig === undefined) delete process.env.FORGE_CONFIG
       else process.env.FORGE_CONFIG = previousConfig
@@ -92,11 +99,42 @@ describe('health endpoint', () => {
       const response = await fetch(
         `http://127.0.0.1:${address.port}/api/harnesses`,
       )
-      expect(Object.keys(await response.json())).toContain('shell')
+      expect(Object.keys(await response.json())).not.toContain('shell')
       expect(await readFile(configPath, 'utf8')).toBe(source)
     } finally {
       if (previousConfig === undefined) delete process.env.FORGE_CONFIG
       else process.env.FORGE_CONFIG = previousConfig
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reconciles stock entries on boot and remains byte-stable', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-config-reconcile-'))
+    const configPath = join(dir, 'forge.toml')
+    const dataDir = join(dir, 'data')
+    await writeFile(
+      configPath,
+      `dataDir = "${dataDir}"\n[harness.shell]\nname = "Shell PTY"\ncommand = "bash"\nargs = ["-i"]\nenv = {}\nprotocol = "pty"\nenabled = true\n[harness.mock]\nname = "Mock ACP agent"\ncommand = "bun"\nargs = ["/missing/acp-mock-agent.ts"]\nenv = {}\nprotocol = "acp"\nenabled = false\n`,
+    )
+    const previousConfig = process.env.FORGE_CONFIG
+    const previousNodeEnv = process.env.NODE_ENV
+    process.env.FORGE_CONFIG = configPath
+    process.env.NODE_ENV = 'production'
+    try {
+      const first = startServer(0)
+      first.close()
+      const reconciled = await readFile(configPath, 'utf8')
+      expect(reconciled).not.toContain('[harness.shell]')
+      expect(reconciled).not.toContain('[harness.mock]')
+
+      const second = startServer(0)
+      second.close()
+      expect(await readFile(configPath, 'utf8')).toBe(reconciled)
+    } finally {
+      if (previousConfig === undefined) delete process.env.FORGE_CONFIG
+      else process.env.FORGE_CONFIG = previousConfig
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = previousNodeEnv
       await rm(dir, { recursive: true, force: true })
     }
   })
