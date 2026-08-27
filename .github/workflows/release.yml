@@ -78,16 +78,22 @@ jobs:
           set -euo pipefail
           data_dir="$(mktemp -d)"
           pid=""
-          trap 'kill "$pid" 2>/dev/null || true; rm -rf "$data_dir"' EXIT
-          cat > "$data_dir/forge.toml" <<'EOF'
+          trap 'code=$?; [ "$code" -ne 0 ] && cat "$data_dir/server.log" 2>/dev/null; kill "$pid" 2>/dev/null || true; rm -rf "$data_dir"; exit "$code"' EXIT
+          # The packed release contains no test fixtures, so the mock harness
+          # points at the checkout's ACP fixture. FORGE_CONFIG makes the server
+          # read this file instead of seeding ~/.forge/forge.toml defaults
+          # whose mock path does not exist in the packed tree.
+          cat > "$data_dir/forge.toml" <<EOF
           [harness.mock]
           name = "Fake ACP agent"
-          command = "node"
-          args = ["-e", "process.exit(0)"]
+          command = "bun"
+          args = ["$GITHUB_WORKSPACE/apps/server/test/fixtures/acp-mock-agent.ts"]
           protocol = "acp"
           enabled = true
+          [harness.mock.env]
           EOF
           FORGE_DATA_DIR="$data_dir" FORGE_PORT=3900 FORGE_VERSION="$FORGE_VERSION" \
+            FORGE_CONFIG="$data_dir/forge.toml" \
             node "$RUNNER_TEMP/forge-linux-x64/apps/server/src/index.js" > "$data_dir/server.log" 2>&1 &
           pid=$!
           for attempt in $(seq 1 30); do
