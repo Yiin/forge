@@ -9,6 +9,7 @@ export const roleName = z.enum(roleNames)
 export const hop = z.object({
   harness: z.string().trim().min(1),
   model: z.string().trim().min(1).optional(),
+  skipAboveUtilization: z.number().int().min(0).max(100).optional(),
 })
 export const rolePolicy = z
   .object({

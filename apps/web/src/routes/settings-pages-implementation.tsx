@@ -57,7 +57,7 @@ import {
 
 type Harness = HarnessConfig
 
-function ErrorRow({
+export function ErrorRow({
   children,
   onRetry,
 }: {
@@ -1592,17 +1592,24 @@ export function SettingsSection({
   description,
   children,
   footer,
+  headerAction,
 }: {
   title: string
   description?: string
   children: ReactNode
   footer?: ReactNode
+  headerAction?: ReactNode
 }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-base">{title}</CardTitle>
+            {description && <CardDescription>{description}</CardDescription>}
+          </div>
+          {headerAction}
+        </div>
       </CardHeader>
       <CardContent className="flex flex-col divide-y divide-border p-0 [&>*]:px-6 [&>*]:py-3">
         {children}

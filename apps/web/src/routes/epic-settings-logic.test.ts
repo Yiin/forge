@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { validateEpicDefaults, type EpicDefaults } from './epic-settings-logic'
+import {
+  addTierHop,
+  assignRoleTier,
+  createTier,
+  deleteTier,
+  moveTierHop,
+  renameTier,
+  setTierHopSkipAboveUtilization,
+  validateEpicDefaults,
+  type EpicDefaults,
+} from './epic-settings-logic'
 
 const defaults: EpicDefaults = {
   workerCount: 3,
@@ -56,5 +66,58 @@ describe('epic defaults validation', () => {
         ['mock'],
       )['rolePolicy.tiers.default'],
     ).toContain('at least one')
+  })
+})
+
+describe('role policy operations', () => {
+  const policy = {
+    roles: {
+      'iteration-worker': 'fast',
+      'triage-control': 'fast',
+      'title-generation': 'slow',
+    },
+    tiers: {
+      fast: [{ harness: 'a' }, { harness: 'b' }],
+      slow: [{ harness: 'c' }],
+    },
+  }
+  it('copies policies and repoints all roles when renaming', () => {
+    const next = renameTier(policy, 'fast', 'faster')
+    expect('policy' in next && next.policy.roles).toEqual({
+      'iteration-worker': 'faster',
+      'triage-control': 'faster',
+      'title-generation': 'slow',
+    })
+    expect(policy.tiers.fast).toHaveLength(2)
+  })
+  it('unassigns roles when deleting a tier', () => {
+    expect(deleteTier(policy, 'fast').roles).toEqual({
+      'title-generation': 'slow',
+    })
+  })
+  it('keeps hop order at both ends and rejects invalid thresholds', () => {
+    expect(moveTierHop(policy, 'fast', 0, 'up').tiers.fast).toEqual(
+      policy.tiers.fast,
+    )
+    expect(moveTierHop(policy, 'fast', 1, 'down').tiers.fast).toEqual(
+      policy.tiers.fast,
+    )
+    expect(
+      setTierHopSkipAboveUtilization(policy, 'fast', 0, 101).tiers.fast[0],
+    ).toEqual(policy.tiers.fast[0])
+    expect(
+      setTierHopSkipAboveUtilization(policy, 'fast', 0, 50).tiers.fast[0]
+        ?.skipAboveUtilization,
+    ).toBe(50)
+  })
+  it('creates and assigns a tier without mutating the input', () => {
+    const created = createTier(policy, 'backup')
+    expect('policy' in created && created.policy.tiers.backup).toEqual([])
+    const assigned = assignRoleTier(policy, 'iteration-worker', 'slow')
+    expect(assigned.roles['iteration-worker']).toBe('slow')
+    expect(policy.roles['iteration-worker']).toBe('fast')
+    expect(
+      addTierHop(policy, 'slow', { harness: 'd' }).tiers.slow,
+    ).toHaveLength(2)
   })
 })
