@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  accountKindForHarness,
   buildAccountReorderPatch,
   deriveAccountLimitState,
   formatResetCountdown,
@@ -146,5 +147,36 @@ describe('harness account presentation logic', () => {
         output: '',
       }),
     ).toBe(current)
+  })
+})
+
+describe('accountKindForHarness', () => {
+  it('maps the default forge harness entries to their account kinds', () => {
+    expect(
+      accountKindForHarness('claude-code-acp', {
+        command: 'npx',
+        args: ['@zed-industries/claude-code-acp'],
+      }),
+    ).toBe('claude')
+    expect(
+      accountKindForHarness('codex-acp', {
+        command: 'npx',
+        args: ['@zed-industries/codex-acp'],
+      }),
+    ).toBe('codex')
+    expect(accountKindForHarness('kimi', { command: 'kimi' })).toBe('kimi')
+    expect(accountKindForHarness('my-oc', { command: 'opencode' })).toBe(
+      'opencode',
+    )
+  })
+  it('returns null for harnesses with no managed accounts', () => {
+    expect(accountKindForHarness('shell', { command: 'bash' })).toBeNull()
+    expect(accountKindForHarness('gemini', { command: 'gemini' })).toBeNull()
+    expect(
+      accountKindForHarness('mock', {
+        command: 'bun',
+        args: ['apps/server/test/fixtures/acp-mock-agent.ts'],
+      }),
+    ).toBeNull()
   })
 })

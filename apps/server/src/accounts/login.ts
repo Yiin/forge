@@ -30,6 +30,17 @@ const emptyState = (): LoginState => ({
   verificationUrl: null,
   userCode: null,
 })
+const cliFor = (kind: string) =>
+  kind === 'claude'
+    ? 'claude'
+    : kind === 'codex'
+      ? 'codex'
+      : kind === 'kimi'
+        ? 'kimi'
+        : kind === 'opencode'
+          ? 'opencode'
+          : null
+
 const argsFor = (
   kind: string,
   input?: { provider?: string; method?: string },
@@ -71,6 +82,9 @@ export class LoginManager {
     private readonly accounts: HarnessAccountStore,
     private readonly bus: EventBus,
     private readonly config: (harnessKey: string) => HarnessConfig | undefined,
+    // The provider CLI owns the login flow; the harness command is an ACP
+    // adapter (often npx) and must never be used to run `auth login`.
+    private readonly cli: (kind: string) => string | null = cliFor,
   ) {}
 
   private publish(loginId: string, state: LoginState) {
@@ -91,12 +105,15 @@ export class LoginManager {
     const entry = this.config(account.harnessKey)
     if (!entry)
       throw new Error(`Harness ${account.harnessKey} is not configured`)
+    const command = this.cli(account.kind)
+    if (!command)
+      throw new Error(`No login command for account kind ${account.kind}`)
     const loginId = `login_${crypto.randomUUID().replaceAll('-', '')}`
     const run: Run = { state: emptyState() }
     this.runs.set(loginId, run)
     this.publish(loginId, run.state)
     try {
-      run.pty = spawn(entry.command, argsFor(account.kind, input), {
+      run.pty = spawn(command, argsFor(account.kind, input), {
         name: 'xterm-256color',
         cols: 100,
         rows: 30,

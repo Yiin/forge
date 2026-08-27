@@ -13,27 +13,36 @@ const {
   listHarnesses,
   saveHarnesses,
   listHarnessStatus,
+  listAccounts,
   getAccountsDir,
-  allocateAccountHome,
+  createAccount,
+  reorderAccounts,
   loginStart,
 } = vi.hoisted(() => ({
   listHarnesses: vi.fn(),
   saveHarnesses: vi.fn(),
   listHarnessStatus: vi.fn(),
+  listAccounts: vi.fn(),
   getAccountsDir: vi.fn(),
-  allocateAccountHome: vi.fn(),
+  createAccount: vi.fn(),
+  reorderAccounts: vi.fn(),
   loginStart: vi.fn(),
 }))
 vi.mock('../lib/api', () => ({ api: { listHarnesses, saveHarnesses } }))
 vi.mock('../lib/accounts-api', () => ({
   listHarnessStatus,
+  listAccounts,
   getAccountsDir,
-  allocateAccountHome,
+  createAccount,
+  reorderAccounts,
   loginStart,
   loginStatus: vi.fn(() => () => {}),
   loginCancel: vi.fn(),
   loginRespond: vi.fn(),
   logout: vi.fn(),
+  deleteAccount: vi.fn(),
+  updateAccount: vi.fn(),
+  clearCooldown: vi.fn(),
 }))
 const harness = (name: string) => ({
   name,
@@ -43,36 +52,59 @@ const harness = (name: string) => ({
   protocol: 'pty' as const,
   enabled: true,
 })
-const snapshot = (accountId: string) => ({
+const snapshot = (accountId: string, displayName: string) => ({
   accountId,
   harnessKind: 'claude',
-  displayName: accountId,
+  displayName,
   enabled: true,
   installed: true,
-  version: '1',
-  status: 'ready' as const,
+  version: 'unknown',
+  status: 'warning' as const,
   auth: { status: 'unauthenticated' as const },
   checkedAt: '2026-08-27T12:00:00.000Z',
-  availability: 'available' as const,
+})
+const account = (id: string, label: string) => ({
+  id,
+  harness: 'claude',
+  label,
+  storageDir: `/tmp/accounts/claude/${id}`,
+  enabled: true,
+  authStatus: 'unauthenticated' as const,
+  email: null,
+  cooldownUntil: null,
+  cooldownReason: null,
+  lastUsedAt: null,
 })
 
 describe('HarnessSettings', () => {
   afterEach(cleanup)
   beforeEach(() => {
     vi.clearAllMocks()
-    listHarnesses.mockResolvedValue({
-      claude: harness('Claude Account 1'),
-      claude_account_2: harness('Claude Account 2'),
-    })
+    // The base "claude" config entry has no name of its own so each account
+    // row falls back to its own snapshot label instead of a shared one.
+    listHarnesses.mockResolvedValue({ claude: harness('') })
     saveHarnesses.mockImplementation(async (value) => value)
     listHarnessStatus.mockResolvedValue([
-      snapshot('claude'),
-      snapshot('claude_account_2'),
+      snapshot('acct_1', 'Claude Account 1'),
+      snapshot('acct_2', 'Claude Account 2'),
+    ])
+    listAccounts.mockResolvedValue([
+      account('acct_1', 'Claude Account 1'),
+      account('acct_2', 'Claude Account 2'),
     ])
     getAccountsDir.mockResolvedValue('/tmp/accounts')
-    allocateAccountHome.mockResolvedValue({
-      homePath: '/tmp/accounts/claude/claude_account_3',
+    createAccount.mockResolvedValue({
+      id: 'acct_3',
+      harnessKey: 'claude',
+      label: 'Claude Account 3',
+      kind: 'claude',
+      homePath: '/tmp/accounts/claude/acct_3',
+      orderIndex: 2,
+      disabledAt: null,
+      createdAt: 1,
+      lastUsedAt: null,
     })
+    reorderAccounts.mockResolvedValue([])
     loginStart.mockResolvedValue({
       loginId: 'login-1',
       state: {
@@ -105,7 +137,7 @@ describe('HarnessSettings', () => {
       ).disabled,
     ).toBe(true)
   })
-  it('optimistically reorders accounts and persists the new order', async () => {
+  it('reorders accounts through the harness-accounts API', async () => {
     render(<HarnessSettings />)
     await screen.findByText('Claude Account 1')
     fireEvent.click(
@@ -113,11 +145,29 @@ describe('HarnessSettings', () => {
         name: 'Move Claude Account 2 up in rotation order',
       }),
     )
-    await waitFor(() => expect(saveHarnesses).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(reorderAccounts).toHaveBeenCalledWith(['acct_2', 'acct_1']),
+    )
   })
   it('shows add account for supported harnesses', async () => {
     render(<HarnessSettings />)
     await screen.findByText('Claude Account 1')
     expect(screen.getByRole('button', { name: /Add account/ })).toBeTruthy()
+  })
+  it('adds an account via create + login, not a config write', async () => {
+    render(<HarnessSettings />)
+    await screen.findByText('Claude Account 1')
+    fireEvent.click(screen.getByRole('button', { name: /Add account/ }))
+    await waitFor(() =>
+      expect(createAccount).toHaveBeenCalledWith({
+        harnessKey: 'claude',
+        label: 'Claude Account 3',
+        kind: 'claude',
+      }),
+    )
+    await waitFor(() =>
+      expect(loginStart).toHaveBeenCalledWith({ accountId: 'acct_3' }),
+    )
+    expect(saveHarnesses).not.toHaveBeenCalled()
   })
 })

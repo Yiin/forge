@@ -3,7 +3,12 @@ import {
   createHarnessAccountSchema,
   patchHarnessAccountSchema,
 } from '@forge/protocol/accounts'
-import { HarnessAccountStore } from '../accounts/store.js'
+import {
+  accountAuthenticated,
+  clearAccountCredentials,
+  HarnessAccountStore,
+} from '../accounts/store.js'
+import { clearAccountLimits } from '../accounts/limits.js'
 import { LoginManager } from '../accounts/login.js'
 import type { EventBus } from '../events/bus.js'
 import type { ConfigState } from '../config.js'
@@ -55,6 +60,35 @@ export function harnessAccountRoutes(
     return store.delete(c.req.param('id'), removeHome)
       ? c.json({ ok: true })
       : c.json({ error: 'Account not found' }, 404)
+  })
+  app.post('/api/harness-accounts/:id/logout', async (c) => {
+    const account = store.get(c.req.param('id'))
+    if (!account) return c.json({ error: 'Account not found' }, 404)
+    let deleteAccountHome = false
+    try {
+      const body = await c.req.json<{ deleteAccountHome?: boolean }>()
+      deleteAccountHome = body.deleteAccountHome === true
+    } catch {
+      // An empty POST body is valid.
+    }
+    try {
+      if (deleteAccountHome) store.resetHome(account.id)
+      else clearAccountCredentials(account.kind, account.homePath)
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        400,
+      )
+    }
+    return c.json({
+      authenticated: accountAuthenticated(account.kind, account.homePath),
+    })
+  })
+  app.post('/api/harness-accounts/:id/clear-cooldown', (c) => {
+    const account = store.get(c.req.param('id'))
+    if (!account) return c.json({ error: 'Account not found' }, 404)
+    clearAccountLimits(db, account.id)
+    return c.json({ ok: true })
   })
   app.post('/api/harness-accounts/:id/login', async (c) => {
     if (!login) return c.json({ error: 'Login is unavailable' }, 503)

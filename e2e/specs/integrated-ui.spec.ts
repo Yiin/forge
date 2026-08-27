@@ -31,8 +31,16 @@ async function wireIsolatedServer(
       await route.fulfill({ json: {} })
       return
     }
-    if (requestUrl.pathname === '/api/accounts') {
+    if (requestUrl.pathname === '/api/harnesses/health') {
       await route.fulfill({ json: [] })
+      return
+    }
+    if (requestUrl.pathname === '/api/harness-accounts') {
+      await route.fulfill({ json: [] })
+      return
+    }
+    if (requestUrl.pathname === '/api/config') {
+      await route.fulfill({ json: { accountsDir: '/tmp/e2e-accounts' } })
       return
     }
     if (requestUrl.pathname === '/api/epics') {

@@ -1,21 +1,20 @@
 import {
   harnessAccountSnapshotSchema,
+  type HarnessAccount,
   type HarnessAccountSnapshot,
 } from '@forge/protocol/accounts'
+import { harnessHealthResponseSchema } from '@forge/protocol/status'
 
 export type { HarnessAccountSnapshot }
 
-export type HarnessUsageSample = {
-  window: string
-  utilization: number
-  resetsAt: string | null
-  source: string
-  observedAt: string
-}
-
 export type AccountLimit = {
   kind:
-    'usage-limit' | 'spend-limit' | 'credits-depleted' | 'auth' | 'unavailable'
+    | 'usage-limit'
+    | 'spend-limit'
+    | 'credits-depleted'
+    | 'auth'
+    | 'rate-limit'
+    | 'unavailable'
   detectedAt: string
   resetsAt: string | null
   resetsAtEstimated: boolean
@@ -32,6 +31,16 @@ export type LoginRunState = {
   verificationUrl: string | null
   userCode: string | null
 }
+
+const emptyLoginState = (): LoginRunState => ({
+  status: 'idle',
+  startedAt: null,
+  finishedAt: null,
+  message: null,
+  output: '',
+  verificationUrl: null,
+  userCode: null,
+})
 
 export type Account = {
   id: string
@@ -70,9 +79,46 @@ export class AccountsApi {
     this.pollIntervalMs = options.pollIntervalMs ?? 1000
   }
 
-  listHarnessStatus() {
-    return this.get<unknown>('/api/harnesses/status').then((value) =>
-      harnessAccountSnapshotSchema.array().parse(value),
+  async listHarnessStatus(): Promise<HarnessAccountSnapshot[]> {
+    const health = harnessHealthResponseSchema.parse(
+      await this.get<unknown>('/api/harnesses/health'),
+    )
+    const checkedAt = new Date().toISOString()
+    return health.flatMap((entry) =>
+      entry.accounts.map((account) =>
+        harnessAccountSnapshotSchema.parse({
+          accountId: account.id,
+          harnessKind: entry.key,
+          displayName: account.label,
+          enabled: entry.enabled,
+          installed: entry.enabled,
+          version: 'unknown',
+          status: account.disabled
+            ? 'disabled'
+            : account.cooldown
+              ? 'warning'
+              : account.authenticated
+                ? 'ready'
+                : 'warning',
+          auth: {
+            status: account.authenticated ? 'authenticated' : 'unauthenticated',
+          },
+          checkedAt,
+          limit: account.cooldown
+            ? {
+                kind: account.cooldown.kind,
+                detectedAt: new Date(account.cooldown.detectedAt).toISOString(),
+                resetsAt:
+                  account.cooldown.resetsAt === null
+                    ? null
+                    : new Date(account.cooldown.resetsAt).toISOString(),
+                resetsAtEstimated: account.cooldown.resetsAtEstimated,
+                source: 'server',
+                detail: account.cooldown.detail,
+              }
+            : null,
+        }),
+      ),
     )
   }
 
@@ -80,15 +126,105 @@ export class AccountsApi {
     return this.listHarnessStatus()
   }
 
-  allocateAccountHome(input: { harnessKind: string; accountId: string }) {
-    return this.post<{ homePath: string }>('/api/accounts/allocate-home', input)
+  private async healthByAccountId() {
+    const health = harnessHealthResponseSchema.parse(
+      await this.get<unknown>('/api/harnesses/health'),
+    )
+    const index = new Map<
+      string,
+      { authenticated: boolean; cooldown: AccountLimit | null }
+    >()
+    for (const entry of health)
+      for (const account of entry.accounts)
+        index.set(account.id, {
+          authenticated: account.authenticated,
+          cooldown: account.cooldown
+            ? {
+                kind: account.cooldown.kind as AccountLimit['kind'],
+                detectedAt: new Date(account.cooldown.detectedAt).toISOString(),
+                resetsAt:
+                  account.cooldown.resetsAt === null
+                    ? null
+                    : new Date(account.cooldown.resetsAt).toISOString(),
+                resetsAtEstimated: account.cooldown.resetsAtEstimated,
+                source: 'server',
+                detail: account.cooldown.detail,
+              }
+            : null,
+        })
+    return index
   }
 
-  loginStart(input: { accountId: string }) {
-    return this.post<{ loginId: string; state: LoginRunState }>(
-      '/api/accounts/login',
+  async listAccounts(): Promise<Account[]> {
+    const [rows, health] = await Promise.all([
+      this.get<HarnessAccount[]>('/api/harness-accounts'),
+      this.healthByAccountId(),
+    ])
+    return rows.map((row) => {
+      const info = health.get(row.id)
+      return {
+        id: row.id,
+        harness: row.harnessKey,
+        label: row.label,
+        storageDir: row.homePath,
+        enabled: row.disabledAt === null,
+        authStatus: info
+          ? info.authenticated
+            ? 'authenticated'
+            : 'unauthenticated'
+          : 'unknown',
+        email: null,
+        cooldownUntil: info?.cooldown?.resetsAt
+          ? Date.parse(info.cooldown.resetsAt)
+          : null,
+        cooldownReason: info?.cooldown?.detail ?? null,
+        lastUsedAt: row.lastUsedAt,
+      }
+    })
+  }
+
+  createAccount(input: { harnessKey: string; label: string; kind: string }) {
+    return this.post<HarnessAccount>('/api/harness-accounts', input)
+  }
+
+  updateAccount(
+    id: string,
+    input: { label?: string; orderIndex?: number; disabled?: boolean },
+  ) {
+    return this.patch<HarnessAccount>(
+      `/api/harness-accounts/${encodeURIComponent(id)}`,
       input,
     )
+  }
+
+  deleteAccount(id: string, removeHome = false) {
+    return this.request<{ ok: true }>(
+      'DELETE',
+      `/api/harness-accounts/${encodeURIComponent(id)}${removeHome ? '?removeHome=1' : ''}`,
+    )
+  }
+
+  reorderAccounts(ids: readonly string[]) {
+    return Promise.all(
+      ids.map((id, index) => this.updateAccount(id, { orderIndex: index })),
+    )
+  }
+
+  clearCooldown(id: string) {
+    return this.post<{ ok: true }>(
+      `/api/harness-accounts/${encodeURIComponent(id)}/clear-cooldown`,
+      {},
+    )
+  }
+
+  async loginStart(input: {
+    accountId: string
+  }): Promise<{ loginId: string; state: LoginRunState }> {
+    const { loginId } = await this.post<{ loginId: string }>(
+      `/api/harness-accounts/${encodeURIComponent(input.accountId)}/login`,
+      {},
+    )
+    return { loginId, state: emptyLoginState() }
   }
 
   loginStatus(terminalId: string, listener: LoginStatusListener) {
@@ -97,7 +233,7 @@ export class AccountsApi {
     const poll = async () => {
       try {
         const state = await this.get<LoginRunState>(
-          `/api/accounts/login/${encodeURIComponent(terminalId)}`,
+          `/api/harness-accounts/logins/${encodeURIComponent(terminalId)}`,
         )
         if (stopped) return
         listener(state)
@@ -114,59 +250,38 @@ export class AccountsApi {
     }
   }
 
-  loginRespond(input: { terminalId: string; data: string }) {
-    return this.post<LoginRunState>(
-      `/api/accounts/login/${encodeURIComponent(input.terminalId)}/input`,
+  async loginRespond(input: {
+    terminalId: string
+    data: string
+  }): Promise<LoginRunState> {
+    await this.post<{ ok: true }>(
+      `/api/harness-accounts/logins/${encodeURIComponent(input.terminalId)}/respond`,
       { data: input.data },
+    )
+    return this.get<LoginRunState>(
+      `/api/harness-accounts/logins/${encodeURIComponent(input.terminalId)}`,
     )
   }
 
-  loginCancel(input: { terminalId: string }) {
-    return this.post<LoginRunState>(
-      `/api/accounts/login/${encodeURIComponent(input.terminalId)}/cancel`,
+  async loginCancel(input: { terminalId: string }): Promise<LoginRunState> {
+    await this.post<{ ok: true }>(
+      `/api/harness-accounts/logins/${encodeURIComponent(input.terminalId)}/cancel`,
       {},
+    )
+    return this.get<LoginRunState>(
+      `/api/harness-accounts/logins/${encodeURIComponent(input.terminalId)}`,
     )
   }
 
   logout(input: { accountId: string; deleteAccountHome?: boolean }) {
-    return this.post<Account>(
-      `/api/accounts/${encodeURIComponent(input.accountId)}/logout`,
-      { deleteStorage: input.deleteAccountHome },
-    )
-  }
-
-  listAccounts() {
-    return this.get<Account[]>('/api/accounts')
-  }
-
-  createAccount(input: { harness: string; label: string }) {
-    return this.post<Account>('/api/accounts', input)
-  }
-
-  updateAccount(id: string, input: { label?: string; enabled?: boolean }) {
-    return this.patch<Account>(`/api/accounts/${encodeURIComponent(id)}`, input)
-  }
-
-  deleteAccount(id: string, deleteStorage = false) {
-    return this.request<{ ok: true }>(
-      'DELETE',
-      `/api/accounts/${encodeURIComponent(id)}${deleteStorage ? '?deleteStorage=1' : ''}`,
-    )
-  }
-
-  reorderAccounts(input: { harness: string; ids: string[] }) {
-    return this.post<Account[]>('/api/accounts/reorder', input)
-  }
-
-  clearCooldown(id: string) {
-    return this.post<Account>(
-      `/api/accounts/${encodeURIComponent(id)}/clear-cooldown`,
-      {},
+    return this.post<{ authenticated: boolean }>(
+      `/api/harness-accounts/${encodeURIComponent(input.accountId)}/logout`,
+      { deleteAccountHome: input.deleteAccountHome },
     )
   }
 
   getAccountsDir() {
-    return this.get<{ accountsDir?: string }>('/api/config').then(
+    return this.get<{ accountsDir: string }>('/api/config').then(
       (config) => config.accountsDir,
     )
   }
@@ -214,10 +329,6 @@ export class AccountsApi {
 export const accountsApi = new AccountsApi()
 export const listHarnessStatus = () => accountsApi.listHarnessStatus()
 export const refreshHarnessStatus = () => accountsApi.refreshHarnessStatus()
-export const allocateAccountHome = (input: {
-  harnessKind: string
-  accountId: string
-}) => accountsApi.allocateAccountHome(input)
 export const loginStart = (input: { accountId: string }) =>
   accountsApi.loginStart(input)
 export const loginStatus = (
@@ -233,15 +344,18 @@ export const logout = (input: {
   deleteAccountHome?: boolean
 }) => accountsApi.logout(input)
 export const listAccounts = () => accountsApi.listAccounts()
-export const createAccount = (input: { harness: string; label: string }) =>
-  accountsApi.createAccount(input)
+export const createAccount = (input: {
+  harnessKey: string
+  label: string
+  kind: string
+}) => accountsApi.createAccount(input)
 export const updateAccount = (
   id: string,
-  input: { label?: string; enabled?: boolean },
+  input: { label?: string; orderIndex?: number; disabled?: boolean },
 ) => accountsApi.updateAccount(id, input)
-export const deleteAccount = (id: string, deleteStorage?: boolean) =>
-  accountsApi.deleteAccount(id, deleteStorage)
-export const reorderAccounts = (input: { harness: string; ids: string[] }) =>
-  accountsApi.reorderAccounts(input)
+export const deleteAccount = (id: string, removeHome?: boolean) =>
+  accountsApi.deleteAccount(id, removeHome)
+export const reorderAccounts = (ids: readonly string[]) =>
+  accountsApi.reorderAccounts(ids)
 export const clearCooldown = (id: string) => accountsApi.clearCooldown(id)
 export const getAccountsDir = () => accountsApi.getAccountsDir()

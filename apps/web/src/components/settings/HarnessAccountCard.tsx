@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import {
   deriveAccountLimitState,
   formatResetCountdown,
+  LIMIT_KIND_LABELS,
   readAccountHome,
   resolveAccountAuthAction,
 } from '@/lib/harness-accounts-logic'
@@ -39,6 +40,8 @@ type Props = {
   onExpandedChange: (open: boolean) => void
   onUpdate: (next: HarnessConfig) => void
   onDelete?: () => void
+  /** Real credential home for a managed account row. Falls back to the env-derived home when omitted. */
+  homePath?: string | null
   headerAction?: ReactNode
   isSettingsDisabled?: boolean
   authActionBusy?: 'sign-in' | 'sign-out' | null
@@ -65,6 +68,7 @@ export function HarnessAccountCard({
   onExpandedChange,
   onUpdate,
   onDelete,
+  homePath,
   headerAction,
   isSettingsDisabled = false,
   authActionBusy = null,
@@ -75,7 +79,15 @@ export function HarnessAccountCard({
   const tick = useRelativeTimeTick(30_000)
   const enabled = harness.enabled ?? true
   const kind = snapshot?.harnessKind ?? accountId
-  const displayName = harness.name.trim() || snapshot?.displayName || accountId
+  // `harness` is the shared config for the whole kind (command/args/env), so
+  // every row in a group carries the same `harness.name`. A real account row
+  // (accountId !== kind) must show its own label first, or every row in the
+  // group would render the identical title.
+  const displayName =
+    (accountId !== kind ? snapshot?.displayName : undefined) ||
+    harness.name.trim() ||
+    snapshot?.displayName ||
+    accountId
   const authStatus = snapshot?.auth.status ?? 'unknown'
   const authAction = resolveAccountAuthAction({
     harnessKind: kind,
@@ -95,7 +107,10 @@ export function HarnessAccountCard({
       : authStatus === 'unauthenticated'
         ? ['Sign-in needed', 'warning']
         : ['Auth unknown', 'secondary']
-  const home = readAccountHome({ harnessKind: kind, env: harness.env })
+  const home =
+    homePath !== undefined
+      ? homePath
+      : readAccountHome({ harnessKind: kind, env: harness.env })
   const status = snapshot?.status ?? (enabled ? 'warning' : 'disabled')
   const email = snapshot?.auth.email
   const update = (patch: Partial<HarnessConfig>) =>
@@ -226,15 +241,7 @@ export function HarnessAccountCard({
                 {limit.blocked && (
                   <span className="font-medium text-warning">
                     {snapshot?.limit
-                      ? (
-                          {
-                            'usage-limit': 'Usage limit reached',
-                            'spend-limit': 'Spend limit reached',
-                            'credits-depleted': 'Credits depleted',
-                            auth: 'Sign-in required',
-                            unavailable: 'Account unavailable',
-                          } as const
-                        )[snapshot.limit.kind]
+                      ? LIMIT_KIND_LABELS[snapshot.limit.kind]
                       : 'Usage limit reached'}
                     {limit.blocked.resetsAt &&
                       ` · resets in ${formatResetCountdown(limit.blocked.resetsAt, tick)}`}

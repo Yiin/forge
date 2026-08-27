@@ -3,6 +3,22 @@ import type { HarnessConfig } from '@forge/protocol/config'
 export const HARNESS_KINDS = ['claude', 'codex', 'kimi', 'opencode'] as const
 export type HarnessKind = (typeof HARNESS_KINDS)[number]
 
+/**
+ * Maps a harness config entry to the account kind that owns its credential
+ * isolation, matching kind tokens in the key, command, or args. Harnesses
+ * with no managed-account support (shell, gemini, mock) return null.
+ */
+export function accountKindForHarness(
+  key: string,
+  harness?: { command?: string; args?: string[] },
+): HarnessKind | null {
+  const haystack = [key, harness?.command ?? '', ...(harness?.args ?? [])]
+    .join(' ')
+    .toLowerCase()
+  for (const kind of HARNESS_KINDS) if (haystack.includes(kind)) return kind
+  return null
+}
+
 const ISOLATION_ENV: Record<HarnessKind, string> = {
   claude: 'CLAUDE_CONFIG_DIR',
   codex: 'CODEX_HOME',
@@ -198,6 +214,7 @@ export const LIMIT_KIND_LABELS = {
   'spend-limit': 'Spend limit reached',
   'credits-depleted': 'Credits depleted',
   auth: 'Sign-in required',
+  'rate-limit': 'Rate limit reached',
   unavailable: 'Account unavailable',
 } as const
 

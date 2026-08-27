@@ -67,6 +67,7 @@ export const harnessAccountSnapshotSchema = z.object({
         'spend-limit',
         'credits-depleted',
         'auth',
+        'rate-limit',
         'unavailable',
       ]),
       detectedAt: z.string(),
@@ -82,3 +83,8 @@ export const harnessAccountSnapshotSchema = z.object({
 export type HarnessAccountSnapshot = z.infer<
   typeof harnessAccountSnapshotSchema
 >
+
+export const configResponseSchema = z.object({
+  accountsDir: z.string(),
+})
+export type ConfigResponse = z.infer<typeof configResponseSchema>

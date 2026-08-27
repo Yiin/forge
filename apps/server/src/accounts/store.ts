@@ -20,7 +20,7 @@ type AccountRow = {
   last_used_at: number | null
 }
 
-const accountRoot = () =>
+export const accountRoot = () =>
   resolve(
     process.env.FORGE_ACCOUNTS_DIR ?? join(homedir(), '.forge', 'accounts'),
   )
@@ -36,6 +36,14 @@ const toAccount = (row: AccountRow): HarnessAccount => ({
   lastUsedAt: row.last_used_at,
 })
 const newId = () => `acct_${crypto.randomUUID().replaceAll('-', '')}`
+
+function assertManagedHome(homePath: string) {
+  const root = accountRoot()
+  const resolved = resolve(homePath)
+  if (resolved !== root && !resolved.startsWith(`${root}/`))
+    throw new Error('Account home is outside the accounts directory')
+  return resolved
+}
 
 export class HarnessAccountStore {
   constructor(private readonly db: Db) {}
@@ -124,8 +132,25 @@ export class HarnessAccountStore {
     const current = this.get(id)
     if (!current) return false
     this.db.prepare('DELETE FROM harness_accounts WHERE id = ?').run(id)
-    if (removeHome) rmSync(current.homePath, { recursive: true, force: true })
+    if (removeHome)
+      rmSync(assertManagedHome(current.homePath), {
+        recursive: true,
+        force: true,
+      })
     return true
+  }
+
+  /** Wipes an account's home directory in place, keeping the account row. */
+  resetHome(id: string) {
+    const current = this.get(id)
+    if (!current) return undefined
+    rmSync(assertManagedHome(current.homePath), {
+      recursive: true,
+      force: true,
+    })
+    mkdirSync(current.homePath, { recursive: true, mode: 0o700 })
+    chmodSync(current.homePath, 0o700)
+    return current
   }
 }
 
@@ -150,16 +175,28 @@ export function accountEnv(
   }
 }
 
+function credentialFiles(kind: string): string[] {
+  switch (kind) {
+    case 'claude':
+      return ['.credentials.json', '.claude.json']
+    case 'codex':
+      return ['auth.json']
+    case 'kimi':
+      return ['credentials.json', 'auth.json']
+    case 'opencode':
+      return ['opencode/auth.json']
+    default:
+      return []
+  }
+}
+
 export function accountAuthenticated(kind: string, homePath: string) {
-  const files =
-    kind === 'claude'
-      ? ['.credentials.json', '.claude.json']
-      : kind === 'codex'
-        ? ['auth.json']
-        : kind === 'kimi'
-          ? ['credentials.json', 'auth.json']
-          : kind === 'opencode'
-            ? ['opencode/auth.json']
-            : []
-  return files.some((file) => existsSync(join(homePath, file)))
+  return credentialFiles(kind).some((file) => existsSync(join(homePath, file)))
+}
+
+/** Deletes just the credential files inside an account home, leaving the rest in place. */
+export function clearAccountCredentials(kind: string, homePath: string) {
+  assertManagedHome(homePath)
+  for (const file of credentialFiles(kind))
+    rmSync(join(homePath, file), { force: true })
 }

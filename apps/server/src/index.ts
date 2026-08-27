@@ -41,6 +41,7 @@ import {
   createHarnessHealthReader,
 } from './http/harnessHealth.js'
 import { harnessAccountRoutes } from './http/harnessAccounts.js'
+import { serverConfigRoutes } from './http/config.js'
 import {
   defaultConfig,
   loadConfigSync,
@@ -155,6 +156,7 @@ export function createApp(
         loginManager,
       }),
     )
+    app.route('/', serverConfigRoutes())
   }
   if (questions) app.route('/', questionRoutes(questions))
   if (status) app.route('/', workspaceRoutes(status.db, uploadStore))

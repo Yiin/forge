@@ -1,5 +1,11 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtempSync, statSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  statSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -130,6 +136,82 @@ describe('HarnessAccountStore', () => {
         .status,
     ).toBe(200)
     expect(statSync(homePath).isDirectory()).toBe(true)
+  })
+
+  it('clears credentials on logout, and optionally wipes the whole home', async () => {
+    const { db } = fixture()
+    const app = harnessAccountRoutes(db)
+    const store = new HarnessAccountStore(db)
+    const account = store.create({
+      harnessKey: 'claude',
+      label: 'Work',
+      kind: 'claude',
+    })
+    writeFileSync(join(account.homePath, '.credentials.json'), '{}')
+
+    const loggedOut = await app.request(
+      `/api/harness-accounts/${account.id}/logout`,
+      { method: 'POST' },
+    )
+    expect(await loggedOut.json()).toEqual({ authenticated: false })
+    expect(existsSync(join(account.homePath, '.credentials.json'))).toBe(false)
+    expect(statSync(account.homePath).isDirectory()).toBe(true)
+
+    writeFileSync(join(account.homePath, 'extra.txt'), 'keep-me')
+    const wiped = await app.request(
+      `/api/harness-accounts/${account.id}/logout`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ deleteAccountHome: true }),
+      },
+    )
+    expect(wiped.status).toBe(200)
+    expect(existsSync(join(account.homePath, 'extra.txt'))).toBe(false)
+    expect(statSync(account.homePath).isDirectory()).toBe(true)
+
+    expect(
+      (
+        await app.request('/api/harness-accounts/missing/logout', {
+          method: 'POST',
+        })
+      ).status,
+    ).toBe(404)
+  })
+
+  it('clears recorded cooldowns for an account', async () => {
+    const { db } = fixture()
+    const app = harnessAccountRoutes(db)
+    const store = new HarnessAccountStore(db)
+    const account = store.create({
+      harnessKey: 'claude',
+      label: 'Work',
+      kind: 'claude',
+    })
+    db.prepare(
+      `INSERT INTO harness_account_limits
+        (account_id, kind, harness_key, detected_at, resets_at, resets_at_estimated, source, detail)
+       VALUES (?, 'usage-limit', 'claude', ?, NULL, 0, 'test', NULL)`,
+    ).run(account.id, Date.now())
+
+    const cleared = await app.request(
+      `/api/harness-accounts/${account.id}/clear-cooldown`,
+      { method: 'POST' },
+    )
+    expect(await cleared.json()).toEqual({ ok: true })
+    expect(
+      db
+        .prepare('SELECT * FROM harness_account_limits WHERE account_id = ?')
+        .all(account.id),
+    ).toEqual([])
+
+    expect(
+      (
+        await app.request('/api/harness-accounts/missing/clear-cooldown', {
+          method: 'POST',
+        })
+      ).status,
+    ).toBe(404)
   })
 
   it('replays migrations cleanly', () => {

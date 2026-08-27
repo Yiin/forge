@@ -12,21 +12,20 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { api } from '../../lib/api'
+import type { Account } from '../../lib/accounts-api'
 import {
-  allocateAccountHome,
+  createAccount,
+  deleteAccount,
   getAccountsDir,
+  listAccounts,
   listHarnessStatus,
   loginStart,
+  reorderAccounts,
 } from '../../lib/accounts-api'
 import {
-  buildAccountReorderPatch,
+  accountKindForHarness,
   moveAccount,
-  nextAccountIdentity,
   orderAccountRows,
-  readAccountHome,
-  withAccountHome,
-  HARNESS_KINDS,
-  type HarnessKind,
 } from '../../lib/harness-accounts-logic'
 import { AccountLoginDialog } from '../../components/settings/AccountLoginDialog'
 import { AccountSignOutDialog } from '../../components/settings/AccountSignOutDialog'
@@ -53,6 +52,7 @@ const labels: Record<string, string> = {
 export function HarnessSettings() {
   const [config, setConfig] = useState<Record<string, Harness>>({})
   const [snapshots, setSnapshots] = useState<HarnessAccountSnapshot[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
   const [checkedAt, setCheckedAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<Set<string>>(new Set())
@@ -73,8 +73,12 @@ export function HarnessSettings() {
     snapshots.find((item) => item.accountId === id)
   const refresh = async (initial = false) => {
     try {
-      const next = await listHarnessStatus()
+      const [next, nextAccounts] = await Promise.all([
+        listHarnessStatus(),
+        listAccounts(),
+      ])
       setSnapshots(next)
+      setAccounts(nextAccounts)
       setCheckedAt(
         next.reduce<string | null>(
           (latest, item) =>
@@ -119,25 +123,19 @@ export function HarnessSettings() {
       return false
     }
   }
+  // Each kind gets one unmanaged "base" row (the harness's own config, using
+  // whatever ambient credentials it finds) plus a row per real managed
+  // account the server tracks.
   const rowsFor = (kind: string) => {
-    const ids = new Set([
-      kind,
-      ...snapshots
-        .filter((item) => item.harnessKind === kind)
-        .map((item) => item.accountId),
-      ...Object.keys(config).filter(
-        (id) =>
-          id !== kind &&
-          (snapshotFor(id)?.harnessKind === kind || id.startsWith(`${kind}_`)),
-      ),
-    ])
+    const accountIds = snapshots
+      .filter((item) => item.harnessKind === kind)
+      .map((item) => item.accountId)
     return orderAccountRows(
-      [...ids]
+      [kind, ...accountIds]
         .map((id) => ({
           accountId: id,
-          harness: config[id] ?? config[kind],
-          availability: (snapshotFor(id)?.availability ?? 'available') as
-            'available' | 'unavailable',
+          harness: config[kind],
+          availability: 'available' as const,
         }))
         .filter(
           (
@@ -145,46 +143,31 @@ export function HarnessSettings() {
           ): row is {
             accountId: string
             harness: Harness
-            availability: 'available' | 'unavailable'
+            availability: 'available'
           } => Boolean(row.harness),
         ),
-      Object.keys(config),
+      [kind],
     )
   }
-  const addManagedAccount = async (kind: HarnessKind) => {
+  const addManagedAccount = async (groupKey: string) => {
     if (isAdding) return
-    setBusyState((current) => new Set(current).add(`add:${kind}`))
-    const identity = nextAccountIdentity(
-      kind,
-      new Set([
-        ...Object.keys(config),
-        ...snapshots.map((item) => item.accountId),
-      ]),
-    )
-    const name = `${labels[kind]} ${identity.displayName}`
+    const accountKind = accountKindForHarness(groupKey, config[groupKey])
+    if (!accountKind) return
+    setBusyState((current) => new Set(current).add(`add:${groupKey}`))
+    const number =
+      snapshots.filter((item) => item.harnessKind === groupKey).length + 1
+    const name = `${labels[accountKind]} Account ${number}`
     try {
-      const base = config[kind]
-      if (!base) throw new Error('This harness has no managed credential home.')
-      const allocated = await allocateAccountHome({
-        harnessKind: kind,
-        accountId: identity.accountId,
+      const account = await createAccount({
+        harnessKey: groupKey,
+        label: name,
+        kind: accountKind,
       })
-      const current = (await api.listHarnesses()) as Record<string, Harness>
-      if (current[identity.accountId])
-        throw new Error('Another account used this ID. Try Add account again.')
-      const next = {
-        ...current,
-        [identity.accountId]: withAccountHome(
-          { ...base, name, harnessKind: kind },
-          allocated.homePath,
-        ) as Harness,
-      }
-      if (!(await save(next, `Could not save ${name}`))) return
       try {
         setLogin({
-          id: identity.accountId,
+          id: account.id,
           name,
-          start: await loginStart({ accountId: identity.accountId }),
+          start: await loginStart({ accountId: account.id }),
         })
       } catch {
         toast.error(`${name} was added, but sign-in did not start`, {
@@ -193,34 +176,39 @@ export function HarnessSettings() {
       }
       await refresh()
     } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : String(cause)
       toast.error(`Could not add ${name}`, {
-        description: detail.includes('managed credential')
-          ? detail
-          : 'The server could not allocate an account home.',
+        description: cause instanceof Error ? cause.message : String(cause),
       })
     } finally {
       setBusyState((current) => {
         const next = new Set(current)
-        next.delete(`add:${kind}`)
+        next.delete(`add:${groupKey}`)
         return next
       })
     }
   }
   const reorder = async (
+    kind: string,
     rows: ReturnType<typeof rowsFor>,
     id: string,
     direction: 'up' | 'down',
   ) => {
-    const moved = moveAccount(rows, id, direction)
+    const accountRows = rows.filter((row) => row.accountId !== kind)
+    const moved = moveAccount(accountRows, id, direction)
     if (!moved) return
-    const previous = config
-    const patch = buildAccountReorderPatch({
-      config: { harness: config },
-      groupOrder: moved,
-    })
-    setConfig(patch.harness)
-    if (!(await save(patch.harness))) setConfig(previous)
+    setBusyState((current) => new Set(current).add(`reorder:${id}`))
+    try {
+      await reorderAccounts(moved.map((row) => row.accountId))
+      await refresh()
+    } catch {
+      toast.error('Could not save account order')
+    } finally {
+      setBusyState((current) => {
+        const next = new Set(current)
+        next.delete(`reorder:${id}`)
+        return next
+      })
+    }
   }
   const signIn = async (id: string, name: string) => {
     setBusyState((current) => new Set(current).add(`sign-in:${id}`))
@@ -243,8 +231,7 @@ export function HarnessSettings() {
     : null
   const kinds = [
     ...new Set([
-      ...HARNESS_KINDS.filter((kind) => config[kind]),
-      ...Object.keys(config).map((id) => id.split('_account_')[0]),
+      ...Object.keys(config),
       ...snapshots.map((item) => item.harnessKind),
     ]),
   ]
@@ -328,16 +315,14 @@ export function HarnessSettings() {
               return (
                 <SettingsSection
                   key={kind}
-                  title={labels[kind] ?? kind}
+                  title={config[kind]?.name ?? labels[kind] ?? kind}
                   headerAction={
-                    HARNESS_KINDS.includes(kind as HarnessKind) ? (
+                    accountKindForHarness(kind, config[kind]) ? (
                       <Button
                         size="sm"
                         variant="ghost"
                         disabled={isAdding}
-                        onClick={() =>
-                          void addManagedAccount(kind as HarnessKind)
-                        }
+                        onClick={() => void addManagedAccount(kind)}
                       >
                         {busy.has(`add:${kind}`) ? (
                           <LoaderCircle className="animate-spin" />
@@ -349,17 +334,31 @@ export function HarnessSettings() {
                     ) : null
                   }
                 >
-                  {rows.map((row, index) => {
+                  {rows.map((row) => {
+                    const isBase = row.accountId === kind
+                    // `row.harness` is shared across the whole group, so a
+                    // real account row must prefer its own snapshot label.
                     const name =
+                      (!isBase && snapshotFor(row.accountId)?.displayName) ||
                       row.harness.name ||
                       snapshotFor(row.accountId)?.displayName ||
                       row.accountId
+                    const accountRows = rows.filter((r) => r.accountId !== kind)
+                    const accountIndex = accountRows.findIndex(
+                      (r) => r.accountId === row.accountId,
+                    )
                     return (
                       <HarnessAccountCard
                         key={row.accountId}
                         accountId={row.accountId}
                         harness={row.harness}
                         snapshot={snapshotFor(row.accountId)}
+                        homePath={
+                          isBase
+                            ? undefined
+                            : (accounts.find((a) => a.id === row.accountId)
+                                ?.storageDir ?? null)
+                        }
                         isExpanded={expanded[row.accountId] ?? false}
                         onExpandedChange={(open) =>
                           setExpanded((current) => ({
@@ -368,16 +367,19 @@ export function HarnessSettings() {
                           }))
                         }
                         onUpdate={(next) => {
-                          const all = { ...config, [row.accountId]: next }
+                          const all = { ...config, [kind]: next }
                           void save(all)
                         }}
                         onDelete={
-                          row.accountId === kind
+                          isBase
                             ? undefined
                             : async () => {
-                                const next = { ...config }
-                                delete next[row.accountId]
-                                await save(next)
+                                try {
+                                  await deleteAccount(row.accountId)
+                                  await refresh()
+                                } catch {
+                                  toast.error(`Could not delete ${name}`)
+                                }
                               }
                         }
                         isSettingsDisabled={isAdding}
@@ -394,24 +396,29 @@ export function HarnessSettings() {
                             id: row.accountId,
                             name,
                             kind,
-                            home: readAccountHome({
-                              harnessKind: kind,
-                              env: row.harness.env,
-                            }),
+                            home:
+                              accounts.find((a) => a.id === row.accountId)
+                                ?.storageDir ?? null,
                           })
                         }
                         reorder={
-                          rows.length > 1
+                          !isBase && accountRows.length > 1
                             ? {
                                 onMoveUp:
-                                  index > 0
-                                    ? () =>
-                                        void reorder(rows, row.accountId, 'up')
-                                    : undefined,
-                                onMoveDown:
-                                  index < rows.length - 1
+                                  accountIndex > 0
                                     ? () =>
                                         void reorder(
+                                          kind,
+                                          rows,
+                                          row.accountId,
+                                          'up',
+                                        )
+                                    : undefined,
+                                onMoveDown:
+                                  accountIndex < accountRows.length - 1
+                                    ? () =>
+                                        void reorder(
+                                          kind,
                                           rows,
                                           row.accountId,
                                           'down',

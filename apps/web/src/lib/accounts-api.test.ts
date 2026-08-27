@@ -46,6 +46,22 @@ describe('harnessAccountSnapshotSchema', () => {
     expect(snapshot.limit).toBeUndefined()
   })
 
+  it('accepts a rate-limit cooldown, the category the server actually records', () => {
+    const snapshot = harnessAccountSnapshotSchema.parse({
+      ...base,
+      limit: {
+        kind: 'rate-limit',
+        detectedAt: base.checkedAt,
+        resetsAt: null,
+        resetsAtEstimated: false,
+        source: 'harness_account_limits',
+        detail: 'rate limited',
+      },
+    })
+
+    expect(snapshot.limit?.kind).toBe('rate-limit')
+  })
+
   it('keeps an explicit null limit', () => {
     const snapshot = harnessAccountSnapshotSchema.parse({
       ...base,

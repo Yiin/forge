@@ -88,6 +88,12 @@ export function clearExpiredLimits(db: Db, now: number) {
   ).run(now)
 }
 
+export function clearAccountLimits(db: Db, accountId: string) {
+  db.prepare('DELETE FROM harness_account_limits WHERE account_id = ?').run(
+    accountId,
+  )
+}
+
 export function blockedAccounts(
   db: Db,
   now: number,

@@ -33,14 +33,19 @@ function fixture(body: string) {
   const bus = new EventBus()
   const events: unknown[] = []
   bus.subscribeEphemeral((event) => events.push(event))
-  const login = new LoginManager(accounts, bus, () => ({
-    command: script,
-    args: [],
-    env: {},
-    protocol: 'pty',
-    name: 'test',
-    enabled: true,
-  }))
+  const login = new LoginManager(
+    accounts,
+    bus,
+    () => ({
+      command: script,
+      args: [],
+      env: {},
+      protocol: 'pty',
+      name: 'test',
+      enabled: true,
+    }),
+    () => script,
+  )
   resources.push({ db, root, script })
   return { login, account, events }
 }
