@@ -13,7 +13,9 @@ defines product limits. `docs/architecture.md` is historical.
 - `apps/web/src/components/AppShell.tsx`: one mounted route outlet and global shortcuts.
 - `apps/web/src/routes.tsx`: route tree, root entry, draft, session, and Settings paths.
 - `apps/server`: Hono HTTP, WebSocket, session promotion, uploads, and Bun tooling.
+- `apps/server/drizzle`: raw SQL migrations. `src/db/migrate.ts` replays every file on each boot.
 - `packages/protocol`: Zod wire schemas shared by server, web, and dashboards.
+- `packages/protocol/src/status.ts` is vendored into `packages/forge-client` with a drift check. Change it and run the sync.
 - `e2e`: Playwright flows. Use `.agents/skills/test-forge-app/SKILL.md` for live QA.
 - T3 reference: `/home/yiin/Projects/t3code/apps/web/src/components/settings` and draft routes. Keep Forge terms.
 
@@ -24,6 +26,22 @@ defines product limits. `docs/architecture.md` is historical.
 - Lint: `bun run lint`
 - Browser tests: `bun run e2e`
 - Full gate: `bash scripts/epic-gate.sh`
+- Component tests need `// @vitest-environment jsdom` on line 1. There is no global jsdom.
+
+## Server runtime facts
+
+- Production boot uses `defaultConfig()` only. `loadConfig` is never called, and `harnessRoutes` gets no `configPath`, so harness and settings edits are memory-only today (`apps/server/src/index.ts:118-121,169`).
+- `FORGE_DB` defaults to `:memory:` (`apps/server/src/index.ts:163`). The deployed service never sets it, so all SQLite state dies on restart.
+- The production `HarnessFactory` stubs ACP harnesses (`apps/server/src/index.ts:170-182`). `spawnAcpClient` runs only from `POST /api/harnesses/test`.
+- `EpicRunner` is never constructed; `/api/epics` routes do not mount in the real server.
+- The e2e server (`FORGE_E2E=1`, `apps/server/src/index.ts:262`) is a separate Bun fake. e2e does not cover `startServer` code.
+
+## Release and deploy
+
+- Release: `bash scripts/release.sh <version>` on a clean `main`. The tag triggers `.github/workflows/release.yml`, which builds, smoke-tests, and publishes `forge-linux-x64.tar.gz`.
+- The pack step in `release.yml:51-63` is an explicit file list. New runtime assets must be added there or they do not ship.
+- Hosts (`yiin-lt`, `main-laptop`, `travel-laptop`) self-update every 15 min via `forge-update.timer`; force with `systemctl --user start forge-update.service`. Health: `curl -fsS http://127.0.0.1:3900/api/health`.
+- The deployed unit (`ops/forge.service`) has a minimal PATH that cannot find `claude`, `codex`, `kimi`, or `opencode`.
 
 ## UI and interaction contracts
 
@@ -53,7 +71,6 @@ defines product limits. `docs/architecture.md` is historical.
 
 ## Do not
 
-- For `forge-lnm`, `.1` owns tokens, feature children scope local CSS, and `.13` owns cross-surface cleanup.
 - Do not add a default-project setting. Draft entry owns project recency.
 - Do not use native Select for production choices without a documented platform reason.
 - Do not change agent runner semantics to implement the draft UI.
