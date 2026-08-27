@@ -161,14 +161,15 @@ export function createSession(
     contextMethod?: string | null
     contextConfidence?: string | null
     epicRunId?: string | null
+    accountId?: string | null
     now?: number
   },
 ) {
   const now = input.now ?? Date.now()
   const value = { id: id('ses_'), ...input, kind: input.kind ?? 'chat', now }
   db.prepare(
-    `INSERT INTO sessions (id, project_id, harness, title, cwd, kind, retention, parent_session_id, forked_at_seq, fork_request_id, context_method, context_confidence, epic_run_id, status, auto_resume, created_at, last_activity_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
+    `INSERT INTO sessions (id, project_id, harness, title, cwd, kind, retention, parent_session_id, forked_at_seq, fork_request_id, context_method, context_confidence, epic_run_id, account_id, status, auto_resume, created_at, last_activity_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
   ).run(
     value.id,
     value.projectId,
@@ -183,6 +184,7 @@ export function createSession(
     input.contextMethod ?? null,
     input.contextConfidence ?? null,
     input.epicRunId ?? null,
+    input.accountId ?? null,
     now,
     now,
   )
@@ -272,6 +274,7 @@ export function createIteration(
     attempt?: number
     harness?: string | null
     model?: string | null
+    accountId?: string | null
   },
 ) {
   const value = {
@@ -281,7 +284,7 @@ export function createIteration(
     startedAt: Date.now(),
   }
   db.prepare(
-    `INSERT INTO epic_iterations (id, epic_run_id, bead_id, session_id, worktree_path, branch, attempt, harness, model, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)`,
+    `INSERT INTO epic_iterations (id, epic_run_id, bead_id, session_id, worktree_path, branch, attempt, harness, model, account_id, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)`,
   ).run(
     value.id,
     value.runId,
@@ -292,6 +295,7 @@ export function createIteration(
     value.attempt,
     value.harness ?? null,
     value.model ?? null,
+    value.accountId ?? null,
     value.startedAt,
   )
   return value

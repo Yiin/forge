@@ -23,6 +23,7 @@ export const sessions = sqliteTable('sessions', {
   forkedAtSeq: integer('forked_at_seq'),
   spawnedBySeq: integer('spawned_by_seq'),
   epicRunId: text('epic_run_id'),
+  accountId: text('account_id'),
   status: text('status').notNull(),
   autoResume: integer('auto_resume').notNull(),
   createdAt: integer('created_at').notNull(),

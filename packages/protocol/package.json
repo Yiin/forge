@@ -12,7 +12,8 @@
     "./status": "./src/status.ts",
     "./config": "./src/config.ts",
     "./rolePolicy": "./src/rolePolicy.ts",
-    "./beads": "./src/beads.ts"
+    "./beads": "./src/beads.ts",
+    "./accounts": "./src/accounts.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

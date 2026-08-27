@@ -36,6 +36,7 @@ import {
 } from './epics/runner.js'
 import { recoverSessions } from './sessions/recovery.js'
 import { harnessRoutes } from './http/harnesses.js'
+import { harnessAccountRoutes } from './http/harnessAccounts.js'
 import {
   defaultConfig,
   loadConfigSync,
@@ -129,6 +130,7 @@ export function createApp(
     app.route('/', fsBrowseRoutes())
     app.route('/', searchRoutes(uploadStore.database))
     app.route('/', harnessRoutes({ configState, db: uploadStore.database }))
+    app.route('/', harnessAccountRoutes(uploadStore.database))
   }
   if (questions) app.route('/', questionRoutes(questions))
   if (status) app.route('/', workspaceRoutes(status.db, uploadStore))
