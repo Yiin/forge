@@ -7,6 +7,7 @@ import {
   HealthResponse,
   StatusEvent,
   StatusResponse,
+  type StatusHarness,
 } from '@forge/protocol/status'
 import { EventBus } from '../events/bus.js'
 
@@ -17,11 +18,7 @@ export type StatusOptions = {
   bootId?: string
   startedAt?: number
   dataDir?: string
-  harnesses?: Array<{
-    key: string
-    protocol: 'acp' | 'pty'
-    liveProcesses: number
-  }>
+  harnesses?: StatusHarness[] | (() => StatusHarness[])
 }
 
 function count(db: DatabaseSync, table: string, where = '') {
@@ -68,7 +65,10 @@ export function statusRoutes(options: StatusOptions) {
         running: count(options.db, 'epic_runs', " WHERE status = 'running'"),
         paused: count(options.db, 'epic_runs', " WHERE status = 'paused'"),
       },
-      harnesses: options.harnesses ?? [],
+      harnesses:
+        typeof options.harnesses === 'function'
+          ? options.harnesses()
+          : (options.harnesses ?? []),
       dataDirBytes: options.dataDir ? await directoryBytes(options.dataDir) : 0,
     })
 

@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type {
@@ -148,4 +148,18 @@ export function accountEnv(
     default:
       return {}
   }
+}
+
+export function accountAuthenticated(kind: string, homePath: string) {
+  const files =
+    kind === 'claude'
+      ? ['.credentials.json', '.claude.json']
+      : kind === 'codex'
+        ? ['auth.json']
+        : kind === 'kimi'
+          ? ['credentials.json', 'auth.json']
+          : kind === 'opencode'
+            ? ['opencode/auth.json']
+            : []
+  return files.some((file) => existsSync(join(homePath, file)))
 }

@@ -36,6 +36,10 @@ import {
 } from './epics/runner.js'
 import { recoverSessions } from './sessions/recovery.js'
 import { harnessRoutes } from './http/harnesses.js'
+import {
+  harnessHealthRoutes,
+  createHarnessHealthReader,
+} from './http/harnessHealth.js'
 import { harnessAccountRoutes } from './http/harnessAccounts.js'
 import {
   defaultConfig,
@@ -134,6 +138,15 @@ export function createApp(
     app.route('/', fsBrowseRoutes())
     app.route('/', searchRoutes(uploadStore.database))
     app.route('/', harnessRoutes({ configState, db: uploadStore.database }))
+    if (manager && configState)
+      app.route(
+        '/',
+        harnessHealthRoutes({
+          db: uploadStore.database,
+          configState,
+          manager,
+        }),
+      )
     app.route(
       '/',
       harnessAccountRoutes(uploadStore.database, {
@@ -249,6 +262,7 @@ export function startServer(
     bus,
     (key) => configState.current.harness[key],
   )
+  const harnessHealth = createHarnessHealthReader({ db, configState, manager })
   // Settle persisted turns before exposing the port. Respawn work continues
   // from the settled state without delaying health checks.
   void recoverSessions(db, manager, bus)
@@ -259,6 +273,12 @@ export function startServer(
       bus,
       version: process.env.FORGE_VERSION ?? version,
       dataDir,
+      harnesses: () =>
+        harnessHealth().map(({ key, protocol, liveProcesses }) => ({
+          key,
+          protocol,
+          liveProcesses,
+        })),
     },
     questions,
     manager,

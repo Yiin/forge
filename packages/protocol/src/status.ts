@@ -5,6 +5,32 @@ export const HealthResponse = z.object({
   version: z.string(),
   db: z.enum(['ok', 'error']),
 })
+export const harnessCooldownSchema = z.object({
+  kind: z.string(),
+  detectedAt: z.number().int(),
+  resetsAt: z.number().int().nullable(),
+  resetsAtEstimated: z.boolean(),
+  detail: z.string().nullable(),
+})
+export const harnessAccountHealthSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  order: z.number().int(),
+  disabled: z.boolean(),
+  authenticated: z.boolean(),
+  cooldown: harnessCooldownSchema.nullable(),
+})
+export const harnessStatusSchema = z.object({
+  key: z.string(),
+  name: z.string(),
+  command: z.string(),
+  args: z.array(z.string()),
+  protocol: z.enum(['acp', 'pty']),
+  enabled: z.boolean(),
+  accounts: z.array(harnessAccountHealthSchema),
+  liveProcesses: z.number().int().nonnegative(),
+})
+export const harnessHealthResponseSchema = z.array(harnessStatusSchema)
 export const StatusResponse = z.object({
   version: z.string(),
   bootId: z.string(),
@@ -43,5 +69,8 @@ export const StatusEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('heartbeat'), ts: z.string() }),
 ])
 export type HealthResponse = z.infer<typeof HealthResponse>
+export type StatusHarness = z.infer<typeof StatusResponse>['harnesses'][number]
+export type HarnessStatus = z.infer<typeof harnessStatusSchema>
+export type HarnessHealthResponse = z.infer<typeof harnessHealthResponseSchema>
 export type StatusResponse = z.infer<typeof StatusResponse>
 export type StatusEvent = z.infer<typeof StatusEvent>

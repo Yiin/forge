@@ -43,6 +43,7 @@ function recoveryRecap(db: Db, sessionId: string) {
 
 export class SessionManager {
   private readonly handles = new Map<string, HarnessHandle>()
+  private readonly handleHarnesses = new Map<string, string>()
   private readonly reapTimers = new Map<string, ReturnType<typeof setTimeout>>()
   constructor(
     private readonly db: Db,
@@ -52,6 +53,16 @@ export class SessionManager {
   ) {}
   get database() {
     return this.db
+  }
+  liveProcessCount(harness: string) {
+    let count = 0
+    for (const value of this.handleHarnesses.values())
+      if (value === harness) count += 1
+    return count
+  }
+  private forgetHandle(id: string) {
+    this.handles.delete(id)
+    this.handleHarnesses.delete(id)
   }
 
   create(input: {
@@ -158,7 +169,7 @@ export class SessionManager {
       }
     }
     const onExit = () => {
-      this.handles.delete(row.id)
+      this.forgetHandle(row.id)
       if (
         this.db.prepare('SELECT status FROM sessions WHERE id = ?').get(row.id)
       )
@@ -176,6 +187,7 @@ export class SessionManager {
       onExit,
     )
     this.handles.set(row.id, handle)
+    this.handleHarnesses.set(row.id, row.harness)
     this.status(row.id, 'running')
     return handle
   }
@@ -202,7 +214,10 @@ export class SessionManager {
         eventBus: this.bus,
       })
     }
-    const onExit = () => this.status(row.id, 'errored')
+    const onExit = () => {
+      this.forgetHandle(row.id)
+      this.status(row.id, 'errored')
+    }
     const session = {
       id: row.id,
       cwd: row.cwd,
@@ -247,6 +262,7 @@ export class SessionManager {
       })
     }
     this.handles.set(row.id, result.handle)
+    this.handleHarnesses.set(row.id, row.harness)
     this.markAccountUsed(row.account_id)
     if (recap) await result.handle.prompt(recap)
     await result.handle.prompt('The server restarted mid-turn. Continue.')
@@ -285,7 +301,7 @@ export class SessionManager {
     const handle = this.handles.get(id)
     if (!handle) return
     await handle.kill()
-    this.handles.delete(id)
+    this.forgetHandle(id)
     this.reapTimers.delete(id)
     if (getSession(this.db, id)) this.status(id, 'idle')
   }
@@ -320,7 +336,7 @@ export class SessionManager {
       const oldHandle = this.handles.get(id)
       if (oldHandle) {
         await oldHandle.kill()
-        this.handles.delete(id)
+        this.forgetHandle(id)
       }
       const timer = this.reapTimers.get(id)
       if (timer) clearTimeout(timer)
@@ -523,7 +539,7 @@ export class SessionManager {
   async discard(id: string) {
     await this.handles.get(id)?.cancel()
     await this.handles.get(id)?.kill()
-    this.handles.delete(id)
+    this.forgetHandle(id)
     return Boolean(
       this.db
         .prepare(
