@@ -115,9 +115,7 @@ export function planAttempts(
       .sort((a, b) => a.orderIndex - b.orderIndex)
     if (candidates.length)
       return candidates.map((account) => ({ ...hop, accountId: account.id }))
-    if (accounts.some((account) => account.harnessKey === hop.harness))
-      return []
-    return [hop]
+    return []
   })
 }
 

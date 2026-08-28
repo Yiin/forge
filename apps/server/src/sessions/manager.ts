@@ -101,7 +101,8 @@ export class SessionManager {
         'SELECT id FROM harness_accounts WHERE harness_key = ? AND disabled_at IS NULL ORDER BY order_index, created_at LIMIT 1',
       )
       .get(harness) as { id: string } | undefined
-    return row?.id ?? null
+    if (!row) throw new Error('This harness has no account')
+    return row.id
   }
 
   private markAccountUsed(accountId: string | null) {

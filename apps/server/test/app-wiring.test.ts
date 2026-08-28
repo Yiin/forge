@@ -11,6 +11,9 @@ describe('app wiring', () => {
   test('serves project, session and question routes together', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)
+    db.prepare(
+      "INSERT INTO harness_accounts (id, harness_key, label, kind, home_path, created_at) VALUES ('acct', 'claude', 'Claude', 'claude', '/tmp/acct', 1)",
+    ).run()
     const bus = new EventBus()
     const store = new UploadStore(db, { dataDir: '/tmp/forge-app-wiring', bus })
     const questions = new QuestionManager({ db, bus })

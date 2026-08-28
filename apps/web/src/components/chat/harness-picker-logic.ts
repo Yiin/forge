@@ -12,6 +12,8 @@ export type HarnessOption = {
   harness: string
   label: string
   accounts: HarnessOptionAccount[]
+  disabled: boolean
+  disabledReason: string | null
 }
 export type HarnessSelection = { harness: string; accountId?: string }
 
@@ -22,28 +24,31 @@ export function buildHarnessOptions(
 ): HarnessOption[] {
   return harnesses.map((entry) => {
     const harness = typeof entry === 'string' ? entry : entry.key
+    const optionAccounts = accounts
+      .filter((account) => account.harness === harness)
+      .map((account) => {
+        const cooling =
+          account.cooldownUntil !== null && account.cooldownUntil > nowMs
+        return {
+          id: account.id,
+          label: account.label,
+          cooling,
+          coolingLabel:
+            cooling && account.cooldownUntil !== null
+              ? formatCooldown(
+                  new Date(account.cooldownUntil).toISOString(),
+                  nowMs,
+                )
+              : null,
+          disabled: !account.enabled,
+        }
+      })
     return {
       harness,
       label: harness,
-      accounts: accounts
-        .filter((account) => account.harness === harness)
-        .map((account) => {
-          const cooling =
-            account.cooldownUntil !== null && account.cooldownUntil > nowMs
-          return {
-            id: account.id,
-            label: account.label,
-            cooling,
-            coolingLabel:
-              cooling && account.cooldownUntil !== null
-                ? formatCooldown(
-                    new Date(account.cooldownUntil).toISOString(),
-                    nowMs,
-                  )
-                : null,
-            disabled: !account.enabled,
-          }
-        }),
+      accounts: optionAccounts,
+      disabled: optionAccounts.length === 0,
+      disabledReason: optionAccounts.length === 0 ? 'No account' : null,
     }
   })
 }
@@ -60,8 +65,9 @@ export function defaultSelection(
   )
   if (
     currentOption &&
-    (!current.accountId ||
-      (currentAccount && !currentAccount.cooling && !currentAccount.disabled))
+    currentAccount &&
+    !currentAccount.cooling &&
+    !currentAccount.disabled
   )
     return current
   const usable = options.find((option) => {
@@ -70,5 +76,5 @@ export function defaultSelection(
   })
   if (usable)
     return { harness: usable.harness, accountId: usable.accounts[0]!.id }
-  return options[0] ? { harness: options[0].harness } : current
+  return { harness: '' }
 }

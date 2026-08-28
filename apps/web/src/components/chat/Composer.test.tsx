@@ -18,7 +18,31 @@ describe('Composer', () => {
   })
 
   const renderComposer = (onSend = vi.fn().mockResolvedValue(undefined)) => {
-    render(<Composer sessionId="session-1" onSend={onSend} />)
+    vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([
+      {
+        id: 'main',
+        harness: 'claude',
+        harnessKey: 'claude',
+        kind: 'claude',
+        label: 'Main',
+        storageDir: '/tmp/main',
+        homePath: '/tmp/main',
+        enabled: true,
+        authStatus: 'authenticated',
+        email: null,
+        cooldownUntil: null,
+        cooldownReason: null,
+        lastUsedAt: null,
+      },
+    ])
+    render(
+      <Composer
+        sessionId="session-1"
+        harness="claude"
+        accountId="main"
+        onSend={onSend}
+      />,
+    )
     return screen.getByLabelText('Message composer')
   }
 
@@ -32,7 +56,10 @@ describe('Composer', () => {
     fireEvent.keyDown(composer, { key: 'Enter', shiftKey: true })
     expect(onSend).not.toHaveBeenCalled()
     fireEvent.keyDown(composer, { key: 'Enter' })
-    expect(onSend).toHaveBeenCalledWith('hello', [], { harness: '' })
+    expect(onSend).toHaveBeenCalledWith('hello', [], {
+      harness: 'claude',
+      accountId: 'main',
+    })
   })
 
   it('lets the trigger menu consume Enter and Escape', async () => {
@@ -121,7 +148,9 @@ describe('Composer', () => {
     const onSend = vi.fn().mockResolvedValue(undefined)
     render(<Composer sessionId="session-1" harness="claude" onSend={onSend} />)
 
-    await waitFor(() => expect(screen.getByText('Work')).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getAllByText('Work').length).toBeGreaterThan(0),
+    )
     fireEvent.click(screen.getByRole('combobox', { name: 'Harness' }))
     fireEvent.click(screen.getByRole('option', { name: 'Work' }))
     const composer = screen.getByLabelText('Message composer')
@@ -135,7 +164,7 @@ describe('Composer', () => {
     )
   })
 
-  it('keeps status harnesses when accounts are unavailable', async () => {
+  it('keeps the initial harness usable when account lookup is unavailable', async () => {
     vi.spyOn(accountsApi, 'listAccounts').mockRejectedValue(
       new Error('offline'),
     )
@@ -147,8 +176,6 @@ describe('Composer', () => {
     const composer = screen.getByLabelText('Message composer')
     fireEvent.change(composer, { target: { value: 'hello' } })
     fireEvent.keyDown(composer, { key: 'Enter' })
-    await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith('hello', [], { harness: 'codex' }),
-    )
+    expect(onSend).toHaveBeenCalledWith('hello', [], { harness: 'codex' })
   })
 })

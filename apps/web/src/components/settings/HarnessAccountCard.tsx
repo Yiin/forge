@@ -113,11 +113,7 @@ export function HarnessAccountCard({
   const [usageRefreshing, setUsageRefreshing] = useState(false)
   const enabled = snapshot?.status !== 'disabled'
   const kind = accountKind
-  // `harness` is the shared config for the whole kind (command/args/env), so
-  // every row in a group carries the same `harness.name`. A real account row
-  // (accountId !== kind) must show its own label first, or every row in the
-  // group would render the identical title.
-  const displayName = snapshot?.displayName || label || accountId
+  const displayName = label || accountId
   const authStatus = snapshot?.auth.status ?? 'unknown'
   const authAction = resolveAccountAuthAction({
     harnessKind: kind,
@@ -219,11 +215,6 @@ export function HarnessAccountCard({
               <h3 className="truncate text-[13px] font-semibold tracking-[-0.01em]">
                 {displayName}
               </h3>
-              {accountId !== kind && (
-                <code className="truncate rounded bg-muted/60 px-1 py-0.5 text-[10px] text-muted-foreground">
-                  {accountId}
-                </code>
-              )}
               <Badge
                 variant={authBadge[1] as 'success' | 'warning' | 'secondary'}
               >
@@ -337,35 +328,120 @@ export function HarnessAccountCard({
                 )}
               </p>
             )}
-            {usageSupported && usageState !== 'unsupported' &&
+            {usageSupported &&
+              usageState !== 'unsupported' &&
               snapshot?.auth.status !== 'unknown' && (
-              <div className="mt-2 space-y-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">Usage</span>
-                  {usageState === 'loading' && <span className="text-muted-foreground">Loading usage…</span>}
-                  {usageState === 'auth' && <span className="text-muted-foreground">Sign in to view usage.</span>}
-                  {usageState === 'empty' && <span className="text-muted-foreground">No usage data yet.</span>}
-                  {usageState === 'unavailable' && <span className="text-warning">Provider unavailable. Last known windows shown.</span>}
-                  {usageHeadline && hasWireUsage && (
-                    <span className={cn('font-medium', usageHeadline.percent >= 90 && 'text-destructive')}>
-                      {usageHeadline.windowLabel} {usageHeadline.percent}%
+                <div className="mt-2 space-y-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">Usage</span>
+                    {usageState === 'loading' && (
+                      <span className="text-muted-foreground">
+                        Loading usage…
+                      </span>
+                    )}
+                    {usageState === 'auth' && (
+                      <span className="text-muted-foreground">
+                        Sign in to view usage.
+                      </span>
+                    )}
+                    {usageState === 'empty' && (
+                      <span className="text-muted-foreground">
+                        No usage data yet.
+                      </span>
+                    )}
+                    {usageState === 'unavailable' && (
+                      <span className="text-warning">
+                        Provider unavailable. Last known windows shown.
+                      </span>
+                    )}
+                    {usageHeadline && hasWireUsage && (
+                      <span
+                        className={cn(
+                          'font-medium',
+                          usageHeadline.percent >= 90 && 'text-destructive',
+                        )}
+                      >
+                        {usageHeadline.windowLabel} {usageHeadline.percent}%
+                      </span>
+                    )}
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="ghost"
+                      className="ml-auto"
+                      disabled={usageRefreshing}
+                      onClick={() => {
+                        setUsageRefreshing(true)
+                        void refreshUsage(accountId).finally(() =>
+                          setUsageRefreshing(false),
+                        )
+                      }}
+                      aria-label="Refresh usage"
+                    >
+                      <RefreshCw
+                        className={cn(
+                          'size-3.5',
+                          usageRefreshing && 'animate-spin',
+                        )}
+                      />
+                    </Button>
+                    {usage?.length ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-xs"
+                        onClick={() => setUsageExpanded(!usageExpanded)}
+                      >
+                        {usageExpanded ? 'Hide windows' : 'Show windows'}
+                      </Button>
+                    ) : null}
+                  </div>
+                  {usageHeadline?.resetsAt && (
+                    <span className="text-muted-foreground">
+                      Resets in{' '}
+                      {formatResetCountdown(usageHeadline.resetsAt, tick)}
                     </span>
                   )}
-                  <Button type="button" size="icon-xs" variant="ghost" className="ml-auto" disabled={usageRefreshing} onClick={() => { setUsageRefreshing(true); void refreshUsage(accountId).finally(() => setUsageRefreshing(false)) }} aria-label="Refresh usage">
-                    <RefreshCw className={cn('size-3.5', usageRefreshing && 'animate-spin')} />
-                  </Button>
-                  {usage?.length ? <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => setUsageExpanded(!usageExpanded)}>{usageExpanded ? 'Hide windows' : 'Show windows'}</Button> : null}
+                  {usageExpanded &&
+                    usage?.map((window) => {
+                      const percent = Math.round(
+                        window.utilization <= 1
+                          ? window.utilization * 100
+                          : window.utilization,
+                      )
+                      return (
+                        <div
+                          key={window.windowId}
+                          className="space-y-1 rounded-md border border-border/60 p-2"
+                        >
+                          <div className="flex justify-between">
+                            <span>{window.window}</span>
+                            <span
+                              className={cn(
+                                percent >= 90 &&
+                                  'font-semibold text-destructive',
+                              )}
+                            >
+                              {percent}%
+                              {window.resetsAt
+                                ? ` · resets in ${formatResetCountdown(window.resetsAt, tick) ?? 'now'}`
+                                : ''}
+                            </span>
+                          </div>
+                          <Progress
+                            value={percent}
+                            className={
+                              percent >= 90
+                                ? '[&>div]:bg-destructive'
+                                : undefined
+                            }
+                          />
+                        </div>
+                      )
+                    })}
                 </div>
-                {usageHeadline?.resetsAt && <span className="text-muted-foreground">Resets in {formatResetCountdown(usageHeadline.resetsAt, tick)}</span>}
-                {usageExpanded && usage?.map((window) => {
-                  const percent = Math.round(window.utilization <= 1 ? window.utilization * 100 : window.utilization)
-                  return <div key={window.windowId} className="space-y-1 rounded-md border border-border/60 p-2">
-                    <div className="flex justify-between"><span>{window.window}</span><span className={cn(percent >= 90 && 'font-semibold text-destructive')}>{percent}%{window.resetsAt ? ` · resets in ${formatResetCountdown(window.resetsAt, tick) ?? 'now'}` : ''}</span></div>
-                    <Progress value={percent} className={percent >= 90 ? '[&>div]:bg-destructive' : undefined} />
-                  </div>
-                })}
-              </div>
-            )}
+              )}
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
             {authAction.kind === 'sign-in' && onSignIn && (

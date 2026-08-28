@@ -150,6 +150,7 @@ export function Composer({
   }, [draftMode, sessionId])
   const [harnesses, setHarnesses] = useState<string[]>(harness ? [harness] : [])
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [accountsLoaded, setAccountsLoaded] = useState(false)
   useEffect(() => {
     void fetch('/api/status')
       .then((response) => (response.ok ? response.json() : null))
@@ -162,11 +163,16 @@ export function Composer({
   useEffect(() => {
     void accountsApi
       .listAccounts()
-      .then(setAccounts)
+      .then((next) => {
+        setAccounts(next)
+        setAccountsLoaded(true)
+      })
       .catch(() => undefined)
   }, [])
   const harnessOptions = buildHarnessOptions(harnesses, accounts, Date.now())
-  const selected = defaultSelection(harnessOptions, selection)
+  const selected = accountsLoaded
+    ? defaultSelection(harnessOptions, selection)
+    : selection
   useEffect(() => {
     if (
       selected.harness !== selection.harness ||
@@ -279,10 +285,15 @@ export function Composer({
   }, [])
   const submit = async () => {
     const value = text.trim()
-    if (!value || !canSendUploads(uploads)) return
+    if (
+      !value ||
+      (accountsLoaded && !selected.accountId) ||
+      !canSendUploads(uploads)
+    )
+      return
     setSendError(null)
     try {
-      await onSend(value, completedAttachmentIds(uploads), selection)
+      await onSend(value, completedAttachmentIds(uploads), selected)
       setText('')
       setTrigger(null)
       dispatchUploads(initialAttachmentUploads)
@@ -442,7 +453,7 @@ export function Composer({
               value={
                 selection.accountId
                   ? `${selection.harness}:${selection.accountId}`
-                  : selection.harness
+                  : ''
               }
               onValueChange={(value) => {
                 const separator = value.indexOf(':')
@@ -466,8 +477,8 @@ export function Composer({
                   <SelectGroup key={option.harness}>
                     <SelectLabel>{option.label}</SelectLabel>
                     {option.accounts.length === 0 ? (
-                      <SelectItem value={option.harness}>
-                        {option.label}
+                      <SelectItem value={`${option.harness}:none`} disabled>
+                        {option.label} - {option.disabledReason}
                       </SelectItem>
                     ) : (
                       option.accounts.map((account) => (
@@ -511,7 +522,7 @@ export function Composer({
             type="submit"
             size="icon"
             className="size-8 shrink-0 rounded-lg pointer-coarse:size-11"
-            disabled={!canSubmit}
+            disabled={!canSubmit || (accountsLoaded && !selected.accountId)}
             title={
               !canSendUploads(uploads)
                 ? 'Wait for uploads to finish or remove failed files'

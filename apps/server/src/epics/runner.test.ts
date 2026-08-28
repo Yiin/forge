@@ -27,6 +27,10 @@ describe('epic runner account attempts', () => {
     ).toEqual([{ harness: 'codex', accountId: 'codex-a' }])
   })
 
+  it('skips hops without managed accounts', () => {
+    expect(planAttempts([{ harness: 'kimi' }], accounts, new Set())).toEqual([])
+  })
+
   it('records cooldowns only for limit failures', () => {
     expect(
       classifyPromptFailure(new Error('usage limit reached'), 123),

@@ -6,6 +6,13 @@ import type { HarnessConfig } from '@forge/protocol/config'
 import type { HarnessAccountSnapshot } from '@forge/protocol/accounts'
 import { Button } from '@/components/ui/button'
 import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from '@/components/ui/empty'
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -328,7 +335,6 @@ export function HarnessSettings() {
     }
   }
   const reorder = async (
-    kind: string,
     rows: ReturnType<typeof rowsFor>,
     id: string,
     direction: 'up' | 'down',
@@ -512,140 +518,156 @@ export function HarnessSettings() {
                     ) : null
                   }
                 >
-                  {rows.map((row) => {
-                    const name =
-                      snapshotFor(row.accountId)?.displayName ||
-                      row.harness.name ||
-                      snapshotFor(row.accountId)?.displayName ||
-                      row.accountId
-                    const accountRows = rows
-                    const accountIndex = accountRows.findIndex(
-                      (r) => r.accountId === row.accountId,
-                    )
-                    return (
-                      <HarnessAccountCard
-                        key={row.accountId}
-                        accountId={row.accountId}
-                        harness={row.harness}
-                        snapshot={snapshotFor(row.accountId)}
-                        accountKind={
-                          accounts.find((a) => a.id === row.accountId)?.kind ??
-                          kind
-                        }
-                        homePath={
-                          accounts.find((a) => a.id === row.accountId)
-                            ?.homePath ?? null
-                        }
-                        label={
-                          accounts.find((a) => a.id === row.accountId)?.label ??
-                          name
-                        }
-                        config={
-                          accounts.find((a) => a.id === row.accountId)
-                            ?.config ?? null
-                        }
-                        isExpanded={expanded[row.accountId] ?? false}
-                        onExpandedChange={(open) =>
-                          setExpanded((current) => ({
-                            ...current,
-                            [row.accountId]: open,
-                          }))
-                        }
-                        onUpdateAccount={async (patch) => {
-                          try {
-                            const updated = await updateAccount(
-                              row.accountId,
-                              patch,
-                            )
-                            setAccounts((current) =>
-                              current.map((account) =>
-                                account.id === row.accountId
-                                  ? {
-                                      ...account,
-                                      ...(patch.label
-                                        ? { label: patch.label }
-                                        : {}),
-                                      ...(patch.config !== undefined
-                                        ? { config: patch.config }
-                                        : {}),
-                                      ...(patch.disabled !== undefined
-                                        ? { enabled: !patch.disabled }
-                                        : {}),
-                                    }
-                                  : account,
-                              ),
-                            )
-                            return Boolean(updated)
-                          } catch (cause) {
-                            toast.error('Could not save account settings', {
-                              description:
-                                cause instanceof Error
-                                  ? cause.message
-                                  : String(cause),
+                  {rows.length === 0 ? (
+                    <Empty className="border-0 py-10">
+                      <EmptyHeader>
+                        <EmptyTitle>No accounts</EmptyTitle>
+                        <EmptyDescription>
+                          Add an account to use this harness.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                      <EmptyContent>
+                        {accountKindForHarness(kind, config[kind]) && (
+                          <Button
+                            size="sm"
+                            onClick={() => void addManagedAccount(kind)}
+                          >
+                            <Plus /> Add account
+                          </Button>
+                        )}
+                      </EmptyContent>
+                    </Empty>
+                  ) : (
+                    rows.map((row) => {
+                      const name =
+                        snapshotFor(row.accountId)?.displayName || row.accountId
+                      const accountRows = rows
+                      const accountIndex = accountRows.findIndex(
+                        (r) => r.accountId === row.accountId,
+                      )
+                      return (
+                        <HarnessAccountCard
+                          key={row.accountId}
+                          accountId={row.accountId}
+                          harness={row.harness}
+                          snapshot={snapshotFor(row.accountId)}
+                          accountKind={
+                            accounts.find((a) => a.id === row.accountId)
+                              ?.kind ?? kind
+                          }
+                          homePath={
+                            accounts.find((a) => a.id === row.accountId)
+                              ?.homePath ?? null
+                          }
+                          label={
+                            accounts.find((a) => a.id === row.accountId)
+                              ?.label ?? name
+                          }
+                          config={
+                            accounts.find((a) => a.id === row.accountId)
+                              ?.config ?? null
+                          }
+                          isExpanded={expanded[row.accountId] ?? false}
+                          onExpandedChange={(open) =>
+                            setExpanded((current) => ({
+                              ...current,
+                              [row.accountId]: open,
+                            }))
+                          }
+                          onUpdateAccount={async (patch) => {
+                            try {
+                              const updated = await updateAccount(
+                                row.accountId,
+                                patch,
+                              )
+                              setAccounts((current) =>
+                                current.map((account) =>
+                                  account.id === row.accountId
+                                    ? {
+                                        ...account,
+                                        ...(patch.label
+                                          ? { label: patch.label }
+                                          : {}),
+                                        ...(patch.config !== undefined
+                                          ? { config: patch.config }
+                                          : {}),
+                                        ...(patch.disabled !== undefined
+                                          ? { enabled: !patch.disabled }
+                                          : {}),
+                                      }
+                                    : account,
+                                ),
+                              )
+                              return Boolean(updated)
+                            } catch (cause) {
+                              toast.error('Could not save account settings', {
+                                description:
+                                  cause instanceof Error
+                                    ? cause.message
+                                    : String(cause),
+                              })
+                              return false
+                            }
+                          }}
+                          onDelete={async () => {
+                            try {
+                              await deleteAccount(row.accountId)
+                              await refresh()
+                            } catch {
+                              toast.error(`Could not delete ${name}`)
+                            }
+                          }}
+                          isSettingsDisabled={isAdding}
+                          authActionBusy={
+                            busy.has(`sign-in:${row.accountId}`)
+                              ? 'sign-in'
+                              : busy.has(`sign-out:${row.accountId}`)
+                                ? 'sign-out'
+                                : null
+                          }
+                          onSignIn={() => void signIn(row.accountId, name)}
+                          onSignOut={() =>
+                            setSignOut({
+                              id: row.accountId,
+                              name,
+                              kind:
+                                accounts.find((a) => a.id === row.accountId)
+                                  ?.kind ??
+                                snapshotFor(row.accountId)?.harnessKind ??
+                                kind,
+                              home:
+                                accounts.find((a) => a.id === row.accountId)
+                                  ?.storageDir ?? null,
                             })
-                            return false
                           }
-                        }}
-                        onDelete={async () => {
-                          try {
-                            await deleteAccount(row.accountId)
-                            await refresh()
-                          } catch {
-                            toast.error(`Could not delete ${name}`)
+                          reorder={
+                            accountRows.length > 1
+                              ? {
+                                  onMoveUp:
+                                    accountIndex > 0
+                                      ? () =>
+                                          void reorder(
+                                            rows,
+                                            row.accountId,
+                                            'up',
+                                          )
+                                      : undefined,
+                                  onMoveDown:
+                                    accountIndex < accountRows.length - 1
+                                      ? () =>
+                                          void reorder(
+                                            rows,
+                                            row.accountId,
+                                            'down',
+                                          )
+                                      : undefined,
+                                }
+                              : undefined
                           }
-                        }}
-                        isSettingsDisabled={isAdding}
-                        authActionBusy={
-                          busy.has(`sign-in:${row.accountId}`)
-                            ? 'sign-in'
-                            : busy.has(`sign-out:${row.accountId}`)
-                              ? 'sign-out'
-                              : null
-                        }
-                        onSignIn={() => void signIn(row.accountId, name)}
-                        onSignOut={() =>
-                          setSignOut({
-                            id: row.accountId,
-                            name,
-                            kind:
-                              accounts.find((a) => a.id === row.accountId)
-                                ?.kind ??
-                              snapshotFor(row.accountId)?.harnessKind ??
-                              kind,
-                            home:
-                              accounts.find((a) => a.id === row.accountId)
-                                ?.storageDir ?? null,
-                          })
-                        }
-                        reorder={
-                          accountRows.length > 1
-                            ? {
-                                onMoveUp:
-                                  accountIndex > 0
-                                    ? () =>
-                                        void reorder(
-                                          kind,
-                                          rows,
-                                          row.accountId,
-                                          'up',
-                                        )
-                                    : undefined,
-                                onMoveDown:
-                                  accountIndex < accountRows.length - 1
-                                    ? () =>
-                                        void reorder(
-                                          kind,
-                                          rows,
-                                          row.accountId,
-                                          'down',
-                                        )
-                                    : undefined,
-                              }
-                            : undefined
-                        }
-                      />
-                    )
-                  })}
+                        />
+                      )
+                    })
+                  )}
                 </SettingsSection>
               )
             })}

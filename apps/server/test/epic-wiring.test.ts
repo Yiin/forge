@@ -75,6 +75,9 @@ describe('epic production wiring', () => {
       }),
     }))
     const project = createProject(db, { name: 'Forge', path: '/tmp' })
+    db.prepare(
+      "INSERT INTO harness_accounts (id, harness_key, label, kind, home_path, created_at) VALUES ('acct', 'default', 'Default', 'claude', '/tmp/acct', 1)",
+    ).run()
     const run = createRun(db, {
       projectId: project.id,
       epicBeadId: 'forge-test',
@@ -92,6 +95,7 @@ describe('epic production wiring', () => {
       title: 'worker',
       kind: 'epic_worker',
       epicRunId: run.id,
+      accountId: 'acct',
     })
     const row = db
       .prepare('SELECT kind, epic_run_id, retention FROM sessions WHERE id = ?')

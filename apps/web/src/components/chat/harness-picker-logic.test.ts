@@ -35,6 +35,17 @@ describe('harness picker logic', () => {
       0,
     )
     expect(options.map((option) => option.accounts.length)).toEqual([2, 1, 0])
+    expect(options[2]).toMatchObject({
+      disabled: true,
+      disabledReason: 'No account',
+    })
+  })
+
+  it('does not return an accountless selection', () => {
+    const options = buildHarnessOptions(['claude'], [], 0)
+    expect(defaultSelection(options, { harness: 'claude' })).toEqual({
+      harness: '',
+    })
   })
 
   it('marks cooling accounts and keeps them selectable', () => {

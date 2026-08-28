@@ -7,6 +7,21 @@ import { SessionManager } from './manager.js'
 import type { HarnessFactory, HarnessHandle } from './harness.js'
 
 describe('session harness selection', () => {
+  it('rejects a harness without a managed account', () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => {
+        throw new Error('should not spawn')
+      },
+    }))
+
+    expect(() =>
+      manager.create({ projectId: project.id, harness: 'claude', cwd: '/tmp' }),
+    ).toThrow('This harness has no account')
+  })
+
   it('records a usage limit from a failed prompt', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)
@@ -43,9 +58,13 @@ describe('session harness selection', () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)
     const project = createProject(db, { name: 'test', path: '/tmp' })
+    db.prepare(
+      "INSERT INTO harness_accounts (id, harness_key, label, kind, home_path, created_at) VALUES ('first-account', 'first', 'First', 'claude', '/tmp/first', 1), ('second-account', 'second', 'Second', 'claude', '/tmp/second', 1)",
+    ).run()
     const session = createSession(db, {
       projectId: project.id,
       harness: 'first',
+      accountId: 'first-account',
       title: 'Chat',
       cwd: '/tmp',
     })
@@ -67,7 +86,14 @@ describe('session harness selection', () => {
     const manager = new SessionManager(db, new EventBus(), factory)
 
     await manager.prompt(session.id, 'one', undefined, undefined, 'first')
-    await manager.prompt(session.id, 'two', undefined, undefined, 'second')
+    await manager.prompt(
+      session.id,
+      'two',
+      undefined,
+      undefined,
+      'second',
+      'second-account',
+    )
 
     expect(spawned).toEqual(['first', 'second'])
     expect(killed).toBe(1)

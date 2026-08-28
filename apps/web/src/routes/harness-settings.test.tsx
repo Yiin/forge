@@ -7,7 +7,7 @@ import {
   waitFor,
 } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HarnessSettings } from './settings-pages'
+import { HarnessSettings } from './settings/HarnessSettings'
 
 const {
   listHarnesses,
@@ -153,6 +153,15 @@ describe('HarnessSettings', () => {
     render(<HarnessSettings />)
     await screen.findByText('Claude Account 1')
     expect(screen.getByRole('button', { name: /Add account/ })).toBeTruthy()
+  })
+  it('shows an empty state when a harness has no managed accounts', async () => {
+    listHarnessStatus.mockResolvedValue([])
+    listAccounts.mockResolvedValue([])
+    render(<HarnessSettings />)
+    expect(await screen.findByText('No accounts')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: /Add account/ })).toHaveLength(
+      2,
+    )
   })
   it('adds an account via create + login, not a config write', async () => {
     render(<HarnessSettings />)
