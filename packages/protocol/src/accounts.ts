@@ -88,14 +88,17 @@ export const harnessAccountSnapshotSchema = z.object({
   usage: z
     .array(
       z.object({
-        window: z.string(),
+        windowId: z.string().optional(),
         utilization: z.number(),
+        window: z.string(),
         resetsAt: z.string().nullable(),
         source: z.string(),
         observedAt: z.string(),
       }),
     )
     .optional(),
+  tierLabel: z.string().optional(),
+  usageStatus: z.enum(['ok', 'auth', 'unavailable', 'unsupported']).optional(),
   limit: z
     .object({
       kind: z.enum([

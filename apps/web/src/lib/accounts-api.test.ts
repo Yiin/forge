@@ -19,7 +19,9 @@ describe('harnessAccountSnapshotSchema', () => {
       ...base,
       usage: [
         {
+          windowId: 'five_hour',
           window: 'five_hour',
+          label: 'Session',
           utilization: 0.42,
           resetsAt: null,
           source: 'claude.sdk.get_usage',

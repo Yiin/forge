@@ -13,9 +13,9 @@ export const harnessCooldownSchema = z.object({
   detail: z.string().nullable(),
 })
 export const accountUsageWindow = z.object({
-  windowKey: z.string(),
+  windowId: z.string(),
   label: z.string(),
-  percent: z.number().min(0).max(1),
+  utilization: z.number().min(0).max(1),
   resetsAt: z.number().int().nullable(),
   source: z.string(),
   observedAt: z.number().int(),

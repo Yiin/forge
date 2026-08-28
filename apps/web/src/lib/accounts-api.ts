@@ -121,6 +121,19 @@ export class AccountsApi {
             label: account.identity?.label,
             type: account.identity?.type,
           },
+          usage: account.usage?.map((window) => ({
+            windowId: window.windowId,
+            window: window.label,
+            utilization: window.utilization,
+            resetsAt:
+              window.resetsAt === null
+                ? null
+                : new Date(window.resetsAt).toISOString(),
+            source: window.source,
+            observedAt: new Date(window.observedAt).toISOString(),
+          })),
+          tierLabel: account.tierLabel,
+          usageStatus: account.usageStatus,
           checkedAt,
           limit: account.cooldown
             ? {
@@ -238,6 +251,13 @@ export class AccountsApi {
   clearCooldown(id: string) {
     return this.post<{ ok: true }>(
       `/api/harness-accounts/${encodeURIComponent(id)}/clear-cooldown`,
+      {},
+    )
+  }
+
+  refreshUsage(id: string) {
+    return this.post<{ ok: true }>(
+      `/api/harnesses/accounts/${encodeURIComponent(id)}/usage/refresh`,
       {},
     )
   }
@@ -396,4 +416,5 @@ export const deleteAccount = (id: string, removeHome?: boolean) =>
 export const reorderAccounts = (ids: readonly string[]) =>
   accountsApi.reorderAccounts(ids)
 export const clearCooldown = (id: string) => accountsApi.clearCooldown(id)
+export const refreshUsage = (id: string) => accountsApi.refreshUsage(id)
 export const getAccountsDir = () => accountsApi.getAccountsDir()

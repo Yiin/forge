@@ -116,5 +116,15 @@ export function blockedAccounts(
        AND detected_at >= ? AND (resets_at IS NULL OR resets_at > ?)`,
     )
     .all(cutoff, now) as Array<{ account_id: string }>
-  return new Set(rows.map((row) => row.account_id))
+  const usageRows = db
+    .prepare(
+      `SELECT account_id FROM harness_account_usage
+       WHERE percent >= 1 AND (resets_at IS NULL OR resets_at > ?)
+         AND observed_at >= ?`,
+    )
+    .all(now, cutoff) as Array<{ account_id: string }>
+  return new Set([
+    ...rows.map((row) => row.account_id),
+    ...usageRows.map((row) => row.account_id),
+  ])
 }

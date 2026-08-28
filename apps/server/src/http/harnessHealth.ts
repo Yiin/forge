@@ -86,9 +86,9 @@ export function createHarnessHealthReader(options: {
                 : null,
               usage: visibleUsage.length
                 ? visibleUsage.map((row) => ({
-                    windowKey: row.windowKey,
+                    windowId: row.windowKey,
                     label: row.label,
-                    percent: row.percent,
+                    utilization: row.percent,
                     resetsAt: row.resetsAt,
                     source: row.source,
                     observedAt: row.observedAt!,

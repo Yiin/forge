@@ -115,4 +115,23 @@ describe('account limits', () => {
     ).not.toContainEqual({ account_id: 'expired' })
     expect(blockedAccounts(value, 1000, 500)).toEqual(new Set(['open']))
   })
+
+  it('blocks accounts with a fresh saturated usage window', () => {
+    const value = db()
+    value
+      .prepare(
+        `INSERT INTO harness_account_usage
+          (account_id, window_key, label, percent, resets_at, source, status, observed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run('usage', 'weekly', 'Weekly', 1, 5000, 'test', 'ok', 950)
+    value
+      .prepare(
+        `INSERT INTO harness_account_usage
+          (account_id, window_key, label, percent, resets_at, source, status, observed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run('stale', 'weekly', 'Weekly', 1, 5000, 'test', 'ok', 1)
+    expect(blockedAccounts(value, 1000, 500)).toEqual(new Set(['usage']))
+  })
 })

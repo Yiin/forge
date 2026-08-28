@@ -6,6 +6,7 @@ import {
   Cpu,
   LogIn,
   LogOut,
+  RefreshCw,
   Trash2,
 } from 'lucide-react'
 import type { HarnessConfig } from '@forge/protocol/config'
@@ -15,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Progress } from '@/components/ui/progress'
 import {
   Select,
   SelectContent,
@@ -36,7 +38,7 @@ import {
   resolveAccountAuthAction,
 } from '@/lib/harness-accounts-logic'
 import { accountConfigFields } from '@/lib/account-config-fields'
-import { getAccountModels } from '@/lib/accounts-api'
+import { getAccountModels, refreshUsage } from '@/lib/accounts-api'
 import type { HarnessAccountConfig } from '@forge/protocol/accounts'
 import { useRelativeTimeTick } from './settings-layout'
 import { RedactedSensitiveText } from './RedactedSensitiveText'
@@ -107,6 +109,8 @@ export function HarnessAccountCard({
   const [models, setModels] = useState<
     Array<{ slug: string; name: string; subProvider?: string }>
   >([])
+  const [usageExpanded, setUsageExpanded] = useState(false)
+  const [usageRefreshing, setUsageRefreshing] = useState(false)
   const enabled = snapshot?.status !== 'disabled'
   const kind = accountKind
   // `harness` is the shared config for the whole kind (command/args/env), so
@@ -139,6 +143,21 @@ export function HarnessAccountCard({
       : readAccountHome({ harnessKind: kind, env: harness.env })
   const status = snapshot?.status ?? (enabled ? 'warning' : 'disabled')
   const email = snapshot?.auth.email
+  const usage = snapshot?.usage
+  const usageSupported = snapshot?.usageStatus !== 'unsupported'
+  const hasWireUsage = usage?.some((window) => window.windowId !== undefined)
+  const usageState = !snapshot
+    ? 'loading'
+    : !usageSupported
+      ? 'unsupported'
+      : snapshot.auth.status !== 'authenticated'
+        ? 'auth'
+        : usage?.length
+          ? snapshot.usageStatus === 'unavailable'
+            ? 'unavailable'
+            : 'ready'
+          : 'empty'
+  const usageHeadline = limit?.utilization
   useEffect(() => setLabel(labelProp), [labelProp])
   useEffect(() => setAccountConfig(config), [config])
   useEffect(() => {
@@ -214,6 +233,9 @@ export function HarnessAccountCard({
                 <code className="text-xs text-muted-foreground">
                   {snapshot.version}
                 </code>
+              )}
+              {snapshot?.tierLabel && (
+                <Badge variant="secondary">{snapshot.tierLabel}</Badge>
               )}
               {headerAction}
               {onDelete && (
@@ -314,6 +336,35 @@ export function HarnessAccountCard({
                   </span>
                 )}
               </p>
+            )}
+            {usageSupported && usageState !== 'unsupported' &&
+              snapshot?.auth.status !== 'unknown' && (
+              <div className="mt-2 space-y-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">Usage</span>
+                  {usageState === 'loading' && <span className="text-muted-foreground">Loading usage…</span>}
+                  {usageState === 'auth' && <span className="text-muted-foreground">Sign in to view usage.</span>}
+                  {usageState === 'empty' && <span className="text-muted-foreground">No usage data yet.</span>}
+                  {usageState === 'unavailable' && <span className="text-warning">Provider unavailable. Last known windows shown.</span>}
+                  {usageHeadline && hasWireUsage && (
+                    <span className={cn('font-medium', usageHeadline.percent >= 90 && 'text-destructive')}>
+                      {usageHeadline.windowLabel} {usageHeadline.percent}%
+                    </span>
+                  )}
+                  <Button type="button" size="icon-xs" variant="ghost" className="ml-auto" disabled={usageRefreshing} onClick={() => { setUsageRefreshing(true); void refreshUsage(accountId).finally(() => setUsageRefreshing(false)) }} aria-label="Refresh usage">
+                    <RefreshCw className={cn('size-3.5', usageRefreshing && 'animate-spin')} />
+                  </Button>
+                  {usage?.length ? <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => setUsageExpanded(!usageExpanded)}>{usageExpanded ? 'Hide windows' : 'Show windows'}</Button> : null}
+                </div>
+                {usageHeadline?.resetsAt && <span className="text-muted-foreground">Resets in {formatResetCountdown(usageHeadline.resetsAt, tick)}</span>}
+                {usageExpanded && usage?.map((window) => {
+                  const percent = Math.round(window.utilization <= 1 ? window.utilization * 100 : window.utilization)
+                  return <div key={window.windowId} className="space-y-1 rounded-md border border-border/60 p-2">
+                    <div className="flex justify-between"><span>{window.window}</span><span className={cn(percent >= 90 && 'font-semibold text-destructive')}>{percent}%{window.resetsAt ? ` · resets in ${formatResetCountdown(window.resetsAt, tick) ?? 'now'}` : ''}</span></div>
+                    <Progress value={percent} className={percent >= 90 ? '[&>div]:bg-destructive' : undefined} />
+                  </div>
+                })}
+              </div>
             )}
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">

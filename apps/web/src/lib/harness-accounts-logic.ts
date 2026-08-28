@@ -255,6 +255,7 @@ export const USAGE_WINDOW_LABELS: Record<string, string> = {
 }
 
 export interface UsageSample {
+  windowId?: string
   utilization: number
   window: string
   resetsAt: string | null
@@ -284,8 +285,11 @@ export function deriveAccountLimitState(input: {
     .sort((a, b) => b.utilization - a.utilization)[0]
   const utilization = worst
     ? {
-        percent: Math.round(Math.max(0, worst.utilization)),
-        windowLabel: USAGE_WINDOW_LABELS[worst.window] ?? worst.window,
+        percent: Math.round(Math.max(0, worst.utilization <= 1 ? worst.utilization * 100 : worst.utilization)),
+        windowLabel:
+          worst.windowId === undefined
+            ? USAGE_WINDOW_LABELS[worst.window] ?? worst.window
+            : worst.window,
         resetsAt: worst.resetsAt,
       }
     : null
