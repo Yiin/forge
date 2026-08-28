@@ -21,7 +21,9 @@ import {
   listHarnessStatus,
   loginStart,
   reorderAccounts,
+  updateAccount,
 } from '../../lib/accounts-api'
+import { Input } from '@/components/ui/input'
 import {
   accountKindForHarness,
   moveAccount,
@@ -41,6 +43,64 @@ type LoginTarget = {
   id: string
   name: string
   start: Awaited<ReturnType<typeof loginStart>>
+}
+
+function HarnessGroupEditor({
+  harness,
+  onSave,
+}: {
+  harness: Harness
+  onSave: (next: Harness) => void
+}) {
+  return (
+    <div className="mt-2 grid gap-2 text-xs font-normal text-muted-foreground">
+      <label className="grid gap-1">
+        Command
+        <Input
+          className="h-8 font-mono text-xs"
+          value={harness.command}
+          onChange={(event) =>
+            onSave({ ...harness, command: event.target.value })
+          }
+        />
+      </label>
+      <label className="grid gap-1">
+        Arguments
+        <Input
+          className="h-8 font-mono text-xs"
+          value={harness.args.join('\n')}
+          onChange={(event) =>
+            onSave({
+              ...harness,
+              args: event.target.value.split('\n').filter(Boolean),
+            })
+          }
+        />
+      </label>
+      <fieldset className="grid gap-2">
+        <legend>Environment variables</legend>
+        {Object.entries(harness.env).map(([key, value]) => (
+          <label className="grid gap-1" key={key}>
+            <code>{key}</code>
+            <Input
+              className="h-8 font-mono text-xs"
+              value={value}
+              onChange={(event) =>
+                onSave({
+                  ...harness,
+                  env: { ...harness.env, [key]: event.target.value },
+                })
+              }
+            />
+          </label>
+        ))}
+      </fieldset>
+      <p>
+        Protocol: <code>{harness.protocol.toUpperCase()}</code>
+      </p>
+      <p>These harness settings apply to every account in this group.</p>
+    </div>
+  )
 }
 const labels: Record<string, string> = {
   claude: 'Claude',
@@ -125,15 +185,12 @@ export function HarnessSettings() {
       return false
     }
   }
-  // Each kind gets one unmanaged "base" row (the harness's own config, using
-  // whatever ambient credentials it finds) plus a row per real managed
-  // account the server tracks.
   const rowsFor = (kind: string) => {
     const accountIds = snapshots
       .filter((item) => item.harnessKind === kind)
       .map((item) => item.accountId)
     return orderAccountRows(
-      [kind, ...accountIds]
+      accountIds
         .map((id) => ({
           accountId: id,
           harness: config[kind],
@@ -148,7 +205,7 @@ export function HarnessSettings() {
             availability: 'available'
           } => Boolean(row.harness),
         ),
-      [kind],
+      accountIds,
     )
   }
   const addManagedAccount = async (groupKey: string) => {
@@ -195,8 +252,7 @@ export function HarnessSettings() {
     id: string,
     direction: 'up' | 'down',
   ) => {
-    const accountRows = rows.filter((row) => row.accountId !== kind)
-    const moved = moveAccount(accountRows, id, direction)
+    const moved = moveAccount(rows, id, direction)
     if (!moved) return
     setBusyState((current) => new Set(current).add(`reorder:${id}`))
     try {
@@ -319,9 +375,10 @@ export function HarnessSettings() {
                   key={kind}
                   title={config[kind]?.name ?? labels[kind] ?? kind}
                   description={
-                    kind === 'pi'
-                      ? 'Pi ACP adapter limits: no filesystem, terminal, or MCP delegation. Assistant text has no separate thought stream. Requires Node 22+ and pi 0.80.4+.'
-                      : undefined
+                    <HarnessGroupEditor
+                      harness={config[kind]!}
+                      onSave={(next) => void save({ ...config, [kind]: next })}
+                    />
                   }
                   headerAction={
                     accountKindForHarness(kind, config[kind]) ? (
@@ -342,15 +399,12 @@ export function HarnessSettings() {
                   }
                 >
                   {rows.map((row) => {
-                    const isBase = row.accountId === kind
-                    // `row.harness` is shared across the whole group, so a
-                    // real account row must prefer its own snapshot label.
                     const name =
-                      (!isBase && snapshotFor(row.accountId)?.displayName) ||
+                      snapshotFor(row.accountId)?.displayName ||
                       row.harness.name ||
                       snapshotFor(row.accountId)?.displayName ||
                       row.accountId
-                    const accountRows = rows.filter((r) => r.accountId !== kind)
+                    const accountRows = rows
                     const accountIndex = accountRows.findIndex(
                       (r) => r.accountId === row.accountId,
                     )
@@ -361,18 +415,20 @@ export function HarnessSettings() {
                         harness={row.harness}
                         snapshot={snapshotFor(row.accountId)}
                         accountKind={
-                          isBase
-                            ? kind
-                            : (accounts.find((a) => a.id === row.accountId)
-                                ?.kind ??
-                              snapshotFor(row.accountId)?.harnessKind ??
-                              kind)
+                          accounts.find((a) => a.id === row.accountId)?.kind ??
+                          kind
                         }
                         homePath={
-                          isBase
-                            ? undefined
-                            : (accounts.find((a) => a.id === row.accountId)
-                                ?.storageDir ?? null)
+                          accounts.find((a) => a.id === row.accountId)
+                            ?.homePath ?? null
+                        }
+                        label={
+                          accounts.find((a) => a.id === row.accountId)?.label ??
+                          name
+                        }
+                        config={
+                          accounts.find((a) => a.id === row.accountId)
+                            ?.config ?? null
                         }
                         isExpanded={expanded[row.accountId] ?? false}
                         onExpandedChange={(open) =>
@@ -381,22 +437,49 @@ export function HarnessSettings() {
                             [row.accountId]: open,
                           }))
                         }
-                        onUpdate={(next) => {
-                          const all = { ...config, [kind]: next }
-                          void save(all)
+                        onUpdateAccount={async (patch) => {
+                          try {
+                            const updated = await updateAccount(
+                              row.accountId,
+                              patch,
+                            )
+                            setAccounts((current) =>
+                              current.map((account) =>
+                                account.id === row.accountId
+                                  ? {
+                                      ...account,
+                                      ...(patch.label
+                                        ? { label: patch.label }
+                                        : {}),
+                                      ...(patch.config !== undefined
+                                        ? { config: patch.config }
+                                        : {}),
+                                      ...(patch.disabled !== undefined
+                                        ? { enabled: !patch.disabled }
+                                        : {}),
+                                    }
+                                  : account,
+                              ),
+                            )
+                            return Boolean(updated)
+                          } catch (cause) {
+                            toast.error('Could not save account settings', {
+                              description:
+                                cause instanceof Error
+                                  ? cause.message
+                                  : String(cause),
+                            })
+                            return false
+                          }
                         }}
-                        onDelete={
-                          isBase
-                            ? undefined
-                            : async () => {
-                                try {
-                                  await deleteAccount(row.accountId)
-                                  await refresh()
-                                } catch {
-                                  toast.error(`Could not delete ${name}`)
-                                }
-                              }
-                        }
+                        onDelete={async () => {
+                          try {
+                            await deleteAccount(row.accountId)
+                            await refresh()
+                          } catch {
+                            toast.error(`Could not delete ${name}`)
+                          }
+                        }}
                         isSettingsDisabled={isAdding}
                         authActionBusy={
                           busy.has(`sign-in:${row.accountId}`)
@@ -421,7 +504,7 @@ export function HarnessSettings() {
                           })
                         }
                         reorder={
-                          !isBase && accountRows.length > 1
+                          accountRows.length > 1
                             ? {
                                 onMoveUp:
                                   accountIndex > 0

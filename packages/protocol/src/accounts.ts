@@ -19,6 +19,8 @@ export const harnessAccountConfigSchema = z
   .object({
     provider: z.string().optional(),
     model: z.string().optional(),
+    agent: z.string().optional(),
+    variant: z.string().optional(),
     thinking: z
       .enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
       .optional(),
@@ -61,6 +63,7 @@ export const patchHarnessAccountSchema = z
 export type HarnessAccount = z.infer<typeof harnessAccountSchema>
 export type CreateHarnessAccount = z.infer<typeof createHarnessAccountSchema>
 export type PatchHarnessAccount = z.infer<typeof patchHarnessAccountSchema>
+export type HarnessAccountConfig = z.infer<typeof harnessAccountConfigSchema>
 
 export const harnessAccountSnapshotSchema = z.object({
   accountId: z.string(),
@@ -74,6 +77,7 @@ export const harnessAccountSnapshotSchema = z.object({
   auth: z.object({
     status: z.enum(['authenticated', 'unauthenticated', 'unknown']),
     email: z.string().optional(),
+    plan: z.string().optional(),
     label: z.string().optional(),
     type: z.string().optional(),
   }),

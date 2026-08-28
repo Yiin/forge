@@ -1,8 +1,17 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HarnessConfig } from '@forge/protocol/config'
-import type { HarnessAccountSnapshot } from '@forge/protocol/accounts'
+import type {
+  HarnessAccountConfig,
+  HarnessAccountSnapshot,
+} from '@forge/protocol/accounts'
 import { HarnessAccountCard } from './HarnessAccountCard'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
@@ -33,6 +42,14 @@ const snapshot = (
 function renderCard(
   current = snapshot(),
   options: {
+    expanded?: boolean
+    label?: string
+    config?: HarnessAccountConfig | null
+    onUpdateAccount?: (patch: {
+      label?: string
+      disabled?: boolean
+      config?: HarnessAccountConfig | null
+    }) => Promise<boolean>
     onDelete?: () => void
     reorder?: {
       onMoveUp: (() => void) | undefined
@@ -47,9 +64,11 @@ function renderCard(
         accountKind="claude"
         harness={harness}
         snapshot={current}
-        isExpanded={false}
+        isExpanded={options.expanded ?? false}
         onExpandedChange={vi.fn()}
-        onUpdate={vi.fn()}
+        label={options.label ?? 'Work Claude'}
+        config={options.config ?? null}
+        onUpdateAccount={options.onUpdateAccount ?? vi.fn(async () => true)}
         {...options}
       />
     </TooltipProvider>,
@@ -151,5 +170,69 @@ describe('HarnessAccountCard', () => {
     expect(
       screen.queryByRole('button', { name: /Move Work Claude up/ }),
     ).toBeNull()
+  })
+
+  it('saves a changed label without saving the harness', async () => {
+    const onUpdateAccount = vi.fn(async () => true)
+    renderCard(snapshot({ displayName: undefined }), {
+      expanded: true,
+      onUpdateAccount,
+    })
+    fireEvent.change(screen.getByDisplayValue('Work Claude'), {
+      target: { value: 'Personal Claude' },
+    })
+    await waitFor(() =>
+      expect(onUpdateAccount).toHaveBeenCalledWith({
+        label: 'Personal Claude',
+      }),
+    )
+  })
+
+  it('restores a label after a failed save and reports the error', async () => {
+    const onUpdateAccount = vi.fn(async () => false)
+    renderCard(snapshot({ displayName: undefined }), {
+      expanded: true,
+      onUpdateAccount,
+    })
+    fireEvent.change(screen.getByDisplayValue('Work Claude'), {
+      target: { value: 'Broken' },
+    })
+    await waitFor(() =>
+      expect(screen.getByText('Could not save label.')).toBeTruthy(),
+    )
+    expect(screen.getByDisplayValue('Work Claude')).toBeTruthy()
+  })
+
+  it('updates the account disabled state from the switch', async () => {
+    const onUpdateAccount = vi.fn(async () => true)
+    renderCard(snapshot(), { onUpdateAccount })
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable Work Claude' }))
+    await waitFor(() =>
+      expect(onUpdateAccount).toHaveBeenCalledWith({ disabled: true }),
+    )
+  })
+
+  it('renders no fields for Claude and the OpenCode account fields', () => {
+    renderCard(snapshot(), { expanded: true })
+    expect(screen.queryByText('Provider')).toBeNull()
+    cleanup()
+    render(
+      <TooltipProvider>
+        <HarnessAccountCard
+          accountId="open"
+          accountKind="opencode"
+          harness={{ ...harness, command: 'opencode' }}
+          snapshot={snapshot({ accountId: 'open', harnessKind: 'opencode' })}
+          label="OpenCode"
+          config={null}
+          isExpanded
+          onExpandedChange={vi.fn()}
+          onUpdateAccount={vi.fn(async () => true)}
+        />
+      </TooltipProvider>,
+    )
+    expect(screen.getByText('Provider')).toBeTruthy()
+    expect(screen.getByText('Agent')).toBeTruthy()
+    expect(screen.getByText('Variant')).toBeTruthy()
   })
 })

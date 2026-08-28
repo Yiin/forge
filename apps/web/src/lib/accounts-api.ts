@@ -2,6 +2,7 @@ import {
   harnessAccountSnapshotSchema,
   type HarnessAccount,
   type HarnessAccountSnapshot,
+  type HarnessAccountConfig,
   type PatchHarnessAccount,
 } from '@forge/protocol/accounts'
 import { harnessHealthResponseSchema } from '@forge/protocol/status'
@@ -56,6 +57,7 @@ export type Account = {
   authStatus: 'authenticated' | 'unauthenticated' | 'unknown'
   email: string | null
   identity?: HarnessAccount['identity']
+  config?: HarnessAccountConfig | null
   cooldownUntil: number | null
   cooldownReason: string | null
   lastUsedAt: number | null
@@ -115,6 +117,7 @@ export class AccountsApi {
           auth: {
             status: account.authenticated ? 'authenticated' : 'unauthenticated',
             email: account.identity?.email,
+            plan: account.identity?.plan,
             label: account.identity?.label,
             type: account.identity?.type,
           },
@@ -182,22 +185,13 @@ export class AccountsApi {
     ])
     return rows.map((row) => {
       const info = health.get(row.id)
-      const ordinal =
-        rows
-          .filter((item) => item.harnessKey === row.harnessKey)
-          .findIndex((item) => item.id === row.id) + 1
       return {
         id: row.id,
         harness: row.harnessKey,
         harnessKey: row.harnessKey,
         kind: row.kind,
         homePath: row.homePath,
-        label: formatAccountDisplayName({
-          kindLabel: row.kind[0]!.toUpperCase() + row.kind.slice(1),
-          ordinal,
-          label: row.label,
-          identity: info?.identity,
-        }),
+        label: row.label,
         storageDir: row.homePath,
         enabled: row.disabledAt === null,
         authStatus: info
@@ -207,6 +201,7 @@ export class AccountsApi {
           : 'unknown',
         email: info?.identity?.email ?? null,
         identity: info?.identity ?? null,
+        config: row.config ?? null,
         cooldownUntil: info?.cooldown?.resetsAt
           ? Date.parse(info.cooldown.resetsAt)
           : null,
@@ -381,7 +376,7 @@ export const createAccount = (input: {
 }) => accountsApi.createAccount(input)
 export const updateAccount = (
   id: string,
-  input: { label?: string; orderIndex?: number; disabled?: boolean },
+  input: Parameters<AccountsApi['updateAccount']>[1],
 ) => accountsApi.updateAccount(id, input)
 export const deleteAccount = (id: string, removeHome?: boolean) =>
   accountsApi.deleteAccount(id, removeHome)

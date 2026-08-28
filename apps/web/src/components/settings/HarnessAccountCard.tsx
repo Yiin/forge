@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -7,7 +7,6 @@ import {
   LogIn,
   LogOut,
   Trash2,
-  X,
 } from 'lucide-react'
 import type { HarnessConfig } from '@forge/protocol/config'
 import type { HarnessAccountSnapshot } from '@forge/protocol/accounts'
@@ -16,6 +15,13 @@ import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Tooltip,
   TooltipContent,
@@ -29,6 +35,8 @@ import {
   readAccountHome,
   resolveAccountAuthAction,
 } from '@/lib/harness-accounts-logic'
+import { accountConfigFields } from '@/lib/account-config-fields'
+import type { HarnessAccountConfig } from '@forge/protocol/accounts'
 import { useRelativeTimeTick } from './settings-layout'
 import { RedactedSensitiveText } from './RedactedSensitiveText'
 
@@ -37,9 +45,15 @@ type Props = {
   accountKind: string
   harness: HarnessConfig
   snapshot: HarnessAccountSnapshot | undefined
+  label: string
+  config?: HarnessAccountConfig | null
   isExpanded: boolean
   onExpandedChange: (open: boolean) => void
-  onUpdate: (next: HarnessConfig) => void
+  onUpdateAccount: (patch: {
+    label?: string
+    disabled?: boolean
+    config?: HarnessAccountConfig | null
+  }) => Promise<boolean>
   onDelete?: () => void
   /** Real credential home for a managed account row. Falls back to the env-derived home when omitted. */
   homePath?: string | null
@@ -68,7 +82,9 @@ export function HarnessAccountCard({
   snapshot,
   isExpanded,
   onExpandedChange,
-  onUpdate,
+  label: labelProp,
+  config,
+  onUpdateAccount,
   onDelete,
   homePath,
   headerAction,
@@ -79,17 +95,21 @@ export function HarnessAccountCard({
   reorder,
 }: Props) {
   const tick = useRelativeTimeTick(30_000)
-  const enabled = harness.enabled ?? true
+  const [label, setLabel] = useState(labelProp)
+  const [accountConfig, setAccountConfig] = useState(config)
+  const [labelState, setLabelState] = useState<'idle' | 'saving' | 'error'>(
+    'idle',
+  )
+  const [configState, setConfigState] = useState<'idle' | 'saving' | 'error'>(
+    'idle',
+  )
+  const enabled = snapshot?.status !== 'disabled'
   const kind = accountKind
   // `harness` is the shared config for the whole kind (command/args/env), so
   // every row in a group carries the same `harness.name`. A real account row
   // (accountId !== kind) must show its own label first, or every row in the
   // group would render the identical title.
-  const displayName =
-    (accountId !== kind ? snapshot?.displayName : undefined) ||
-    harness.name.trim() ||
-    snapshot?.displayName ||
-    accountId
+  const displayName = snapshot?.displayName || label || accountId
   const authStatus = snapshot?.auth.status ?? 'unknown'
   const authAction = resolveAccountAuthAction({
     harnessKind: kind,
@@ -115,8 +135,33 @@ export function HarnessAccountCard({
       : readAccountHome({ harnessKind: kind, env: harness.env })
   const status = snapshot?.status ?? (enabled ? 'warning' : 'disabled')
   const email = snapshot?.auth.email
-  const update = (patch: Partial<HarnessConfig>) =>
-    onUpdate({ ...harness, ...patch })
+  useEffect(() => setLabel(labelProp), [labelProp])
+  useEffect(() => setAccountConfig(config), [config])
+  useEffect(() => {
+    if (label === labelProp || !label.trim()) return
+    setLabelState('saving')
+    const timer = window.setTimeout(() => {
+      void onUpdateAccount({ label })
+        .then((ok) => {
+          setLabelState(ok ? 'idle' : 'error')
+          if (!ok) setLabel(labelProp)
+        })
+        .catch(() => {
+          setLabelState('error')
+          setLabel(labelProp)
+        })
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [label, labelProp, onUpdateAccount])
+  const updateConfig = (key: keyof HarnessAccountConfig, value: string) => {
+    const next = { ...accountConfig, [key]: value || undefined }
+    setAccountConfig(next)
+    setConfigState('saving')
+    void onUpdateAccount({ config: next })
+      .then((ok) => setConfigState(ok ? 'idle' : 'error'))
+      .catch(() => setConfigState('error'))
+  }
+  const fields = accountConfigFields(kind)
   const iconName = `harness ${kind} account ${accountId}`
 
   return (
@@ -329,9 +374,9 @@ export function HarnessAccountCard({
             <Switch
               checked={enabled}
               disabled={isSettingsDisabled}
-              onCheckedChange={(checked) =>
-                update({ enabled: Boolean(checked) })
-              }
+              onCheckedChange={(checked) => {
+                void onUpdateAccount({ disabled: !checked })
+              }}
               aria-label={`Enable ${displayName}`}
             />
           </div>
@@ -341,74 +386,73 @@ export function HarnessAccountCard({
         <CollapsibleContent>
           <div className="space-y-3 border-t border-border/60 px-4 py-3 sm:px-5">
             <label className="grid gap-1 text-xs font-medium">
-              Display name
+              Label
               <Input
-                value={harness.name}
-                onChange={(event) => update({ name: event.target.value })}
+                value={label}
+                onChange={(event) => setLabel(event.target.value)}
+                aria-invalid={labelState === 'error' || undefined}
               />
+              {labelState === 'saving' && (
+                <span className="text-muted-foreground">Saving…</span>
+              )}
+              {labelState === 'error' && (
+                <span className="text-destructive">Could not save label.</span>
+              )}
             </label>
-            <label className="grid gap-1 text-xs font-medium">
-              Command
-              <Input
-                className="font-mono"
-                value={harness.command}
-                onChange={(event) => update({ command: event.target.value })}
-              />
-            </label>
-            <label className="grid gap-1 text-xs font-medium">
-              Arguments
-              <Input
-                className="font-mono"
-                value={harness.args.join('\n')}
-                onChange={(event) =>
-                  update({
-                    args: event.target.value.split('\n').filter(Boolean),
-                  })
-                }
-              />
-            </label>
-            <fieldset className="grid gap-2">
-              <legend className="text-xs font-medium">
-                Environment variables
-              </legend>
-              {Object.entries(harness.env).map(([name, value]) => (
-                <div className="flex min-w-0 items-center gap-2" key={name}>
+            <p className="text-xs text-muted-foreground">
+              Credential home <code>{home ?? 'Not captured'}</code>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Email: {email ?? 'Not captured'} · Plan:{' '}
+              {snapshot?.auth.plan ?? 'Not captured'}
+            </p>
+            {fields.map((field) => (
+              <label className="grid gap-1 text-xs font-medium" key={field.key}>
+                {field.label}
+                {field.control === 'select' ? (
+                  <Select
+                    value={String(accountConfig?.[field.key] ?? '')}
+                    onValueChange={(value) => updateConfig(field.key, value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select level" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {field.options?.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
                   <Input
-                    className="min-w-0 flex-1 font-mono"
-                    aria-label={`Environment variable ${name}`}
-                    value={name}
-                    readOnly
-                  />
-                  <Input
-                    className="min-w-0 flex-1 font-mono"
-                    aria-label={`Value for ${name}`}
-                    value={value}
+                    value={String(accountConfig?.[field.key] ?? '')}
+                    placeholder={field.placeholder}
                     onChange={(event) =>
-                      update({
-                        env: { ...harness.env, [name]: event.target.value },
-                      })
+                      updateConfig(field.key, event.target.value)
                     }
                   />
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    onClick={() => {
-                      const env = { ...harness.env }
-                      delete env[name]
-                      update({ env })
-                    }}
-                    aria-label={`Remove environment variable ${name}`}
-                  >
-                    <X className="size-4" />
-                  </Button>
-                </div>
-              ))}
-            </fieldset>
-            <label className="grid gap-1 text-xs font-medium">
-              Protocol
-              <Input value={harness.protocol.toUpperCase()} readOnly />
-            </label>
+                )}
+              </label>
+            ))}
+            {configState === 'saving' && (
+              <span className="text-xs text-muted-foreground">
+                Saving account settings…
+              </span>
+            )}
+            {configState === 'error' && (
+              <span className="text-xs text-destructive">
+                Could not save account settings.
+              </span>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Harness:{' '}
+              <code>
+                {harness.command} {harness.args.join(' ')}
+              </code>{' '}
+              · {harness.protocol.toUpperCase()} · group-level settings
+            </p>
           </div>
         </CollapsibleContent>
       </Collapsible>

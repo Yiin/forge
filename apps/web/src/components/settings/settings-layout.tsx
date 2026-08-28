@@ -91,7 +91,7 @@ export function SettingsSection({
   headerAction,
 }: {
   title: string
-  description?: string
+  description?: ReactNode
   children: ReactNode
   footer?: ReactNode
   headerAction?: ReactNode
