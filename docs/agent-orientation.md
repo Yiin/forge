@@ -49,7 +49,8 @@ defines product limits. `docs/architecture.md` is historical.
 - Release: `bash scripts/release.sh <version>` on a clean `main`. The tag triggers `.github/workflows/release.yml`, which builds, smoke-tests, and publishes `forge-linux-x64.tar.gz`.
 - The pack step in `release.yml:51-63` is an explicit file list. New runtime assets must be added there or they do not ship.
 - Hosts (`yiin-lt`, `main-laptop`, `travel-laptop`) self-update every 15 min via `forge-update.timer`; force with `systemctl --user start forge-update.service`. Health: `curl -fsS http://127.0.0.1:3900/api/health`.
-- The deployed unit (`ops/forge.service`) sets PATH entries for `claude`, `codex`, `kimi`, and `opencode`.
+- The deployed unit (`ops/forge.service`) includes `%h/.local/share/mise/shims` in PATH for `grok`, `opencode`, and `pi`.
+- The `pi` PATH entry is a mise wrapper. It runs `mise use -g pi` on each spawn.
 - The unit uses option A from `forge-o9o.11`: command lookup stays PATH-based.
 - After a release, `ops/install.sh` installs the unit and reloads systemd. For a manual unit update on `yiin-lt`, run `install -m 644 ops/forge.service ~/.config/systemd/user/forge.service` and `systemctl --user daemon-reload`.
 
