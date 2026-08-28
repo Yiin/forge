@@ -216,21 +216,18 @@ export class ForgeApi {
         if (attempt >= 1) throw error
         continue
       }
-      if (!response.ok)
-        throw new Error(`Forge API request failed (${response.status})`)
+      if (!response.ok) throw await apiError(response)
       return await response.json()
     }
   }
   private async get(path: string) {
     const response = await this.fetcher(`${this.baseUrl}${path}`)
-    if (!response.ok)
-      throw new Error(`Forge API request failed (${response.status})`)
+    if (!response.ok) throw await apiError(response)
     return await response.json()
   }
   private async request(method: string, path: string) {
     const response = await this.fetcher(`${this.baseUrl}${path}`, { method })
-    if (!response.ok)
-      throw new Error(`Forge API request failed (${response.status})`)
+    if (!response.ok) throw await apiError(response)
     return await response.json()
   }
   private async put(path: string, body: unknown) {
@@ -239,12 +236,24 @@ export class ForgeApi {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     })
-    if (!response.ok)
-      throw new Error(`Forge API request failed (${response.status})`)
+    if (!response.ok) throw await apiError(response)
     return await response.json()
   }
 }
 export const api = new ForgeApi()
+
+// The server answers failures with { error: string }; show that text instead
+// of a bare status so users see the real cause.
+async function apiError(response: Response) {
+  let detail = ''
+  try {
+    const body = await response.json()
+    if (body && typeof body.error === 'string') detail = `: ${body.error}`
+  } catch {
+    // Non-JSON failure body; the status alone has to do.
+  }
+  return new Error(`Forge API request failed (${response.status})${detail}`)
+}
 
 function makeRequestId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`

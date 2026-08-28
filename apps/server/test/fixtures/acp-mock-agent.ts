@@ -40,6 +40,10 @@ class MockAgent implements acp.Agent {
   async authenticate(
     _params: acp.AuthenticateRequest,
   ): Promise<acp.AuthenticateResponse> {
+    // Mirrors claude-code-acp 0.16.2: advertises an auth method but does not
+    // implement authenticate. The SDK serializes this throw into a -32603
+    // response, and the client rejects with the raw plain error object.
+    if (flag('FAIL_AUTHENTICATE')) throw new Error('Method not implemented.')
     return {}
   }
 
@@ -56,6 +60,17 @@ class MockAgent implements acp.Agent {
           : {}),
         promptCapabilities: { image: false },
       },
+      ...(flag('FAIL_AUTHENTICATE')
+        ? {
+            authMethods: [
+              {
+                id: 'mock-login',
+                name: 'Mock login',
+                description: 'Advertised but not implemented',
+              },
+            ],
+          }
+        : {}),
     }
     if (flag('EXIT_AFTER_INITIALIZE')) setTimeout(() => process.exit(0), 0)
     return result

@@ -7,6 +7,7 @@ import { isDefaultTitle, titleFromPrompt } from './titles.js'
 import { appendForkContext, createFork } from './fork.js'
 import type { UploadStore } from '../uploads/store.js'
 import { detectProviderError, recordLimit } from '../accounts/limits.js'
+import { errorMessage } from '../error-message.js'
 
 type Db = DatabaseSync
 export type SessionRow = {
@@ -420,7 +421,7 @@ export class SessionManager {
       await handle.prompt(text)
     } catch (error) {
       this.turns.delete(id)
-      const message = error instanceof Error ? error.message : String(error)
+      const message = errorMessage(error)
       const match = detectProviderError(message)
       if (match && row.account_id) {
         recordLimit(this.db, {

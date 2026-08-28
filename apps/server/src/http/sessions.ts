@@ -7,6 +7,7 @@ import {
 } from '@forge/protocol/commands'
 import type { SessionManager } from '../sessions/manager.js'
 import type { UploadStore } from '../uploads/store.js'
+import { errorMessage } from '../error-message.js'
 
 export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
   const app = new Hono()
@@ -16,7 +17,7 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
     try {
       return c.json(manager.create(value.data), 201)
     } catch (error) {
-      return c.json({ error: String(error) }, 400)
+      return c.json({ error: errorMessage(error) }, 400)
     }
   })
   app.post('/api/drafts/:id/promote', async (c) => {
@@ -33,7 +34,7 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
         201,
       )
     } catch (error) {
-      return c.json({ error: String(error) }, 400)
+      return c.json({ error: errorMessage(error) }, 400)
     }
   })
   app.get('/api/sessions', (c) =>
@@ -84,7 +85,7 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
       )
       return c.json({ ok: true })
     } catch (error) {
-      return c.json({ error: String(error) }, 404)
+      return c.json({ error: errorMessage(error) }, 404)
     }
   })
   app.post('/api/sessions/:id/interrupt', async (c) => {

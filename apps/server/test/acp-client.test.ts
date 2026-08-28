@@ -52,6 +52,20 @@ describe('ACP client', () => {
     expect(updates.join('')).toContain('unsolicited')
   })
 
+  it('spawns despite an advertised auth method the agent cannot run', async () => {
+    // Regression: claude-code-acp advertises authMethods but answers
+    // authenticate with a JSON-RPC error. The SDK rejects with the raw plain
+    // object; a proactive authenticate must not kill the spawn.
+    const client = await spawnAcpClient(entry({ FAIL_AUTHENTICATE: '1' }))
+    clients.push(client)
+    const session = await client.newSession('/tmp')
+    expect(session.sessionId).toBe('forge-mock-session')
+    const response = await client.prompt(session.sessionId, [
+      { type: 'text', text: 'hello' },
+    ])
+    expect(response.stopReason).toBe('end_turn')
+  })
+
   it('forwards the working directory to the child process', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'forge-acp-cwd-'))
     const requestLogPath = join(cwd, 'requests.jsonl')

@@ -273,9 +273,16 @@ export async function spawnAcpClient(
     }),
   )
   if (initialized.authMethods?.length)
-    await race(
-      connection.authenticate({ methodId: initialized.authMethods[0].id }),
-    )
+    try {
+      await race(
+        connection.authenticate({ methodId: initialized.authMethods[0].id }),
+      )
+    } catch {
+      // Agents advertise authMethods even when already authenticated, and some
+      // (claude-code-acp) do not implement authenticate at all. Auth is
+      // enforced per request via authRequired, so a failed proactive
+      // handshake must not kill the spawn.
+    }
   const agent = initialized.agentCapabilities ?? {}
   const capabilities: AcpCapabilities = {
     loadSession: agent.loadSession === true,
