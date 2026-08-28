@@ -769,9 +769,7 @@ export function HarnessSettings() {
           >
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>
-                  Delete {deleteTarget.name}?
-                </AlertDialogTitle>
+                <AlertDialogTitle>Delete {deleteTarget.name}?</AlertDialogTitle>
                 <AlertDialogDescription>
                   This removes the account credentials. The account is removed
                   from your harness list.

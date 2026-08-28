@@ -285,10 +285,17 @@ export function deriveAccountLimitState(input: {
     .sort((a, b) => b.utilization - a.utilization)[0]
   const utilization = worst
     ? {
-        percent: Math.round(Math.max(0, worst.utilization <= 1 ? worst.utilization * 100 : worst.utilization)),
+        percent: Math.round(
+          Math.max(
+            0,
+            worst.utilization <= 1
+              ? worst.utilization * 100
+              : worst.utilization,
+          ),
+        ),
         windowLabel:
           worst.windowId === undefined
-            ? USAGE_WINDOW_LABELS[worst.window] ?? worst.window
+            ? (USAGE_WINDOW_LABELS[worst.window] ?? worst.window)
             : worst.window,
         resetsAt: worst.resetsAt,
       }

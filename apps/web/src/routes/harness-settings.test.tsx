@@ -199,6 +199,8 @@ describe('HarnessSettings', () => {
     ).toBe('true')
     fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
 
-    await waitFor(() => expect(deleteAccount).toHaveBeenCalledWith('acct_1', true))
+    await waitFor(() =>
+      expect(deleteAccount).toHaveBeenCalledWith('acct_1', true),
+    )
   })
 })
