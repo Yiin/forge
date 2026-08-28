@@ -6,7 +6,10 @@ import {
   type PatchHarnessAccount,
 } from '@forge/protocol/accounts'
 import { harnessHealthResponseSchema } from '@forge/protocol/status'
-import { formatAccountDisplayName } from './harness-accounts-logic.js'
+import {
+  KIND_LABELS,
+  formatAccountDisplayName,
+} from './harness-accounts-logic.js'
 
 export type { HarnessAccountSnapshot }
 
@@ -99,7 +102,7 @@ export class AccountsApi {
           harnessKind: account.kind,
           harnessKey: entry.key,
           displayName: formatAccountDisplayName({
-            kindLabel: entry.name,
+            kindLabel: KIND_LABELS[account.kind] ?? entry.name,
             ordinal: index + 1,
             label: account.label,
             identity: account.identity,

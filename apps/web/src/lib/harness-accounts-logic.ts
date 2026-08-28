@@ -11,6 +11,15 @@ export const HARNESS_KINDS = [
 ] as const
 export type HarnessKind = (typeof HARNESS_KINDS)[number]
 
+export const KIND_LABELS: Record<string, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  kimi: 'Kimi',
+  opencode: 'OpenCode',
+  grok: 'Grok',
+  pi: 'Pi',
+}
+
 export function formatAccountDisplayName(input: {
   kindLabel: string
   ordinal: number

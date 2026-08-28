@@ -113,7 +113,7 @@ export function HarnessAccountCard({
   const [usageRefreshing, setUsageRefreshing] = useState(false)
   const enabled = snapshot?.status !== 'disabled'
   const kind = accountKind
-  const displayName = label || accountId
+  const displayName = snapshot?.displayName || label || accountId
   const authStatus = snapshot?.auth.status ?? 'unknown'
   const authAction = resolveAccountAuthAction({
     harnessKind: kind,
