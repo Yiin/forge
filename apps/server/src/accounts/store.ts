@@ -220,6 +220,37 @@ export class HarnessAccountStore {
   }
 }
 
+export const ACCOUNT_KINDS = [
+  'claude',
+  'codex',
+  'kimi',
+  'opencode',
+  'grok',
+  'pi',
+] as const
+
+/**
+ * Derives the account kind a harness entry belongs to by token-matching the
+ * key, command, and args. Harnesses with no managed-account support (gemini,
+ * mock, custom PTY entries) return null and run on ambient credentials.
+ */
+export function accountKindForHarness(
+  key: string,
+  entry?: { command?: string; args?: string[] },
+): string | null {
+  const tokens = [key, entry?.command ?? '', ...(entry?.args ?? [])]
+    .join(' ')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+  for (const kind of [...ACCOUNT_KINDS].sort(
+    (left, right) => right.length - left.length,
+  )) {
+    if (tokens.includes(kind)) return kind
+  }
+  return null
+}
+
 export function accountEnv(
   kind: string,
   homePath: string,

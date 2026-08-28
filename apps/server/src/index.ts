@@ -51,7 +51,11 @@ import {
 } from './config.js'
 import { ptyHarness } from './pty/harness.js'
 import { acpHarness } from './acp/harness.js'
-import { HarnessAccountStore, deriveAccountHarness } from './accounts/store.js'
+import {
+  HarnessAccountStore,
+  accountKindForHarness,
+  deriveAccountHarness,
+} from './accounts/store.js'
 import { clearExpiredLimits } from './accounts/limits.js'
 import { LoginManager } from './accounts/login.js'
 import { unsupportedUsageProbe, UsagePoller } from './accounts/usagePoller.js'
@@ -261,8 +265,23 @@ export function startServer(
       return acpHarness(derived, { db, bus, questions, accountId })
     throw new Error(`Harness ${key} is not configured`)
   }
-  const manager = new SessionManager(db, bus, factory)
-  const runner = new EpicRunner(db, createEpicSessionAdapter(manager), bus)
+  const manager = new SessionManager(
+    db,
+    bus,
+    factory,
+    undefined,
+    (harness) =>
+      accountKindForHarness(harness, configState.current.harness[harness]) !==
+      null,
+  )
+  const runner = new EpicRunner(
+    db,
+    createEpicSessionAdapter(manager),
+    bus,
+    (harness) =>
+      accountKindForHarness(harness, configState.current.harness[harness]) !==
+      null,
+  )
   const loginManager = new LoginManager(
     accountStore,
     bus,

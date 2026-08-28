@@ -22,6 +22,30 @@ describe('session harness selection', () => {
     ).toThrow('This harness has no account')
   })
 
+  it('allows a kind-less harness to run without an account', () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const manager = new SessionManager(
+      db,
+      new EventBus(),
+      () => ({
+        spawn: async () => {
+          throw new Error('should not spawn')
+        },
+      }),
+      undefined,
+      () => false,
+    )
+
+    const session = manager.create({
+      projectId: project.id,
+      harness: 'mock',
+      cwd: '/tmp',
+    })
+    expect(session.accountId).toBeNull()
+  })
+
   it('records a usage limit from a failed prompt', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)

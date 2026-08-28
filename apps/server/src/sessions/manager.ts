@@ -50,6 +50,7 @@ export class SessionManager {
     private readonly bus: EventBus,
     private readonly factory: HarnessFactory,
     private readonly idleMs = 15 * 60 * 1000,
+    private readonly requiresAccount: (harness: string) => boolean = () => true,
   ) {}
   get database() {
     return this.db
@@ -101,7 +102,11 @@ export class SessionManager {
         'SELECT id FROM harness_accounts WHERE harness_key = ? AND disabled_at IS NULL ORDER BY order_index, created_at LIMIT 1',
       )
       .get(harness) as { id: string } | undefined
-    if (!row) throw new Error('This harness has no account')
+    if (!row) {
+      if (this.requiresAccount(harness))
+        throw new Error('This harness has no account')
+      return null
+    }
     return row.id
   }
 

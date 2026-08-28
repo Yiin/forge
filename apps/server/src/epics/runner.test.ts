@@ -46,3 +46,18 @@ describe('epic runner account attempts', () => {
     })
   })
 })
+
+describe('planAttempts ambient hops', () => {
+  it('keeps an accountless attempt for a kind-less harness', () => {
+    const attempts = planAttempts(
+      [{ harness: 'gemini' }],
+      [],
+      new Set(),
+      () => false,
+    )
+    expect(attempts).toEqual([{ harness: 'gemini' }])
+  })
+  it('drops the hop when the harness requires an account and has none', () => {
+    expect(planAttempts([{ harness: 'claude' }], [], new Set())).toEqual([])
+  })
+})

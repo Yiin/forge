@@ -23,6 +23,7 @@ import {
   accountConfigOverlay,
   accountEnv,
   deriveAccountHarness,
+  accountKindForHarness,
 } from './store.js'
 
 const resources: Array<{ db: DatabaseSync; root: string }> = []
@@ -392,5 +393,32 @@ describe('HarnessAccountStore', () => {
           .get() as any
       ).name,
     ).toBe('0010_harness_accounts.sql')
+  })
+})
+
+describe('accountKindForHarness', () => {
+  it('maps default harness entries to their account kinds', () => {
+    expect(
+      accountKindForHarness('claude-code-acp', {
+        command: 'npx',
+        args: ['@zed-industries/claude-code-acp'],
+      }),
+    ).toBe('claude')
+    expect(accountKindForHarness('grok', { command: 'grok' })).toBe('grok')
+    expect(accountKindForHarness('pi', { command: 'pi' })).toBe('pi')
+  })
+  it('returns null for kind-less harnesses', () => {
+    expect(accountKindForHarness('gemini', { command: 'gemini' })).toBeNull()
+    expect(
+      accountKindForHarness('mock', {
+        command: 'bun',
+        args: ['apps/server/test/fixtures/acp-mock-agent.ts'],
+      }),
+    ).toBeNull()
+  })
+  it('does not substring-match pi inside other words', () => {
+    expect(
+      accountKindForHarness('pipeline', { command: 'pipeline-tool' }),
+    ).toBeNull()
   })
 })

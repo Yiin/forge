@@ -103,6 +103,7 @@ export function planAttempts(
   hops: readonly ProviderHop[],
   accounts: readonly AttemptAccount[],
   blocked: ReadonlySet<string>,
+  requiresAccount: (harness: string) => boolean = () => true,
 ): PlannedAttempt[] {
   return hops.flatMap((hop) => {
     const candidates = accounts
@@ -115,6 +116,8 @@ export function planAttempts(
       .sort((a, b) => a.orderIndex - b.orderIndex)
     if (candidates.length)
       return candidates.map((account) => ({ ...hop, accountId: account.id }))
+    // A harness with no managed-account kind runs on ambient credentials.
+    if (!requiresAccount(hop.harness)) return [{ ...hop }]
     return []
   })
 }
@@ -170,6 +173,7 @@ type PromptAttemptsInput = {
   setActive?: (session: WorkerSession) => void
   setWorker?: (iterationId: string, session: WorkerSession) => void
   clearWorker?: (iterationId: string) => void
+  requiresAccount?: (harness: string) => boolean
 }
 
 type PromptAttemptsResult = {
@@ -200,6 +204,7 @@ async function runPromptAttempts(
       hops,
       rows,
       blockedAccounts(db, Date.now(), ACCOUNT_LIMIT_TTL_MS),
+      value.requiresAccount ?? (() => true),
     )
     const next = attempts.find((candidate) => {
       const key = `${candidate.harness}\0${candidate.model ?? ''}\0${candidate.accountId ?? ''}`
@@ -291,6 +296,7 @@ export class EpicRunner {
     private readonly db: Db,
     private readonly sessions: SessionManager,
     private readonly bus = new EventBus(),
+    private readonly requiresAccount: (harness: string) => boolean = () => true,
   ) {}
   get eventBus() {
     return this.bus
@@ -349,6 +355,8 @@ export class EpicRunner {
         ])
         await claim(input.repoPath, bead.id)
         const attempts = await runPromptAttempts(this.db, this.sessions, {
+          requiresAccount: this.requiresAccount,
+          requiresAccount: this.requiresAccount,
           run,
           input,
           bead,
