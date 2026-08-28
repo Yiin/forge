@@ -244,12 +244,20 @@ export class AccountsApi {
 
   async loginStart(input: {
     accountId: string
+    provider?: string
+    method?: string
   }): Promise<{ loginId: string; state: LoginRunState }> {
     const { loginId } = await this.post<{ loginId: string }>(
       `/api/harness-accounts/${encodeURIComponent(input.accountId)}/login`,
-      {},
+      { provider: input.provider, method: input.method },
     )
     return { loginId, state: emptyLoginState() }
+  }
+
+  getModels(accountId: string) {
+    return this.get<
+      Array<{ slug: string; name: string; subProvider?: string }>
+    >(`/api/harness-accounts/${encodeURIComponent(accountId)}/models`)
   }
 
   loginStatus(terminalId: string, listener: LoginStatusListener) {
@@ -354,8 +362,13 @@ export class AccountsApi {
 export const accountsApi = new AccountsApi()
 export const listHarnessStatus = () => accountsApi.listHarnessStatus()
 export const refreshHarnessStatus = () => accountsApi.refreshHarnessStatus()
-export const loginStart = (input: { accountId: string }) =>
-  accountsApi.loginStart(input)
+export const loginStart = (input: {
+  accountId: string
+  provider?: string
+  method?: string
+}) => accountsApi.loginStart(input)
+export const getAccountModels = (accountId: string) =>
+  accountsApi.getModels(accountId)
 export const loginStatus = (
   terminalId: string,
   listener: LoginStatusListener,

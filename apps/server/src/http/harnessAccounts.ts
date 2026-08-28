@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { z } from 'zod'
 import {
   createHarnessAccountSchema,
   patchHarnessAccountSchema,
@@ -13,6 +14,13 @@ import { LoginManager } from '../accounts/login.js'
 import type { UsagePoller } from '../accounts/usagePoller.js'
 import type { EventBus } from '../events/bus.js'
 import type { ConfigState } from '../config.js'
+
+const loginInputSchema = z
+  .object({
+    provider: z.string().trim().min(1).max(128).optional(),
+    method: z.string().trim().min(1).max(128).optional(),
+  })
+  .strict()
 
 export function harnessAccountRoutes(
   db: { prepare(sql: string): any },
@@ -102,18 +110,30 @@ export function harnessAccountRoutes(
   })
   app.post('/api/harness-accounts/:id/login', async (c) => {
     if (!login) return c.json({ error: 'Login is unavailable' }, 503)
-    let body: { provider?: string; method?: string } = {}
+    let raw: unknown = {}
     try {
-      body = await c.req.json()
-    } catch {}
+      raw = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400)
+    }
+    const parsed = loginInputSchema.safeParse(raw)
+    if (!parsed.success) return c.json({ error: parsed.error.message }, 400)
     try {
-      return c.json({ loginId: login.start(c.req.param('id'), body) }, 202)
+      return c.json(
+        { loginId: login.start(c.req.param('id'), parsed.data) },
+        202,
+      )
     } catch (error) {
       return c.json(
         { error: error instanceof Error ? error.message : String(error) },
         400,
       )
     }
+  })
+  app.get('/api/harness-accounts/:id/models', (c) => {
+    if (!store.get(c.req.param('id')))
+      return c.json({ error: 'Account not found' }, 404)
+    return c.json([])
   })
   app.get('/api/harness-accounts/logins/:loginId', (c) => {
     const state = login?.get(c.req.param('loginId'))

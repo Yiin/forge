@@ -36,6 +36,7 @@ import {
   resolveAccountAuthAction,
 } from '@/lib/harness-accounts-logic'
 import { accountConfigFields } from '@/lib/account-config-fields'
+import { getAccountModels } from '@/lib/accounts-api'
 import type { HarnessAccountConfig } from '@forge/protocol/accounts'
 import { useRelativeTimeTick } from './settings-layout'
 import { RedactedSensitiveText } from './RedactedSensitiveText'
@@ -103,6 +104,9 @@ export function HarnessAccountCard({
   const [configState, setConfigState] = useState<'idle' | 'saving' | 'error'>(
     'idle',
   )
+  const [models, setModels] = useState<
+    Array<{ slug: string; name: string; subProvider?: string }>
+  >([])
   const enabled = snapshot?.status !== 'disabled'
   const kind = accountKind
   // `harness` is the shared config for the whole kind (command/args/env), so
@@ -137,6 +141,12 @@ export function HarnessAccountCard({
   const email = snapshot?.auth.email
   useEffect(() => setLabel(labelProp), [labelProp])
   useEffect(() => setAccountConfig(config), [config])
+  useEffect(() => {
+    if (!['opencode', 'pi', 'grok'].includes(kind)) return
+    void getAccountModels(accountId)
+      .then(setModels)
+      .catch(() => setModels([]))
+  }, [accountId, kind])
   useEffect(() => {
     if (label === labelProp || !label.trim()) return
     setLabelState('saving')
@@ -409,7 +419,24 @@ export function HarnessAccountCard({
             {fields.map((field) => (
               <label className="grid gap-1 text-xs font-medium" key={field.key}>
                 {field.label}
-                {field.control === 'select' ? (
+                {field.key === 'model' && models.length > 0 ? (
+                  <Select
+                    value={String(accountConfig?.model ?? '')}
+                    onValueChange={(value) => updateConfig('model', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {models.map((model) => (
+                        <SelectItem key={model.slug} value={model.slug}>
+                          {model.subProvider ? `${model.subProvider} · ` : ''}
+                          {model.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : field.control === 'select' ? (
                   <Select
                     value={String(accountConfig?.[field.key] ?? '')}
                     onValueChange={(value) => updateConfig(field.key, value)}

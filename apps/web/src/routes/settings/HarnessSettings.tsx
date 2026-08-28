@@ -24,6 +24,22 @@ import {
   updateAccount,
 } from '../../lib/accounts-api'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   accountKindForHarness,
   moveAccount,
@@ -43,6 +59,70 @@ type LoginTarget = {
   id: string
   name: string
   start: Awaited<ReturnType<typeof loginStart>>
+}
+
+type LoginOptions = {
+  id: string
+  name: string
+  kind: string
+  provider: string
+  method: string
+}
+
+function LoginOptionsDialog({
+  options,
+  onOpenChange,
+  onSubmit,
+}: {
+  options: LoginOptions
+  onOpenChange: (open: boolean) => void
+  onSubmit: (provider: string, method: string) => void
+}) {
+  const [provider, setProvider] = useState(options.provider)
+  const [method, setMethod] = useState(options.method)
+  const methods =
+    options.kind === 'pi' ? ['oauth', 'api-key'] : ['oauth', 'api-key']
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Sign in to {options.name}</DialogTitle>
+          <DialogDescription>
+            Choose the provider and authentication method.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3">
+          <Label>Provider</Label>
+          <Input
+            value={provider}
+            onChange={(event) => setProvider(event.target.value)}
+            placeholder="Provider name"
+          />
+          <Label>Authentication method</Label>
+          <Select value={method} onValueChange={setMethod}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select method" />
+            </SelectTrigger>
+            <SelectContent>
+              {methods.map((method) => (
+                <SelectItem key={method} value={method}>
+                  {method}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={() => onSubmit(provider.trim(), method)}>
+            Continue
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 function HarnessGroupEditor({
@@ -121,6 +201,7 @@ export function HarnessSettings() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [addOpen, setAddOpen] = useState(false)
   const [login, setLogin] = useState<LoginTarget | null>(null)
+  const [loginOptions, setLoginOptions] = useState<LoginOptions | null>(null)
   const [signOut, setSignOut] = useState<{
     id: string
     name: string
@@ -268,10 +349,29 @@ export function HarnessSettings() {
       })
     }
   }
-  const signIn = async (id: string, name: string) => {
+  const startLogin = async (
+    id: string,
+    name: string,
+    provider?: string,
+    method?: string,
+  ) => {
     setBusyState((current) => new Set(current).add(`sign-in:${id}`))
     try {
-      setLogin({ id, name, start: await loginStart({ accountId: id }) })
+      const start = await loginStart({ accountId: id, provider, method })
+      if (provider) {
+        const account = accounts.find((item) => item.id === id)
+        await updateAccount(id, {
+          config: { ...account?.config, provider },
+        })
+        setAccounts((current) =>
+          current.map((item) =>
+            item.id === id
+              ? { ...item, config: { ...item.config, provider } }
+              : item,
+          ),
+        )
+      }
+      setLogin({ id, name, start })
     } catch {
       toast.error(`Could not sign in to ${name}`)
     } finally {
@@ -281,6 +381,20 @@ export function HarnessSettings() {
         return next
       })
     }
+  }
+  const signIn = async (id: string, name: string) => {
+    const account = accounts.find((item) => item.id === id)
+    if (account && (account.kind === 'opencode' || account.kind === 'pi')) {
+      setLoginOptions({
+        id,
+        name,
+        kind: account.kind,
+        provider: account.config?.provider ?? '',
+        method: 'oauth',
+      })
+      return
+    }
+    await startLogin(id, name)
   }
   const checked = checkedAt
     ? Number.isNaN(Date.parse(checkedAt))
@@ -562,6 +676,24 @@ export function HarnessSettings() {
                 setLogin(null)
                 void refresh()
               }
+            }}
+          />
+        )}
+        {loginOptions && (
+          <LoginOptionsDialog
+            options={loginOptions}
+            onOpenChange={(open) => {
+              if (!open) setLoginOptions(null)
+            }}
+            onSubmit={(provider, method) => {
+              const selected = loginOptions
+              setLoginOptions(null)
+              void startLogin(
+                selected.id,
+                selected.name,
+                provider || undefined,
+                method || undefined,
+              )
             }}
           />
         )}

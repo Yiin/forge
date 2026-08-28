@@ -27,7 +27,21 @@ export const ACCOUNT_CONFIG_FIELDS: Record<
   claude: [],
   codex: [],
   kimi: [],
-  grok: [],
+  grok: [
+    {
+      key: 'model',
+      control: 'text',
+      label: 'Model',
+      placeholder: 'Optional model',
+      clearWhenEmpty: true,
+    },
+    {
+      key: 'thinking',
+      control: 'select',
+      label: 'Thinking',
+      options: thinkingLevels,
+    },
+  ],
   opencode: [
     {
       key: 'provider',
