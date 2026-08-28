@@ -294,7 +294,7 @@ export function HarnessSettings() {
   }
   const rowsFor = (kind: string) => {
     const accountIds = snapshots
-      .filter((item) => item.harnessKind === kind)
+      .filter((item) => item.harnessKey === kind)
       .map((item) => item.accountId)
     return orderAccountRows(
       accountIds
@@ -321,7 +321,7 @@ export function HarnessSettings() {
     if (!accountKind) return
     setBusyState((current) => new Set(current).add(`add:${groupKey}`))
     const number =
-      snapshots.filter((item) => item.harnessKind === groupKey).length + 1
+      snapshots.filter((item) => item.harnessKey === groupKey).length + 1
     const name = `${labels[accountKind]} Account ${number}`
     try {
       const account = await createAccount({
@@ -446,7 +446,7 @@ export function HarnessSettings() {
   const kinds = [
     ...new Set([
       ...Object.keys(config),
-      ...snapshots.map((item) => item.harnessKind),
+      ...snapshots.map((item) => item.harnessKey),
     ]),
   ]
   return (
@@ -531,10 +531,14 @@ export function HarnessSettings() {
                   key={kind}
                   title={config[kind]?.name ?? labels[kind] ?? kind}
                   description={
-                    <HarnessGroupEditor
-                      harness={config[kind]!}
-                      onSave={(next) => void save({ ...config, [kind]: next })}
-                    />
+                    config[kind] ? (
+                      <HarnessGroupEditor
+                        harness={config[kind]}
+                        onSave={(next) =>
+                          void save({ ...config, [kind]: next })
+                        }
+                      />
+                    ) : undefined
                   }
                   headerAction={
                     accountKindForHarness(kind, config[kind]) ? (

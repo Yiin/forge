@@ -55,6 +55,7 @@ const harness = (name: string) => ({
 const snapshot = (accountId: string, displayName: string) => ({
   accountId,
   harnessKind: 'claude',
+  harnessKey: 'claude',
   displayName,
   enabled: true,
   installed: true,
