@@ -356,7 +356,6 @@ export class EpicRunner {
         await claim(input.repoPath, bead.id)
         const attempts = await runPromptAttempts(this.db, this.sessions, {
           requiresAccount: this.requiresAccount,
-          requiresAccount: this.requiresAccount,
           run,
           input,
           bead,
@@ -656,6 +655,7 @@ export class EpicRunner {
     const before = await git(worktree.worktreePath, ['rev-parse', 'HEAD'])
     await claim(input.repoPath, bead.id)
     const attempts = await runPromptAttempts(this.db, this.sessions, {
+      requiresAccount: this.requiresAccount,
       run,
       input,
       bead,
