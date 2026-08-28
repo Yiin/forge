@@ -5,6 +5,17 @@ import { toast } from 'sonner'
 import type { HarnessConfig } from '@forge/protocol/config'
 import type { HarnessAccountSnapshot } from '@forge/protocol/accounts'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Empty,
   EmptyContent,
@@ -49,6 +60,7 @@ import {
 } from '@/components/ui/select'
 import {
   accountKindForHarness,
+  isManagedAccountHome,
   moveAccount,
   orderAccountRows,
 } from '../../lib/harness-accounts-logic'
@@ -215,6 +227,13 @@ export function HarnessSettings() {
     kind: string
     home: string | null
   } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string
+    name: string
+    kind: string
+    home: string | null
+  } | null>(null)
+  const [removeHome, setRemoveHome] = useState(true)
   const [accountsDir, setAccountsDir] = useState<string | null>(null)
   const setBusyState = (value: React.SetStateAction<Set<string>>) =>
     setBusy(value)
@@ -401,6 +420,23 @@ export function HarnessSettings() {
       return
     }
     await startLogin(id, name)
+  }
+  const deleteSelectedAccount = async () => {
+    if (!deleteTarget) return
+    setBusyState((current) => new Set(current).add(`delete:${deleteTarget.id}`))
+    try {
+      await deleteAccount(deleteTarget.id, removeHome)
+      setDeleteTarget(null)
+      await refresh()
+    } catch {
+      toast.error(`Could not delete ${deleteTarget.name}`)
+    } finally {
+      setBusyState((current) => {
+        const next = new Set(current)
+        next.delete(`delete:${deleteTarget.id}`)
+        return next
+      })
+    }
   }
   const checked = checkedAt
     ? Number.isNaN(Date.parse(checkedAt))
@@ -610,12 +646,16 @@ export function HarnessSettings() {
                             }
                           }}
                           onDelete={async () => {
-                            try {
-                              await deleteAccount(row.accountId)
-                              await refresh()
-                            } catch {
-                              toast.error(`Could not delete ${name}`)
-                            }
+                            const account = accounts.find(
+                              (item) => item.id === row.accountId,
+                            )
+                            setRemoveHome(true)
+                            setDeleteTarget({
+                              id: row.accountId,
+                              name,
+                              kind: account?.kind ?? kind,
+                              home: account?.homePath ?? null,
+                            })
                           }}
                           isSettingsDisabled={isAdding}
                           authActionBusy={
@@ -718,6 +758,62 @@ export function HarnessSettings() {
               )
             }}
           />
+        )}
+        {deleteTarget && (
+          <AlertDialog
+            open
+            onOpenChange={(open) => {
+              if (!open && !busy.has(`delete:${deleteTarget.id}`))
+                setDeleteTarget(null)
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Delete {deleteTarget.name}?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This removes the account credentials. The account is removed
+                  from your harness list.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              {isManagedAccountHome({
+                homePath: deleteTarget.home,
+                accountsDir,
+                harnessKind: deleteTarget.kind,
+                accountId: deleteTarget.id,
+              }) && (
+                <label className="flex items-start gap-3 rounded-md border p-3">
+                  <Checkbox
+                    checked={removeHome}
+                    onCheckedChange={(value) => setRemoveHome(value === true)}
+                    aria-label="Also delete the managed credential home"
+                  />
+                  <span className="grid gap-1 text-sm">
+                    <strong>Delete managed credential home</strong>
+                    <span className="text-muted-foreground">
+                      Remove this account&apos;s credential directory from the
+                      server.
+                    </span>
+                  </span>
+                </label>
+              )}
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    void deleteSelectedAccount()
+                  }}
+                >
+                  {busy.has(`delete:${deleteTarget.id}`)
+                    ? 'Deleting'
+                    : 'Delete account'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         )}
         {signOut && (
           <AccountSignOutDialog

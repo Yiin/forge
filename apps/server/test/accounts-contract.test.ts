@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -133,6 +133,7 @@ describe('web AccountsApi against the real server routes', () => {
     expect(loggedOut.authenticated).toBe(false)
 
     expect(await api.deleteAccount(second.id, true)).toEqual({ ok: true })
+    expect(existsSync(second.homePath)).toBe(false)
     expect((await api.listAccounts()).map((account) => account.id)).toEqual([
       first.id,
     ])

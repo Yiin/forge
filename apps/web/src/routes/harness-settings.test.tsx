@@ -68,6 +68,9 @@ const account = (id: string, label: string) => ({
   harness: 'claude',
   label,
   storageDir: `/tmp/accounts/claude/${id}`,
+  homePath: `/tmp/accounts/claude/${id}`,
+  harnessKey: 'claude',
+  kind: 'claude',
   enabled: true,
   authStatus: 'unauthenticated' as const,
   email: null,
@@ -178,5 +181,24 @@ describe('HarnessSettings', () => {
       expect(loginStart).toHaveBeenCalledWith({ accountId: 'acct_3' }),
     )
     expect(saveHarnesses).not.toHaveBeenCalled()
+  })
+  it('confirms account deletion and removes its home by default', async () => {
+    const { deleteAccount } = await import('../lib/accounts-api')
+    render(<HarnessSettings />)
+    await screen.findByText('Claude Account 1')
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Delete account acct_1' }),
+    )
+    expect(
+      screen
+        .getByRole('checkbox', {
+          name: 'Also delete the managed credential home',
+        })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
+
+    await waitFor(() => expect(deleteAccount).toHaveBeenCalledWith('acct_1', true))
   })
 })
