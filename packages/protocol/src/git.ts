@@ -16,7 +16,13 @@ export type GitStatus = z.infer<typeof gitStatusSchema>
 export type GitRef = z.infer<typeof gitRefSchema>
 export type GitRefsPage = z.infer<typeof gitRefsPageSchema>
 
-export const worktreeSchema = z.object({ path: z.string(), branch: z.string().nullable(), detached: z.boolean() })
+export const worktreeSchema = z.object({
+  path: z.string(),
+  branch: z.string().nullable(),
+  detached: z.boolean(),
+  dirty: z.boolean(),
+  activeSession: z.boolean(),
+})
 export const createWorktreeRequestSchema = z.object({ baseRef: z.string().min(1), branch: z.string().min(1).optional() })
 export const createWorktreeResponseSchema = z.object({ path: z.string(), branch: z.string() })
 export const worktreeListResponseSchema = z.object({ worktrees: z.array(worktreeSchema) })

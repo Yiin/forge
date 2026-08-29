@@ -306,13 +306,24 @@ export function ProjectSettings() {
     (typeof projects)[number] | null
   >(null)
   const [archiveError, setArchiveError] = useState<string | null>(null)
+  const [worktrees, setWorktrees] = useState<Record<string, Array<{
+    path: string
+    branch: string | null
+    dirty: boolean
+    activeSession: boolean
+  }>>>({})
+  const [worktreeState, setWorktreeState] = useState<Record<string, 'loading' | 'error' | 'ready'>>({})
+  const [removing, setRemoving] = useState<string | null>(null)
+  const [worktreeError, setWorktreeError] = useState<string | null>(null)
   const load = () => {
     setLoadState('loading')
     void api
       .listSettingsProjects()
       .then((value) => {
-        setProjects(value as typeof projects)
+        const nextProjects = value as typeof projects
+        setProjects(nextProjects)
         setLoadState('saved')
+        for (const project of nextProjects) void loadWorktrees(project.id)
       })
       .catch((cause: unknown) => {
         setError(cause instanceof Error ? cause.message : String(cause))
@@ -404,6 +415,57 @@ export function ProjectSettings() {
                 {project.archived_at ? 'Archived' : 'Archive'}
               </Button>
             </SettingsRow>
+            <SettingsRow
+              label="Session worktrees"
+              description="Worktrees created for sessions. Remove them only when no session uses them."
+            >
+              <div className="w-full space-y-2">
+                {worktreeState[project.id] === 'loading' && (
+                  <p className="text-sm text-muted-foreground">Loading…</p>
+                )}
+                {worktreeState[project.id] === 'error' && (
+                  <ErrorRow onRetry={() => void loadWorktrees(project.id)}>
+                    Could not load worktrees.
+                  </ErrorRow>
+                )}
+                {worktreeState[project.id] === 'ready' &&
+                  worktrees[project.id]?.length === 0 && (
+                    <p className="text-sm text-muted-foreground">No session worktrees.</p>
+                  )}
+                {worktrees[project.id]?.map((worktree) => (
+                  <div
+                    key={worktree.path}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {worktree.branch ?? 'Detached worktree'}
+                      </p>
+                      <p className="truncate font-mono text-xs text-muted-foreground">
+                        {worktree.path}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {worktree.activeSession
+                          ? 'Active session uses this worktree.'
+                          : worktree.dirty
+                            ? 'Uncommitted changes.'
+                            : 'Clean.'}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={worktree.activeSession || removing === worktree.path}
+                      aria-label={`Remove worktree ${worktree.branch ?? worktree.path}`}
+                      onClick={() => void removeWorktree(project.id, worktree.path)}
+                    >
+                      {removing === worktree.path && <Spinner className="size-4" />}
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </SettingsRow>
           </SettingsSection>
         ))}
       </div>
@@ -413,6 +475,7 @@ export function ProjectSettings() {
       {archiveError && (
         <ErrorRow>Could not archive project: {archiveError}</ErrorRow>
       )}
+      {worktreeError && <ErrorRow>{worktreeError}</ErrorRow>}
       <ConfirmDialog
         open={archiveProject !== null}
         onOpenChange={(open) => {
@@ -466,6 +529,38 @@ export function ProjectSettings() {
       setSaveState((current) => ({ ...current, [project.id]: 'error' }))
     } finally {
       setSaving((current) => ({ ...current, [project.id]: false }))
+    }
+  }
+
+  async function loadWorktrees(projectId: string) {
+    setWorktreeState((current) => ({ ...current, [projectId]: 'loading' }))
+    try {
+      const value = (await api.listWorktrees(projectId)) as { worktrees: Array<{
+        path: string
+        branch: string | null
+        dirty: boolean
+        activeSession: boolean
+      }> }
+      setWorktrees((current) => ({ ...current, [projectId]: value.worktrees }))
+      setWorktreeState((current) => ({ ...current, [projectId]: 'ready' }))
+    } catch {
+      setWorktreeState((current) => ({ ...current, [projectId]: 'error' }))
+    }
+  }
+
+  async function removeWorktree(projectId: string, path: string) {
+    setRemoving(path)
+    setWorktreeError(null)
+    try {
+      await api.removeWorktree(projectId, { path })
+      setWorktrees((current) => ({
+        ...current,
+        [projectId]: current[projectId]?.filter((worktree) => worktree.path !== path) ?? [],
+      }))
+    } catch (cause: unknown) {
+      setWorktreeError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setRemoving(null)
     }
   }
 }

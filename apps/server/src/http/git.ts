@@ -67,11 +67,21 @@ export function gitRoutes(options: { db: DatabaseSync; dataDir: string }) {
     const row = project(c.req.param('id'))
     if (!row) return c.json({ error: 'Project not found' }, 404)
     try {
-      return c.json(
-        worktreeListResponseSchema.parse({
-          worktrees: await listWorktrees(row.path),
-        }),
+      const worktrees = await listWorktrees(row.path)
+      const enriched = await Promise.all(
+        worktrees.map(async (worktree) => ({
+          ...worktree,
+          dirty: (await gitStatus(worktree.path)).dirty,
+          activeSession: Boolean(
+            db
+              .prepare(
+                "SELECT 1 FROM sessions WHERE cwd = ? AND status NOT IN ('archived', 'deleted') LIMIT 1",
+              )
+              .get(worktree.path),
+          ),
+        })),
       )
+      return c.json(worktreeListResponseSchema.parse({ worktrees: enriched }))
     } catch (error) {
       return c.json(
         { error: error instanceof Error ? error.message : String(error) },

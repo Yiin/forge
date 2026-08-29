@@ -65,9 +65,19 @@ describe('git routes', () => {
       })
       expect(create.status).toBe(201)
       const created = (await create.json()) as { path: string; branch: string }
-      expect((await app.request('/api/projects/p1/git/worktrees')).status).toBe(
-        200,
-      )
+      const listed = await app.request('/api/projects/p1/git/worktrees')
+      expect(listed.status).toBe(200)
+      expect(await listed.json()).toEqual({
+        worktrees: [
+          expect.objectContaining({
+            path: created.path,
+            branch: 'feature/test',
+            detached: false,
+            dirty: false,
+            activeSession: false,
+          }),
+        ],
+      })
       const duplicate = await app.request('/api/projects/p1/git/worktrees', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
