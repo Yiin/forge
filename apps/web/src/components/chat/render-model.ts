@@ -133,6 +133,7 @@ export function toRenderModel(
   const anchors = new Map<string, number>()
   const turnIds = new Map<string, string>()
   const childTurnIds = new Map<string, string>()
+  const toolIds = new Map<string, Extract<ChatRenderItem, { kind: 'tool' }>>()
   for (const message of messages) {
     turnIds.set(message.itemId, message.turnId)
     if (message.content.type === 'ask_user_question')
@@ -167,9 +168,16 @@ export function toRenderModel(
       content.type === 'tool_update' ||
       content.type === 'tool_result'
     ) {
-      const previous = result.find(
-        (item) => item.kind === 'tool' && item.id === message.itemId,
-      )
+      const toolId =
+        content.type === 'tool_call' ||
+        content.type === 'tool_update' ||
+        content.type === 'tool_result'
+          ? content.toolCallId
+          : undefined
+      const previous =
+        result.find(
+          (item) => item.kind === 'tool' && item.id === message.itemId,
+        ) ?? (content.type !== 'tool_call' ? toolIds.get(toolId ?? '') : undefined)
       if (previous?.kind === 'tool') {
         anchors.set(previous.id, message.seq)
         if (content.type === 'tool_update')
@@ -179,7 +187,7 @@ export function toRenderModel(
           previous.state = content.isError ? 'error' : 'done'
         }
       } else {
-        result.push({
+        const tool = {
           kind: 'tool',
           id: message.itemId,
           name: 'name' in content ? content.name : 'Tool',
@@ -193,7 +201,9 @@ export function toRenderModel(
                 : 'running',
           input: content.type === 'tool_call' ? content.input : undefined,
           output: content.type === 'tool_result' ? content.output : undefined,
-        })
+        } satisfies Extract<ChatRenderItem, { kind: 'tool' }>
+        result.push(tool)
+        if (toolId) toolIds.set(toolId, tool)
         anchors.set(message.itemId, message.seq)
       }
     } else if (content.type === 'attachment_ref') {

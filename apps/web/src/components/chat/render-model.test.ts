@@ -86,6 +86,43 @@ describe('chat render model', () => {
       },
     ])
   })
+
+  it('folds lifecycle events by toolCallId when itemIds differ', () => {
+    const items = toRenderModel([
+      message(
+        {
+          type: 'tool_call',
+          toolCallId: 'tool-legacy',
+          name: 'shell',
+          input: 'pwd',
+        },
+        { itemId: 'call-item' },
+      ),
+      message(
+        { type: 'tool_update', toolCallId: 'tool-legacy', status: 'running' },
+        { itemId: 'update-item', seq: 2 },
+      ),
+      message(
+        {
+          type: 'tool_result',
+          toolCallId: 'tool-legacy',
+          output: 'done',
+          isError: false,
+        },
+        { itemId: 'result-item', seq: 3 },
+      ),
+    ])
+    expect(items).toEqual([
+      {
+        kind: 'tool',
+        id: 'call-item',
+        name: 'shell',
+        state: 'done',
+        input: 'pwd',
+        output: 'done',
+      },
+    ])
+  })
   it('makes interruption and recap visible system rows', () => {
     expect(
       toRenderModel(

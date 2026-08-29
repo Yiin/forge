@@ -31,17 +31,36 @@ function foldMessage(existing: Message, incoming: Message): Message {
   return { ...existing, ...incoming, content }
 }
 
+function toolCallId(message: Message): string | undefined {
+  if (
+    message.content.type === 'tool_call' ||
+    message.content.type === 'tool_update' ||
+    message.content.type === 'tool_result'
+  )
+    return message.content.toolCallId
+  return undefined
+}
+
 export function foldEvent(
   state: Pick<MessagesState, 'bySession' | 'lastSeq'>,
   event: ServerEvent,
 ): Pick<MessagesState, 'bySession' | 'lastSeq'> {
   if (event.seq <= state.lastSeq) return state
   const items = state.bySession[event.sessionId] ?? []
-  // Fold only on a real itemId. Events without one (system rows, answers
-  // from slim producers) must never merge into each other.
-  const index = event.msg.itemId
+  // Fold by itemId first. Older rows can lack the server-generated itemId,
+  // so use the ACP toolCallId for lifecycle updates and results.
+  let index = event.msg.itemId
     ? items.findIndex((item) => item.itemId === event.msg.itemId)
     : -1
+  if (
+    index < 0 &&
+    (event.msg.content.type === 'tool_update' ||
+      event.msg.content.type === 'tool_result')
+  ) {
+    const id = toolCallId(event.msg)
+    if (id)
+      index = items.findIndex((item) => toolCallId(item) === id)
+  }
   const nextItems = [...items]
   if (index < 0) nextItems.push(event.msg)
   else nextItems[index] = foldMessage(nextItems[index], event.msg)

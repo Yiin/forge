@@ -107,6 +107,62 @@ describe('message folding', () => {
     })
   })
 
+  it('folds lifecycle events by toolCallId when itemIds differ', () => {
+    let state: Parameters<typeof foldEvent>[0] = { bySession: {}, lastSeq: 0 }
+    state = foldEvent(
+      state,
+      event(
+        1,
+        message({
+          itemId: 'call-item',
+          type: 'tool_call',
+          content: {
+            type: 'tool_call',
+            toolCallId: 'tool-legacy',
+            name: 'shell',
+            input: 'pwd',
+          },
+        }),
+      ),
+    )
+    state = foldEvent(
+      state,
+      event(
+        2,
+        message({
+          itemId: 'update-item',
+          type: 'tool_update',
+          content: {
+            type: 'tool_update',
+            toolCallId: 'tool-legacy',
+            status: 'running',
+          },
+        }),
+      ),
+    )
+    state = foldEvent(
+      state,
+      event(
+        3,
+        message({
+          itemId: 'result-item',
+          type: 'tool_result',
+          content: {
+            type: 'tool_result',
+            toolCallId: 'tool-legacy',
+            output: 'done',
+            isError: false,
+          },
+        }),
+      ),
+    )
+    expect(state.bySession['ses-1']).toHaveLength(1)
+    expect(state.bySession['ses-1'][0]).toMatchObject({
+      itemId: 'result-item',
+      content: { type: 'tool_result', output: 'done' },
+    })
+  })
+
   it('drops events at or below the global cursor', () => {
     const state = foldEvent(
       { bySession: {}, lastSeq: 4 },
