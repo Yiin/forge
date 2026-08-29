@@ -51,6 +51,16 @@ defines product limits. `docs/architecture.md` is historical.
 - `foldEvent` (`apps/web/src/stores/messages.ts:48`) drops any event with `seq <= lastSeq`. `applyEvent` is unsafe for history replay across sessions; use `loadMessages`.
 - The e2e fake never publishes a user `text_delta`; e2e cannot show a user row.
 
+### Worktree lifecycle
+
+- Session delete and discard preserve worktrees and uncommitted files; explicit removal is required (`apps/server/src/http/sessions.ts:212-223`, `apps/server/src/sessions/manager.ts:718-726`).
+- Multiple sessions may share a worktree, but removal returns 409 while any active session uses its effective cwd (`apps/server/src/http/workspace.ts:1-80`, `apps/server/src/sessions/manager.ts:202`).
+- Forge runs `git worktree prune` once per repository at boot; it never deletes worktree files during pruning (`apps/server/src/index.ts:200-260`, `apps/server/src/git/worktrees.ts:11-25`).
+- Forge removes temporary `forge/<8 hex>` branches only after safe worktree removal and proof that the branch is merged into the project default (`apps/server/src/git/worktrees.ts:6-8`, `apps/server/src/git/worktrees.ts:42-59`).
+- Settings will list session worktrees and provide an explicit remove action; no other worktree surface exists yet (`apps/web/src/components/settings`, `apps/server/src/http/workspace.ts`).
+- Forge allows at most 16 session worktrees per project and rejects the next provision with 409; epic-runner worktrees are outside this cap (`apps/server/src/git/worktrees.ts:20-59`, `apps/server/src/epics/worktrees.ts:42-61`).
+- Session worktrees use `<dataDir>/worktrees/<projectId>/<branch>` and differ from the epic runner's in-repository `<repo>/worktrees/epic-<runId>/<childId>` (`apps/server/src/git/worktrees.ts:19-23`, `apps/server/src/epics/worktrees.ts:42-50`).
+
 ## Release and deploy
 
 - Release: `bash scripts/release.sh <version>` on a clean `main`. The tag triggers `.github/workflows/release.yml`, which builds, smoke-tests, and publishes `forge-linux-x64.tar.gz`.
