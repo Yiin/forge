@@ -11,6 +11,8 @@ export type SessionSummary = {
   harness?: string
   accountId?: string | null
   model?: string | null
+  branch?: string | null
+  worktreePath?: string | null
   createdAt?: string
   created_at?: number
   project_id?: string | null

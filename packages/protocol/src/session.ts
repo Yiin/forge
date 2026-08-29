@@ -9,6 +9,7 @@ export const sessionResponseSchema = z.object({
   title: z.string(),
   cwd: z.string(),
   worktreePath: z.string().nullable(),
+  branch: z.string().nullable(),
   providerSessionId: z.string().nullable(),
   model: z.string().nullable(),
   kind: z.string(),

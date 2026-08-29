@@ -4,11 +4,14 @@ import {
   prompt as promptSchema,
   promoteDraft as promoteDraftSchema,
   answerQuestion as answerSchema,
+  setSessionWorkspace as workspaceSchema,
 } from '@forge/protocol/commands'
 import type { SessionManager } from '../sessions/manager.js'
 import type { UploadStore } from '../uploads/store.js'
 import { errorMessage } from '../error-message.js'
 import { sessionResponse, sessionResponses } from './session-response.js'
+import { gitStatus } from '../git/repo.js'
+import { runGit } from '../git/exec.js'
 
 export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
   const app = new Hono()
@@ -16,7 +19,16 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
     const value = schema.safeParse(await c.req.json())
     if (!value.success) return c.json({ error: value.error.message }, 400)
     try {
-      return c.json(manager.create(value.data), 201)
+      const project = manager.database
+        .prepare('SELECT path FROM projects WHERE id = ? AND archived_at IS NULL')
+        .get(value.data.projectId) as { path: string } | undefined
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const workspace = await manager.resolveWorkspace(
+        value.data.projectId,
+        project.path,
+        value.data.workspace,
+      )
+      return c.json(manager.create({ ...value.data, ...workspace }), 201)
     } catch (error) {
       return c.json({ error: errorMessage(error) }, 400)
     }
@@ -105,6 +117,49 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
     return row
       ? c.json({ models: manager.models(c.req.param('id')) })
       : c.json({ error: 'Session not found' }, 404)
+  })
+  app.patch('/api/sessions/:id/workspace', async (c) => {
+    const value = workspaceSchema.safeParse({
+      ...(await c.req.json()),
+      sessionId: c.req.param('id'),
+    })
+    if (!value.success) return c.json({ error: value.error.message }, 400)
+    const row = manager.database
+      .prepare(
+        `SELECT sessions.*, projects.path AS project_path
+         FROM sessions JOIN projects ON projects.id = sessions.project_id
+         WHERE sessions.id = ? AND sessions.deleted_at IS NULL`,
+      )
+      .get(value.data.sessionId) as
+      | (Record<string, unknown> & { project_path: string })
+      | undefined
+    if (!row) return c.json({ error: 'Session not found' }, 404)
+    if (row.status === 'running') return c.json({ error: 'Session is running' }, 409)
+    try {
+      if (value.data.mode === 'local' && value.data.branch) {
+        const status = await gitStatus(row.project_path)
+        if (status.dirty)
+          return c.json({ error: 'The working tree has uncommitted changes' }, 409)
+        await runGit(row.project_path, ['checkout', value.data.branch])
+      }
+      const workspace = await manager.resolveWorkspace(
+        row.project_id as string,
+        row.project_path,
+        value.data,
+      )
+      manager.database
+        .prepare(
+          'UPDATE sessions SET cwd = ?, worktree_path = ?, branch = ? WHERE id = ?',
+        )
+        .run(workspace.cwd, workspace.worktreePath, workspace.branch, value.data.sessionId)
+      if (workspace.cwd !== row.cwd) await manager.releaseHandle(value.data.sessionId)
+      const updated = manager.database
+        .prepare('SELECT * FROM sessions WHERE id = ?')
+        .get(value.data.sessionId) as Record<string, unknown>
+      return c.json(sessionResponse(updated))
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, 400)
+    }
   })
   app.post('/api/sessions/:id/interrupt', async (c) => {
     await manager.interrupt(c.req.param('id'))

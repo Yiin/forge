@@ -16,6 +16,7 @@ export const sessions = sqliteTable('sessions', {
   title: text('title').notNull(),
   cwd: text('cwd').notNull(),
   worktreePath: text('worktree_path'),
+  branch: text('branch'),
   providerSessionId: text('provider_session_id'),
   model: text('model'),
   kind: text('kind').notNull(),

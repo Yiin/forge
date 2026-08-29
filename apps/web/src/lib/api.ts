@@ -16,6 +16,7 @@ import {
   type Prompt,
   type PromoteDraft,
   type EpicStart,
+  type SetSessionWorkspace,
 } from '@forge/protocol/commands'
 import { putUpload } from './upload'
 export type ApiOptions = { baseUrl?: string; fetch?: typeof globalThis.fetch }
@@ -147,6 +148,9 @@ export class ForgeApi {
       'DELETE',
       `/api/sessions/${encodeURIComponent(sessionId)}`,
     )
+  }
+  setSessionWorkspace(sessionId: string, input: Omit<SetSessionWorkspace, 'sessionId'>) {
+    return this.request('PATCH', `/api/sessions/${encodeURIComponent(sessionId)}/workspace`, { sessionId, ...input })
   }
   prompt(input: Prompt) {
     return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)

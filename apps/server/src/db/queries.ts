@@ -153,6 +153,8 @@ export function createSession(
     harness: string
     title: string
     cwd: string
+    worktreePath?: string | null
+    branch?: string | null
     kind?: string
     retention?: 'permanent' | 'discardable'
     parentSessionId?: string | null
@@ -168,14 +170,16 @@ export function createSession(
   const now = input.now ?? Date.now()
   const value = { id: id('ses_'), ...input, kind: input.kind ?? 'chat', now }
   db.prepare(
-    `INSERT INTO sessions (id, project_id, harness, title, cwd, kind, retention, parent_session_id, forked_at_seq, fork_request_id, context_method, context_confidence, epic_run_id, account_id, status, auto_resume, created_at, last_activity_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
+    `INSERT INTO sessions (id, project_id, harness, title, cwd, worktree_path, branch, kind, retention, parent_session_id, forked_at_seq, fork_request_id, context_method, context_confidence, epic_run_id, account_id, status, auto_resume, created_at, last_activity_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
   ).run(
     value.id,
     value.projectId,
     value.harness,
     value.title,
     value.cwd,
+    input.worktreePath ?? null,
+    input.branch ?? null,
     value.kind,
     input.retention ?? 'permanent',
     value.parentSessionId ?? null,

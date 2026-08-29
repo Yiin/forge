@@ -275,6 +275,7 @@ export function startServer(
     (harness) =>
       accountKindForHarness(harness, configState.current.harness[harness]) !==
       null,
+    dataDir,
   )
   const runner = new EpicRunner(
     db,
@@ -532,8 +533,11 @@ async function startE2eServer(): Promise<void> {
       const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/prompt$/)
       const promote = url.pathname.match(/^\/api\/drafts\/([^/]+)\/promote$/)
       const sessionRow = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
+      const workspaceSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/workspace$/)
       const shapeSession = (session: E2eState['sessions'][number]) => ({
         ...session,
+        branch: 'main',
+        worktreePath: null,
         title: 'New session',
         harness: 'fake-acp-agent',
         status: 'idle',
@@ -551,6 +555,12 @@ async function startE2eServer(): Promise<void> {
         const session = state.sessions.find(
           (entry) => entry.id === sessionRow[1],
         )
+        return session
+          ? response(shapeSession(session))
+          : response({ error: 'Session not found' }, 404)
+      }
+      if (request.method === 'PATCH' && workspaceSession) {
+        const session = state.sessions.find((entry) => entry.id === workspaceSession[1])
         return session
           ? response(shapeSession(session))
           : response({ error: 'Session not found' }, 404)

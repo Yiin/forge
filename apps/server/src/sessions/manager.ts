@@ -12,6 +12,9 @@ import { appendForkContext, createFork } from './fork.js'
 import type { UploadStore } from '../uploads/store.js'
 import { detectProviderError, recordLimit } from '../accounts/limits.js'
 import { errorMessage } from '../error-message.js'
+import { gitStatus } from '../git/repo.js'
+import { provisionWorktree } from '../git/worktrees.js'
+import type { WorkspaceChoice } from '@forge/protocol/commands'
 
 type Db = DatabaseSync
 export type SessionRow = {
@@ -58,6 +61,7 @@ export class SessionManager {
     private readonly factory: HarnessFactory,
     private readonly idleMs = 15 * 60 * 1000,
     private readonly requiresAccount: (harness: string) => boolean = () => true,
+    private readonly dataDir = process.env.FORGE_DATA_DIR ?? 'data',
   ) {}
   get database() {
     return this.db
@@ -83,6 +87,8 @@ export class SessionManager {
     projectId: string
     harness: string
     cwd: string
+    worktreePath?: string | null
+    branch?: string | null
     title?: string
     kind?: string
     parentSessionId?: string | null
@@ -97,7 +103,36 @@ export class SessionManager {
       title: input.title?.trim() || 'New session',
       retention: input.retention,
       epicRunId: input.epicRunId,
+      worktreePath: input.worktreePath,
+      branch: input.branch,
     })
+  }
+
+  async resolveWorkspace(
+    projectId: string,
+    projectPath: string,
+    workspace?: WorkspaceChoice,
+  ) {
+    const status = await gitStatus(projectPath)
+    if (!workspace || workspace.mode === 'local') {
+      return {
+        cwd: projectPath,
+        worktreePath: null,
+        branch: status.branch,
+      }
+    }
+    const worktree = await provisionWorktree({
+      repoPath: projectPath,
+      dataDir: this.dataDir,
+      projectId,
+      baseRef: workspace.baseRef ?? status.defaultBranch ?? status.branch ?? 'HEAD',
+      branch: workspace.branch,
+    })
+    return {
+      cwd: worktree.path,
+      worktreePath: worktree.path,
+      branch: worktree.branch,
+    }
   }
 
   private resolveAccount(harness: string, accountId?: string | null) {
@@ -564,6 +599,7 @@ export class SessionManager {
       attachmentIds?: string[]
       accountId?: string | null
       clientItemId?: string
+      workspace?: WorkspaceChoice
     },
     requestId: string,
     uploads?: UploadStore,
@@ -579,11 +615,16 @@ export class SessionManager {
       .prepare('SELECT path FROM projects WHERE id = ? AND archived_at IS NULL')
       .get(input.projectId) as { path: string } | undefined
     if (!project) throw new Error('Project not found')
+    const workspace = await this.resolveWorkspace(
+      input.projectId,
+      project.path,
+      input.workspace,
+    )
     const session = this.create({
       projectId: input.projectId,
       harness: input.harness,
       accountId: input.accountId,
-      cwd: project.path,
+      ...workspace,
       title: 'New session',
     })
     try {
@@ -635,6 +676,12 @@ export class SessionManager {
   }
   async interrupt(id: string) {
     await this.handles.get(id)?.cancel()
+  }
+  async releaseHandle(id: string) {
+    await this.handles.get(id)?.cancel()
+    await this.handles.get(id)?.kill()
+    this.forgetHandle(id)
+    this.status(id, 'idle')
   }
   async discard(id: string) {
     await this.handles.get(id)?.cancel()

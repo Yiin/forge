@@ -4,6 +4,11 @@ const page = {
   limit: z.number().int().positive().max(100).optional(),
   cursor: z.string().optional(),
 }
+export const workspaceChoice = z.object({
+  mode: z.enum(['local', 'worktree']),
+  baseRef: z.string().min(1).optional(),
+  branch: z.string().min(1).optional(),
+})
 export const createProject = z.object({
   name: z.string().trim().min(1),
   path: z.string().min(1),
@@ -17,6 +22,7 @@ export const createSession = z.object({
   kind: z.enum(['chat', 'subagent', 'epic_worker']).default('chat'),
   parentSessionId: id.nullable().optional(),
   accountId: id.nullable().optional(),
+  workspace: workspaceChoice.optional(),
 })
 export const prompt = z.object({
   sessionId: id,
@@ -37,6 +43,7 @@ export const promoteDraft = z.object({
   text: z.string().min(1),
   attachmentIds: z.array(id).optional(),
   accountId: id.nullable().optional(),
+  workspace: workspaceChoice.optional(),
   clientItemId: z
     .string()
     .regex(/^client_[0-9a-f]{32}$/)
@@ -75,6 +82,12 @@ export const answerQuestion = z
     },
   )
 export const cancelQuestion = z.object({ sessionId: id, questionId: id })
+export const setSessionWorkspace = z.object({
+  sessionId: id,
+  mode: z.enum(['local', 'worktree']),
+  branch: z.string().min(1).optional(),
+  baseRef: z.string().min(1).optional(),
+})
 // HTTP body for POST /api/sessions/:id/uploads. The 1 GiB ceiling is enforced
 // by the upload store so an oversize init answers 413, not a validation error.
 export const uploadInitSchema = z.object({
@@ -186,6 +199,7 @@ export const commandSchemas = {
   epicResume,
   epicCancel,
   search,
+  setSessionWorkspace,
 } as const
 
 export type CreateProject = z.infer<typeof createProject>
@@ -193,6 +207,8 @@ export type ArchiveProject = z.infer<typeof archiveProject>
 export type CreateSession = z.infer<typeof createSession>
 export type Prompt = z.infer<typeof prompt>
 export type PromoteDraft = z.infer<typeof promoteDraft>
+export type WorkspaceChoice = z.infer<typeof workspaceChoice>
+export type SetSessionWorkspace = z.infer<typeof setSessionWorkspace>
 export type Interrupt = z.infer<typeof interrupt>
 export type Fork = z.infer<typeof fork>
 export type Btw = z.infer<typeof btw>

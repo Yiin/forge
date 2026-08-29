@@ -8,13 +8,13 @@ describe('session REST responses', () => {
     db.exec(`
       CREATE TABLE sessions (
         id TEXT PRIMARY KEY, project_id TEXT, harness TEXT, title TEXT, cwd TEXT,
-        worktree_path TEXT, provider_session_id TEXT, kind TEXT, retention TEXT,
+        worktree_path TEXT, branch TEXT, provider_session_id TEXT, kind TEXT, retention TEXT,
         parent_session_id TEXT, forked_at_seq INTEGER, spawned_by_seq INTEGER,
         epic_run_id TEXT, account_id TEXT, model TEXT, status TEXT, auto_resume INTEGER,
         created_at INTEGER, last_activity_at INTEGER, deleted_at INTEGER
       );
       INSERT INTO sessions VALUES
-        ('session', 'project', 'claude', 'Chat', '/tmp', NULL, NULL, 'chat',
+        ('session', 'project', 'claude', 'Chat', '/tmp', NULL, NULL, NULL, 'chat',
          'permanent', NULL, NULL, NULL, NULL, 'account-2', 'model-2', 'idle', 0, 10, 20, NULL);
     `)
     const manager = {

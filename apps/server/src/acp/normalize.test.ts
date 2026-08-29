@@ -14,7 +14,7 @@ function fixture() {
   databases.push(db)
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, path TEXT, created_at INTEGER);
-    CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT, harness TEXT, title TEXT, cwd TEXT, kind TEXT, retention TEXT NOT NULL DEFAULT 'permanent', parent_session_id TEXT, forked_at_seq INTEGER, fork_request_id TEXT, context_method TEXT, context_confidence TEXT, epic_run_id TEXT, account_id TEXT, status TEXT, auto_resume INTEGER, created_at INTEGER, last_activity_at INTEGER);
+    CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT, harness TEXT, title TEXT, cwd TEXT, worktree_path TEXT, branch TEXT, kind TEXT, retention TEXT NOT NULL DEFAULT 'permanent', parent_session_id TEXT, forked_at_seq INTEGER, fork_request_id TEXT, context_method TEXT, context_confidence TEXT, epic_run_id TEXT, account_id TEXT, status TEXT, auto_resume INTEGER, created_at INTEGER, last_activity_at INTEGER);
     CREATE TABLE messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, turn_id TEXT, item_id TEXT, role TEXT, type TEXT, content TEXT, created_at INTEGER);
     CREATE VIRTUAL TABLE messages_fts USING fts5(text, item_id UNINDEXED, seq UNINDEXED);
   `)

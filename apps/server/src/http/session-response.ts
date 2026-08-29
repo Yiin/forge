@@ -13,6 +13,7 @@ export function sessionResponse(row: SessionRow): SessionResponse {
     title: row.title,
     cwd: row.cwd,
     worktreePath: row.worktree_path ?? null,
+    branch: row.branch ?? null,
     providerSessionId: row.provider_session_id ?? null,
     model: row.model ?? null,
     kind: row.kind,
