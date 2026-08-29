@@ -94,6 +94,55 @@ describe('ACP update normalization', () => {
     expect(JSON.parse(results.at(-1)!.content).subagent.status).toBe('unknown')
   })
 
+  it('closes unfinished tools at turn end with their call item', async () => {
+    const { db, session } = fixture()
+    const normalizer = new AcpNormalizer({ db })
+    normalizer.beginTurn(session.id, 'unfinished-tool-turn')
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool-1',
+        title: 'Read',
+        rawInput: { path: 'x' },
+      }),
+    )
+    normalizer.endTurn(session.id, { stopReason: 'cancelled' })
+    const rows = replaySince(db, 0, [session.id]) as Array<{
+      type: string
+      item_id: string
+      content: string
+    }>
+    const result = rows.find((row) => row.type === 'tool_result')
+    expect(result?.item_id).toBe('tool-1')
+    expect(JSON.parse(result!.content)).toMatchObject({
+      toolCallId: 'tool-1',
+      isError: true,
+    })
+  })
+
+  it('closes plan items immediately', async () => {
+    const { db, session } = fixture()
+    const normalizer = new AcpNormalizer({ db })
+    normalizer.beginTurn(session.id, 'plan-turn')
+    await normalizer.handle(
+      notification(session.id, {
+        sessionUpdate: 'plan',
+        entries: [{ content: 'Read the file' }],
+      }),
+    )
+    const rows = replaySince(db, 0, [session.id]) as Array<{
+      type: string
+      item_id: string
+      content: string
+    }>
+    const planRows = rows.filter((row) => row.type.startsWith('tool_'))
+    expect(planRows.map((row) => row.type)).toEqual([
+      'tool_call',
+      'tool_result',
+    ])
+    expect(planRows[0]?.item_id).toBe(planRows[1]?.item_id)
+  })
+
   it('ignores malformed completion signals and finalizes them honestly', async () => {
     const { db, session } = fixture()
     const logger = { warn: vi.fn() }

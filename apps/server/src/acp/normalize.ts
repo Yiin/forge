@@ -47,7 +47,12 @@ export class AcpNormalizer {
   >()
   private readonly turns = new Map<
     string,
-    { turnId: string; closed: boolean; subagents: SubagentTurn }
+    {
+      turnId: string
+      closed: boolean
+      subagents: SubagentTurn
+      openTools: Map<string, string>
+    }
   >()
   private readonly commands = new Map<string, readonly unknown[]>()
   private readonly logger: Logger
@@ -67,6 +72,7 @@ export class AcpNormalizer {
       turnId,
       closed: false,
       subagents: createSubagentTurn(),
+      openTools: new Map(),
     })
     this.append(sessionId, turnId, newItem(), 'turn_start', {
       type: 'turn_start',
@@ -82,6 +88,7 @@ export class AcpNormalizer {
       turnId,
       closed: false,
       subagents: createSubagentTurn(),
+      openTools: new Map(),
     })
     this.append(sessionId, turnId, newItem(), 'turn_start', {
       type: 'turn_start',
@@ -177,9 +184,14 @@ export class AcpNormalizer {
   async handle(notification: acp.SessionNotification) {
     const { sessionId, update } = notification
     const state = this.turns.get(sessionId)
-    if (state?.closed) return
-    const turnId = this.turnFor(sessionId)
     const value = update as any
+    if (
+      state?.closed &&
+      (value.sessionUpdate !== 'tool_call_update' ||
+        (value.status !== 'completed' && value.status !== 'failed'))
+    )
+      return
+    const turnId = state?.closed ? state.turnId : this.turnFor(sessionId)
     switch ((value as { sessionUpdate?: string }).sessionUpdate) {
       case 'agent_message_chunk':
         this.delta(sessionId, turnId, 'text_delta', textOf(value.content))
@@ -194,6 +206,8 @@ export class AcpNormalizer {
             stateFor(this.turns, sessionId),
             value,
           )
+          const itemId = value.toolCallId
+          this.turns.get(sessionId)!.openTools.set(itemId, itemId)
           this.append(sessionId, turnId, value.toolCallId, 'tool_call', {
             type: 'tool_call',
             toolCallId: value.toolCallId,
@@ -223,7 +237,7 @@ export class AcpNormalizer {
             (!subagent ||
               subagent.status === 'completed' ||
               subagent.status === 'failed')
-          )
+          ) {
             this.append(sessionId, turnId, value.toolCallId, 'tool_result', {
               type: 'tool_result',
               toolCallId: value.toolCallId,
@@ -231,16 +245,27 @@ export class AcpNormalizer {
               isError: value.status === 'failed',
               ...(subagent ? { subagent } : {}),
             })
+            this.turns.get(sessionId)!.openTools.delete(value.toolCallId)
+          }
         }
         return
       case 'plan':
         this.flush(sessionId, turnId)
-        this.append(sessionId, turnId, newItem(), 'tool_call', {
-          type: 'tool_call',
-          toolCallId: newItem(),
-          name: 'plan',
-          input: value.entries,
-        })
+        {
+          const itemId = newItem()
+          this.append(sessionId, turnId, itemId, 'tool_call', {
+            type: 'tool_call',
+            toolCallId: itemId,
+            name: 'plan',
+            input: value.entries,
+          })
+          this.append(sessionId, turnId, itemId, 'tool_result', {
+            type: 'tool_result',
+            toolCallId: itemId,
+            output: null,
+            isError: false,
+          })
+        }
         return
       case 'available_commands_update':
         this.commands.set(sessionId, value.availableCommands)
@@ -264,14 +289,33 @@ export class AcpNormalizer {
     const current = this.turns.get(sessionId)
     if (!current || current.closed) return
     this.flush(sessionId, current.turnId)
-    for (const subagent of finalizeSubagents(current.subagents))
-      this.append(sessionId, current.turnId, newItem(), 'tool_result', {
+    const isError = response.stopReason !== 'end_turn'
+    for (const [toolCallId, itemId] of current.openTools) {
+      const subagent = current.subagents.records.find(
+        (record) => record.toolCallId === toolCallId,
+      )
+      if (subagent) continue
+      this.append(sessionId, current.turnId, itemId, 'tool_result', {
         type: 'tool_result',
-        toolCallId: subagent.toolCallId,
+        toolCallId,
         output: null,
-        isError: false,
-        subagent,
+        isError,
       })
+    }
+    for (const subagent of finalizeSubagents(current.subagents))
+      this.append(
+        sessionId,
+        current.turnId,
+        subagent.toolCallId,
+        'tool_result',
+        {
+          type: 'tool_result',
+          toolCallId: subagent.toolCallId,
+          output: null,
+          isError: false,
+          subagent,
+        },
+      )
     this.append(sessionId, current.turnId, newItem(), 'turn_end', {
       type: 'turn_end',
       stopReason: response.stopReason,
