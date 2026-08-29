@@ -7,6 +7,43 @@ import { SessionManager } from './manager.js'
 import type { HarnessFactory, HarnessHandle } from './harness.js'
 
 describe('session harness selection', () => {
+  it('uses the client item id for the user text row', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: async () => undefined,
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+    await manager.prompt(
+      session.id,
+      'hello',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'client_1234567890abcdef1234567890abcdef',
+    )
+    expect(
+      db
+        .prepare(
+          "SELECT item_id FROM messages WHERE session_id = ? AND type = 'text_delta'",
+        )
+        .get(session.id),
+    ).toEqual({ item_id: 'client_1234567890abcdef1234567890abcdef' })
+    manager.close()
+  })
+
   it('changes and persists the ACP model before the prompt', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)

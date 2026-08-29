@@ -4,7 +4,7 @@ import { SessionHeader } from '../components/chat/SessionHeader'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
-import { connectForgeSocket, normalizeServerEvent } from '../lib/socket'
+import { connectForgeSocket } from '../lib/socket'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore, type SessionSummary } from '../stores/sessions'
 import { PathSwitcher } from '../components/chat/PathSwitcher'
@@ -128,11 +128,7 @@ export function SessionRoute() {
           )
           .then((messages: unknown) => {
             if (!Array.isArray(messages)) return
-            for (const message of messages) {
-              const event = normalizeServerEvent(message)
-              if (event && typeof event === 'object' && 'msg' in event)
-                useMessagesStore.getState().applyEvent(event as never)
-            }
+            useMessagesStore.getState().loadMessages(sessionId, messages)
           })
           .catch(() => undefined)
       } catch (error) {
@@ -188,14 +184,27 @@ export function SessionRoute() {
           params: { sessionId: result.sessionId },
         })
       } else {
-        await api.prompt({
+        const clientItemId = `client_${crypto.randomUUID().replaceAll('-', '')}`
+        useMessagesStore.getState().addPending({
           sessionId,
+          itemId: clientItemId,
           text: value,
-          attachmentIds,
-          harness: selection.harness || harness,
-          accountId: selection.accountId,
-          model: selection.model,
+          createdAt: new Date().toISOString(),
         })
+        try {
+          await api.prompt({
+            sessionId,
+            text: value,
+            attachmentIds,
+            harness: selection.harness || harness,
+            accountId: selection.accountId,
+            model: selection.model,
+            clientItemId,
+          })
+        } catch (error) {
+          useMessagesStore.getState().removePending(sessionId, clientItemId)
+          throw error
+        }
         setHarness(selection.harness || harness)
         setAccountId(selection.accountId)
         setModel(selection.model)

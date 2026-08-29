@@ -59,6 +59,27 @@ describe('chat render model', () => {
       { kind: 'message', id: 'i', seq: 1, role: 'agent', text: 'hello' },
     ])
   })
+  it('appends pending user messages after server items', () => {
+    const items = toRenderModel(
+      [message({ type: 'text_delta', text: 'reply' })],
+      false,
+      [],
+      [
+        {
+          sessionId: 's',
+          itemId: 'client_1234567890abcdef1234567890abcdef',
+          text: 'hello',
+          createdAt: 'now',
+        },
+      ],
+    )
+    expect(items.at(-1)).toMatchObject({
+      kind: 'message',
+      role: 'user',
+      text: 'hello',
+      pending: true,
+    })
+  })
   it('folds tool states and preserves input and output', () => {
     const items = toRenderModel([
       message({

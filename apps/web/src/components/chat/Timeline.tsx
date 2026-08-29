@@ -30,14 +30,17 @@ export function Timeline({
   const messages = useMessagesStore(
     (state) => state.bySession[sessionId] ?? EMPTY_MESSAGES,
   )
+  const pending = useMessagesStore(
+    (state) => state.pendingBySession[sessionId] ?? EMPTY_MESSAGES,
+  )
   const sessions = useSessionsStore((state) => state.sessions)
   const children = useMemo(
     () => sessions.filter((session) => session.parentSessionId === sessionId),
     [sessions, sessionId],
   )
   const items = useMemo(
-    () => toRenderModel(messages, resumedWithRecap, children),
-    [messages, resumedWithRecap, children],
+    () => toRenderModel(messages, resumedWithRecap, children, pending),
+    [messages, resumedWithRecap, children, pending],
   )
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)

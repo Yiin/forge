@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { foldEvent } from './messages'
+import { foldEvent, useMessagesStore } from './messages'
 import type { ServerEvent } from '@forge/protocol/events'
 import type { Message } from '@forge/protocol/message'
 
@@ -169,5 +169,35 @@ describe('message folding', () => {
       event(4, message({})),
     )
     expect(state).toEqual({ bySession: {}, lastSeq: 4 })
+  })
+
+  it('reconciles pending rows when the server item arrives', () => {
+    const pending = {
+      sessionId: 'ses-1',
+      itemId: 'client_1234567890abcdef1234567890abcdef',
+      text: 'hello',
+      createdAt: 'now',
+    }
+    const state = foldEvent(
+      {
+        bySession: {},
+        lastSeq: 0,
+        pendingBySession: { 'ses-1': [pending] },
+      },
+      event(1, message({ itemId: pending.itemId, role: 'user' })),
+    )
+    expect(state.bySession['ses-1']).toHaveLength(1)
+    expect(state.pendingBySession?.['ses-1']).toEqual([])
+  })
+
+  it('loads older history despite the global cursor', () => {
+    useMessagesStore.getState().reset()
+    useMessagesStore.getState().loadMessages('ses-1', [message({ seq: 2 })])
+    useMessagesStore
+      .getState()
+      .loadMessages('ses-2', [message({ sessionId: 'ses-2', seq: 1 })])
+    const state = useMessagesStore.getState()
+    expect(state.bySession['ses-2']).toHaveLength(1)
+    expect(state.lastSeq).toBe(2)
   })
 })

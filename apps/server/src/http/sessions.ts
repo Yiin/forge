@@ -91,6 +91,7 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
         value.data.harness,
         value.data.accountId,
         value.data.model,
+        value.data.clientItemId,
       )
       return c.json({ ok: true })
     } catch (error) {

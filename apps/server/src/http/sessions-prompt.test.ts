@@ -52,6 +52,13 @@ describe('prompt REST lifecycle', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ ok: true })
     expect(promptCalls).toBe(1)
+
+    const malformed = await app.request(`/api/sessions/${session.id}/prompt`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'hello', clientItemId: 'client_bad' }),
+    })
+    expect(malformed.status).toBe(400)
     expect(
       db
         .prepare(

@@ -25,6 +25,10 @@ export const prompt = z.object({
   harness: z.string().min(1).optional(),
   accountId: id.nullable().optional(),
   model: z.string().min(1).optional(),
+  clientItemId: z
+    .string()
+    .regex(/^client_[0-9a-f]{32}$/)
+    .optional(),
 })
 export const promoteDraft = z.object({
   draftId: id,
@@ -33,6 +37,10 @@ export const promoteDraft = z.object({
   text: z.string().min(1),
   attachmentIds: z.array(id).optional(),
   accountId: id.nullable().optional(),
+  clientItemId: z
+    .string()
+    .regex(/^client_[0-9a-f]{32}$/)
+    .optional(),
 })
 export const interrupt = z.object({ sessionId: id })
 export const fork = z.object({

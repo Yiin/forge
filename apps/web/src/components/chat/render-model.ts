@@ -1,5 +1,6 @@
 import type { Message } from '@forge/protocol/message'
 import type { SubagentSession } from './subagent'
+import type { PendingUserMessage } from '../../stores/messages'
 
 export type ToolState = 'running' | 'done' | 'error'
 export type ActivityState = ToolState | 'unknown'
@@ -11,6 +12,7 @@ export type ChatRenderItem =
       role: 'user' | 'agent'
       text: string
       thought?: boolean
+      pending?: boolean
     }
   | {
       kind: 'tool'
@@ -125,6 +127,7 @@ export function toRenderModel(
   messages: Message[],
   resumedWithRecap = false,
   children: SubagentSession[] = [],
+  pending: PendingUserMessage[] = [],
 ): ChatRenderItem[] {
   const result: ChatRenderItem[] = resumedWithRecap
     ? [{ kind: 'system', id: 'resumed-recap', text: 'Resumed with recap' }]
@@ -252,7 +255,21 @@ export function toRenderModel(
     const anchorItem = messages.find((message) => message.seq === anchor)
     if (anchorItem) childTurnIds.set(child.id, anchorItem.turnId)
   }
-  return groupActivity(placed, turnIds, childTurnIds)
+  return groupActivity(
+    [
+      ...placed,
+      ...pending.map((item) => ({
+        kind: 'message' as const,
+        id: item.itemId,
+        seq: Number.MAX_SAFE_INTEGER,
+        role: 'user' as const,
+        text: item.text,
+        pending: true,
+      })),
+    ],
+    turnIds,
+    childTurnIds,
+  )
 }
 
 import { placeSubagents } from './subagent'

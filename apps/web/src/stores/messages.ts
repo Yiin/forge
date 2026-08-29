@@ -4,12 +4,24 @@ import type { Message, MessageContent } from '@forge/protocol/message'
 
 export type TimelineItem = Message
 export type VolatileEvent = Ephemeral
+export type PendingUserMessage = {
+  sessionId: string
+  itemId: string
+  text: string
+  createdAt: string
+}
+type FoldedMessagesState = Pick<MessagesState, 'bySession' | 'lastSeq'> &
+  Partial<Pick<MessagesState, 'pendingBySession'>>
 type MessagesState = {
   bySession: Record<string, TimelineItem[]>
+  pendingBySession: Record<string, PendingUserMessage[]>
   lastSeq: number
   volatile: VolatileEvent[]
   applyEvent: (event: ServerEvent) => void
   loadMessages: (sessionId: string, messages: Message[]) => void
+  addPending: (pending: PendingUserMessage) => void
+  removePending: (sessionId: string, itemId: string) => void
+  clearPending: (sessionId: string) => void
   applyEphemeral: (event: VolatileEvent) => void
   reset: () => void
 }
@@ -42,11 +54,13 @@ function toolCallId(message: Message): string | undefined {
 }
 
 export function foldEvent(
-  state: Pick<MessagesState, 'bySession' | 'lastSeq'>,
+  state: Pick<MessagesState, 'bySession' | 'lastSeq'> &
+    Partial<Pick<MessagesState, 'pendingBySession'>>,
   event: ServerEvent,
-): Pick<MessagesState, 'bySession' | 'lastSeq'> {
+): FoldedMessagesState {
   if (event.seq <= state.lastSeq) return state
   const items = state.bySession[event.sessionId] ?? []
+  const pending = state.pendingBySession?.[event.sessionId] ?? []
   // Fold by itemId first. Older rows can lack the server-generated itemId,
   // so use the ACP toolCallId for lifecycle updates and results.
   let index = event.msg.itemId
@@ -65,12 +79,19 @@ export function foldEvent(
   else nextItems[index] = foldMessage(nextItems[index], event.msg)
   return {
     bySession: { ...state.bySession, [event.sessionId]: nextItems },
+    pendingBySession: {
+      ...state.pendingBySession,
+      [event.sessionId]: pending.filter(
+        (item) => item.itemId !== event.msg.itemId,
+      ),
+    },
     lastSeq: event.seq,
   }
 }
 
 export const useMessagesStore = create<MessagesState>((set) => ({
   bySession: {},
+  pendingBySession: {},
   lastSeq: 0,
   volatile: [],
   applyEvent: (event) => set((state) => foldEvent(state, event)),
@@ -86,8 +107,46 @@ export const useMessagesStore = create<MessagesState>((set) => ({
           ).values(),
         ).sort((left, right) => left.seq - right.seq),
       },
+      pendingBySession: {
+        ...state.pendingBySession,
+        [sessionId]: (state.pendingBySession[sessionId] ?? []).filter(
+          (pending) =>
+            !messages.some((message) => message.itemId === pending.itemId),
+        ),
+      },
+      lastSeq: Math.max(
+        state.lastSeq,
+        ...messages.map((message) => message.seq),
+        0,
+      ),
+    })),
+  addPending: (pending) =>
+    set((state) => ({
+      pendingBySession: {
+        ...state.pendingBySession,
+        [pending.sessionId]: [
+          ...(state.pendingBySession[pending.sessionId] ?? []).filter(
+            (item) => item.itemId !== pending.itemId,
+          ),
+          pending,
+        ],
+      },
+    })),
+  removePending: (sessionId, itemId) =>
+    set((state) => ({
+      pendingBySession: {
+        ...state.pendingBySession,
+        [sessionId]: (state.pendingBySession[sessionId] ?? []).filter(
+          (item) => item.itemId !== itemId,
+        ),
+      },
+    })),
+  clearPending: (sessionId) =>
+    set((state) => ({
+      pendingBySession: { ...state.pendingBySession, [sessionId]: [] },
     })),
   applyEphemeral: (event) =>
     set((state) => ({ volatile: [...state.volatile, event] })),
-  reset: () => set({ bySession: {}, lastSeq: 0, volatile: [] }),
+  reset: () =>
+    set({ bySession: {}, pendingBySession: {}, lastSeq: 0, volatile: [] }),
 }))

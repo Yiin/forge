@@ -77,26 +77,34 @@ export function MessageRow({
     return (
       <article
         className="chat-row chat-user group flex flex-col items-end gap-1"
-        data-seq={item.seq}
+        data-seq={item.pending ? undefined : item.seq}
+        data-pending={item.pending ? 'true' : undefined}
+        aria-busy={item.pending ? true : undefined}
       >
         <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3 text-sm text-foreground">
           <SkillChipText text={item.text} skills={[]} />
         </div>
-        <div className={META_ROW_CLASS}>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Copy message"
-            onClick={() => void copy()}
-          >
-            <Copy className="size-3.5" />
-          </Button>
-          {sessionId && (
-            <Button variant="ghost" size="xs" onClick={() => void fork(false)}>
-              <Pencil className="size-3.5" /> Edit
+        {!item.pending && (
+          <div className={META_ROW_CLASS}>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Copy message"
+              onClick={() => void copy()}
+            >
+              <Copy className="size-3.5" />
             </Button>
-          )}
-        </div>
+            {sessionId && (
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => void fork(false)}
+              >
+                <Pencil className="size-3.5" /> Edit
+              </Button>
+            )}
+          </div>
+        )}
       </article>
     )
   return (

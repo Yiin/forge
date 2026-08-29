@@ -344,6 +344,7 @@ export class SessionManager {
     harness?: string,
     accountId?: string | null,
     model?: string,
+    clientItemId?: string,
   ) {
     let row = getSession(this.db, id) as SessionRow | undefined
     if (!row) throw new Error('Session not found')
@@ -435,7 +436,7 @@ export class SessionManager {
     appendMessage(this.db, {
       sessionId: id,
       turnId,
-      itemId: makeId('item_'),
+      itemId: clientItemId ?? makeId('item_'),
       role: 'user',
       type: 'text_delta',
       content: { type: 'text_delta', text } as never,
@@ -453,6 +454,7 @@ export class SessionManager {
     harness?: string,
     accountId?: string | null,
     model?: string,
+    clientItemId?: string,
   ) {
     const accepted = await this.acceptPrompt(
       id,
@@ -462,6 +464,7 @@ export class SessionManager {
       harness,
       accountId,
       model,
+      clientItemId,
     )
     if (!accepted) return
     // Startup errors become timeline errors after acceptance. This keeps the
@@ -560,6 +563,7 @@ export class SessionManager {
       text: string
       attachmentIds?: string[]
       accountId?: string | null
+      clientItemId?: string
     },
     requestId: string,
     uploads?: UploadStore,
@@ -607,6 +611,8 @@ export class SessionManager {
         input.attachmentIds,
         input.harness,
         input.accountId,
+        undefined,
+        input.clientItemId,
       )
       return { sessionId: session.id }
     } catch (error) {
