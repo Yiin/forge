@@ -62,6 +62,7 @@ import { LoginManager } from './accounts/login.js'
 import { unsupportedUsageProbe, UsagePoller } from './accounts/usagePoller.js'
 import { codexUsageProbe } from './accounts/probes/codex.js'
 import { claudeUsageProbe } from './accounts/probes/claude.js'
+import { refreshAccountModels } from './accounts/models.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -131,6 +132,7 @@ export function createApp(
   configState?: ConfigState,
   loginManager?: LoginManager,
   usagePoller?: UsagePoller,
+  refreshModels?: (accountId: string) => void,
 ) {
   const app = new Hono()
 
@@ -146,7 +148,10 @@ export function createApp(
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
-    app.route('/', gitRoutes({ db: uploadStore.database, dataDir: uploadStore.dataDir }))
+    app.route(
+      '/',
+      gitRoutes({ db: uploadStore.database, dataDir: uploadStore.dataDir }),
+    )
     app.route('/', fsBrowseRoutes())
     app.route('/', searchRoutes(uploadStore.database))
     app.route('/', harnessRoutes({ configState, db: uploadStore.database }))
@@ -166,6 +171,7 @@ export function createApp(
         configState,
         loginManager,
         usagePoller,
+        refreshModels,
       }),
     )
     app.route('/', serverConfigRoutes())
@@ -301,6 +307,31 @@ export function startServer(
       ['pi', unsupportedUsageProbe],
     ]),
   })
+  const refreshModels = (accountId: string) => {
+    const account = accountStore.get(accountId)
+    const entry = account && configState.current.harness[account.harnessKey]
+    if (!account || !entry || entry.protocol !== 'acp') return
+    if (!['claude', 'kimi', 'opencode'].includes(account.harnessKey)) return
+    void refreshAccountModels(db, {
+      accountId,
+      harnessKey: account.harnessKey,
+      probe: async () => {
+        const harnessProcess = factory(account.harnessKey, accountId)
+        if (!harnessProcess.newSession) return []
+        const result = await harnessProcess.newSession(
+          {
+            id: `model-probe-${accountId}`,
+            cwd: globalThis.process.cwd(),
+            harness: account.harnessKey,
+          },
+          () => undefined,
+          () => undefined,
+        )
+        await result.handle.kill()
+        return result.availableModels ?? result.handle.availableModels ?? []
+      },
+    })
+  }
   const harnessHealth = createHarnessHealthReader({ db, configState, manager })
   // Settle persisted turns before exposing the port. Respawn work continues
   // from the settled state without delaying health checks.
@@ -326,6 +357,7 @@ export function startServer(
     configState,
     loginManager,
     usagePoller,
+    refreshModels,
   )
   usagePoller.start()
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
@@ -478,7 +510,9 @@ async function startE2eServer(): Promise<void> {
           })),
         )
       }
-      const gitPath = url.pathname.match(/^\/api\/projects\/([^/]+)\/git\/(status|branches)$/)
+      const gitPath = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/git\/(status|branches)$/,
+      )
       if (request.method === 'GET' && gitPath) {
         if (gitPath[2] === 'status')
           return response({
@@ -493,17 +527,37 @@ async function startE2eServer(): Promise<void> {
           isRepo: true,
           hasRemote: false,
           refs: [
-            { name: 'main', current: true, isDefault: true, isRemote: false, remoteName: null, worktreePath: null },
-            { name: 'feature/demo', current: false, isDefault: false, isRemote: false, remoteName: null, worktreePath: null },
+            {
+              name: 'main',
+              current: true,
+              isDefault: true,
+              isRemote: false,
+              remoteName: null,
+              worktreePath: null,
+            },
+            {
+              name: 'feature/demo',
+              current: false,
+              isDefault: false,
+              isRemote: false,
+              remoteName: null,
+              worktreePath: null,
+            },
           ],
           nextCursor: null,
           totalCount: 2,
         })
       }
-      const worktreePath = url.pathname.match(/^\/api\/projects\/([^/]+)\/git\/worktrees$/)
+      const worktreePath = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/git\/worktrees$/,
+      )
       if (worktreePath) {
         if (request.method === 'GET') return response({ worktrees: [] })
-        if (request.method === 'POST') return response({ path: '/tmp/e2e-project-worktree', branch: 'forge/abcd1234' }, 201)
+        if (request.method === 'POST')
+          return response(
+            { path: '/tmp/e2e-project-worktree', branch: 'forge/abcd1234' },
+            201,
+          )
         if (request.method === 'DELETE') return response({ ok: true })
       }
       const project = url.pathname.match(/^\/api\/projects\/([^/]+)\/sessions$/)
@@ -533,7 +587,9 @@ async function startE2eServer(): Promise<void> {
       const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/prompt$/)
       const promote = url.pathname.match(/^\/api\/drafts\/([^/]+)\/promote$/)
       const sessionRow = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
-      const workspaceSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/workspace$/)
+      const workspaceSession = url.pathname.match(
+        /^\/api\/sessions\/([^/]+)\/workspace$/,
+      )
       const shapeSession = (session: E2eState['sessions'][number]) => ({
         ...session,
         branch: 'main',
@@ -560,7 +616,9 @@ async function startE2eServer(): Promise<void> {
           : response({ error: 'Session not found' }, 404)
       }
       if (request.method === 'PATCH' && workspaceSession) {
-        const session = state.sessions.find((entry) => entry.id === workspaceSession[1])
+        const session = state.sessions.find(
+          (entry) => entry.id === workspaceSession[1],
+        )
         return session
           ? response(shapeSession(session))
           : response({ error: 'Session not found' }, 404)

@@ -75,6 +75,7 @@ export class SessionManager {
   }
   private forgetHandle(id: string) {
     this.handles.delete(id)
+    this.availableModels.delete(id)
     this.handleHarnesses.delete(id)
   }
   models(id: string) {

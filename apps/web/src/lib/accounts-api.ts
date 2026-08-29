@@ -6,6 +6,7 @@ import {
   type PatchHarnessAccount,
 } from '@forge/protocol/accounts'
 import { harnessHealthResponseSchema } from '@forge/protocol/status'
+import type { ModelCatalog } from '@forge/protocol/models'
 import {
   KIND_LABELS,
   formatAccountDisplayName,
@@ -297,9 +298,9 @@ export class AccountsApi {
   }
 
   getModels(accountId: string) {
-    return this.get<
-      Array<{ slug: string; name: string; subProvider?: string }>
-    >(`/api/harness-accounts/${encodeURIComponent(accountId)}/models`)
+    return this.get<ModelCatalog>(
+      `/api/harness-accounts/${encodeURIComponent(accountId)}/models`,
+    )
   }
 
   loginStatus(terminalId: string, listener: LoginStatusListener) {

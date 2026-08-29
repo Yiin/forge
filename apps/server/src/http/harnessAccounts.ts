@@ -14,6 +14,7 @@ import { LoginManager } from '../accounts/login.js'
 import type { UsagePoller } from '../accounts/usagePoller.js'
 import type { EventBus } from '../events/bus.js'
 import type { ConfigState } from '../config.js'
+import { readAccountModels, isAccountModelsStale } from '../accounts/models.js'
 
 const loginInputSchema = z
   .object({
@@ -29,6 +30,7 @@ export function harnessAccountRoutes(
     configState?: ConfigState
     loginManager?: LoginManager
     usagePoller?: UsagePoller
+    refreshModels?: (accountId: string) => void
   },
 ) {
   const store = new HarnessAccountStore(db)
@@ -133,7 +135,18 @@ export function harnessAccountRoutes(
   app.get('/api/harness-accounts/:id/models', (c) => {
     if (!store.get(c.req.param('id')))
       return c.json({ error: 'Account not found' }, 404)
-    return c.json([])
+    const catalog = readAccountModels(db, c.req.param('id'))
+    if (isAccountModelsStale(catalog))
+      options?.refreshModels?.(c.req.param('id'))
+    return c.json(
+      catalog ?? {
+        accountId: c.req.param('id'),
+        models: [],
+        source: 'none',
+        updatedAt: 0,
+        harnessKey: store.get(c.req.param('id'))!.kind,
+      },
+    )
   })
   app.get('/api/harness-accounts/logins/:loginId', (c) => {
     const state = login?.get(c.req.param('loginId'))

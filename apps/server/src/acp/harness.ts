@@ -15,6 +15,7 @@ import type { EventBus } from '../events/bus.js'
 import { readClaudeContextUsage } from '../accounts/context/claudeTranscript.js'
 import { readCodexRollout } from '../accounts/context/codexRollout.js'
 import { recordUsageSnapshot } from '../accounts/usage.js'
+import { writeAccountModels } from '../accounts/models.js'
 
 type Db = {
   exec(sql: string): unknown
@@ -40,6 +41,16 @@ export function acpHarness(
   entry: HarnessConfig,
   deps: AcpHarnessDeps,
 ): HarnessProcess {
+  const rememberCatalog = (models: HarnessModel[]) => {
+    if (!deps.accountId || !models.length) return
+    writeAccountModels(deps.db, {
+      accountId: deps.accountId,
+      harnessKey: entry.name,
+      models,
+      source: 'acp',
+      updatedAt: Date.now(),
+    })
+  }
   const stored = getHarnessCapabilities(deps.db as never, entry.name)
   const capabilities = stored?.capabilities as
     Record<string, unknown> | undefined
@@ -54,7 +65,9 @@ export function acpHarness(
       const id = providerId(response)
       if (!id) throw new Error('ACP newSession did not return a session id')
       saveProviderSession(deps.db, session.id, id)
-      return handle(client, normalizer, id, models(response), session)
+      const available = models(response)
+      rememberCatalog(available)
+      return handle(client, normalizer, id, available, session)
     },
     async newSession(session, onItem, onExit) {
       const { client, normalizer } = await createClient(session, onItem, onExit)
@@ -62,10 +75,12 @@ export function acpHarness(
       const id = providerId(response)
       if (!id) throw new Error('ACP newSession did not return a session id')
       saveProviderSession(deps.db, session.id, id)
+      const available = models(response)
+      rememberCatalog(available)
       return {
-        handle: handle(client, normalizer, id, models(response), session),
+        handle: handle(client, normalizer, id, available, session),
         proven: true,
-        availableModels: models(response),
+        availableModels: available,
       }
     },
     async loadSession(session, onItem, onExit) {
@@ -89,10 +104,12 @@ export function acpHarness(
           proven: false,
         }
       saveProviderSession(deps.db, session.id, id)
+      const available = models(response)
+      rememberCatalog(available)
       return {
-        handle: handle(client, normalizer, id, models(response), session),
+        handle: handle(client, normalizer, id, available, session),
         proven: true,
-        availableModels: models(response),
+        availableModels: available,
       }
     },
     async fork(session, onItem, onExit) {
@@ -113,11 +130,13 @@ export function acpHarness(
           proven: false,
         }
       saveProviderSession(deps.db, session.id, id)
+      const available = models(response)
+      rememberCatalog(available)
       return {
-        handle: handle(client, normalizer, id, models(response), session),
+        handle: handle(client, normalizer, id, available, session),
         proven: true,
         providerSessionId: id,
-        availableModels: models(response),
+        availableModels: available,
       }
     },
   }

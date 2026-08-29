@@ -12,6 +12,7 @@ import { errorMessage } from '../error-message.js'
 import { sessionResponse, sessionResponses } from './session-response.js'
 import { gitStatus } from '../git/repo.js'
 import { runGit } from '../git/exec.js'
+import { readAccountModels } from '../accounts/models.js'
 
 export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
   const app = new Hono()
@@ -115,10 +116,17 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
   })
   app.get('/api/sessions/:id/models', (c) => {
     const row = manager.database
-      .prepare('SELECT id FROM sessions WHERE id = ?')
+      .prepare('SELECT id, account_id FROM sessions WHERE id = ?')
       .get(c.req.param('id'))
     return row
-      ? c.json({ models: manager.models(c.req.param('id')) })
+      ? c.json({
+          models: manager.models(c.req.param('id')).length
+            ? manager.models(c.req.param('id'))
+            : (readAccountModels(
+                manager.database,
+                String((row as { account_id?: string | null }).account_id),
+              )?.models ?? []),
+        })
       : c.json({ error: 'Session not found' }, 404)
   })
   app.get('/api/sessions/:id/config-options', (c) => {
