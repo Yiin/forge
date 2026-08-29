@@ -8,6 +8,7 @@
     "./message": "./src/message.ts",
     "./events": "./src/events.ts",
     "./commands": "./src/commands.ts",
+    "./session": "./src/session.ts",
     "./ws": "./src/ws.ts",
     "./status": "./src/status.ts",
     "./config": "./src/config.ts",

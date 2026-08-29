@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { DatabaseSync } from 'node:sqlite'
 import { createProject, listSessions } from '../db/queries.js'
 import type { UploadStore } from '../uploads/store.js'
+import { sessionResponses } from './session-response.js'
 
 export function workspaceRoutes(db: DatabaseSync, uploads?: UploadStore) {
   const app = new Hono()
@@ -23,7 +24,11 @@ export function workspaceRoutes(db: DatabaseSync, uploads?: UploadStore) {
   })
   app.get('/api/sessions', (c) => {
     const projectId = c.req.query('projectId')
-    return c.json({ sessions: listSessions(db, projectId) })
+    return c.json({
+      sessions: sessionResponses(
+        listSessions(db, projectId) as Array<Record<string, unknown>>,
+      ),
+    })
   })
   app.post('/api/sessions/:id', async (c) => {
     const body = (await c.req.json()) as { title?: string }

@@ -8,6 +8,7 @@ import {
 import type { SessionManager } from '../sessions/manager.js'
 import type { UploadStore } from '../uploads/store.js'
 import { errorMessage } from '../error-message.js'
+import { sessionResponse, sessionResponses } from './session-response.js'
 
 export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
   const app = new Hono()
@@ -39,14 +40,21 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
   })
   app.get('/api/sessions', (c) =>
     c.json(
-      manager.list(c.req.query('projectId'), c.req.query('parentSessionId')),
+      sessionResponses(
+        manager.list(
+          c.req.query('projectId'),
+          c.req.query('parentSessionId'),
+        ) as Array<Record<string, unknown>>,
+      ),
     ),
   )
   app.get('/api/sessions/:id', (c) => {
     const row = manager.database
       .prepare('SELECT * FROM sessions WHERE id = ?')
       .get(c.req.param('id'))
-    return row ? c.json(row) : c.json({ error: 'Session not found' }, 404)
+    return row
+      ? c.json(sessionResponse(row as Record<string, unknown>))
+      : c.json({ error: 'Session not found' }, 404)
   })
   app.get('/api/sessions/:id/messages', (c) => {
     const rows = manager.database
