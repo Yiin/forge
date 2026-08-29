@@ -42,7 +42,9 @@ defines product limits. `docs/architecture.md` is historical.
 - Usage sources that exist: Claude `GET https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer <accessToken from .credentials.json>` and header `anthropic-beta: oauth-2025-04-20` (buckets `five_hour`, `seven_day_oauth_apps`, plus model-scoped `limits[]` incl. Fable). Codex: spawn `codex -s read-only -a untrusted app-server`, JSON-RPC `account/read` + `account/rateLimits/read` with per-account `CODEX_HOME`. Kimi, grok, gemini, pi, and opencode expose no usage API; their limits are reactive only.
 - Isolation env vars: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `KIMI_SHARE_DIR`, `XDG_DATA_HOME`(+`OPENCODE_DB`), `GROK_HOME` (grok), `PI_CODING_AGENT_DIR` (pi).
 - On laptops, `grok`/`opencode`/`pi` are mise shims under `~/.local/share/mise/shims`; a service PATH without it marks them unavailable.
-- The e2e server (`FORGE_E2E=1`) is a separate Bun fake. e2e does not cover `startServer` code; the accounts contract test (`apps/server/test/accounts-contract.test.ts`) covers the real routes.
+- The e2e server (`FORGE_E2E=1`) is a separate Bun fake. e2e does not cover `startServer` code; the accounts contract test (`apps/server/test/accounts-contract.test.ts`) covers the real routes. The fake's deltas carry no itemId and are coalesced client-side, so chat streaming, tool-call lifecycle, and composer timing bugs pass e2e; verify those against the real server.
+- Chat timeline flow: ACP notification → `AcpNormalizer` (`acp/normalize.ts`) → harness sink → `SessionManager.onItem` → `appendMessage` → EventBus → `ws.ts` → web messages store → `toRenderModel`. The sink must forward itemId/turnId; dropping them orphans tool updates and splits streamed text (forge-d4j).
+- `POST /api/sessions/:id/prompt` blocks for the whole ACP turn.
 
 ## Release and deploy
 
@@ -85,6 +87,9 @@ defines product limits. `docs/architecture.md` is historical.
   Never invent one.
 - Epic fallback tries other accounts in the same harness kind, then the next hop.
 - `seq` is the single global message cursor.
+- itemId groups one logical timeline item (a tool-call lifecycle, one streamed text run). Web folds strictly by itemId; all rows for one item must share it. toolCallId is the ACP-native key and the client-side fallback.
+- Session REST responses are camelCase via `packages/protocol` schemas; raw SQLite rows must not leak from handlers.
+- Model selection is session-scoped via ACP `session/setModel`; effort is account-scoped at spawn (`accounts/store.ts` accountConfigOverlay).
 - Session kinds are `chat`, `subagent`, and `epic_worker`.
 - Change `packages/protocol` schemas and all consumers together.
 
