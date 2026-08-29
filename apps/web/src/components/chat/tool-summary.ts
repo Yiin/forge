@@ -19,12 +19,10 @@ function stringValue(input: ToolInput, keys: string[]): string | undefined {
   return undefined
 }
 
-export function summarizeToolCall(
-  name: string,
-  input: unknown,
-): ToolSummary {
+export function summarizeToolCall(name: string, input: unknown): ToolSummary {
   const title = cleanTitle(name)
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return { title }
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    return { title }
 
   const values = input as ToolInput
   const command = stringValue(values, ['command', 'cmd'])
@@ -35,7 +33,9 @@ export function summarizeToolCall(
       typeof timeout === 'number' || typeof timeout === 'string'
         ? `timeout ${timeout}ms`
         : undefined
-    const notes = [description && `— ${description}`, timeoutNote].filter(Boolean)
+    const notes = [description && `— ${description}`, timeoutNote].filter(
+      Boolean,
+    )
     return { title: `$ ${command}`, detail: notes.join(' · ') || undefined }
   }
 

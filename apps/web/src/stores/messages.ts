@@ -58,8 +58,7 @@ export function foldEvent(
       event.msg.content.type === 'tool_result')
   ) {
     const id = toolCallId(event.msg)
-    if (id)
-      index = items.findIndex((item) => toolCallId(item) === id)
+    if (id) index = items.findIndex((item) => toolCallId(item) === id)
   }
   const nextItems = [...items]
   if (index < 0) nextItems.push(event.msg)

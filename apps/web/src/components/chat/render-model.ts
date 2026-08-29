@@ -177,7 +177,8 @@ export function toRenderModel(
       const previous =
         result.find(
           (item) => item.kind === 'tool' && item.id === message.itemId,
-        ) ?? (content.type !== 'tool_call' ? toolIds.get(toolId ?? '') : undefined)
+        ) ??
+        (content.type !== 'tool_call' ? toolIds.get(toolId ?? '') : undefined)
       if (previous?.kind === 'tool') {
         anchors.set(previous.id, message.seq)
         if (content.type === 'tool_update')

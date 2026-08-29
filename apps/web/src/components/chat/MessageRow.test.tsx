@@ -93,7 +93,9 @@ describe('MessageRow', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: /\$ hostname.*check hostnamedone/i })).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /\$ hostname.*check hostnamedone/i }),
+    ).toBeTruthy()
     expect(screen.queryByText(/\{"command":"hostname"/)).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /\$ hostname/i }))

@@ -16,9 +16,9 @@ describe('summarizeToolCall', () => {
   })
 
   it('summarizes file tools with their path', () => {
-    expect(summarizeToolCall('read_file', { path: '/tmp/example.txt' })).toEqual(
-      { title: 'read_file /tmp/example.txt' },
-    )
+    expect(
+      summarizeToolCall('read_file', { path: '/tmp/example.txt' }),
+    ).toEqual({ title: 'read_file /tmp/example.txt' })
   })
 
   it('falls back to a clean title for empty or unknown input', () => {
