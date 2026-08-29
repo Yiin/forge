@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { Composer } from '../components/chat/Composer'
 import { api } from '../lib/api'
+import { promoteDraftWithKey } from '../lib/draft-promotion'
 import { useDraftsStore } from '../stores/drafts'
 import {
   Select,
@@ -129,31 +130,16 @@ export function DraftRoute() {
               harness: selectedHarness.harness,
               accountId: selectedHarness.accountId,
             })
-            useDraftsStore
-              .getState()
-              .update(draft.id, { promotionState: 'promoting' })
-            try {
-              const result = (await api.promoteDraft({
-                draftId: draft.id,
-                projectId: draft.projectId,
-                harness: selectedHarness.harness || draft.harness,
-                accountId: selectedHarness.accountId,
-                text,
-                attachmentIds,
-              })) as { sessionId: string }
-              useDraftsStore
-                .getState()
-                .update(draft.id, { promotionState: 'promoted' })
-              await navigate({
-                to: '/s/$sessionId',
-                params: { sessionId: result.sessionId },
-              })
-            } catch (error) {
-              useDraftsStore
-                .getState()
-                .update(draft.id, { promotionState: 'failed' })
-              throw error
-            }
+            const result = await promoteDraftWithKey(draft, {
+              text,
+              attachmentIds,
+              harness: selectedHarness.harness,
+              accountId: selectedHarness.accountId,
+            })
+            await navigate({
+              to: '/s/$sessionId',
+              params: { sessionId: result.sessionId },
+            })
           }}
         />
       </div>

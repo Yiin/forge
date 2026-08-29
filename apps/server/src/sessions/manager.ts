@@ -533,11 +533,12 @@ export class SessionManager {
     requestId: string,
     uploads?: UploadStore,
   ) {
+    // Idempotency keys on the promotion attempt (requestId), never on the
+    // draft id: drafts are reused across sessions, so a draft-scoped lookup
+    // would return a previous session and silently drop the new prompt.
     const existing = this.db
-      .prepare(
-        'SELECT session_id FROM draft_promotions WHERE draft_id = ? OR request_id = ?',
-      )
-      .get(input.draftId, requestId) as { session_id: string } | undefined
+      .prepare('SELECT session_id FROM draft_promotions WHERE request_id = ?')
+      .get(requestId) as { session_id: string } | undefined
     if (existing) return { sessionId: existing.session_id }
     const project = this.db
       .prepare('SELECT path FROM projects WHERE id = ? AND archived_at IS NULL')
@@ -561,9 +562,9 @@ export class SessionManager {
         await this.discard(session.id)
         const winner = this.db
           .prepare(
-            'SELECT session_id FROM draft_promotions WHERE draft_id = ? OR request_id = ?',
+            'SELECT session_id FROM draft_promotions WHERE request_id = ?',
           )
-          .get(input.draftId, requestId) as { session_id: string }
+          .get(requestId) as { session_id: string }
         return { sessionId: winner.session_id }
       }
       if (uploads)

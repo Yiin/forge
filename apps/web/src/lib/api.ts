@@ -132,12 +132,12 @@ export class ForgeApi {
   prompt(input: Prompt) {
     return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)
   }
-  promoteDraft(input: PromoteDraft) {
+  promoteDraft(input: PromoteDraft, requestId: string) {
     return this.post(
       `/api/drafts/${encodeURIComponent(input.draftId)}/promote`,
       null,
       input,
-      input.draftId,
+      requestId,
     )
   }
   async upload(

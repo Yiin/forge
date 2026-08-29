@@ -90,6 +90,7 @@ defines product limits. `docs/architecture.md` is historical.
 - itemId groups one logical timeline item (a tool-call lifecycle, one streamed text run). Web folds strictly by itemId; all rows for one item must share it. toolCallId is the ACP-native key and the client-side fallback.
 - Session REST responses are camelCase via `packages/protocol` schemas; raw SQLite rows must not leak from handlers.
 - Model selection is session-scoped via ACP `session/setModel`; effort is account-scoped at spawn (`accounts/store.ts` accountConfigOverlay).
+- Draft promotion idempotency keys per attempt (`draft.promotionKey` → `Idempotency-Key`), never per draft id. Drafts are one per project and reused across sessions; `draft_promotions.request_id` is the unique key.
 - Session kinds are `chat`, `subagent`, and `epic_worker`.
 - Change `packages/protocol` schemas and all consumers together.
 

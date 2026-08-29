@@ -17,11 +17,20 @@ export type LocalDraft = {
   updatedAt: number
   attachments: DraftAttachment[]
   promotionState: 'unpromoted' | 'promoting' | 'promoted' | 'failed'
+  // Idempotency key for the in-flight or failed promotion attempt. Generated
+  // per attempt, persisted before the request so a reload mid-flight retries
+  // with the same key, cleared on success so the next send is a new session.
+  promotionKey?: string
 }
 type DraftPatch = Partial<
   Pick<
     LocalDraft,
-    'harness' | 'accountId' | 'prompt' | 'attachments' | 'promotionState'
+    | 'harness'
+    | 'accountId'
+    | 'prompt'
+    | 'attachments'
+    | 'promotionState'
+    | 'promotionKey'
   >
 >
 type DraftState = {

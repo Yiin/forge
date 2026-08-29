@@ -297,3 +297,62 @@ describe('session harness selection', () => {
     ).toBe('second')
   })
 })
+
+describe('draft promotion idempotency', () => {
+  function setup() {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const manager = new SessionManager(
+      db,
+      new EventBus(),
+      () => ({
+        spawn: async () => ({
+          prompt: async () => undefined,
+          cancel: () => undefined,
+          kill: () => undefined,
+        }),
+      }),
+      undefined,
+      () => false,
+    )
+    const input = {
+      draftId: `draft:${project.id}`,
+      projectId: project.id,
+      harness: 'mock',
+      text: 'hello',
+    }
+    return { db, manager, input }
+  }
+
+  const textsOf = (db: DatabaseSync, sessionId: string) =>
+    db
+      .prepare(
+        "SELECT json_extract(content, '$.text') AS text FROM messages WHERE session_id = ? AND type = 'text_delta' ORDER BY seq",
+      )
+      .all(sessionId)
+
+  it('creates a new session per attempt when one draft is promoted twice', async () => {
+    const { db, manager, input } = setup()
+
+    const first = await manager.promoteDraft(input, 'attempt-1')
+    const second = await manager.promoteDraft(
+      { ...input, text: 'second message' },
+      'attempt-2',
+    )
+
+    expect(second.sessionId).not.toBe(first.sessionId)
+    expect(textsOf(db, first.sessionId)).toEqual([{ text: 'hello' }])
+    expect(textsOf(db, second.sessionId)).toEqual([{ text: 'second message' }])
+  })
+
+  it('returns the same session when one attempt is retried', async () => {
+    const { db, manager, input } = setup()
+
+    const first = await manager.promoteDraft(input, 'attempt-1')
+    const retry = await manager.promoteDraft(input, 'attempt-1')
+
+    expect(retry.sessionId).toBe(first.sessionId)
+    expect(textsOf(db, first.sessionId)).toEqual([{ text: 'hello' }])
+  })
+})
