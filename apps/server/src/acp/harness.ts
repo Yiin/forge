@@ -12,6 +12,7 @@ import type {
   HarnessSession,
 } from '../sessions/harness.js'
 import type { EventBus } from '../events/bus.js'
+import { readClaudeContextUsage } from '../accounts/context/claudeTranscript.js'
 
 type Db = {
   exec(sql: string): unknown
@@ -51,7 +52,7 @@ export function acpHarness(
       const id = providerId(response)
       if (!id) throw new Error('ACP newSession did not return a session id')
       saveProviderSession(deps.db, session.id, id)
-      return handle(client, normalizer, id, models(response))
+      return handle(client, normalizer, id, models(response), session)
     },
     async newSession(session, onItem, onExit) {
       const { client, normalizer } = await createClient(session, onItem, onExit)
@@ -60,7 +61,7 @@ export function acpHarness(
       if (!id) throw new Error('ACP newSession did not return a session id')
       saveProviderSession(deps.db, session.id, id)
       return {
-        handle: handle(client, normalizer, id, models(response)),
+        handle: handle(client, normalizer, id, models(response), session),
         proven: true,
         availableModels: models(response),
       }
@@ -81,12 +82,13 @@ export function acpHarness(
             normalizer,
             session.providerSessionId,
             models(response),
+            session,
           ),
           proven: false,
         }
       saveProviderSession(deps.db, session.id, id)
       return {
-        handle: handle(client, normalizer, id, models(response)),
+        handle: handle(client, normalizer, id, models(response), session),
         proven: true,
         availableModels: models(response),
       }
@@ -104,12 +106,13 @@ export function acpHarness(
             normalizer,
             session.providerSessionId,
             models(response),
+            session,
           ),
           proven: false,
         }
       saveProviderSession(deps.db, session.id, id)
       return {
-        handle: handle(client, normalizer, id, models(response)),
+        handle: handle(client, normalizer, id, models(response), session),
         proven: true,
         providerSessionId: id,
         availableModels: models(response),
@@ -159,13 +162,38 @@ export function acpHarness(
     normalizer: AcpNormalizer,
     sessionId: string | null | undefined,
     availableModels: HarnessModel[] = [],
+    session: HarnessSession,
   ): HarnessHandle {
+    const publishContextWindow = () => {
+      if (entry.name !== 'claude' || !deps.accountId) return
+      const account = deps.db
+        .prepare('SELECT home_path FROM harness_accounts WHERE id = ?')
+        .get(deps.accountId) as { home_path?: unknown } | undefined
+      if (typeof account?.home_path !== 'string' || !session.cwd) return
+      const row = deps.db
+        .prepare('SELECT model FROM sessions WHERE id = ?')
+        .get(session.id) as { model?: unknown } | undefined
+      const usage = readClaudeContextUsage({
+        homePath: account.home_path,
+        cwd: session.cwd,
+        providerSessionId: sessionId ?? '',
+        model: typeof row?.model === 'string' ? row.model : null,
+      })
+      if (usage)
+        deps.bus.publishEphemeral({
+          type: 'contextWindow',
+          seq: null,
+          sessionId: session.id,
+          usage,
+        })
+    }
     return {
       availableModels,
       prompt: async (content) => {
         await normalizer.promptTurn(client, sessionId ?? '', [
           { type: 'text', text: content },
         ])
+        publishContextWindow()
       },
       cancel: () => client.cancel(sessionId ?? ''),
       setModel: async (modelId) => {

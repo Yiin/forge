@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -122,5 +122,67 @@ describe('ACP harness adapter', () => {
         .filter((line) => line.params?.processCwd)
         .map((line) => line.params?.processCwd),
     ).toEqual([cwd, cwd, cwd, cwd])
+  })
+
+  it('publishes one Claude context frame after a completed turn', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'claude',
+      title: 'Chat',
+      cwd: '/tmp',
+      accountId: 'acct',
+    })
+    const homePath = await mkdtemp(join(tmpdir(), 'forge-claude-account-'))
+    await mkdir(join(homePath, 'projects', '-tmp'), { recursive: true })
+    await writeFile(
+      join(homePath, 'projects', '-tmp', 'forge-mock-session.jsonl'),
+      JSON.stringify({
+        message: {
+          role: 'assistant',
+          usage: {
+            input_tokens: 2,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 3,
+            output_tokens: 1,
+          },
+        },
+      }),
+    )
+    db.prepare(
+      "INSERT INTO harness_accounts (id, harness_key, label, kind, home_path, created_at) VALUES ('acct', 'claude', 'Claude', 'claude', ?, 1)",
+    ).run(homePath)
+    const bus = new EventBus()
+    const frames: unknown[] = []
+    bus.subscribeEphemeral((event) => {
+      if (event.type === 'contextWindow') frames.push(event)
+    })
+    const command = spawnMockAgent()
+    const process = acpHarness(
+      {
+        name: 'claude',
+        command: command.command,
+        args: command.args,
+        env: command.env as Record<string, string>,
+        protocol: 'acp',
+        enabled: true,
+      },
+      { db, bus, questions: new QuestionManager({ db }), accountId: 'acct' },
+    )
+    const handle = await process.spawn(
+      { id: session.id, cwd: '/tmp', harness: 'claude' },
+      () => undefined,
+      () => undefined,
+    )
+    handles.push(handle)
+    await handle.prompt('hello')
+
+    expect(frames).toHaveLength(1)
+    expect(frames[0]).toMatchObject({
+      type: 'contextWindow',
+      sessionId: session.id,
+    })
   })
 })
