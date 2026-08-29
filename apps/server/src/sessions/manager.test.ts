@@ -182,12 +182,67 @@ describe('session harness selection', () => {
       }),
     })
     const manager = new SessionManager(db, new EventBus(), factory)
-    await expect(manager.prompt(session.id, 'one')).rejects.toThrow(
-      'usage limit',
-    )
+    await manager.prompt(session.id, 'one')
+    await new Promise<void>((resolve) => setImmediate(resolve))
     expect(
       db.prepare('SELECT account_id, kind FROM harness_account_limits').get(),
     ).toMatchObject({ account_id: 'acct', kind: 'usage-limit' })
+    expect(
+      db
+        .prepare(
+          'SELECT type, content FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT 1',
+        )
+        .get(session.id),
+    ).toMatchObject({ type: 'error' })
+    expect(
+      db.prepare('SELECT status FROM sessions WHERE id = ?').get(session.id),
+    ).toEqual({ status: 'errored' })
+  })
+
+  it('accepts a prompt before an asynchronous turn ends', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    let resolvePrompt!: () => void
+    const promptStarted = new Promise<void>((resolve) => {
+      resolvePrompt = resolve
+    })
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: () => promptStarted,
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+
+    await manager.prompt(session.id, 'one', 'request-1')
+
+    expect(
+      db
+        .prepare(
+          "SELECT type FROM messages WHERE session_id = ? AND type = 'turn_start'",
+        )
+        .get(session.id),
+    ).toEqual({ type: 'turn_start' })
+    expect(
+      db.prepare('SELECT status FROM sessions WHERE id = ?').get(session.id),
+    ).toEqual({ status: 'running' })
+
+    resolvePrompt()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(
+      db
+        .prepare(
+          "SELECT type FROM messages WHERE session_id = ? AND type = 'turn_end'",
+        )
+        .get(session.id),
+    ).toEqual({ type: 'turn_end' })
   })
 
   it('uses the selected harness and persists it before the prompt', async () => {

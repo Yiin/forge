@@ -451,41 +451,62 @@ export class SessionManager {
       content: { type: 'text_delta', text } as never,
       eventBus: this.bus,
     })
+    void this.runPrompt(handle, row, turnId, text)
+  }
+
+  private runPrompt(
+    handle: HarnessHandle,
+    row: SessionRow,
+    turnId: string,
+    text: string,
+  ) {
     try {
-      await handle.prompt(text)
+      const result = handle.prompt(text)
+      if (result && typeof result === 'object' && 'then' in result)
+        void Promise.resolve(result).then(
+          () => this.finishPrompt(row, turnId),
+          (error: unknown) => this.failPrompt(row, turnId, error),
+        )
+      else this.finishPrompt(row, turnId)
     } catch (error) {
-      this.turns.delete(id)
-      const message = errorMessage(error)
-      const match = detectProviderError(message)
-      if (match && row.account_id) {
-        recordLimit(this.db, {
-          accountId: row.account_id,
-          kind: match.category,
-          harnessKey: row.harness,
-          detectedAt: Date.now(),
-          source: 'session.prompt',
-          detail: match.excerpt,
-        })
-      }
-      appendMessage(this.db, {
-        sessionId: id,
-        turnId,
-        itemId: makeId('item_'),
-        role: 'system',
-        type: 'error',
-        content: {
-          type: 'error',
-          message,
-        },
-        eventBus: this.bus,
-      })
-      this.status(id, 'errored')
-      throw error
+      this.failPrompt(row, turnId, error)
     }
+  }
+
+  private failPrompt(row: SessionRow, turnId: string, error: unknown) {
+    this.turns.delete(row.id)
+    const message = errorMessage(error)
+    const match = detectProviderError(message)
+    if (match && row.account_id) {
+      recordLimit(this.db, {
+        accountId: row.account_id,
+        kind: match.category,
+        harnessKey: row.harness,
+        detectedAt: Date.now(),
+        source: 'session.prompt',
+        detail: match.excerpt,
+      })
+    }
+    appendMessage(this.db, {
+      sessionId: row.id,
+      turnId,
+      itemId: makeId('item_'),
+      role: 'system',
+      type: 'error',
+      content: {
+        type: 'error',
+        message,
+      },
+      eventBus: this.bus,
+    })
+    this.status(row.id, 'errored')
+  }
+
+  private finishPrompt(row: SessionRow, turnId: string) {
     // A harness may emit its own framing. Complete the turn when it does not.
-    if (this.turns.get(id) === turnId) {
+    if (this.turns.get(row.id) === turnId) {
       appendMessage(this.db, {
-        sessionId: id,
+        sessionId: row.id,
         turnId,
         itemId: makeId('item_'),
         role: 'system',
@@ -493,10 +514,10 @@ export class SessionManager {
         content: { type: 'turn_end' },
         eventBus: this.bus,
       })
-      this.turns.delete(id)
-      this.status(id, 'idle')
-      this.maybeTitle(id, row.title, this.firstPrompt.get(id) ?? '')
-      this.scheduleReap(id)
+      this.turns.delete(row.id)
+      this.status(row.id, 'idle')
+      this.maybeTitle(row.id, row.title, this.firstPrompt.get(row.id) ?? '')
+      this.scheduleReap(row.id)
     }
   }
 
