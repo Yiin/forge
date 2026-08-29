@@ -13,6 +13,8 @@ import type {
 } from '../sessions/harness.js'
 import type { EventBus } from '../events/bus.js'
 import { readClaudeContextUsage } from '../accounts/context/claudeTranscript.js'
+import { readCodexRollout } from '../accounts/context/codexRollout.js'
+import { recordUsageSnapshot } from '../accounts/usage.js'
 
 type Db = {
   exec(sql: string): unknown
@@ -165,7 +167,11 @@ export function acpHarness(
     session: HarnessSession,
   ): HarnessHandle {
     const publishContextWindow = () => {
-      if (entry.name !== 'claude' || !deps.accountId) return
+      if (
+        !deps.accountId ||
+        (entry.name !== 'claude' && entry.name !== 'codex')
+      )
+        return
       const account = deps.db
         .prepare('SELECT home_path FROM harness_accounts WHERE id = ?')
         .get(deps.accountId) as { home_path?: unknown } | undefined
@@ -173,18 +179,68 @@ export function acpHarness(
       const row = deps.db
         .prepare('SELECT model FROM sessions WHERE id = ?')
         .get(session.id) as { model?: unknown } | undefined
-      const usage = readClaudeContextUsage({
-        homePath: account.home_path,
-        cwd: session.cwd,
-        providerSessionId: sessionId ?? '',
-        model: typeof row?.model === 'string' ? row.model : null,
-      })
-      if (usage)
+      const result =
+        entry.name === 'claude'
+          ? {
+              usage: readClaudeContextUsage({
+                homePath: account.home_path,
+                cwd: session.cwd,
+                providerSessionId: sessionId ?? '',
+                model: typeof row?.model === 'string' ? row.model : null,
+              }),
+            }
+          : readCodexRollout({
+              homePath: account.home_path,
+              cwd: session.cwd,
+              providerSessionId: sessionId ?? null,
+            })
+      if (result?.rateLimits) {
+        const windows = [result.rateLimits.primary, result.rateLimits.secondary]
+          .filter(
+            (
+              window,
+            ): window is {
+              used_percent: number
+              window_minutes: number
+              resets_at?: unknown
+            } =>
+              window != null &&
+              typeof window.used_percent === 'number' &&
+              typeof window.window_minutes === 'number',
+          )
+          .map((window) => {
+            const minutes = window.window_minutes as number
+            const weekly = minutes === 10080
+            const hours = minutes / 60
+            return {
+              windowKey: weekly
+                ? 'weekly-7d'
+                : Number.isInteger(hours)
+                  ? `${hours}h`
+                  : `${minutes}m`,
+              label: weekly
+                ? 'Weekly (7-day)'
+                : Number.isInteger(hours)
+                  ? `${hours}h window`
+                  : `${minutes}m window`,
+              percent:
+                Math.max(0, Math.min(100, window.used_percent as number)) / 100,
+              resetsAt:
+                typeof window.resets_at === 'number'
+                  ? window.resets_at * 1000
+                  : null,
+              source: 'codex.rollout',
+            }
+          })
+        if (windows.length)
+          recordUsageSnapshot(deps.db, deps.accountId, windows)
+      }
+      if (result?.usage)
         deps.bus.publishEphemeral({
           type: 'contextWindow',
           seq: null,
           sessionId: session.id,
-          usage,
+          usage: result.usage,
         })
     }
     return {
