@@ -62,6 +62,7 @@ export function Composer({
   draftProjectId,
   initialText = '',
   onTextChange,
+  onSelectionChange,
 }: {
   sessionId: string
   harness?: string
@@ -79,6 +80,7 @@ export function Composer({
   draftProjectId?: string
   initialText?: string
   onTextChange?: (text: string) => void
+  onSelectionChange?: (selection: HarnessSelection) => void
 }) {
   const [text, setText] = useState(initialText)
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null)
@@ -292,12 +294,16 @@ export function Composer({
     )
       return
     setSendError(null)
+    const attachmentIds = completedAttachmentIds(uploads)
+    setText('')
+    onTextChange?.('')
+    setTrigger(null)
+    dispatchUploads(initialAttachmentUploads)
     try {
-      await onSend(value, completedAttachmentIds(uploads), selected)
-      setText('')
-      setTrigger(null)
-      dispatchUploads(initialAttachmentUploads)
+      await onSend(value, attachmentIds, selected)
     } catch (error) {
+      setText(value)
+      onTextChange?.(value)
       setSendError(
         error instanceof Error ? error.message : 'Message failed to send',
       )
@@ -457,12 +463,15 @@ export function Composer({
               }
               onValueChange={(value) => {
                 const separator = value.indexOf(':')
-                if (separator < 0) setSelection({ harness: value })
-                else
-                  setSelection({
-                    harness: value.slice(0, separator),
-                    accountId: value.slice(separator + 1),
-                  })
+                const nextSelection =
+                  separator < 0
+                    ? { harness: value }
+                    : {
+                        harness: value.slice(0, separator),
+                        accountId: value.slice(separator + 1),
+                      }
+                setSelection(nextSelection)
+                onSelectionChange?.(nextSelection)
               }}
             >
               <SelectTrigger

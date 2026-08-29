@@ -17,7 +17,10 @@ describe('Composer', () => {
     vi.unstubAllGlobals()
   })
 
-  const renderComposer = (onSend = vi.fn().mockResolvedValue(undefined)) => {
+  const renderComposer = (
+    onSend = vi.fn().mockResolvedValue(undefined),
+    onTextChange?: (text: string) => void,
+  ) => {
     vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([
       {
         id: 'main',
@@ -41,6 +44,7 @@ describe('Composer', () => {
         harness="claude"
         accountId="main"
         onSend={onSend}
+        onTextChange={onTextChange}
       />,
     )
     return screen.getByLabelText('Message composer')
@@ -88,7 +92,8 @@ describe('Composer', () => {
 
   it('retains the draft and announces a failed send', async () => {
     const onSend = vi.fn().mockRejectedValue(new Error('Connection lost'))
-    const composer = renderComposer(onSend)
+    const onTextChange = vi.fn()
+    const composer = renderComposer(onSend, onTextChange)
 
     fireEvent.change(composer, { target: { value: 'keep this draft' } })
     fireEvent.keyDown(composer, { key: 'Enter' })
@@ -98,6 +103,25 @@ describe('Composer', () => {
       ),
     )
     expect(composer).toHaveProperty('value', 'keep this draft')
+    expect(onTextChange).toHaveBeenLastCalledWith('keep this draft')
+  })
+
+  it('clears the composer before a send resolves', async () => {
+    let resolveSend!: () => void
+    const onSend = vi.fn(
+      () => new Promise<void>((resolve) => (resolveSend = resolve)),
+    )
+    const onTextChange = vi.fn()
+    const composer = renderComposer(onSend, onTextChange)
+
+    fireEvent.change(composer, { target: { value: 'send now' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+
+    expect(composer).toHaveProperty('value', '')
+    expect(onTextChange).toHaveBeenLastCalledWith('')
+
+    resolveSend()
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce())
   })
 
   it('exposes the manual end-turn action for a running PTY session', () => {
@@ -120,6 +144,21 @@ describe('Composer', () => {
 
   it('shows account groups and sends the selected account', async () => {
     vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([
+      {
+        id: 'main',
+        harness: 'claude',
+        harnessKey: 'claude-code-acp',
+        kind: 'claude',
+        label: 'Main',
+        storageDir: '/tmp/main',
+        homePath: '/tmp/main',
+        enabled: true,
+        authStatus: 'authenticated',
+        email: null,
+        cooldownUntil: null,
+        cooldownReason: null,
+        lastUsedAt: null,
+      },
       {
         id: 'work',
         harness: 'claude',
@@ -146,13 +185,28 @@ describe('Composer', () => {
       ),
     )
     const onSend = vi.fn().mockResolvedValue(undefined)
-    render(<Composer sessionId="session-1" harness="claude" onSend={onSend} />)
+    const onSelectionChange = vi.fn()
+    render(
+      <Composer
+        sessionId="session-1"
+        harness="claude"
+        accountId="main"
+        onSend={onSend}
+        onSelectionChange={onSelectionChange}
+      />,
+    )
 
     await waitFor(() =>
       expect(screen.getAllByText('Work').length).toBeGreaterThan(0),
     )
     fireEvent.click(screen.getByRole('combobox', { name: 'Harness' }))
     fireEvent.click(screen.getByRole('option', { name: 'Work' }))
+    await waitFor(() =>
+      expect(onSelectionChange).toHaveBeenCalledWith({
+        harness: 'claude',
+        accountId: 'work',
+      }),
+    )
     const composer = screen.getByLabelText('Message composer')
     fireEvent.change(composer, { target: { value: 'hello' } })
     fireEvent.keyDown(composer, { key: 'Enter' })

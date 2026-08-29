@@ -41,6 +41,25 @@ describe('local draft store', () => {
     )
   })
 
+  it('persists a changed account selection across hydration', () => {
+    const draft = useDraftsStore.getState().getOrCreate('project-1')
+    useDraftsStore.getState().update(draft.id, {
+      harness: 'claude',
+      accountId: 'work',
+    })
+    useDraftsStore.getState().flush()
+    const saved = window.localStorage.getItem(draftStorageKey)
+
+    resetDraftsStore()
+    window.localStorage.setItem(draftStorageKey, saved!)
+    useDraftsStore.getState().hydrate()
+
+    expect(useDraftsStore.getState().drafts[draft.id]).toMatchObject({
+      harness: 'claude',
+      accountId: 'work',
+    })
+  })
+
   it('removes drafts for missing projects and ignores corrupt storage', () => {
     window.localStorage.setItem(draftStorageKey, '{bad json')
     useDraftsStore.getState().hydrate()

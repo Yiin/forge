@@ -118,6 +118,12 @@ export function DraftRoute() {
           onTextChange={(prompt) =>
             useDraftsStore.getState().update(draft.id, { prompt })
           }
+          onSelectionChange={(selection) =>
+            useDraftsStore.getState().update(draft.id, {
+              harness: selection.harness,
+              accountId: selection.accountId,
+            })
+          }
           onSend={async (text, attachmentIds, selectedHarness) => {
             useDraftsStore.getState().update(draft.id, {
               harness: selectedHarness.harness,
