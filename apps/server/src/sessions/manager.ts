@@ -336,7 +336,7 @@ export class SessionManager {
     this.reapTimers.delete(id)
     if (getSession(this.db, id)) this.status(id, 'idle')
   }
-  async prompt(
+  private async acceptPrompt(
     id: string,
     text: string,
     requestId?: string,
@@ -384,16 +384,6 @@ export class SessionManager {
         account_id: nextAccount,
         provider_session_id: null,
       }
-    }
-    const handle = this.handles.get(id) ?? (await this.spawn(row))
-    if (model !== undefined && model !== row.model) {
-      if (!handle.setModel)
-        throw new Error('Harness does not support model selection')
-      await handle.setModel(model)
-      this.db
-        .prepare('UPDATE sessions SET model = ? WHERE id = ?')
-        .run(model, id)
-      row = { ...row, model }
     }
     const turnId = makeId('turn_')
     if (!this.firstPrompt.has(id)) this.firstPrompt.set(id, text)
@@ -451,7 +441,48 @@ export class SessionManager {
       content: { type: 'text_delta', text } as never,
       eventBus: this.bus,
     })
-    void this.runPrompt(handle, row, turnId, text)
+    this.status(id, 'running')
+    return { row, turnId, model }
+  }
+
+  async prompt(
+    id: string,
+    text: string,
+    requestId?: string,
+    attachmentIds?: string[],
+    harness?: string,
+    accountId?: string | null,
+    model?: string,
+  ) {
+    const accepted = await this.acceptPrompt(
+      id,
+      text,
+      requestId,
+      attachmentIds,
+      harness,
+      accountId,
+      model,
+    )
+    if (!accepted) return
+    // Startup errors become timeline errors after acceptance. This keeps the
+    // user row visible and leaves the session reachable for inspection.
+    void (async () => {
+      const handle =
+        this.handles.get(accepted.row.id) ?? (await this.spawn(accepted.row))
+      let row = accepted.row
+      if (accepted.model !== undefined && accepted.model !== row.model) {
+        if (!handle.setModel)
+          throw new Error('Harness does not support model selection')
+        await handle.setModel(accepted.model)
+        this.db
+          .prepare('UPDATE sessions SET model = ? WHERE id = ?')
+          .run(accepted.model, row.id)
+        row = { ...row, model: accepted.model }
+      }
+      this.runPrompt(handle, row, accepted.turnId, text)
+    })().catch((error: unknown) =>
+      this.failPrompt(accepted.row, accepted.turnId, error),
+    )
   }
 
   private runPrompt(

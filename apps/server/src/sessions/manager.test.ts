@@ -41,6 +41,7 @@ describe('session harness selection', () => {
       undefined,
       'fast',
     )
+    await new Promise<void>((resolve) => setImmediate(resolve))
 
     expect(calls).toEqual(['model:fast', 'prompt'])
     expect(
@@ -100,6 +101,7 @@ describe('session harness selection', () => {
     const manager = new SessionManager(db, new EventBus(), factory)
 
     await manager.prompt(session.id, 'one')
+    await new Promise<void>((resolve) => setImmediate(resolve))
 
     const rows = db
       .prepare(
@@ -245,6 +247,67 @@ describe('session harness selection', () => {
     ).toEqual({ type: 'turn_end' })
   })
 
+  it('publishes user rows before a cold harness finishes spawning', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const spawnStarted = new Promise<never>(() => undefined)
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => spawnStarted,
+    }))
+
+    await manager.prompt(session.id, 'hello')
+
+    expect(
+      db
+        .prepare('SELECT type FROM messages WHERE session_id = ? ORDER BY seq')
+        .all(session.id),
+    ).toEqual([{ type: 'turn_start' }, { type: 'text_delta' }])
+    expect(
+      db.prepare('SELECT status FROM sessions WHERE id = ?').get(session.id),
+    ).toEqual({ status: 'running' })
+  })
+
+  it('keeps an accepted session and records a spawn error', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => {
+        throw new Error('spawn failed')
+      },
+    }))
+
+    await manager.prompt(session.id, 'hello')
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    expect(
+      db.prepare('SELECT id FROM sessions WHERE id = ?').get(session.id),
+    ).toEqual({ id: session.id })
+    expect(
+      db
+        .prepare(
+          "SELECT type, json_extract(content, '$.message') AS message FROM messages WHERE session_id = ? AND type = 'error'",
+        )
+        .all(session.id),
+    ).toEqual([{ type: 'error', message: 'spawn failed' }])
+    expect(
+      db.prepare('SELECT status FROM sessions WHERE id = ?').get(session.id),
+    ).toEqual({ status: 'errored' })
+  })
+
   it('uses the selected harness and persists it before the prompt', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)
@@ -277,6 +340,7 @@ describe('session harness selection', () => {
     const manager = new SessionManager(db, new EventBus(), factory)
 
     await manager.prompt(session.id, 'one', undefined, undefined, 'first')
+    await new Promise<void>((resolve) => setImmediate(resolve))
     await manager.prompt(
       session.id,
       'two',
@@ -354,5 +418,74 @@ describe('draft promotion idempotency', () => {
 
     expect(retry.sessionId).toBe(first.sessionId)
     expect(textsOf(db, first.sessionId)).toEqual([{ text: 'hello' }])
+  })
+
+  it('promotes a draft before a cold harness finishes spawning', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const spawnStarted = new Promise<never>(() => undefined)
+    const manager = new SessionManager(
+      db,
+      new EventBus(),
+      () => ({ spawn: async () => spawnStarted }),
+      undefined,
+      () => false,
+    )
+
+    const result = await manager.promoteDraft(
+      {
+        draftId: `draft:${project.id}`,
+        projectId: project.id,
+        harness: 'mock',
+        text: 'hello',
+      },
+      'attempt-1',
+    )
+
+    expect(result.sessionId).toBeTruthy()
+    expect(textsOf(db, result.sessionId)).toEqual([{ text: 'hello' }])
+  })
+
+  it('keeps a promoted draft when spawning fails', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const manager = new SessionManager(
+      db,
+      new EventBus(),
+      () => ({
+        spawn: async () => {
+          throw new Error('spawn failed')
+        },
+      }),
+      undefined,
+      () => false,
+    )
+
+    const result = await manager.promoteDraft(
+      {
+        draftId: `draft:${project.id}`,
+        projectId: project.id,
+        harness: 'mock',
+        text: 'hello',
+      },
+      'attempt-1',
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    expect(
+      db.prepare('SELECT id FROM sessions WHERE id = ?').get(result.sessionId),
+    ).toEqual({ id: result.sessionId })
+    expect(
+      db
+        .prepare('SELECT session_id FROM draft_promotions WHERE request_id = ?')
+        .get('attempt-1'),
+    ).toEqual({ session_id: result.sessionId })
+    expect(
+      db
+        .prepare('SELECT status FROM sessions WHERE id = ?')
+        .get(result.sessionId),
+    ).toEqual({ status: 'errored' })
   })
 })
