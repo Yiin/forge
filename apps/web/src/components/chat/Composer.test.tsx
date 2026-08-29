@@ -232,4 +232,56 @@ describe('Composer', () => {
     fireEvent.keyDown(composer, { key: 'Enter' })
     expect(onSend).toHaveBeenCalledWith('hello', [], { harness: 'codex' })
   })
+
+  it('shows model choices and sends the selected model', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({ models: [{ id: 'fast', displayName: 'Fast' }] }),
+              { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+          ),
+        ),
+    )
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    renderComposer(onSend)
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole('combobox', { name: 'Model' })
+          .hasAttribute('disabled'),
+      ).toBe(false),
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: 'Model' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Fast' }))
+    const composer = screen.getByLabelText('Message composer')
+    fireEvent.change(composer, { target: { value: 'hello' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith('hello', [], {
+        harness: 'claude',
+        accountId: 'main',
+        model: 'fast',
+      }),
+    )
+  })
+
+  it('disables the model picker when no models are available', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('{}', { status: 200 })),
+    )
+    renderComposer()
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole('combobox', { name: 'Model' })
+          .hasAttribute('disabled'),
+      ).toBe(true),
+    )
+  })
 })

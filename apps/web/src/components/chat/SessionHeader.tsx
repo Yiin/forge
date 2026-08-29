@@ -81,6 +81,12 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
           </dd>
         </div>
         <div className="flex justify-between gap-2">
+          <dt>Model</dt>
+          <dd className="truncate text-foreground">
+            {current.model ?? 'default'}
+          </dd>
+        </div>
+        <div className="flex justify-between gap-2">
           <dt>Created</dt>
           <dd className="text-foreground">
             {createdAt && !Number.isNaN(createdAt.getTime())

@@ -42,6 +42,7 @@ import {
   defaultSelection,
   type HarnessSelection,
 } from './harness-picker-logic'
+import { modelResponse } from './model-picker-logic'
 
 const commandDefaults: ComposerCommand[] = [
   { id: 'btw', label: '/btw', group: 'Built-in', value: '/btw ' },
@@ -53,6 +54,7 @@ export function Composer({
   sessionId,
   harness,
   accountId,
+  model,
   protocol,
   running = false,
   onInterrupt,
@@ -67,6 +69,7 @@ export function Composer({
   sessionId: string
   harness?: string
   accountId?: string
+  model?: string
   protocol?: 'acp' | 'pty'
   running?: boolean
   onInterrupt?: () => Promise<void>
@@ -90,7 +93,9 @@ export function Composer({
   const [selection, setSelection] = useState<HarnessSelection>({
     harness: harness ?? '',
     accountId,
+    model,
   })
+  const [models, setModels] = useState<ReturnType<typeof modelResponse>>([])
   const [interrupting, setInterrupting] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
@@ -153,6 +158,16 @@ export function Composer({
   const [harnesses, setHarnesses] = useState<string[]>(harness ? [harness] : [])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [accountsLoaded, setAccountsLoaded] = useState(false)
+  useEffect(() => {
+    if (draftMode) return
+    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/models`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => setModels(modelResponse(value)))
+      .catch(() => setModels([]))
+  }, [draftMode, sessionId])
+  useEffect(() => {
+    if (model !== undefined) setSelection((current) => ({ ...current, model }))
+  }, [model])
   useEffect(() => {
     void fetch('/api/status')
       .then((response) => (response.ok ? response.json() : null))
@@ -507,6 +522,45 @@ export function Composer({
                 ))}
               </SelectContent>
             </Select>
+          )}
+          {!draftMode && (
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Select
+                      value={selection.model ?? ''}
+                      onValueChange={(value) => {
+                        const nextSelection = { ...selection, model: value }
+                        setSelection(nextSelection)
+                        onSelectionChange?.(nextSelection)
+                      }}
+                      disabled={models.length === 0}
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        aria-label="Model"
+                        className="h-8 max-w-[11rem] gap-1 border-transparent bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-accent hover:text-accent-foreground pointer-coarse:h-11 pointer-coarse:max-w-none"
+                      >
+                        <SelectValue placeholder="Model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {models.map((model) => (
+                          <SelectItem key={model.id} value={model.id}>
+                            {model.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </span>
+                </TooltipTrigger>
+                {models.length === 0 && (
+                  <TooltipContent side="top">
+                    This session does not expose model choices
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
           )}
           <span className="flex-1" />
           <span className="hidden items-center gap-1 pr-1 text-[11px] text-muted-foreground pointer-fine:flex">

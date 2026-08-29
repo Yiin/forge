@@ -15,7 +15,11 @@ export type HarnessOption = {
   disabled: boolean
   disabledReason: string | null
 }
-export type HarnessSelection = { harness: string; accountId?: string }
+export type HarnessSelection = {
+  harness: string
+  accountId?: string
+  model?: string
+}
 
 export function buildHarnessOptions(
   harnesses: ReadonlyArray<string | { key: string }>,

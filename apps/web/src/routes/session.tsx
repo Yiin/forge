@@ -21,6 +21,7 @@ export function SessionRoute() {
   const [sending, setSending] = useState(false)
   const [harness, setHarness] = useState<string>()
   const [accountId, setAccountId] = useState<string>()
+  const [model, setModel] = useState<string>()
   const [protocol, setProtocol] = useState<'acp' | 'pty'>()
   const [loadedStatus, setLoadedStatus] = useState<string>()
   const [loading, setLoading] = useState(true)
@@ -53,12 +54,14 @@ export function SessionRoute() {
         const session = (await response.json()) as SessionSummary & {
           protocol?: 'acp' | 'pty'
           accountId?: string | null
+          model?: string | null
         }
         if (!active) return
         useShellStore.getState().setLastSession(session.id)
         useSessionsStore.getState().upsertSession(session)
         setHarness(session.harness)
         setAccountId(session.accountId ?? undefined)
+        setModel(session.model ?? undefined)
         setProtocol(session.protocol)
         setLoadedStatus(session.status)
         setLoading(false)
@@ -172,9 +175,11 @@ export function SessionRoute() {
           attachmentIds,
           harness: selection.harness || harness,
           accountId: selection.accountId,
+          model: selection.model,
         })
         setHarness(selection.harness || harness)
         setAccountId(selection.accountId)
+        setModel(selection.model)
       }
     } finally {
       setSending(false)
@@ -206,6 +211,7 @@ export function SessionRoute() {
           sessionId={sessionId}
           harness={harness}
           accountId={accountId}
+          model={model}
           protocol={protocol}
           running={(sessionStatus ?? loadedStatus) === 'running'}
           onInterrupt={async () => {

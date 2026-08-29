@@ -9,6 +9,7 @@ export type SessionSummary = {
   status?: string
   harness?: string
   accountId?: string | null
+  model?: string | null
   createdAt?: string
   created_at?: number
   project_id?: string | null
