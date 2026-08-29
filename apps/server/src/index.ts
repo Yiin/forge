@@ -535,10 +535,22 @@ async function startE2eServer(): Promise<void> {
           state.messages.filter((message) => message.sessionId === messages[1]),
         )
       if (request.method === 'POST' && promote) {
-        const body = (await request.json()) as { projectId?: string }
+        const body = (await request.json()) as {
+          projectId?: string
+          text?: string
+          clientItemId?: string
+        }
         const id = `ses_${crypto.randomUUID()}`
         state.sessions.push({ id, projectId: body.projectId ?? '' })
         await writeFile(statePath, JSON.stringify(state))
+        if (body.text)
+          publish({
+            sessionId: id,
+            itemId: body.clientItemId ?? `item_${crypto.randomUUID()}`,
+            type: 'text_delta',
+            role: 'user',
+            content: { text: body.text },
+          })
         publish({
           sessionId: id,
           type: 'turn_start',
@@ -562,6 +574,18 @@ async function startE2eServer(): Promise<void> {
       }
       if (request.method === 'POST' && prompt) {
         const sessionId = prompt[1]
+        const body = (await request.json()) as {
+          text?: string
+          clientItemId?: string
+        }
+        if (body.text)
+          publish({
+            sessionId,
+            itemId: body.clientItemId ?? `item_${crypto.randomUUID()}`,
+            type: 'text_delta',
+            role: 'user',
+            content: { text: body.text },
+          })
         publish({ sessionId, type: 'turn_start', role: 'system', content: {} })
         for (const question of e2eQuestions())
           publish({

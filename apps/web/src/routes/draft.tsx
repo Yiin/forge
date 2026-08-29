@@ -4,6 +4,7 @@ import { Composer } from '../components/chat/Composer'
 import { api } from '../lib/api'
 import { promoteDraftWithKey } from '../lib/draft-promotion'
 import { useDraftsStore } from '../stores/drafts'
+import { useMessagesStore } from '../stores/messages'
 import {
   Select,
   SelectContent,
@@ -76,6 +77,11 @@ export function DraftRoute() {
           <h1 className="text-2xl font-semibold tracking-tight">
             What do you want to build?
           </h1>
+          {draft.promotionState === 'promoting' && (
+            <p role="status" className="text-sm text-muted-foreground">
+              Starting session…
+            </p>
+          )}
           <div className="flex flex-col items-center gap-1.5">
             <label className="sr-only" htmlFor="draft-project">
               Project
@@ -119,6 +125,7 @@ export function DraftRoute() {
           harness={draft.harness}
           accountId={draft.accountId}
           draftMode
+          sending={draft.promotionState === 'promoting'}
           initialText={draft.prompt}
           onTextChange={(prompt) =>
             useDraftsStore.getState().update(draft.id, { prompt })
@@ -130,6 +137,7 @@ export function DraftRoute() {
             })
           }
           onSend={async (text, attachmentIds, selectedHarness) => {
+            const clientItemId = `client_${crypto.randomUUID().replaceAll('-', '')}`
             useDraftsStore.getState().update(draft.id, {
               harness: selectedHarness.harness,
               accountId: selectedHarness.accountId,
@@ -139,6 +147,13 @@ export function DraftRoute() {
               attachmentIds,
               harness: selectedHarness.harness,
               accountId: selectedHarness.accountId,
+              clientItemId,
+            })
+            useMessagesStore.getState().addPending({
+              sessionId: result.sessionId,
+              itemId: clientItemId,
+              text,
+              createdAt: new Date().toISOString(),
             })
             await navigate({
               to: '/s/$sessionId',

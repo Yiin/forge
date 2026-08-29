@@ -6,6 +6,7 @@ export type DraftPromotionInput = {
   attachmentIds?: string[]
   harness: string
   accountId?: string
+  clientItemId: string
 }
 
 function newPromotionKey() {
@@ -38,6 +39,7 @@ export async function promoteDraftWithKey(
         accountId: input.accountId,
         text: input.text,
         attachmentIds: input.attachmentIds,
+        clientItemId: input.clientItemId,
       },
       promotionKey,
     )) as { sessionId: string }

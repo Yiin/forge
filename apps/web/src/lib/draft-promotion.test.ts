@@ -32,7 +32,11 @@ describe('draft promotion keys', () => {
 
     const result = await promoteDraftWithKey(
       draft,
-      { text: 'hello', harness: 'acp' },
+      {
+        text: 'hello',
+        harness: 'acp',
+        clientItemId: 'client_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
       promote as never,
     )
 
@@ -51,7 +55,11 @@ describe('draft promotion keys', () => {
     await expect(
       promoteDraftWithKey(
         draft,
-        { text: 'hello', harness: 'acp' },
+        {
+          text: 'hello',
+          harness: 'acp',
+          clientItemId: 'client_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        },
         failing.promote as never,
       ),
     ).rejects.toThrow('network down')
@@ -63,7 +71,11 @@ describe('draft promotion keys', () => {
     const retry = fakePromote()
     await promoteDraftWithKey(
       afterFailure,
-      { text: 'hello', harness: 'acp' },
+      {
+        text: 'hello',
+        harness: 'acp',
+        clientItemId: 'client_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      },
       retry.promote as never,
     )
     expect(retry.calls[0].requestId).toBe(failing.calls[0].requestId)
@@ -74,7 +86,11 @@ describe('draft promotion keys', () => {
     const first = fakePromote()
     await promoteDraftWithKey(
       draft,
-      { text: 'one', harness: 'acp' },
+      {
+        text: 'one',
+        harness: 'acp',
+        clientItemId: 'client_cccccccccccccccccccccccccccccccc',
+      },
       first.promote as never,
     )
 
@@ -82,7 +98,11 @@ describe('draft promotion keys', () => {
     const reusedDraft = useDraftsStore.getState().drafts[draft.id]
     await promoteDraftWithKey(
       reusedDraft,
-      { text: 'two', harness: 'acp' },
+      {
+        text: 'two',
+        harness: 'acp',
+        clientItemId: 'client_dddddddddddddddddddddddddddddddd',
+      },
       second.promote as never,
     )
 

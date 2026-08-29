@@ -307,6 +307,7 @@ export function Composer({
   const submit = async () => {
     const value = text.trim()
     if (
+      sending ||
       !value ||
       (accountsLoaded && !selected.accountId) ||
       !canSendUploads(uploads)
