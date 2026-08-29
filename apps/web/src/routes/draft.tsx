@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { Composer } from '../components/chat/Composer'
+import { WorkspaceBar } from '../components/chat/WorkspaceBar'
 import { api } from '../lib/api'
 import { promoteDraftWithKey } from '../lib/draft-promotion'
 import { useDraftsStore } from '../stores/drafts'
@@ -119,6 +120,7 @@ export function DraftRoute() {
             </Select>
           </div>
         </header>
+        <WorkspaceBar projectId={draft.projectId} draftId={draft.id} />
         <Composer
           sessionId={draft.id}
           draftProjectId={draft.projectId}
@@ -148,6 +150,10 @@ export function DraftRoute() {
               harness: selectedHarness.harness,
               accountId: selectedHarness.accountId,
               clientItemId,
+              workspace: {
+                mode: draft.workspaceMode ?? 'local',
+                baseRef: draft.baseRef,
+              },
             })
             useMessagesStore.getState().addPending({
               sessionId: result.sessionId,

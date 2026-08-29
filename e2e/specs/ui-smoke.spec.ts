@@ -56,6 +56,8 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
     await projectDialog.getByLabel('Folder path').fill(forge.dataDir)
     await projectDialog.getByRole('button', { name: 'Create project' }).click()
     await page.waitForURL(/\/draft\//, { timeout: 10_000 })
+    await expect(page.getByLabel('Workspace')).toBeVisible()
+    await expect(page.getByLabel('Branch')).toHaveText('main')
     const composer = page.locator(shell).getByLabel('Message composer')
     await expect(composer).toBeVisible()
     await composer.fill('hello from the browser')

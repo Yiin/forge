@@ -21,6 +21,8 @@ export type LocalDraft = {
   // per attempt, persisted before the request so a reload mid-flight retries
   // with the same key, cleared on success so the next send is a new session.
   promotionKey?: string
+  workspaceMode?: 'local' | 'worktree'
+  baseRef?: string
 }
 type DraftPatch = Partial<
   Pick<
@@ -31,6 +33,8 @@ type DraftPatch = Partial<
     | 'attachments'
     | 'promotionState'
     | 'promotionKey'
+    | 'workspaceMode'
+    | 'baseRef'
   >
 >
 type DraftState = {

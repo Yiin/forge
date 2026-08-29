@@ -3,11 +3,11 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { promoteDraftWithKey } from './draft-promotion'
 import { resetDraftsStore, useDraftsStore } from '../stores/drafts'
 
-type PromoteCall = { input: { draftId: string }; requestId: string }
+type PromoteCall = { input: { draftId: string; workspace?: { mode: string; baseRef?: string } }; requestId: string }
 
 function fakePromote(behavior: 'ok' | 'fail' = 'ok'): {
   calls: PromoteCall[]
-  promote: (input: { draftId: string }, requestId: string) => Promise<unknown>
+  promote: (input: PromoteCall['input'], requestId: string) => Promise<unknown>
 } {
   const calls: PromoteCall[] = []
   return {
@@ -36,6 +36,7 @@ describe('draft promotion keys', () => {
         text: 'hello',
         harness: 'acp',
         clientItemId: 'client_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        workspace: { mode: 'worktree', baseRef: 'main' },
       },
       promote as never,
     )
@@ -43,6 +44,7 @@ describe('draft promotion keys', () => {
     expect(result).toEqual({ sessionId: 'session-1' })
     expect(calls).toHaveLength(1)
     expect(calls[0].requestId).toBeTruthy()
+    expect(calls[0].input.workspace).toEqual({ mode: 'worktree', baseRef: 'main' })
     const saved = useDraftsStore.getState().drafts[draft.id]
     expect(saved.promotionState).toBe('promoted')
     expect(saved.promotionKey).toBeUndefined()

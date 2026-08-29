@@ -7,6 +7,7 @@ export type DraftPromotionInput = {
   harness: string
   accountId?: string
   clientItemId: string
+  workspace?: { mode: 'local' | 'worktree'; baseRef?: string }
 }
 
 function newPromotionKey() {
@@ -40,6 +41,7 @@ export async function promoteDraftWithKey(
         text: input.text,
         attachmentIds: input.attachmentIds,
         clientItemId: input.clientItemId,
+        workspace: input.workspace,
       },
       promotionKey,
     )) as { sessionId: string }

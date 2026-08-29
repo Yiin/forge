@@ -1,5 +1,6 @@
 import { Timeline } from '../components/chat/Timeline'
 import { Composer } from '../components/chat/Composer'
+import { WorkspaceBar } from '../components/chat/WorkspaceBar'
 import { SessionHeader } from '../components/chat/SessionHeader'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
@@ -249,6 +250,16 @@ export function SessionRoute() {
             </div>
           </div>
           <div className="chat-composer-lower-chrome pointer-events-auto relative z-10 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:px-5 sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+            <WorkspaceBar
+              projectId={
+                useSessionsStore
+                  .getState()
+                  .sessions.find((item) => item.id === sessionId)?.projectId ??
+                ''
+              }
+              sessionId={sessionId}
+              disabled={(sessionStatus ?? loadedStatus) === 'running'}
+            />
             <Composer
               sessionId={sessionId}
               harness={harness}
