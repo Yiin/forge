@@ -14,7 +14,8 @@
     "./config": "./src/config.ts",
     "./rolePolicy": "./src/rolePolicy.ts",
     "./beads": "./src/beads.ts",
-    "./accounts": "./src/accounts.ts"
+    "./accounts": "./src/accounts.ts",
+    "./git": "./src/git.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

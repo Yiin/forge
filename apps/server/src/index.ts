@@ -13,6 +13,7 @@ import { uploadRoutes } from './http/uploads.js'
 import { attachmentRoutes } from './http/attachments.js'
 import { fsBrowseRoutes } from './http/fsBrowse.js'
 import { projectFileRoutes } from './http/projectFiles.js'
+import { gitRoutes } from './http/git.js'
 import { statusRoutes } from './http/status.js'
 import { migrate } from './db/migrate.js'
 import { EventBus } from './events/bus.js'
@@ -145,6 +146,7 @@ export function createApp(
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
+    app.route('/', gitRoutes(uploadStore.database))
     app.route('/', fsBrowseRoutes())
     app.route('/', searchRoutes(uploadStore.database))
     app.route('/', harnessRoutes({ configState, db: uploadStore.database }))
@@ -474,6 +476,28 @@ async function startE2eServer(): Promise<void> {
             createdAt: 1,
           })),
         )
+      }
+      const gitPath = url.pathname.match(/^\/api\/projects\/([^/]+)\/git\/(status|branches)$/)
+      if (request.method === 'GET' && gitPath) {
+        if (gitPath[2] === 'status')
+          return response({
+            isRepo: true,
+            branch: 'main',
+            defaultBranch: 'main',
+            hasRemote: false,
+            detached: false,
+            dirty: false,
+          })
+        return response({
+          isRepo: true,
+          hasRemote: false,
+          refs: [
+            { name: 'main', current: true, isDefault: true, isRemote: false, remoteName: null, worktreePath: null },
+            { name: 'feature/demo', current: false, isDefault: false, isRemote: false, remoteName: null, worktreePath: null },
+          ],
+          nextCursor: null,
+          totalCount: 2,
+        })
       }
       const project = url.pathname.match(/^\/api\/projects\/([^/]+)\/sessions$/)
       if (request.method === 'POST' && project) {

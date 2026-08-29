@@ -82,6 +82,16 @@ export class ForgeApi {
   listDirectories(path?: string) {
     return this.get(`/api/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`)
   }
+  gitStatus(projectId: string, cwd?: string) {
+    const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''
+    return this.get(`/api/projects/${encodeURIComponent(projectId)}/git/status${query}`)
+  }
+  gitBranches(projectId: string, params: { cwd?: string; query?: string; limit?: number; cursor?: number } = {}) {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) if (value !== undefined) query.set(key, String(value))
+    const suffix = query.toString() ? `?${query}` : ''
+    return this.get(`/api/projects/${encodeURIComponent(projectId)}/git/branches${suffix}`)
+  }
   listHarnesses() {
     return this.get('/api/harnesses')
   }
