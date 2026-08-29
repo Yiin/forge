@@ -7,7 +7,10 @@ export type HarnessSession = {
   providerSessionId?: string | null
 }
 
-export type HarnessItem = MessageContent
+export type HarnessItem = MessageContent & {
+  itemId?: string
+  turnId?: string
+}
 
 export type HarnessHandle = {
   prompt(content: string): Promise<void> | void

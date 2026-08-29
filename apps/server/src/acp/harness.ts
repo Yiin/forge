@@ -102,7 +102,12 @@ export function acpHarness(
     const normalizer = new AcpNormalizer({
       db: deps.db,
       bus: deps.bus,
-      sink: (input) => onItem(input.content as HarnessItem),
+      sink: (input) =>
+        onItem({
+          ...(input.content as HarnessItem),
+          itemId: input.itemId,
+          turnId: input.turnId,
+        }),
     })
     const services = createAcpServices({
       cwd: session.cwd,

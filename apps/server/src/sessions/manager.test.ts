@@ -7,6 +7,74 @@ import { SessionManager } from './manager.js'
 import type { HarnessFactory, HarnessHandle } from './harness.js'
 
 describe('session harness selection', () => {
+  it('persists harness item and turn ids for one logical turn', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const factory: HarnessFactory = () => ({
+      spawn: async (_session, onItem) => ({
+        prompt: () => {
+          onItem({
+            type: 'tool_call',
+            itemId: 'tool-1',
+            turnId: 'turn-1',
+            toolCallId: 'tool-1',
+            name: 'Read',
+            input: { path: 'x' },
+          })
+          onItem({
+            type: 'tool_update',
+            itemId: 'tool-1',
+            turnId: 'turn-1',
+            toolCallId: 'tool-1',
+            status: 'completed',
+          })
+          onItem({
+            type: 'text_delta',
+            itemId: 'text-1',
+            turnId: 'turn-1',
+            text: 'hello ',
+          })
+          onItem({
+            type: 'text_delta',
+            itemId: 'text-1',
+            turnId: 'turn-1',
+            text: 'world',
+          })
+          onItem({ type: 'turn_end', itemId: 'end-1', turnId: 'turn-1' })
+        },
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    })
+    const manager = new SessionManager(db, new EventBus(), factory)
+
+    await manager.prompt(session.id, 'one')
+
+    const rows = db
+      .prepare(
+        "SELECT type, item_id, turn_id FROM messages WHERE session_id = ? AND role = 'agent' AND type IN ('tool_call', 'tool_update', 'text_delta') ORDER BY seq",
+      )
+      .all(session.id) as Array<{
+      type: string
+      item_id: string
+      turn_id: string
+    }>
+    expect(rows.map((row) => row.item_id)).toEqual([
+      'tool-1',
+      'tool-1',
+      'text-1',
+      'text-1',
+    ])
+    expect(new Set(rows.map((row) => row.turn_id))).toEqual(new Set(['turn-1']))
+  })
+
   it('rejects a harness without a managed account', () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)

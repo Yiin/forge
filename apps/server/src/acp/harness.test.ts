@@ -39,7 +39,12 @@ describe('ACP harness adapter', () => {
       },
       { db, bus: new EventBus(), questions: new QuestionManager({ db }) },
     )
-    const items: Array<{ type: string; text?: string }> = []
+    const items: Array<{
+      type: string
+      text?: string
+      itemId?: string
+      turnId?: string
+    }> = []
     const result = await process.spawn(
       { id: session.id, cwd: '/tmp', harness: 'mock' },
       (item) => items.push(item as { type: string; text?: string }),
@@ -50,6 +55,7 @@ describe('ACP harness adapter', () => {
 
     expect(items.filter((item) => item.type === 'text_delta')).toHaveLength(1)
     expect(items.filter((item) => item.type === 'turn_end')).toHaveLength(1)
+    expect(items.every((item) => item.itemId && item.turnId)).toBe(true)
     expect(
       db
         .prepare('SELECT provider_session_id FROM sessions WHERE id = ?')

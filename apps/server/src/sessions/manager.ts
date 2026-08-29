@@ -1,6 +1,5 @@
 import { appendMessage, createSession, getSession } from '../db/queries.js'
 import type { EventBus } from '../events/bus.js'
-import type { MessageContent } from '@forge/protocol/message'
 import type { DatabaseSync } from 'node:sqlite'
 import type { HarnessFactory, HarnessHandle, HarnessItem } from './harness.js'
 import { isDefaultTitle, titleFromPrompt } from './titles.js'
@@ -151,12 +150,13 @@ export class SessionManager {
 
   private async spawn(row: SessionRow) {
     const onItem = (item: HarnessItem) => {
-      const turnId = this.turns.get(row.id) ?? makeId('turn_')
-      const normalized = item as MessageContent
+      const turnId = item.turnId ?? this.turns.get(row.id) ?? makeId('turn_')
+      const itemId = item.itemId ?? makeId('item_')
+      const { itemId: _itemId, turnId: _turnId, ...normalized } = item
       appendMessage(this.db, {
         sessionId: row.id,
         turnId,
-        itemId: makeId('item_'),
+        itemId,
         role:
           normalized.type === 'turn_start' || normalized.type === 'turn_end'
             ? 'system'
@@ -210,14 +210,16 @@ export class SessionManager {
 
   async recover(row: SessionRow, recap?: string) {
     const process = this.factory(row.harness, row.account_id)
+    const fallbackTurnId = makeId('turn_')
     const onItem = (item: HarnessItem) => {
+      const { itemId: _itemId, turnId: _turnId, ...content } = item
       appendMessage(this.db, {
         sessionId: row.id,
-        turnId: makeId('turn_'),
-        itemId: makeId('item_'),
+        turnId: item.turnId ?? fallbackTurnId,
+        itemId: item.itemId ?? makeId('item_'),
         role: 'agent',
         type: item.type,
-        content: item,
+        content,
         eventBus: this.bus,
       })
     }

@@ -9,7 +9,12 @@ afterEach(async () => {
 })
 
 async function fixture(quietPeriodMs = 300) {
-  const items: Array<{ type: string; text?: string; reason?: string }> = []
+  const items: Array<{
+    type: string
+    text?: string
+    reason?: string
+    itemId?: string
+  }> = []
   let exited: Error | undefined
   const harness = createPtyHarness({
     command: 'bash',
@@ -102,6 +107,20 @@ describe('PTY harness', () => {
     expect(text).not.toContain('echo done')
     expect(items.filter((item) => item.type === 'turn_start')).toHaveLength(2)
     expect(items.filter((item) => item.type === 'turn_end')).toHaveLength(2)
+    const firstEnd = items.findIndex((item) => item.type === 'turn_end')
+    const firstDeltaIds = items
+      .slice(0, firstEnd)
+      .filter((item) => item.type === 'text_delta')
+      .map((item) => item.itemId)
+    const secondDeltaIds = items
+      .slice(firstEnd + 1)
+      .filter((item) => item.type === 'text_delta')
+      .map((item) => item.itemId)
+    expect(firstDeltaIds[0]).toBeDefined()
+    expect(new Set(firstDeltaIds).size).toBe(1)
+    expect(secondDeltaIds[0]).toBeDefined()
+    expect(new Set(secondDeltaIds).size).toBe(1)
+    expect(firstDeltaIds[0]).not.toBe(secondDeltaIds[0])
   })
 
   it('waits through a silent command before ending the turn', async () => {
@@ -116,6 +135,16 @@ describe('PTY harness', () => {
         .map((item) => item.text)
         .join(''),
     ).toContain('done')
+  })
+
+  it('keeps one item id across large output chunks', async () => {
+    const { handle, items } = await fixture()
+    handle.prompt("printf 'x%.0s' {1..5000}; echo")
+    await waitFor(items, 'turn_end')
+
+    const deltas = items.filter((item) => item.type === 'text_delta')
+    expect(deltas.length).toBeGreaterThan(2)
+    expect(new Set(deltas.map((item) => item.itemId)).size).toBe(1)
   })
 
   it('cancels a running command and strips ANSI output', async () => {

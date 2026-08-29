@@ -78,6 +78,7 @@ export function createPtyHarness(options: PtyOptions): HarnessProcess {
       let promptText = ''
       let output = ''
       let turnStart = 0
+      let turnItemId: string | undefined
       let quietTimer: ReturnType<typeof setTimeout> | undefined
       let maxTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -96,7 +97,11 @@ export function createPtyHarness(options: PtyOptions): HarnessProcess {
           promptText,
         ).trim()
         for (let offset = 0; offset < text.length; offset += 2048)
-          emit({ type: 'text_delta', text: text.slice(offset, offset + 2048) })
+          emit({
+            type: 'text_delta',
+            text: text.slice(offset, offset + 2048),
+            ...(turnItemId ? { itemId: turnItemId } : {}),
+          })
       }
       const finish = (
         type: 'turn_end' | 'turn_interrupted',
@@ -163,6 +168,7 @@ export function createPtyHarness(options: PtyOptions): HarnessProcess {
           interrupted = false
           turnStart = output.length
           promptText = text
+          turnItemId = `${Date.now().toString(36)}${crypto.randomUUID().replaceAll('-', '')}`
           emit({ type: 'turn_start' })
           pty.write(`${text}\r`)
           maxTimer = setTimeout(
