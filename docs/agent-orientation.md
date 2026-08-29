@@ -44,7 +44,9 @@ defines product limits. `docs/architecture.md` is historical.
 - On laptops, `grok`/`opencode`/`pi` are mise shims under `~/.local/share/mise/shims`; a service PATH without it marks them unavailable.
 - The e2e server (`FORGE_E2E=1`) is a separate Bun fake. e2e does not cover `startServer` code; the accounts contract test (`apps/server/test/accounts-contract.test.ts`) covers the real routes. The fake's deltas carry no itemId and are coalesced client-side, so chat streaming, tool-call lifecycle, and composer timing bugs pass e2e; verify those against the real server.
 - Chat timeline flow: ACP notification → `AcpNormalizer` (`acp/normalize.ts`) → harness sink → `SessionManager.onItem` → `appendMessage` → EventBus → `ws.ts` → web messages store → `toRenderModel`. The sink must forward itemId/turnId; dropping them orphans tool updates and splits streamed text (forge-d4j).
-- `POST /api/sessions/:id/prompt` blocks for the whole ACP turn.
+- `POST /api/sessions/:id/prompt` returns after the harness is spawned and the user rows are persisted; the turn itself runs detached (`manager.ts:453`). The user row is created server-side only (`manager.ts:445`), after spawn. `POST /api/drafts/:id/promote` waits for the same spawn.
+- `foldEvent` (`apps/web/src/stores/messages.ts:48`) drops any event with `seq <= lastSeq`. `applyEvent` is unsafe for history replay across sessions; use `loadMessages`.
+- The e2e fake never publishes a user `text_delta`; e2e cannot show a user row.
 
 ## Release and deploy
 
@@ -89,7 +91,11 @@ defines product limits. `docs/architecture.md` is historical.
 - `seq` is the single global message cursor.
 - itemId groups one logical timeline item (a tool-call lifecycle, one streamed text run). Web folds strictly by itemId; all rows for one item must share it. toolCallId is the ACP-native key and the client-side fallback.
 - Session REST responses are camelCase via `packages/protocol` schemas; raw SQLite rows must not leak from handlers.
-- Model selection is session-scoped via ACP `session/setModel`; effort is account-scoped at spawn (`accounts/store.ts` accountConfigOverlay).
+- Model selection is session-scoped via ACP `session/setModel`. `/api/sessions/:id/models` is a RAM map filled from `session/new` (`manager.ts:75-80`); it is empty for idle sessions and after restart. `GET /api/harness-accounts/:id/models` returns `[]` today and is the seam for a durable catalog. Effort overlay in `accounts/store.ts:284-333` only maps grok, opencode, pi.
+- ACP SDK `@zed-industries/agent-client-protocol@0.4.5` has no `session/set_config_option`, no `config_option_update`, no token usage. `extMethod` prefixes `_`. Wrap the `Stream` to add methods. claude-code-acp takes `_meta.claudeCode.options` (effort, model `<slug>[1m]`) on `session/new`; codex-acp 0.16 has no `session/set_model`, only config options.
+- Context usage lives on disk, not in ACP: Claude transcript at `$CLAUDE_CONFIG_DIR/projects/<cwd with [^a-zA-Z0-9]→'-'>/<providerSessionId>.jsonl` (`message.usage`); Codex rollout at `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` (`token_count` events with `model_context_window` and `rate_limits`).
+- Git: the only git code is `apps/server/src/epics/worktrees.ts` (epic worktrees live INSIDE the repo). `sessions.worktree_path` exists but nothing writes it. Session `cwd` feeds the harness spawn directly (`manager.ts:202`); draft promotion hardcodes `cwd = project.path` (`manager.ts:551`). `apps/server/src/http/projects.ts` still returns raw rows.
+- Vocabulary: `branch` is a Git branch only; `path` is a conversation path. `PathSwitcher.tsx` is conversation paths, not filesystem.
 - Draft promotion idempotency keys per attempt (`draft.promotionKey` → `Idempotency-Key`), never per draft id. Drafts are one per project and reused across sessions; `draft_promotions.request_id` is the unique key.
 - Session kinds are `chat`, `subagent`, and `epic_worker`.
 - Change `packages/protocol` schemas and all consumers together.
