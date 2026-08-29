@@ -36,7 +36,13 @@ import {
   type ComposerTrigger,
 } from './composer-triggers'
 import { AskUserQuestionPanel } from './AskUserQuestionPanel'
-import { accountsApi, type Account } from '../../lib/accounts-api'
+import {
+  accountsApi,
+  type Account,
+  type HarnessAccountSnapshot,
+} from '../../lib/accounts-api'
+import { ContextWindowMeter } from './ContextWindowMeter'
+import { useSessionsStore } from '../../stores/sessions'
 import {
   buildHarnessOptions,
   defaultSelection,
@@ -104,6 +110,9 @@ export function Composer({
   const [sendError, setSendError] = useState<string | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const volatile = useMessagesStore((state) => state.volatile)
+  const contextWindow = useSessionsStore(
+    (state) => state.contextWindow[sessionId],
+  )
   useLayoutEffect(() => {
     const node = textarea.current
     if (!node) return
@@ -163,6 +172,9 @@ export function Composer({
     Array<{ key: string; name?: string; enabled?: boolean }>
   >(harness ? [{ key: harness }] : [])
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [accountSnapshots, setAccountSnapshots] = useState<
+    HarnessAccountSnapshot[]
+  >([])
   const [accountsLoaded, setAccountsLoaded] = useState(false)
   useEffect(() => {
     if (draftMode) return
@@ -187,6 +199,12 @@ export function Composer({
         setAccounts(next)
         setAccountsLoaded(true)
       })
+      .catch(() => undefined)
+  }, [])
+  useEffect(() => {
+    void accountsApi
+      .listHarnessStatus()
+      .then(setAccountSnapshots)
       .catch(() => undefined)
   }, [])
   const harnessOptions = buildHarnessOptions(harnesses, accounts, Date.now())
@@ -348,6 +366,9 @@ export function Composer({
   }
   const canSubmit = !sending && !!text.trim() && canSendUploads(uploads)
   const stopping = protocol === 'pty' && running && onInterrupt
+  const accountSnapshot = accountSnapshots.find(
+    (snapshot) => snapshot.accountId === selected.accountId,
+  )
   return (
     <>
       <AskUserQuestionPanel sessionId={sessionId} />
@@ -619,6 +640,12 @@ export function Composer({
                 )}
               </div>
               <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
+                {contextWindow && (
+                  <ContextWindowMeter
+                    usage={contextWindow}
+                    account={accountSnapshot}
+                  />
+                )}
                 {stopping && (
                   <button
                     type="button"
