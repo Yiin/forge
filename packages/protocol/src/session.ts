@@ -10,6 +10,7 @@ export const sessionResponseSchema = z.object({
   cwd: z.string(),
   worktreePath: z.string().nullable(),
   providerSessionId: z.string().nullable(),
+  model: z.string().nullable(),
   kind: z.string(),
   retention: z.enum(['permanent', 'discardable']),
   parentSessionId: nullableId,

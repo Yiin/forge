@@ -90,11 +90,20 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
         value.data.attachmentIds,
         value.data.harness,
         value.data.accountId,
+        value.data.model,
       )
       return c.json({ ok: true })
     } catch (error) {
       return c.json({ error: errorMessage(error) }, 404)
     }
+  })
+  app.get('/api/sessions/:id/models', (c) => {
+    const row = manager.database
+      .prepare('SELECT id FROM sessions WHERE id = ?')
+      .get(c.req.param('id'))
+    return row
+      ? c.json({ models: manager.models(c.req.param('id')) })
+      : c.json({ error: 'Session not found' }, 404)
   })
   app.post('/api/sessions/:id/interrupt', async (c) => {
     await manager.interrupt(c.req.param('id'))

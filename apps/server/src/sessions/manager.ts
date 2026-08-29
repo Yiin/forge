@@ -1,7 +1,12 @@
 import { appendMessage, createSession, getSession } from '../db/queries.js'
 import type { EventBus } from '../events/bus.js'
 import type { DatabaseSync } from 'node:sqlite'
-import type { HarnessFactory, HarnessHandle, HarnessItem } from './harness.js'
+import type {
+  HarnessFactory,
+  HarnessHandle,
+  HarnessItem,
+  HarnessModel,
+} from './harness.js'
 import { isDefaultTitle, titleFromPrompt } from './titles.js'
 import { appendForkContext, createFork } from './fork.js'
 import type { UploadStore } from '../uploads/store.js'
@@ -16,6 +21,7 @@ export type SessionRow = {
   account_id: string | null
   cwd: string
   provider_session_id: string | null
+  model: string | null
   status: string
   title: string
   kind: string
@@ -43,6 +49,7 @@ function recoveryRecap(db: Db, sessionId: string) {
 
 export class SessionManager {
   private readonly handles = new Map<string, HarnessHandle>()
+  private readonly availableModels = new Map<string, HarnessModel[]>()
   private readonly handleHarnesses = new Map<string, string>()
   private readonly reapTimers = new Map<string, ReturnType<typeof setTimeout>>()
   constructor(
@@ -64,6 +71,12 @@ export class SessionManager {
   private forgetHandle(id: string) {
     this.handles.delete(id)
     this.handleHarnesses.delete(id)
+  }
+  models(id: string) {
+    return this.availableModels.get(id) ?? []
+  }
+  private rememberModels(id: string, models?: HarnessModel[]) {
+    if (models) this.availableModels.set(id, models)
   }
 
   create(input: {
@@ -193,6 +206,7 @@ export class SessionManager {
       onItem,
       onExit,
     )
+    this.rememberModels(row.id, handle.availableModels)
     this.handles.set(row.id, handle)
     this.handleHarnesses.set(row.id, row.harness)
     this.status(row.id, 'running')
@@ -233,7 +247,11 @@ export class SessionManager {
       harness: row.harness,
       providerSessionId: row.provider_session_id,
     }
-    let result: { handle: HarnessHandle; proven: boolean }
+    let result: {
+      handle: HarnessHandle
+      proven: boolean
+      availableModels?: HarnessModel[]
+    }
     const canLoad =
       !recap &&
       process.capabilities?.loadSession &&
@@ -259,6 +277,10 @@ export class SessionManager {
       result = await process.newSession(session, onItem, onExit)
       if (!result.proven) throw new Error('New session was not proven')
     }
+    this.rememberModels(
+      row.id,
+      result.availableModels ?? result.handle.availableModels,
+    )
     if (recap) {
       appendMessage(this.db, {
         sessionId: row.id,
@@ -321,6 +343,7 @@ export class SessionManager {
     attachmentIds?: string[],
     harness?: string,
     accountId?: string | null,
+    model?: string,
   ) {
     let row = getSession(this.db, id) as SessionRow | undefined
     if (!row) throw new Error('Session not found')
@@ -363,6 +386,15 @@ export class SessionManager {
       }
     }
     const handle = this.handles.get(id) ?? (await this.spawn(row))
+    if (model !== undefined && model !== row.model) {
+      if (!handle.setModel)
+        throw new Error('Harness does not support model selection')
+      await handle.setModel(model)
+      this.db
+        .prepare('UPDATE sessions SET model = ? WHERE id = ?')
+        .run(model, id)
+      row = { ...row, model }
+    }
     const turnId = makeId('turn_')
     if (!this.firstPrompt.has(id)) this.firstPrompt.set(id, text)
     this.turns.set(id, turnId)

@@ -24,6 +24,7 @@ export const prompt = z.object({
   attachmentIds: z.array(id).optional(),
   harness: z.string().min(1).optional(),
   accountId: id.nullable().optional(),
+  model: z.string().min(1).optional(),
 })
 export const promoteDraft = z.object({
   draftId: id,

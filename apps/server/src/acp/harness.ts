@@ -7,6 +7,7 @@ import type { QuestionManager } from './questions.js'
 import type {
   HarnessHandle,
   HarnessItem,
+  HarnessModel,
   HarnessProcess,
   HarnessSession,
 } from '../sessions/harness.js'
@@ -50,7 +51,7 @@ export function acpHarness(
       const id = providerId(response)
       if (!id) throw new Error('ACP newSession did not return a session id')
       saveProviderSession(deps.db, session.id, id)
-      return handle(client, normalizer, id)
+      return handle(client, normalizer, id, models(response))
     },
     async newSession(session, onItem, onExit) {
       const { client, normalizer } = await createClient(session, onItem, onExit)
@@ -58,21 +59,37 @@ export function acpHarness(
       const id = providerId(response)
       if (!id) throw new Error('ACP newSession did not return a session id')
       saveProviderSession(deps.db, session.id, id)
-      return { handle: handle(client, normalizer, id), proven: true }
+      return {
+        handle: handle(client, normalizer, id, models(response)),
+        proven: true,
+        availableModels: models(response),
+      }
     },
     async loadSession(session, onItem, onExit) {
       if (!session.providerSessionId)
         return { handle: emptyHandle(), proven: false }
       const { client, normalizer } = await createClient(session, onItem, onExit)
-      await client.loadSession(session.providerSessionId, session.cwd)
+      const response = await client.loadSession(
+        session.providerSessionId,
+        session.cwd,
+      )
       const id = session.providerSessionId
       if (!id)
         return {
-          handle: handle(client, normalizer, session.providerSessionId),
+          handle: handle(
+            client,
+            normalizer,
+            session.providerSessionId,
+            models(response),
+          ),
           proven: false,
         }
       saveProviderSession(deps.db, session.id, id)
-      return { handle: handle(client, normalizer, id), proven: true }
+      return {
+        handle: handle(client, normalizer, id, models(response)),
+        proven: true,
+        availableModels: models(response),
+      }
     },
     async fork(session, onItem, onExit) {
       if (!session.providerSessionId)
@@ -82,14 +99,20 @@ export function acpHarness(
       const id = providerId(response)
       if (!id)
         return {
-          handle: handle(client, normalizer, session.providerSessionId),
+          handle: handle(
+            client,
+            normalizer,
+            session.providerSessionId,
+            models(response),
+          ),
           proven: false,
         }
       saveProviderSession(deps.db, session.id, id)
       return {
-        handle: handle(client, normalizer, id),
+        handle: handle(client, normalizer, id, models(response)),
         proven: true,
         providerSessionId: id,
+        availableModels: models(response),
       }
     },
   }
@@ -135,19 +158,33 @@ export function acpHarness(
     client: AcpClient,
     normalizer: AcpNormalizer,
     sessionId: string | null | undefined,
+    availableModels: HarnessModel[] = [],
   ): HarnessHandle {
     return {
+      availableModels,
       prompt: async (content) => {
         await normalizer.promptTurn(client, sessionId ?? '', [
           { type: 'text', text: content },
         ])
       },
       cancel: () => client.cancel(sessionId ?? ''),
+      setModel: async (modelId) => {
+        await client.setModel(sessionId ?? '', modelId)
+      },
       kill: () => client.kill(),
     }
   }
 
   return process
+}
+
+function models(response: {
+  models?: { availableModels?: Array<{ modelId: string; name: string }> } | null
+}): HarnessModel[] {
+  return (response.models?.availableModels ?? []).map((model) => ({
+    id: model.modelId,
+    displayName: model.name,
+  }))
 }
 
 function saveProviderSession(

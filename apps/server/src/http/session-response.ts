@@ -14,6 +14,7 @@ export function sessionResponse(row: SessionRow): SessionResponse {
     cwd: row.cwd,
     worktreePath: row.worktree_path ?? null,
     providerSessionId: row.provider_session_id ?? null,
+    model: row.model ?? null,
     kind: row.kind,
     retention: row.retention,
     parentSessionId: row.parent_session_id ?? null,

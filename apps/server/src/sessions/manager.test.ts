@@ -7,6 +7,50 @@ import { SessionManager } from './manager.js'
 import type { HarnessFactory, HarnessHandle } from './harness.js'
 
 describe('session harness selection', () => {
+  it('changes and persists the ACP model before the prompt', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const calls: string[] = []
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        availableModels: [{ id: 'fast', displayName: 'Fast' }],
+        prompt: async () => {
+          calls.push('prompt')
+        },
+        setModel: async (model) => {
+          calls.push(`model:${model}`)
+        },
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+
+    await manager.prompt(
+      session.id,
+      'hello',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'fast',
+    )
+
+    expect(calls).toEqual(['model:fast', 'prompt'])
+    expect(
+      db.prepare('SELECT model FROM sessions WHERE id = ?').get(session.id),
+    ).toEqual({ model: 'fast' })
+    expect(manager.models(session.id)).toEqual([
+      { id: 'fast', displayName: 'Fast' },
+    ])
+  })
+
   it('persists harness item and turn ids for one logical turn', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)
