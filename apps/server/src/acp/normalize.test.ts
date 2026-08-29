@@ -227,4 +227,83 @@ describe('ACP update normalization', () => {
     )
     expect(new Set(deltas.map((row) => row.item_id)).size).toBe(1)
   })
+
+  it('keeps one item across timer flushes for delayed text deltas', async () => {
+    vi.useFakeTimers()
+    try {
+      const { db, session } = fixture()
+      const normalizer = new AcpNormalizer({ db })
+      normalizer.beginTurn(session.id, 'turn-delayed')
+      await normalizer.handle(
+        notification(session.id, {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'hello ' },
+        }),
+      )
+      await vi.advanceTimersByTimeAsync(501)
+      await normalizer.handle(
+        notification(session.id, {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'world' },
+        }),
+      )
+      normalizer.endTurn(session.id, { stopReason: 'end_turn' })
+      const rows = replaySince(db, 0, [session.id]) as Array<{
+        type: string
+        item_id: string
+        content: string
+      }>
+      const deltas = rows.filter((row) => row.type === 'text_delta')
+      expect(deltas.map((row) => JSON.parse(row.content).text).join('')).toBe(
+        'hello world',
+      )
+      expect(new Set(deltas.map((row) => row.item_id)).size).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('starts a new item after a tool call separates text', async () => {
+    vi.useFakeTimers()
+    const { db, session } = fixture()
+    try {
+      const normalizer = new AcpNormalizer({ db })
+      normalizer.beginTurn(session.id, 'turn-separated')
+      await normalizer.handle(
+        notification(session.id, {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'before' },
+        }),
+      )
+      await vi.advanceTimersByTimeAsync(501)
+      await normalizer.handle(
+        notification(session.id, {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tool-1',
+          title: 'Read',
+          rawInput: { path: 'x' },
+        }),
+      )
+      await normalizer.handle(
+        notification(session.id, {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'after' },
+        }),
+      )
+      normalizer.endTurn(session.id, { stopReason: 'end_turn' })
+      const rows = replaySince(db, 0, [session.id]) as Array<{
+        type: string
+        item_id: string
+        content: string
+      }>
+      const deltas = rows.filter((row) => row.type === 'text_delta')
+      expect(deltas.map((row) => JSON.parse(row.content).text)).toEqual([
+        'before',
+        'after',
+      ])
+      expect(deltas[0]?.item_id).not.toBe(deltas[1]?.item_id)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

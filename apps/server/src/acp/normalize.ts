@@ -41,6 +41,10 @@ const newItem = () => ulid()
 
 export class AcpNormalizer {
   private readonly buffers = new Map<BufferKey, BufferState>()
+  private readonly continuations = new Map<
+    BufferKey,
+    Pick<BufferState, 'itemId' | 'type'>
+  >()
   private readonly turns = new Map<
     string,
     { turnId: string; closed: boolean; subagents: SubagentTurn }
@@ -106,11 +110,16 @@ export class AcpNormalizer {
     else appendMessage(this.options.db, input)
   }
 
-  private flushKey(key: BufferKey) {
+  private flushKey(key: BufferKey, continueItem = false) {
     const state = this.buffers.get(key)
-    if (!state) return
+    if (!state) {
+      if (!continueItem) this.continuations.delete(key)
+      return
+    }
     if (state.timer) clearTimeout(state.timer)
     this.buffers.delete(key)
+    if (continueItem) this.continuations.set(key, state)
+    else this.continuations.delete(key)
     const [sessionId, turnId] = key.split(':')
     this.append(sessionId, turnId, state.itemId, state.type, {
       type: state.type,
@@ -119,7 +128,8 @@ export class AcpNormalizer {
   }
 
   flush(sessionId?: string, turnId?: string) {
-    for (const key of this.buffers.keys()) {
+    const keys = new Set([...this.buffers.keys(), ...this.continuations.keys()])
+    for (const key of keys) {
       const [keySession, keyTurn] = key.split(':')
       if (
         (!sessionId || keySession === sessionId) &&
@@ -139,7 +149,13 @@ export class AcpNormalizer {
     let state = this.buffers.get(key)
     if (!state || state.type !== type) {
       if (state) this.flushKey(key)
-      state = { text: '', itemId: newItem(), type }
+      const continuation = this.continuations.get(key)
+      state = {
+        text: '',
+        itemId: continuation?.type === type ? continuation.itemId : newItem(),
+        type,
+      }
+      if (continuation?.type !== type) this.continuations.delete(key)
       this.buffers.set(key, state)
     }
     while (text.length) {
@@ -147,7 +163,7 @@ export class AcpNormalizer {
       state.text += text.slice(0, room)
       text = text.slice(room)
       if (state.text.length === 2048) {
-        this.flushKey(key)
+        this.flushKey(key, true)
         if (text.length) {
           state = { text: '', itemId: state.itemId, type }
           this.buffers.set(key, state)
@@ -155,7 +171,7 @@ export class AcpNormalizer {
       }
     }
     if (this.buffers.has(key) && !state.timer)
-      state.timer = setTimeout(() => this.flushKey(key), 500)
+      state.timer = setTimeout(() => this.flushKey(key, true), 500)
   }
 
   async handle(notification: acp.SessionNotification) {
