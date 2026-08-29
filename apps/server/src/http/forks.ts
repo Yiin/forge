@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { fork as forkSchema } from '@forge/protocol/commands'
 import type { SessionManager } from '../sessions/manager.js'
+import { errorMessage } from '../error-message.js'
 
 export function forkRoutes(manager: SessionManager) {
   const app = new Hono()
@@ -17,10 +18,7 @@ export function forkRoutes(manager: SessionManager) {
       )
       return c.json(result, 201)
     } catch (error) {
-      return c.json(
-        { error: error instanceof Error ? error.message : String(error) },
-        400,
-      )
+      return c.json({ error: errorMessage(error) }, 400)
     }
   })
   return app

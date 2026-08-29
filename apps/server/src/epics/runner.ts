@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { EventBus } from '../events/bus.js'
+import { errorMessage } from '../error-message.js'
 import {
   claim,
   hasCommentSince,
@@ -132,9 +133,7 @@ export function classifyPromptFailure(
   error: unknown,
   now: number,
 ): PromptFailureDecision {
-  const match = detectProviderError(
-    error instanceof Error ? error.message : String(error),
-  )
+  const match = detectProviderError(errorMessage(error))
   return {
     category: match?.category ?? null,
     recordCooldown:
@@ -259,9 +258,7 @@ async function runPromptAttempts(
       const decision = classifyPromptFailure(error, detectedAt)
       if (!decision.recordCooldown) exhaustedHarnesses.add(next.harness)
       if (decision.recordCooldown && next.accountId) {
-        const match = detectProviderError(
-          error instanceof Error ? error.message : String(error),
-        )
+        const match = detectProviderError(errorMessage(error))
         recordLimit(db, {
           accountId: next.accountId,
           kind: decision.category!,
@@ -275,7 +272,7 @@ async function runPromptAttempts(
         db,
         iteration.id,
         'failed',
-        `Fallback attempt ${attemptNumber} (${next.harness}${next.accountId ? `/${next.accountId}` : ''}) failed: ${String(error)}`,
+        `Fallback attempt ${attemptNumber} (${next.harness}${next.accountId ? `/${next.accountId}` : ''}) failed: ${errorMessage(error)}`,
       )
       await session.cancel().catch(() => undefined)
     } finally {
@@ -320,7 +317,7 @@ export class EpicRunner {
     const abort = new AbortController()
     this.active.set(run.id, { abort })
     void this.loop(run, input, abort.signal).catch(
-      (error) => void this.fail(run.id, String(error)),
+      (error) => void this.fail(run.id, errorMessage(error)),
     )
     return run
   }
@@ -445,7 +442,7 @@ export class EpicRunner {
             (error) => ({
               kind: 'failed' as const,
               beadId: bead.id,
-              reason: error instanceof Error ? error.message : String(error),
+              reason: errorMessage(error),
             }),
           )
           inFlight.set(bead.id, task)
@@ -722,15 +719,13 @@ export class EpicRunner {
           this.db,
           iteration.id,
           signal.aborted ? 'interrupted' : 'failed',
-          String(error),
+          errorMessage(error),
         )
       if (!signal.aborted) await releaseClaim(input.repoPath, bead.id)
       return {
         kind: signal.aborted ? 'cancelled' : 'failed',
         beadId: bead.id,
-        ...(signal.aborted
-          ? {}
-          : { reason: error instanceof Error ? error.message : String(error) }),
+        ...(signal.aborted ? {} : { reason: errorMessage(error) }),
       } as DispatchResult
     } finally {
       if (iteration) this.workerSessions.delete(iteration.id)
@@ -826,7 +821,7 @@ export class EpicRunner {
     const abort = new AbortController()
     this.active.set(runId, { abort })
     void this.loop({ ...row, id: runId }, input, abort.signal).catch(
-      (error) => void this.fail(runId, String(error)),
+      (error) => void this.fail(runId, errorMessage(error)),
     )
   }
   private async fail(runId: string, reason: string) {

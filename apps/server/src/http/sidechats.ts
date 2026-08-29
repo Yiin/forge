@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { btw as btwSchema } from '@forge/protocol/commands'
 import type { SessionManager } from '../sessions/manager.js'
+import { errorMessage } from '../error-message.js'
 
 export function sideChatRoutes(manager: SessionManager) {
   const app = new Hono()
@@ -20,10 +21,7 @@ export function sideChatRoutes(manager: SessionManager) {
         201,
       )
     } catch (error) {
-      return c.json(
-        { error: error instanceof Error ? error.message : String(error) },
-        400,
-      )
+      return c.json({ error: errorMessage(error) }, 400)
     }
   })
   app.post('/api/sessions/:id/keep', (c) =>
