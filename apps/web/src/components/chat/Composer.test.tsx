@@ -124,21 +124,26 @@ describe('Composer', () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce())
   })
 
-  it('does not send again while a send is in flight', () => {
-    const onSend = vi.fn().mockResolvedValue(undefined)
+  it('does not send again while a send is in flight', async () => {
+    let resolveSend!: () => void
+    const onSend = vi.fn(
+      () => new Promise<void>((resolve) => (resolveSend = resolve)),
+    )
     render(
       <Composer
         sessionId="session-1"
         harness="claude"
         accountId="main"
-        sending
         onSend={onSend}
       />,
     )
     const composer = screen.getByLabelText('Message composer')
     fireEvent.change(composer, { target: { value: 'hello' } })
     fireEvent.keyDown(composer, { key: 'Enter' })
-    expect(onSend).not.toHaveBeenCalled()
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    expect(onSend).toHaveBeenCalledOnce()
+    resolveSend()
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce())
   })
 
   it('exposes the manual end-turn action for a running PTY session', () => {

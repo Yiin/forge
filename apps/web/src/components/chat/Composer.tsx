@@ -108,6 +108,7 @@ export function Composer({
   const [models, setModels] = useState<ReturnType<typeof modelResponse>>([])
   const [interrupting, setInterrupting] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const submitting = useRef(false)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const volatile = useMessagesStore((state) => state.volatile)
   const contextWindow = useSessionsStore(
@@ -327,11 +328,13 @@ export function Composer({
     const value = text.trim()
     if (
       sending ||
+      submitting.current ||
       !value ||
       (accountsLoaded && !selected.accountId) ||
       !canSendUploads(uploads)
     )
       return
+    submitting.current = true
     setSendError(null)
     const attachmentIds = completedAttachmentIds(uploads)
     setText('')
@@ -346,6 +349,8 @@ export function Composer({
       setSendError(
         error instanceof Error ? error.message : 'Message failed to send',
       )
+    } finally {
+      submitting.current = false
     }
   }
   const endTurn = async () => {
