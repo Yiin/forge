@@ -1,6 +1,21 @@
 import { z } from 'zod'
 import { Message } from './message.js'
 
+export const contextWindowUsageSchema = z.object({
+  usedTokens: z.number().int().nonnegative(),
+  totalProcessedTokens: z.number().int().nonnegative().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  inputTokens: z.number().int().nonnegative().optional(),
+  cachedInputTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  reasoningOutputTokens: z.number().int().nonnegative().optional(),
+  lastUsedTokens: z.number().int().nonnegative().optional(),
+  compactsAutomatically: z.boolean().optional(),
+  source: z.string(),
+  observedAt: z.number().int(),
+})
+export type ContextWindowUsage = z.infer<typeof contextWindowUsageSchema>
+
 export const ServerEvent = z.object({
   seq: z.number().int().nonnegative(),
   sessionId: z.string(),
@@ -34,6 +49,12 @@ export const Ephemeral = z.discriminatedUnion('type', [
     seq: z.null(),
     sessionId: z.string(),
     title: z.string(),
+  }),
+  z.object({
+    type: z.literal('contextWindow'),
+    seq: z.null(),
+    sessionId: z.string(),
+    usage: contextWindowUsageSchema,
   }),
   z.object({
     type: z.literal('epicRunStatus'),

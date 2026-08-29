@@ -292,6 +292,7 @@ export function startServer(
     probes: new Map([
       ['claude', claudeUsageProbe],
       ['codex', codexUsageProbe],
+      ['kimi', unsupportedUsageProbe],
       ['opencode', unsupportedUsageProbe],
       ['grok', unsupportedUsageProbe],
       ['pi', unsupportedUsageProbe],

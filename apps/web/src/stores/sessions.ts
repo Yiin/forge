@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { ContextWindowUsage } from '@forge/protocol/events'
 export type SessionSummary = {
   id: string
   title: string
@@ -41,14 +42,17 @@ export function dedupeById<T extends { id: string }>(items: T[]): T[] {
 type SessionsState = {
   sessions: SessionSummary[]
   projects: ProjectSummary[]
+  contextWindow: Record<string, ContextWindowUsage>
   setSessions: (sessions: SessionSummary[]) => void
   setProjects: (projects: ProjectSummary[]) => void
   upsertSession: (session: SessionSummary) => void
   removeSession: (id: string) => void
+  setContextWindow: (sessionId: string, usage: ContextWindowUsage) => void
 }
 export const useSessionsStore = create<SessionsState>((set) => ({
   sessions: [],
   projects: [],
+  contextWindow: {},
   setSessions: (sessions) => set({ sessions: dedupeById(sessions) }),
   setProjects: (projects) => set({ projects }),
   upsertSession: (session) =>
@@ -63,4 +67,10 @@ export const useSessionsStore = create<SessionsState>((set) => ({
     set((state) => ({
       sessions: state.sessions.filter((session) => session.id !== id),
     })),
+  setContextWindow: (sessionId, usage) =>
+    set((state) => {
+      const current = state.contextWindow[sessionId]
+      if (current && current.observedAt >= usage.observedAt) return state
+      return { contextWindow: { ...state.contextWindow, [sessionId]: usage } }
+    }),
 }))

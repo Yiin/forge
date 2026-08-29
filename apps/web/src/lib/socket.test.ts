@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ForgeSocket, type ForgeWebSocket } from './socket'
 import { useMessagesStore } from '../stores/messages'
+import { useSessionsStore } from '../stores/sessions'
 
 class MockSocket implements ForgeWebSocket {
   static sockets: MockSocket[] = []
@@ -37,6 +38,7 @@ describe('ForgeSocket', () => {
   beforeEach(() => {
     MockSocket.sockets = []
     useMessagesStore.getState().reset()
+    useSessionsStore.setState({ sessions: [], projects: [], contextWindow: {} })
     vi.useFakeTimers()
   })
   it('resubscribes from the cursor and produces no duplicate after a drop', () => {
@@ -87,6 +89,35 @@ describe('ForgeSocket', () => {
       text: 'one two',
     })
     expect(useMessagesStore.getState().volatile).toHaveLength(1)
+    socket.stop()
+  })
+
+  it('stores the newest context window frame without adding volatile messages', () => {
+    const socket = new ForgeSocket({
+      createWebSocket: () => new MockSocket(),
+    }).start()
+    const mock = MockSocket.sockets[0]
+    mock.open()
+    const usage = {
+      usedTokens: 10,
+      maxTokens: 100,
+      source: 'test',
+      observedAt: 20,
+    }
+    mock.message({
+      type: 'contextWindow',
+      seq: null,
+      sessionId: 'ses-1',
+      usage,
+    })
+    mock.message({
+      type: 'contextWindow',
+      seq: null,
+      sessionId: 'ses-1',
+      usage: { ...usage, usedTokens: 1, observedAt: 10 },
+    })
+    expect(useSessionsStore.getState().contextWindow['ses-1']).toEqual(usage)
+    expect(useMessagesStore.getState().volatile).toHaveLength(0)
     socket.stop()
   })
 })

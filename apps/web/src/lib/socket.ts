@@ -129,6 +129,12 @@ export class ForgeSocket {
         )
         if (current) sessions.upsertSession({ ...current, title: frame.title })
       }
+      if (frame.type === 'contextWindow') {
+        useSessionsStore
+          .getState()
+          .setContextWindow(frame.sessionId, frame.usage)
+        return
+      }
       return useMessagesStore.getState().applyEphemeral(frame)
     }
     const event = ServerEvent.safeParse(value)

@@ -74,6 +74,38 @@ describe('protocol schemas', () => {
     ] as const
     for (const event of events) expect(Ephemeral.parse(event)).toEqual(event)
   })
+  it('validates context window usage bounds', () => {
+    const usage = {
+      usedTokens: 10,
+      maxTokens: 100,
+      source: 'claude.transcript',
+      observedAt: 1,
+    }
+    expect(
+      Ephemeral.safeParse({
+        type: 'contextWindow',
+        seq: null,
+        sessionId: 'ses-1',
+        usage,
+      }).success,
+    ).toBe(true)
+    expect(
+      Ephemeral.safeParse({
+        type: 'contextWindow',
+        seq: null,
+        sessionId: 'ses-1',
+        usage: { ...usage, usedTokens: -1 },
+      }).success,
+    ).toBe(false)
+    expect(
+      Ephemeral.safeParse({
+        type: 'contextWindow',
+        seq: null,
+        sessionId: 'ses-1',
+        usage: { ...usage, maxTokens: 0 },
+      }).success,
+    ).toBe(false)
+  })
   it('creates and validates prefixed ULIDs', () => {
     for (const kind of ['prj', 'ses', 'att', 'run', 'itr'] as const)
       expect(idSchemas[kind].parse(makeId(kind))).toBeTypeOf('string')

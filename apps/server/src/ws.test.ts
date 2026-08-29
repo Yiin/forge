@@ -129,6 +129,35 @@ describe('event websocket', () => {
     socket.close()
   })
 
+  it('routes context window frames only to subscribed sessions', async () => {
+    const { bus, session, port } = fixture()
+    const other = `${session.id}-other`
+    const subscribed = await openSocket(port)
+    const unsubscribed = await openSocket(port)
+    const received = receiveWithTimeout(subscribed, 1)
+    const notReceived = receiveWithTimeout(unsubscribed, 1, 50).then(
+      () => true,
+      () => false,
+    )
+    subscribed.send(
+      JSON.stringify({ type: 'subscribe', sessions: [session.id], cursor: 0 }),
+    )
+    unsubscribed.send(
+      JSON.stringify({ type: 'subscribe', sessions: [other], cursor: 0 }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    bus.publishEphemeral({
+      type: 'contextWindow',
+      seq: null,
+      sessionId: session.id,
+      usage: { usedTokens: 1, source: 'test', observedAt: Date.now() },
+    })
+    expect((await received)[0].sessionId).toBe(session.id)
+    expect(await notReceived).toBe(false)
+    subscribed.close()
+    unsubscribed.close()
+  })
+
   it('replays a stale cursor in bounded batches without gaps or duplicates', async () => {
     const { db, bus, session, port } = fixture()
     const count = 2_000
