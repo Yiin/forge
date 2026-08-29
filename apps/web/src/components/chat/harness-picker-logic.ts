@@ -17,6 +17,7 @@ export type HarnessSelection = {
   harness: string
   accountId?: string
   model?: string
+  configOptions?: Record<string, string | boolean>
 }
 
 export function buildHarnessOptions(

@@ -49,6 +49,14 @@ import {
   type HarnessSelection,
 } from './harness-picker-logic'
 import { modelResponse } from './model-picker-logic'
+import { ConfigOptionsPicker } from './ConfigOptionsPicker'
+import {
+  parseConfigOptionsResponse,
+  pendingChanges,
+  pickableOptions,
+  type ConfigOption,
+  type ConfigSelections,
+} from './config-options-logic'
 
 /** Ghost pill trigger: the composer footer's shared look for its selects. */
 const PILL_TRIGGER_CLASS =
@@ -106,6 +114,8 @@ export function Composer({
     model,
   })
   const [models, setModels] = useState<ReturnType<typeof modelResponse>>([])
+  const [configOptions, setConfigOptions] = useState<ConfigOption[]>([])
+  const [configSelections, setConfigSelections] = useState<ConfigSelections>({})
   const [interrupting, setInterrupting] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const submitting = useRef(false)
@@ -169,6 +179,30 @@ export function Composer({
       })
       .catch(() => undefined)
   }, [draftMode, sessionId])
+  useEffect(() => {
+    if (draftMode || sending) return
+    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/config-options`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        const next = parseConfigOptionsResponse(value)
+        setConfigOptions(next)
+        setConfigSelections((current) => {
+          const valid = new Set(next.map((option) => option.id))
+          return Object.fromEntries(
+            next
+              .filter((option) => valid.has(option.id))
+              .map((option) => [
+                option.id,
+                current[option.id] ?? option.currentValue,
+              ]),
+          )
+        })
+      })
+      .catch(() => {
+        setConfigOptions([])
+        setConfigSelections({})
+      })
+  }, [draftMode, sessionId, sending])
   const [harnesses, setHarnesses] = useState<
     Array<{ key: string; name?: string; enabled?: boolean }>
   >(harness ? [{ key: harness }] : [])
@@ -342,7 +376,14 @@ export function Composer({
     setTrigger(null)
     dispatchUploads(initialAttachmentUploads)
     try {
-      await onSend(value, attachmentIds, selected)
+      const changedOptions = pendingChanges(configOptions, configSelections)
+      await onSend(
+        value,
+        attachmentIds,
+        Object.keys(changedOptions).length > 0
+          ? { ...selected, configOptions: changedOptions }
+          : selected,
+      )
     } catch (error) {
       setText(value)
       onTextChange?.(value)
@@ -642,6 +683,27 @@ export function Composer({
                       )}
                     </Tooltip>
                   </TooltipProvider>
+                )}
+                {!draftMode && pickableOptions(configOptions).length > 0 && (
+                  <ConfigOptionsPicker
+                    options={pickableOptions(configOptions)}
+                    selections={configSelections}
+                    disabled={running || sending}
+                    onChange={(id, value) => {
+                      const nextSelections = {
+                        ...configSelections,
+                        [id]: value,
+                      }
+                      setConfigSelections(nextSelections)
+                      onSelectionChange?.({
+                        ...selected,
+                        configOptions: pendingChanges(
+                          configOptions,
+                          nextSelections,
+                        ),
+                      })
+                    }}
+                  />
                 )}
               </div>
               <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">

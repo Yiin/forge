@@ -200,6 +200,7 @@ export function SessionRoute() {
             harness: selection.harness || harness,
             accountId: selection.accountId,
             model: selection.model,
+            configOptions: selection.configOptions,
             clientItemId,
           })
         } catch (error) {

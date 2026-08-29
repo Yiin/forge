@@ -349,4 +349,82 @@ describe('Composer', () => {
       ).toBe(true),
     )
   })
+
+  it('shows config options and sends only changed values', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        const body = url.includes('config-options')
+          ? {
+              configOptions: [
+                {
+                  id: 'thought_level',
+                  name: 'Reasoning',
+                  type: 'select',
+                  currentValue: 'high',
+                  category: 'thought_level',
+                  options: [
+                    { value: 'high', name: 'High' },
+                    { value: 'low', name: 'Low' },
+                  ],
+                },
+              ],
+            }
+          : { models: [] }
+        return Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+      }),
+    )
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    renderComposer(onSend)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Reasoning' })).toBeTruthy(),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Reasoning' }).textContent,
+    ).toContain('High')
+    fireEvent.click(screen.getByRole('button', { name: 'Reasoning' }))
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Low' }))
+    const composer = screen.getByLabelText('Message composer')
+    fireEvent.change(composer, { target: { value: 'hello' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith('hello', [], {
+        harness: 'claude',
+        accountId: 'main',
+        configOptions: { thought_level: 'low' },
+      }),
+    )
+  })
+
+  it('does not show config options in draft mode or when none are advertised', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ configOptions: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    )
+    renderComposer()
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Reasoning' })).toBeNull(),
+    )
+    cleanup()
+    render(
+      <Composer
+        sessionId="draft-1"
+        harness="claude"
+        accountId="main"
+        draftMode
+        onSend={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Reasoning' })).toBeNull()
+  })
 })
