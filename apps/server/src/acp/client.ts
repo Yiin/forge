@@ -3,6 +3,10 @@ import { spawn as spawnNode } from 'node:child_process'
 import * as acp from '@zed-industries/agent-client-protocol'
 import type { HarnessConfig } from '@forge/protocol/config'
 import { detectProviderError, recordLimit } from '../accounts/limits.js'
+import {
+  createConfigOptionChannel,
+  type SessionConfigOption,
+} from './configOptions.js'
 
 type Db = { prepare(sql: string): { run(...params: unknown[]): unknown } }
 
@@ -101,6 +105,12 @@ export type AcpClient = {
     sessionId: string,
     modelId: string,
   ): Promise<acp.SetSessionModelResponse | void>
+  configOptions(sessionId: string): SessionConfigOption[]
+  setConfigOption(
+    sessionId: string,
+    configId: string,
+    value: string | boolean,
+  ): Promise<SessionConfigOption[]>
   kill(): Promise<void>
 }
 
@@ -209,11 +219,13 @@ export async function spawnAcpClient(
   })()
 
   let dead: AgentProcessDiedError | undefined
+  let rejectConfigPending: ((error: unknown) => void) | undefined
   let rejectDeath!: (error: AgentProcessDiedError) => void
   const death = new Promise<never>((_, reject) => (rejectDeath = reject))
   void death.catch(() => undefined)
   void process.exited.then((exitCode: number) => {
     dead = new AgentProcessDiedError(exitCode, stderr.toString())
+    rejectConfigPending?.(dead)
     const match = detectProviderError(dead.stderrTail)
     const accountId = handlers.capabilityStore?.accountId
     if (match && accountId)
@@ -256,12 +268,19 @@ export async function spawnAcpClient(
           Promise.resolve(handlers.onExtNotification?.(method, params))
       : undefined,
   }
+  const configOptions = new Map<string, SessionConfigOption[]>()
+  const rawStream = acp.ndJsonStream(
+    asWebWritable(process.stdin),
+    asWebReadable(process.stdout),
+  )
+  const configChannel = createConfigOptionChannel(rawStream, {
+    onConfigOptions: (sessionId, options) =>
+      configOptions.set(sessionId, options),
+  })
+  rejectConfigPending = configChannel.rejectPending
   const connection = new acp.ClientSideConnection(
     () => client,
-    acp.ndJsonStream(
-      asWebWritable(process.stdin),
-      asWebReadable(process.stdout),
-    ),
+    configChannel.stream,
   )
   const initialized = await race(
     connection.initialize({
@@ -304,6 +323,11 @@ export async function spawnAcpClient(
     )
 
   const sessionFeatures = new Map<string, { mode: boolean; model: boolean }>()
+  const seedConfigOptions = (sessionId: string, response: unknown) => {
+    const options = (response as { configOptions?: unknown }).configOptions
+    if (Array.isArray(options))
+      configOptions.set(sessionId, options as SessionConfigOption[])
+  }
   const activePrompts = new Set<string>()
   const newSession = async (cwd: string) => {
     const response = await race(connection.newSession({ cwd, mcpServers: [] }))
@@ -311,6 +335,7 @@ export async function spawnAcpClient(
       mode: Boolean(response.modes?.availableModes?.length),
       model: Boolean(response.models?.availableModels?.length),
     })
+    seedConfigOptions(response.sessionId, response)
     capabilities.setMode ||= Boolean(response.modes?.availableModes?.length)
     capabilities.setModel ||= Boolean(response.models?.availableModels?.length)
     return response
@@ -328,6 +353,7 @@ export async function spawnAcpClient(
         mode: Boolean(response.modes?.availableModes?.length),
         model: Boolean(response.models?.availableModels?.length),
       })
+      seedConfigOptions(sessionId, response)
       capabilities.setMode ||= Boolean(response.modes?.availableModes?.length)
       capabilities.setModel ||= Boolean(
         response.models?.availableModels?.length,
@@ -347,6 +373,7 @@ export async function spawnAcpClient(
         mode: Boolean(response.modes?.availableModes?.length),
         model: Boolean(response.models?.availableModels?.length),
       })
+      seedConfigOptions(response.sessionId, response)
       capabilities.setMode ||= Boolean(response.modes?.availableModes?.length)
       capabilities.setModel ||= Boolean(
         response.models?.availableModels?.length,
@@ -376,6 +403,16 @@ export async function spawnAcpClient(
       if (!sessionFeatures.get(sessionId)?.model)
         throw new CapabilityUnsupportedError('setModel')
       return race(connection.setSessionModel({ sessionId, modelId }))
+    },
+    configOptions: (sessionId) => configOptions.get(sessionId) ?? [],
+    setConfigOption: async (sessionId, configId, value) => {
+      if (!configOptions.has(sessionId))
+        throw new CapabilityUnsupportedError('setConfigOption')
+      const options = await race(
+        configChannel.setConfigOption(sessionId, configId, value),
+      )
+      configOptions.set(sessionId, options)
+      return options
     },
     kill: async () => {
       if (dead) return

@@ -255,6 +255,10 @@ export function acpHarness(
       setModel: async (modelId) => {
         await client.setModel(sessionId ?? '', modelId)
       },
+      configOptions: () => client.configOptions(sessionId ?? ''),
+      setConfigOption: async (configId, value) => {
+        await client.setConfigOption(sessionId ?? '', configId, value)
+      },
       kill: () => client.kill(),
     }
   }

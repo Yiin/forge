@@ -1,4 +1,5 @@
 import type { MessageContent } from '@forge/protocol/message'
+import type { SessionConfigOption } from '../acp/configOptions.js'
 
 export type HarnessSession = {
   id: string
@@ -22,6 +23,8 @@ export type HarnessHandle = {
   cancel(): Promise<void> | void
   kill(): Promise<void> | void
   setModel?(modelId: string): Promise<void> | void
+  configOptions?(): SessionConfigOption[]
+  setConfigOption?(configId: string, value: string | boolean): Promise<void>
   answerQuestion?(questionId: string, answer: string): Promise<void> | void
   availableModels?: HarnessModel[]
 }

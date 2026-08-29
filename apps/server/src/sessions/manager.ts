@@ -25,6 +25,7 @@ export type SessionRow = {
   cwd: string
   provider_session_id: string | null
   model: string | null
+  config_options?: string | null
   status: string
   title: string
   kind: string
@@ -79,6 +80,9 @@ export class SessionManager {
   models(id: string) {
     return this.availableModels.get(id) ?? []
   }
+  configOptions(id: string) {
+    return this.handles.get(id)?.configOptions?.() ?? []
+  }
   private rememberModels(id: string, models?: HarnessModel[]) {
     if (models) this.availableModels.set(id, models)
   }
@@ -125,7 +129,8 @@ export class SessionManager {
       repoPath: projectPath,
       dataDir: this.dataDir,
       projectId,
-      baseRef: workspace.baseRef ?? status.defaultBranch ?? status.branch ?? 'HEAD',
+      baseRef:
+        workspace.baseRef ?? status.defaultBranch ?? status.branch ?? 'HEAD',
       branch: workspace.branch,
     })
     return {
@@ -490,6 +495,7 @@ export class SessionManager {
     accountId?: string | null,
     model?: string,
     clientItemId?: string,
+    configOptions?: Record<string, string | boolean>,
   ) {
     const accepted = await this.acceptPrompt(
       id,
@@ -516,6 +522,30 @@ export class SessionManager {
           .prepare('UPDATE sessions SET model = ? WHERE id = ?')
           .run(accepted.model, row.id)
         row = { ...row, model: accepted.model }
+      }
+      if (configOptions && Object.keys(configOptions).length > 0) {
+        if (!handle.setConfigOption || !handle.configOptions)
+          throw new Error('Harness does not support config options')
+        const live = new Map(
+          handle.configOptions().map((option) => [option.id, option]),
+        )
+        const stored = parseConfigOptions(row.config_options)
+        const merged = { ...stored }
+        for (const key of Object.keys(configOptions).sort()) {
+          const value = configOptions[key]
+          if (!live.has(key)) {
+            delete merged[key]
+            continue
+          }
+          if (stored[key] !== value) {
+            await handle.setConfigOption(key, value)
+            merged[key] = value
+          }
+        }
+        this.db
+          .prepare('UPDATE sessions SET config_options = ? WHERE id = ?')
+          .run(JSON.stringify(merged), row.id)
+        row = { ...row, config_options: JSON.stringify(merged) }
       }
       this.runPrompt(handle, row, accepted.turnId, text)
     })().catch((error: unknown) =>
@@ -798,5 +828,17 @@ export class SessionManager {
   close() {
     for (const timer of this.reapTimers.values()) clearTimeout(timer)
     for (const handle of this.handles.values()) void handle.kill()
+  }
+}
+
+function parseConfigOptions(
+  value: string | null | undefined,
+): Record<string, string | boolean> {
+  if (!value) return {}
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
   }
 }

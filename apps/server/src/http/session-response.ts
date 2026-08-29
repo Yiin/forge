@@ -16,6 +16,7 @@ export function sessionResponse(row: SessionRow): SessionResponse {
     branch: row.branch ?? null,
     providerSessionId: row.provider_session_id ?? null,
     model: row.model ?? null,
+    configOptions: parseConfigOptions(row.config_options),
     kind: row.kind,
     retention: row.retention,
     parentSessionId: row.parent_session_id ?? null,
@@ -29,6 +30,16 @@ export function sessionResponse(row: SessionRow): SessionResponse {
     lastActivityAt: row.last_activity_at,
     deletedAt: row.deleted_at ?? null,
   })
+}
+
+function parseConfigOptions(value: unknown) {
+  if (typeof value !== 'string' || !value) return null
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 export function sessionResponses(rows: SessionRow[]) {

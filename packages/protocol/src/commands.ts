@@ -35,6 +35,9 @@ export const prompt = z.object({
     .string()
     .regex(/^client_[0-9a-f]{32}$/)
     .optional(),
+  configOptions: z
+    .record(z.string().min(1), z.union([z.string(), z.boolean()]))
+    .optional(),
 })
 export const promoteDraft = z.object({
   draftId: id,

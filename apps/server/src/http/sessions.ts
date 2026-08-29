@@ -20,7 +20,9 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
     if (!value.success) return c.json({ error: value.error.message }, 400)
     try {
       const project = manager.database
-        .prepare('SELECT path FROM projects WHERE id = ? AND archived_at IS NULL')
+        .prepare(
+          'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL',
+        )
         .get(value.data.projectId) as { path: string } | undefined
       if (!project) return c.json({ error: 'Project not found' }, 404)
       const workspace = await manager.resolveWorkspace(
@@ -104,6 +106,7 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
         value.data.accountId,
         value.data.model,
         value.data.clientItemId,
+        value.data.configOptions,
       )
       return c.json({ ok: true })
     } catch (error) {
@@ -116,6 +119,14 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
       .get(c.req.param('id'))
     return row
       ? c.json({ models: manager.models(c.req.param('id')) })
+      : c.json({ error: 'Session not found' }, 404)
+  })
+  app.get('/api/sessions/:id/config-options', (c) => {
+    const row = manager.database
+      .prepare('SELECT id FROM sessions WHERE id = ?')
+      .get(c.req.param('id'))
+    return row
+      ? c.json({ configOptions: manager.configOptions(c.req.param('id')) })
       : c.json({ error: 'Session not found' }, 404)
   })
   app.patch('/api/sessions/:id/workspace', async (c) => {
@@ -131,15 +142,18 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
          WHERE sessions.id = ? AND sessions.deleted_at IS NULL`,
       )
       .get(value.data.sessionId) as
-      | (Record<string, unknown> & { project_path: string })
-      | undefined
+      (Record<string, unknown> & { project_path: string }) | undefined
     if (!row) return c.json({ error: 'Session not found' }, 404)
-    if (row.status === 'running') return c.json({ error: 'Session is running' }, 409)
+    if (row.status === 'running')
+      return c.json({ error: 'Session is running' }, 409)
     try {
       if (value.data.mode === 'local' && value.data.branch) {
         const status = await gitStatus(row.project_path)
         if (status.dirty)
-          return c.json({ error: 'The working tree has uncommitted changes' }, 409)
+          return c.json(
+            { error: 'The working tree has uncommitted changes' },
+            409,
+          )
         await runGit(row.project_path, ['checkout', value.data.branch])
       }
       const workspace = await manager.resolveWorkspace(
@@ -151,8 +165,14 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
         .prepare(
           'UPDATE sessions SET cwd = ?, worktree_path = ?, branch = ? WHERE id = ?',
         )
-        .run(workspace.cwd, workspace.worktreePath, workspace.branch, value.data.sessionId)
-      if (workspace.cwd !== row.cwd) await manager.releaseHandle(value.data.sessionId)
+        .run(
+          workspace.cwd,
+          workspace.worktreePath,
+          workspace.branch,
+          value.data.sessionId,
+        )
+      if (workspace.cwd !== row.cwd)
+        await manager.releaseHandle(value.data.sessionId)
       const updated = manager.database
         .prepare('SELECT * FROM sessions WHERE id = ?')
         .get(value.data.sessionId) as Record<string, unknown>
