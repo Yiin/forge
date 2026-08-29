@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MessageRow, ToolCallRow } from './MessageRow'
 
@@ -77,5 +77,28 @@ describe('MessageRow', () => {
     const disclosure = screen.getByRole('button', { name: /searchdone/i })
     expect(disclosure.getAttribute('aria-expanded')).toBe('false')
     expect(disclosure.getAttribute('aria-controls')).toBe('tool-detail-tool-1')
+    expect(screen.queryByText('{"query":"Forge"}')).toBeNull()
+  })
+
+  it('renders a compact command header and keeps raw input in the detail', () => {
+    const view = render(
+      <ToolCallRow
+        item={{
+          kind: 'tool',
+          id: 'tool-2',
+          name: '`Terminal`',
+          state: 'done',
+          input: { command: 'hostname', description: 'Check hostname' },
+        }}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /\$ hostname.*check hostnamedone/i })).toBeTruthy()
+    expect(screen.queryByText(/\{"command":"hostname"/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /\$ hostname/i }))
+    expect(view.container.querySelector('pre')?.textContent).toContain(
+      '"command": "hostname"',
+    )
   })
 })

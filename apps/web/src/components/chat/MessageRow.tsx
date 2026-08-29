@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { ChatMarkdown } from './ChatMarkdown'
 import type { ChatRenderItem } from './render-model'
 import { SkillChipText } from './SkillChipText'
+import { summarizeToolCall } from './tool-summary'
 import { api } from '../../lib/api'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
@@ -152,6 +153,7 @@ export function ToolCallRow({
       : item.state === 'error'
         ? 'text-destructive'
         : 'text-muted-foreground'
+  const summary = summarizeToolCall(item.name, item.input)
   return (
     <article
       className={cn(
@@ -173,7 +175,14 @@ export function ToolCallRow({
             item.state === 'running' && 'animate-spin',
           )}
         />
-        <strong className="font-medium text-foreground">{item.name}</strong>
+        <strong className="min-w-0 truncate font-medium text-foreground">
+          {summary.title}
+          {summary.detail && (
+            <span className="ml-2 font-normal text-muted-foreground">
+              {summary.detail}
+            </span>
+          )}
+        </strong>
         <span className={cn('ml-auto', statusColor)}>{item.state}</span>
         {open ? (
           <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
