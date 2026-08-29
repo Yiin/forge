@@ -48,7 +48,7 @@ import {
   defaultSelection,
   type HarnessSelection,
 } from './harness-picker-logic'
-import { modelResponse } from './model-picker-logic'
+import { modelResponse, resolveModelTriggerLabel } from './model-picker-logic'
 import { ConfigOptionsPicker } from './ConfigOptionsPicker'
 import {
   parseConfigOptionsResponse,
@@ -118,6 +118,7 @@ export function Composer({
   const [configSelections, setConfigSelections] = useState<ConfigSelections>({})
   const [interrupting, setInterrupting] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const modelRequestAccount = useRef<string | undefined>(undefined)
   const submitting = useRef(false)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const volatile = useMessagesStore((state) => state.volatile)
@@ -212,12 +213,28 @@ export function Composer({
   >([])
   const [accountsLoaded, setAccountsLoaded] = useState(false)
   useEffect(() => {
-    if (draftMode) return
-    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/models`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((value) => setModels(modelResponse(value)))
-      .catch(() => setModels([]))
-  }, [draftMode, sessionId])
+    const requestedAccountId = selection.accountId
+    modelRequestAccount.current = requestedAccountId
+    setModels([])
+    const liveModels: Promise<ReturnType<typeof modelResponse>> = draftMode
+      ? Promise.resolve([] as ReturnType<typeof modelResponse>)
+      : fetch(`/api/sessions/${encodeURIComponent(sessionId)}/models`)
+          .then((response) => (response.ok ? response.json() : null))
+          .then(modelResponse)
+          .catch(() => [])
+    const accountModels: Promise<ReturnType<typeof modelResponse>> =
+      requestedAccountId
+        ? accountsApi
+            .getModels(requestedAccountId)
+            .then((value) => modelResponse(value))
+            .catch(() => [])
+        : Promise.resolve([])
+    void Promise.all([liveModels, accountModels]).then(([live, account]) => {
+      if (modelRequestAccount.current !== requestedAccountId) return
+      const byId = new Map(account.concat(live).map((item) => [item.id, item]))
+      setModels([...byId.values()])
+    })
+  }, [draftMode, selection.accountId, sessionId])
   useEffect(() => {
     if (model !== undefined) setSelection((current) => ({ ...current, model }))
   }, [model])
@@ -415,6 +432,7 @@ export function Composer({
   const accountSnapshot = accountSnapshots.find(
     (snapshot) => snapshot.accountId === selected.accountId,
   )
+  const modelTrigger = resolveModelTriggerLabel(selection.model, models)
   return (
     <>
       <AskUserQuestionPanel sessionId={sessionId} />
@@ -636,13 +654,11 @@ export function Composer({
                     Add an account
                   </a>
                 )}
-                {!draftMode && (
-                  <Separator
-                    orientation="vertical"
-                    className="mx-0.5 hidden h-4 sm:block"
-                  />
-                )}
-                {!draftMode && (
+                <Separator
+                  orientation="vertical"
+                  className="mx-0.5 hidden h-4 sm:block"
+                />
+                {
                   <TooltipProvider delay={300}>
                     <Tooltip>
                       <TooltipTrigger render={<span />}>
@@ -665,7 +681,9 @@ export function Composer({
                             aria-label="Model"
                             className={PILL_TRIGGER_CLASS}
                           >
-                            <SelectValue placeholder="Model" />
+                            <span className="flex-1 truncate text-left data-placeholder:text-muted-foreground">
+                              {modelTrigger?.label ?? 'Model'}
+                            </span>
                           </SelectTrigger>
                           <SelectContent>
                             {models.map((model) => (
@@ -683,7 +701,7 @@ export function Composer({
                       )}
                     </Tooltip>
                   </TooltipProvider>
-                )}
+                }
                 {!draftMode && pickableOptions(configOptions).length > 0 && (
                   <ConfigOptionsPicker
                     options={pickableOptions(configOptions)}

@@ -12,6 +12,7 @@ export type LocalDraft = {
   projectId: string
   harness: string
   accountId?: string
+  model?: string
   prompt: string
   createdAt: number
   updatedAt: number
@@ -29,6 +30,7 @@ type DraftPatch = Partial<
     LocalDraft,
     | 'harness'
     | 'accountId'
+    | 'model'
     | 'prompt'
     | 'attachments'
     | 'promotionState'

@@ -126,6 +126,7 @@ export function DraftRoute() {
           draftProjectId={draft.projectId}
           harness={draft.harness}
           accountId={draft.accountId}
+          model={draft.model}
           draftMode
           sending={draft.promotionState === 'promoting'}
           initialText={draft.prompt}
@@ -136,6 +137,7 @@ export function DraftRoute() {
             useDraftsStore.getState().update(draft.id, {
               harness: selection.harness,
               accountId: selection.accountId,
+              model: selection.model,
             })
           }
           onSend={async (text, attachmentIds, selectedHarness) => {
@@ -143,6 +145,7 @@ export function DraftRoute() {
             useDraftsStore.getState().update(draft.id, {
               harness: selectedHarness.harness,
               accountId: selectedHarness.accountId,
+              model: selectedHarness.model,
             })
             const result = await promoteDraftWithKey(draft, {
               text,

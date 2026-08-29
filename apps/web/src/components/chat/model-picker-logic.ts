@@ -1,5 +1,14 @@
 export type ModelOption = { id: string; label: string }
 
+export function resolveModelTriggerLabel(
+  selectedId: string | undefined,
+  options: ModelOption[],
+): { value: string; label: string } | null {
+  if (!selectedId) return null
+  const option = options.find((item) => item.id === selectedId)
+  return { value: selectedId, label: option?.label ?? selectedId }
+}
+
 export function buildModelOptions(
   models: ReadonlyArray<{ id: string; displayName: string }>,
 ): ModelOption[] {

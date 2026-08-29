@@ -335,6 +335,83 @@ describe('Composer', () => {
     )
   })
 
+  it('shows the selected model display name in the trigger', async () => {
+    vi.spyOn(accountsApi, 'getModels').mockResolvedValue({
+      accountId: 'main',
+      harnessKey: 'claude-code-acp',
+      models: [{ id: 'fast', displayName: 'Fast' }],
+      source: 'static',
+      updatedAt: Date.now(),
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ models: [{ id: 'fast', displayName: 'Fast' }] }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        ),
+    )
+    render(
+      <Composer
+        sessionId="session-1"
+        harness="claude"
+        accountId="main"
+        model="fast"
+        onSend={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole('combobox', { name: 'Model' }).textContent,
+      ).toContain('Fast'),
+    )
+    expect(
+      screen.getByRole('combobox', { name: 'Model' }).textContent,
+    ).not.toContain('Model')
+  })
+
+  it('shows and sends the model picker in draft mode', async () => {
+    vi.spyOn(accountsApi, 'getModels').mockResolvedValue({
+      accountId: 'main',
+      harnessKey: 'claude-code-acp',
+      models: [{ id: 'fast', displayName: 'Fast' }],
+      source: 'static',
+      updatedAt: Date.now(),
+    })
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    render(
+      <Composer
+        sessionId="draft-1"
+        harness="claude"
+        accountId="main"
+        draftMode
+        onSend={onSend}
+      />,
+    )
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole('combobox', { name: 'Model' })
+          .hasAttribute('disabled'),
+      ).toBe(false),
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: 'Model' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Fast' }))
+    const composer = screen.getByLabelText('Message composer')
+    fireEvent.change(composer, { target: { value: 'hello' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith('hello', [], {
+        harness: 'claude',
+        accountId: 'main',
+        model: 'fast',
+      }),
+    )
+  })
+
   it('disables the model picker when no models are available', async () => {
     vi.stubGlobal(
       'fetch',

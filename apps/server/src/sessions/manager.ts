@@ -629,6 +629,7 @@ export class SessionManager {
       text: string
       attachmentIds?: string[]
       accountId?: string | null
+      model?: string
       clientItemId?: string
       workspace?: WorkspaceChoice
     },
@@ -683,7 +684,7 @@ export class SessionManager {
         input.attachmentIds,
         input.harness,
         input.accountId,
-        undefined,
+        input.model,
         input.clientItemId,
       )
       return { sessionId: session.id }

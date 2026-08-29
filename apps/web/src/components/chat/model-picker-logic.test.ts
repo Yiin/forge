@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildModelOptions, modelResponse } from './model-picker-logic'
+import {
+  buildModelOptions,
+  modelResponse,
+  resolveModelTriggerLabel,
+} from './model-picker-logic'
 
 describe('model picker logic', () => {
   it('maps model ids and names for display', () => {
@@ -13,5 +17,22 @@ describe('model picker logic', () => {
     expect(
       modelResponse({ models: [{ id: 'fast', displayName: '' }] }),
     ).toEqual([{ id: 'fast', label: 'fast' }])
+  })
+
+  it('resolves a selected model to its display label', () => {
+    expect(
+      resolveModelTriggerLabel('fast', [{ id: 'fast', label: 'Fast model' }]),
+    ).toEqual({ value: 'fast', label: 'Fast model' })
+  })
+
+  it('falls back to the selected model id when it is not in the catalog', () => {
+    expect(resolveModelTriggerLabel('unknown', [])).toEqual({
+      value: 'unknown',
+      label: 'unknown',
+    })
+  })
+
+  it('returns null when no model is selected', () => {
+    expect(resolveModelTriggerLabel(undefined, [])).toBeNull()
   })
 })

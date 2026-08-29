@@ -159,7 +159,14 @@ export function HarnessAccountCard({
   useEffect(() => {
     if (!['opencode', 'pi', 'grok'].includes(kind)) return
     void getAccountModels(accountId)
-      .then(setModels)
+      .then((catalog) =>
+        setModels(
+          catalog.models.map((model) => ({
+            slug: model.id,
+            name: model.displayName,
+          })),
+        ),
+      )
       .catch(() => setModels([]))
   }, [accountId, kind])
   useEffect(() => {

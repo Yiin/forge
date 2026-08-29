@@ -46,6 +46,7 @@ export const promoteDraft = z.object({
   text: z.string().min(1),
   attachmentIds: z.array(id).optional(),
   accountId: id.nullable().optional(),
+  model: z.string().min(1).optional(),
   workspace: workspaceChoice.optional(),
   clientItemId: z
     .string()
