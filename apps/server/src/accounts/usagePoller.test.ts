@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -41,6 +41,39 @@ describe('unsupported usage polling', () => {
         accountId: account.id,
         kind: 'grok',
         harnessKey: 'grok',
+        homePath: account.homePath,
+        env: {},
+        db,
+      }),
+    ).toMatchObject({ status: 'unsupported', windows: [] })
+    expect(db.prepare('SELECT * FROM harness_account_usage').all()).toEqual([])
+  })
+
+  it('returns unsupported for Kimi without creating usage rows', async () => {
+    const db = new DatabaseSync(':memory:')
+    const root = mkdtempSync(join(tmpdir(), 'forge-usage-poller-'))
+    resources.push({ db, root })
+    process.env.FORGE_ACCOUNTS_DIR = root
+    migrate(db)
+    const account = new HarnessAccountStore(db).create({
+      harnessKey: 'kimi',
+      label: 'Kimi',
+      kind: 'kimi',
+    })
+    mkdirSync(join(account.homePath, 'credentials'))
+    writeFileSync(join(account.homePath, 'credentials', 'kimi-code.json'), '{}')
+    const poller = new UsagePoller({
+      db,
+      probes: new Map([['kimi', unsupportedUsageProbe]]),
+    })
+
+    await poller.refresh(account.id)
+
+    expect(
+      await unsupportedUsageProbe({
+        accountId: account.id,
+        kind: 'kimi',
+        harnessKey: 'kimi',
         homePath: account.homePath,
         env: {},
         db,
