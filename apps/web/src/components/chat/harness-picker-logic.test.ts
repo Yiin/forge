@@ -24,9 +24,14 @@ const account = (patch: Partial<Account> = {}): Account => ({
 })
 
 describe('harness picker logic', () => {
-  it('groups zero, one, and several accounts', () => {
+  it('keeps only enabled harnesses with accounts and uses display names', () => {
     const options = buildHarnessOptions(
-      ['claude', 'codex', 'kimi'],
+      [
+        { key: 'claude', name: 'Claude' },
+        { key: 'codex', name: 'Codex', enabled: false },
+        { key: 'kimi', name: 'Kimi' },
+        { key: 'fallback' },
+      ],
       [
         account(),
         account({ id: 'other', label: 'Other' }),
@@ -34,11 +39,19 @@ describe('harness picker logic', () => {
       ],
       0,
     )
-    expect(options.map((option) => option.accounts.length)).toEqual([2, 1, 0])
-    expect(options[2]).toMatchObject({
-      disabled: true,
-      disabledReason: 'No account',
+    expect(options.map((option) => option.harness)).toEqual(['claude'])
+    expect(options[0]).toMatchObject({
+      label: 'Claude',
+      accounts: [{ id: 'main' }, { id: 'other' }],
     })
+
+    expect(
+      buildHarnessOptions(
+        [{ key: 'fallback' }],
+        [account({ harness: 'fallback' })],
+        0,
+      )[0]?.label,
+    ).toBe('fallback')
   })
 
   it('does not return an accountless selection', () => {

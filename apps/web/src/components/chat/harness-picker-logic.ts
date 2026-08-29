@@ -12,8 +12,6 @@ export type HarnessOption = {
   harness: string
   label: string
   accounts: HarnessOptionAccount[]
-  disabled: boolean
-  disabledReason: string | null
 }
 export type HarnessSelection = {
   harness: string
@@ -22,12 +20,15 @@ export type HarnessSelection = {
 }
 
 export function buildHarnessOptions(
-  harnesses: ReadonlyArray<string | { key: string }>,
+  harnesses: ReadonlyArray<
+    string | { key: string; name?: string; enabled?: boolean }
+  >,
   accounts: ReadonlyArray<Account>,
   nowMs: number,
 ): HarnessOption[] {
-  return harnesses.map((entry) => {
+  return harnesses.flatMap((entry) => {
     const harness = typeof entry === 'string' ? entry : entry.key
+    if (typeof entry !== 'string' && entry.enabled === false) return []
     const optionAccounts = accounts
       .filter((account) => account.harness === harness)
       .map((account) => {
@@ -47,13 +48,14 @@ export function buildHarnessOptions(
           disabled: !account.enabled,
         }
       })
-    return {
-      harness,
-      label: harness,
-      accounts: optionAccounts,
-      disabled: optionAccounts.length === 0,
-      disabledReason: optionAccounts.length === 0 ? 'No account' : null,
-    }
+    if (optionAccounts.length === 0) return []
+    return [
+      {
+        harness,
+        label: typeof entry === 'string' ? harness : entry.name || harness,
+        accounts: optionAccounts,
+      },
+    ]
   })
 }
 

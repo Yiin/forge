@@ -239,6 +239,45 @@ describe('Composer', () => {
     )
   })
 
+  it('does not render dead accountless harness rows', async () => {
+    vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([])
+    vi.spyOn(accountsApi, 'listHarnesses').mockResolvedValue([
+      { key: 'claude', name: 'Claude', enabled: true, protocol: 'acp' },
+    ])
+    render(
+      <Composer
+        sessionId="session-1"
+        harness="claude"
+        onSend={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    await waitFor(() => expect(screen.queryByText('No account')).toBeNull())
+  })
+
+  it('links to harness settings when no harness is available', async () => {
+    vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([])
+    vi.spyOn(accountsApi, 'listHarnesses').mockResolvedValue([
+      { key: 'claude', name: 'Claude', enabled: false, protocol: 'acp' },
+    ])
+    render(
+      <Composer
+        sessionId="session-1"
+        harness="claude"
+        onSend={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByRole('combobox', { name: 'Harness' })).toBeNull()
+      expect(
+        screen
+          .getByRole('link', { name: 'Add an account' })
+          .getAttribute('href'),
+      ).toBe('/settings/harnesses')
+    })
+  })
+
   it('keeps the initial harness usable when account lookup is unavailable', async () => {
     vi.spyOn(accountsApi, 'listAccounts').mockRejectedValue(
       new Error('offline'),

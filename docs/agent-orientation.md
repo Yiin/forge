@@ -76,6 +76,10 @@ defines product limits. `docs/architecture.md` is historical.
 - Test `320x568`, `390x844`, `620px`, `844x390`, `920px`, `1280px`, and `1440x900`.
 - Loading, empty, error, dirty, saving, saved, and retry states need distinct words and controls.
 - Dialogs and popups manage focus, close with Escape, and restore trigger focus.
+- Composer pickers use `/api/harnesses/health`, not `/api/status`.
+- `/api/status` has no `enabled` or `name` fields for harnesses.
+- The harness picker shows enabled harnesses with at least one account.
+- If no harness qualifies, it shows a link to `/settings/harnesses`.
 
 ## Vocabulary and data contracts
 

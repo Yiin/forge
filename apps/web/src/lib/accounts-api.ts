@@ -66,6 +66,13 @@ export type Account = {
   lastUsedAt: number | null
 }
 
+export type HarnessPickerEntry = {
+  key: string
+  name: string
+  enabled: boolean
+  protocol: 'acp' | 'pty'
+}
+
 export { harnessAccountSnapshotSchema }
 
 type FetchLike = typeof globalThis.fetch
@@ -158,6 +165,18 @@ export class AccountsApi {
 
   refreshHarnessStatus() {
     return this.listHarnessStatus()
+  }
+
+  async listHarnesses(): Promise<HarnessPickerEntry[]> {
+    const health = harnessHealthResponseSchema.parse(
+      await this.get<unknown>('/api/harnesses/health'),
+    )
+    return health.map(({ key, name, enabled, protocol }) => ({
+      key,
+      name,
+      enabled,
+      protocol,
+    }))
   }
 
   private async healthByAccountId() {

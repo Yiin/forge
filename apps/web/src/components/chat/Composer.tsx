@@ -159,7 +159,9 @@ export function Composer({
       })
       .catch(() => undefined)
   }, [draftMode, sessionId])
-  const [harnesses, setHarnesses] = useState<string[]>(harness ? [harness] : [])
+  const [harnesses, setHarnesses] = useState<
+    Array<{ key: string; name?: string; enabled?: boolean }>
+  >(harness ? [{ key: harness }] : [])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [accountsLoaded, setAccountsLoaded] = useState(false)
   useEffect(() => {
@@ -173,12 +175,9 @@ export function Composer({
     if (model !== undefined) setSelection((current) => ({ ...current, model }))
   }, [model])
   useEffect(() => {
-    void fetch('/api/status')
-      .then((response) => (response.ok ? response.json() : null))
-      .then((status: { harnesses?: Array<{ key: string }> } | null) => {
-        if (status?.harnesses)
-          setHarnesses(status.harnesses.map((item) => item.key))
-      })
+    void accountsApi
+      .listHarnesses()
+      .then(setHarnesses)
       .catch(() => undefined)
   }, [])
   useEffect(() => {
@@ -191,6 +190,8 @@ export function Composer({
       .catch(() => undefined)
   }, [])
   const harnessOptions = buildHarnessOptions(harnesses, accounts, Date.now())
+  const showHarnessPicker =
+    harnessOptions.length > 0 || (!accountsLoaded && Boolean(selection.harness))
   const selected = accountsLoaded
     ? defaultSelection(harnessOptions, selection)
     : selection
@@ -497,13 +498,13 @@ export function Composer({
                     <TooltipPopup side="top">Attach files</TooltipPopup>
                   </Tooltip>
                 </TooltipProvider>
-                {harnesses.length > 0 && (
+                {showHarnessPicker && (
                   <Separator
                     orientation="vertical"
                     className="mx-0.5 hidden h-4 sm:block"
                   />
                 )}
-                {harnesses.length > 0 && (
+                {showHarnessPicker ? (
                   <Select
                     value={
                       selection.accountId
@@ -511,17 +512,10 @@ export function Composer({
                         : ''
                     }
                     items={harnessOptions.flatMap((option) =>
-                      option.accounts.length === 0
-                        ? [
-                            {
-                              value: `${option.harness}:none`,
-                              label: option.disabledReason ?? 'Unavailable',
-                            },
-                          ]
-                        : option.accounts.map((account) => ({
-                            value: `${option.harness}:${account.id}`,
-                            label: account.label,
-                          })),
+                      option.accounts.map((account) => ({
+                        value: `${option.harness}:${account.id}`,
+                        label: account.label,
+                      })),
                     )}
                     onValueChange={(value) => {
                       if (value === null) return
@@ -548,31 +542,32 @@ export function Composer({
                       {harnessOptions.map((option) => (
                         <SelectGroup key={option.harness}>
                           <SelectLabel>{option.label}</SelectLabel>
-                          {option.accounts.length === 0 ? (
+                          {option.accounts.map((account) => (
                             <SelectItem
-                              value={`${option.harness}:none`}
-                              disabled
+                              key={`${option.harness}:${account.id}`}
+                              value={`${option.harness}:${account.id}`}
+                              disabled={account.disabled}
                             >
-                              {option.disabledReason ?? 'Unavailable'}
+                              {account.label}
+                              {account.cooling && account.coolingLabel
+                                ? ` Cooling - ${account.coolingLabel}`
+                                : ''}
                             </SelectItem>
-                          ) : (
-                            option.accounts.map((account) => (
-                              <SelectItem
-                                key={`${option.harness}:${account.id}`}
-                                value={`${option.harness}:${account.id}`}
-                                disabled={account.disabled}
-                              >
-                                {account.label}
-                                {account.cooling && account.coolingLabel
-                                  ? ` Cooling - ${account.coolingLabel}`
-                                  : ''}
-                              </SelectItem>
-                            ))
-                          )}
+                          ))}
                         </SelectGroup>
                       ))}
                     </SelectContent>
                   </Select>
+                ) : (
+                  <a
+                    href="/settings/harnesses"
+                    className={cn(
+                      buttonVariants({ variant: 'ghost', size: 'sm' }),
+                      'px-2 text-xs',
+                    )}
+                  >
+                    Add an account
+                  </a>
                 )}
                 {!draftMode && (
                   <Separator
