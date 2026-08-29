@@ -1,5 +1,45 @@
 # ACP adapter capability matrix
 
+## Models, modes, and effort
+
+Checked on 2026-08-29 with raw JSON-RPC over piped stdio. The probe used the
+default Forge commands and a temporary session in the Forge checkout. The
+adapter versions are the versions returned by `initialize`.
+
+| Adapter | Version | availableModels | availableModes | Effort signal |
+| --- | --- | --- | --- | --- |
+| Claude Code ACP | 0.16.2 | `default`, `sonnet`, `haiku`, `opus[1m]` | `default`, `acceptEdits`, `plan`, `dontAsk`, `bypassPermissions` | No effort mode. |
+| Codex ACP | 0.16.0 | No `models.availableModels` in the response. `configOptions.model`: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5.2` | `read-only`, `auto`, `full-access` | `configOptions.reasoning_effort`: `low`, `medium`, `high`, `xhigh`. |
+| Kimi | 0.34.0 | `kimi-code/kimi-for-coding`, `kimi-code/kimi-for-coding-highspeed`, `kimi-code/k3`, `kimi-code/k3-256k` | `default`, `plan`, `auto`, `yolo` | `configOptions.thinking`: `low`, `high`, `max`. |
+| Grok | 1.0.13 | Initialize metadata lists `grok-4.6` and `grok-4.5` | No modes reported | Model metadata reports reasoning effort. `grok-4.6`: `low`, `medium`, `high`, `xhigh`; `grok-4.5`: `low`, `medium`, `high`. |
+| Pi ACP | 0.0.33 | Not available. `session/new` required authentication. | Not available. `session/new` required authentication. | No probe result. Forge currently passes CLI `--thinking`. |
+
+Claude Code, Codex, Kimi, and Grok completed `initialize`. Claude Code,
+Codex, Kimi, and Grok returned `session/new` responses or session metadata.
+Pi initialized, but its unauthenticated `session/new` returned an authentication
+error before it could expose session options. Grok's `session/new` also needed
+authentication, so its model data came from `initialize` metadata.
+
+ACP 0.4.x has no effort field in `session/new`, `session/set_model`, or
+`session/set_mode`. The typed requests contain `cwd` and `mcpServers` for a
+new session, `modelId` for `set_model`, and `modeId` for `set_mode`. Adapter
+specific `configOptions` are response data, not a shared ACP request field.
+
+### Recommendation
+
+- Claude Code: expose ACP modes only for permission behavior. Skip effort.
+- Codex: add a future ACP config-option bridge for `reasoning_effort`; do not
+  respawn for the session-scoped setting.
+- Kimi: add a future ACP config-option bridge for `thinking`; do not respawn.
+- Grok: use respawn with a changed `--effort` argument. Its effort is CLI-only
+  in Forge, and no ACP mode was reported.
+- Pi: use respawn with a changed `--thinking` argument after authentication.
+  Do not expose a picker until an authenticated probe confirms a session API.
+
+The existing account-scoped effort overlay remains correct for Grok, Pi, and
+OpenCode. A future per-session effort control should first model the adapter's
+config option or CLI argument. It should not send an invented `effort` field.
+
 Checked on 2026-08-26 with raw JSON-RPC over piped stdio. The probe used the
 default Forge commands and a temporary session in the Forge checkout.
 
