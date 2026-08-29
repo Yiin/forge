@@ -16,7 +16,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Spinner } from '@/components/ui/spinner'
-import { Kbd } from '@/components/ui/kbd'
+import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ClipboardEvent } from 'react'
@@ -497,6 +497,12 @@ export function Composer({
                   </Tooltip>
                 </TooltipProvider>
                 {harnesses.length > 0 && (
+                  <Separator
+                    orientation="vertical"
+                    className="mx-0.5 hidden h-4 sm:block"
+                  />
+                )}
+                {harnesses.length > 0 && (
                   <Select
                     value={
                       selection.accountId
@@ -568,6 +574,12 @@ export function Composer({
                   </Select>
                 )}
                 {!draftMode && (
+                  <Separator
+                    orientation="vertical"
+                    className="mx-0.5 hidden h-4 sm:block"
+                  />
+                )}
+                {!draftMode && (
                   <TooltipProvider delay={300}>
                     <Tooltip>
                       <TooltipTrigger render={<span />}>
@@ -611,9 +623,6 @@ export function Composer({
                 )}
               </div>
               <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
-                <span className="hidden items-center gap-1 pr-1 text-[11px] text-muted-foreground pointer-fine:flex">
-                  <Kbd>Enter</Kbd> to send
-                </span>
                 {stopping && (
                   <button
                     type="button"
