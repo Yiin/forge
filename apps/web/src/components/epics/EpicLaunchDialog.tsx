@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useId, useState, type FormEvent } from 'react'
 import { api } from '../../lib/api'
 import {
   buildEpicLaunchConfig,
@@ -18,6 +18,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -70,6 +71,7 @@ export function EpicLaunchDialog({
   )
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [errors, setErrors] = useState<LaunchErrors>({})
+  const formId = useId()
   const [busy, setBusy] = useState(false)
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>(
     'loading',
@@ -165,7 +167,7 @@ export function EpicLaunchDialog({
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
             Epic runner
@@ -175,189 +177,202 @@ export function EpicLaunchDialog({
             Choose the project and epic. Advanced options are optional.
           </DialogDescription>
         </DialogHeader>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => void launch(event)}
-        >
-          {loadState === 'loading' && (
-            <div
-              className="flex items-center gap-2 text-sm text-muted-foreground"
-              role="status"
-            >
-              <Spinner />
-              Loading projects and harnesses…
-            </div>
-          )}
-          {loadState === 'error' && (
-            <div className="flex flex-col gap-2" role="alert">
-              <p className="text-sm text-destructive">{loadError}</p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-fit"
-                onClick={loadOptions}
+        <DialogPanel>
+          <form
+            id={formId}
+            className="flex flex-col gap-4"
+            onSubmit={(event) => void launch(event)}
+          >
+            {loadState === 'loading' && (
+              <div
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+                role="status"
               >
-                Retry
-              </Button>
-            </div>
-          )}
-          {loadState === 'ready' && (
-            <>
-              <div className="grid gap-2">
-                <Label htmlFor="launch-project">Project</Label>
-                <Select value={projectId} onValueChange={setProjectId}>
-                  <SelectTrigger
-                    id="launch-project"
-                    aria-invalid={Boolean(fieldError('projectId'))}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projects.map((project) => (
-                      <SelectItem key={project.id} value={project.id}>
-                        {project.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {fieldError('projectId') && (
-                  <p className="text-sm text-destructive">
-                    {fieldError('projectId')}
-                  </p>
-                )}
+                <Spinner />
+                Loading projects and harnesses…
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="launch-epic-id">Epic id</Label>
-                <Input
-                  id="launch-epic-id"
-                  placeholder="forge-3b7"
-                  value={epicBeadId}
-                  onChange={(event) => setEpicBeadId(event.target.value)}
-                  aria-invalid={Boolean(fieldError('epicBeadId'))}
-                />
-                {fieldError('epicBeadId') && (
-                  <p className="text-sm text-destructive">
-                    {fieldError('epicBeadId')}
-                  </p>
-                )}
+            )}
+            {loadState === 'error' && (
+              <div className="flex flex-col gap-2" role="alert">
+                <p className="text-sm text-destructive">{loadError}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-fit"
+                  onClick={loadOptions}
+                >
+                  Retry
+                </Button>
               </div>
-              <div className="grid gap-4 sm:grid-cols-3">
+            )}
+            {loadState === 'ready' && (
+              <>
                 <div className="grid gap-2">
-                  <Label htmlFor="launch-mode">Mode</Label>
+                  <Label htmlFor="launch-project">Project</Label>
                   <Select
-                    value={mode}
-                    onValueChange={(value) => {
-                      if (
-                        value === 'pool' ||
-                        value === 'serial' ||
-                        value === 'auto'
-                      )
-                        setMode(value)
-                    }}
+                    value={projectId}
+                    items={projects.map((project) => ({
+                      value: project.id,
+                      label: project.name,
+                    }))}
+                    onValueChange={(value) => setProjectId(value ?? '')}
                   >
-                    <SelectTrigger id="launch-mode">
+                    <SelectTrigger
+                      id="launch-project"
+                      aria-invalid={Boolean(fieldError('projectId'))}
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="pool">Pool</SelectItem>
-                      <SelectItem value="serial">Serial</SelectItem>
-                      <SelectItem value="auto">Auto</SelectItem>
+                      {projects.map((project) => (
+                        <SelectItem key={project.id} value={project.id}>
+                          {project.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="launch-workers">Workers</Label>
-                  <Input
-                    id="launch-workers"
-                    type="number"
-                    min="1"
-                    max="32"
-                    value={workerCount}
-                    onChange={(event) => setWorkerCount(event.target.value)}
-                    aria-invalid={Boolean(fieldError('workerCount'))}
-                  />
-                  {fieldError('workerCount') && (
+                  {fieldError('projectId') && (
                     <p className="text-sm text-destructive">
-                      {fieldError('workerCount')}
+                      {fieldError('projectId')}
                     </p>
                   )}
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="launch-branch">Base branch</Label>
+                  <Label htmlFor="launch-epic-id">Epic id</Label>
                   <Input
-                    id="launch-branch"
-                    value={baseBranch}
-                    onChange={(event) => setBaseBranch(event.target.value)}
+                    id="launch-epic-id"
+                    placeholder="forge-3b7"
+                    value={epicBeadId}
+                    onChange={(event) => setEpicBeadId(event.target.value)}
+                    aria-invalid={Boolean(fieldError('epicBeadId'))}
                   />
+                  {fieldError('epicBeadId') && (
+                    <p className="text-sm text-destructive">
+                      {fieldError('epicBeadId')}
+                    </p>
+                  )}
                 </div>
-              </div>
-              <Collapsible
-                open={advancedOpen}
-                onOpenChange={setAdvancedOpen}
-                className="rounded-lg border px-3 py-2"
-              >
-                <CollapsibleTrigger className="text-sm font-medium">
-                  Advanced
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-3 space-y-4">
+                <div className="grid gap-4 sm:grid-cols-3">
                   <div className="grid gap-2">
-                    <Label htmlFor="launch-gate">Gate command</Label>
+                    <Label htmlFor="launch-mode">Mode</Label>
+                    <Select
+                      value={mode}
+                      items={{ pool: 'Pool', serial: 'Serial', auto: 'Auto' }}
+                      onValueChange={(value) => {
+                        if (
+                          value === 'pool' ||
+                          value === 'serial' ||
+                          value === 'auto'
+                        )
+                          setMode(value)
+                      }}
+                    >
+                      <SelectTrigger id="launch-mode">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pool">Pool</SelectItem>
+                        <SelectItem value="serial">Serial</SelectItem>
+                        <SelectItem value="auto">Auto</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="launch-workers">Workers</Label>
                     <Input
-                      id="launch-gate"
-                      value={gateCommand}
-                      onChange={(event) => setGateCommand(event.target.value)}
-                      placeholder="bun run test"
-                      aria-invalid={Boolean(fieldError('gateCommand'))}
+                      id="launch-workers"
+                      type="number"
+                      min="1"
+                      max="32"
+                      value={workerCount}
+                      onChange={(event) => setWorkerCount(event.target.value)}
+                      aria-invalid={Boolean(fieldError('workerCount'))}
                     />
-                    {fieldError('gateCommand') && (
+                    {fieldError('workerCount') && (
                       <p className="text-sm text-destructive">
-                        {fieldError('gateCommand')}
+                        {fieldError('workerCount')}
                       </p>
                     )}
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="launch-install">Install command</Label>
+                    <Label htmlFor="launch-branch">Base branch</Label>
                     <Input
-                      id="launch-install"
-                      value={installCommand}
-                      onChange={(event) =>
-                        setInstallCommand(event.target.value)
-                      }
-                      placeholder="bun install"
-                      aria-invalid={Boolean(fieldError('installCommand'))}
+                      id="launch-branch"
+                      value={baseBranch}
+                      onChange={(event) => setBaseBranch(event.target.value)}
                     />
                   </div>
-                  <RolePolicyEditor
-                    policy={rolePolicy}
-                    harnessKeys={Object.keys(harnesses)}
-                    errors={errors}
-                    onChange={setRolePolicy}
-                    onReset={() => setRolePolicy(savedRolePolicy)}
-                  />
-                </CollapsibleContent>
-              </Collapsible>
-              {fieldError('submit') && (
-                <p className="text-sm text-destructive" role="alert">
-                  {fieldError('submit')}
-                </p>
-              )}
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => onOpenChange(false)}
+                </div>
+                <Collapsible
+                  open={advancedOpen}
+                  onOpenChange={setAdvancedOpen}
+                  className="rounded-lg border px-3 py-2"
                 >
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={busy}>
-                  {busy && <Spinner />}
-                  {busy ? 'Launching…' : 'Launch epic'}
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </form>
+                  <CollapsibleTrigger className="text-sm font-medium">
+                    Advanced
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-3 space-y-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="launch-gate">Gate command</Label>
+                      <Input
+                        id="launch-gate"
+                        value={gateCommand}
+                        onChange={(event) => setGateCommand(event.target.value)}
+                        placeholder="bun run test"
+                        aria-invalid={Boolean(fieldError('gateCommand'))}
+                      />
+                      {fieldError('gateCommand') && (
+                        <p className="text-sm text-destructive">
+                          {fieldError('gateCommand')}
+                        </p>
+                      )}
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="launch-install">Install command</Label>
+                      <Input
+                        id="launch-install"
+                        value={installCommand}
+                        onChange={(event) =>
+                          setInstallCommand(event.target.value)
+                        }
+                        placeholder="bun install"
+                        aria-invalid={Boolean(fieldError('installCommand'))}
+                      />
+                    </div>
+                    <RolePolicyEditor
+                      policy={rolePolicy}
+                      harnessKeys={Object.keys(harnesses)}
+                      errors={errors}
+                      onChange={setRolePolicy}
+                      onReset={() => setRolePolicy(savedRolePolicy)}
+                    />
+                  </CollapsibleContent>
+                </Collapsible>
+                {fieldError('submit') && (
+                  <p className="text-sm text-destructive" role="alert">
+                    {fieldError('submit')}
+                  </p>
+                )}
+              </>
+            )}
+          </form>
+        </DialogPanel>
+        {loadState === 'ready' && (
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" form={formId} disabled={busy}>
+              {busy && <Spinner />}
+              {busy ? 'Launching…' : 'Launch epic'}
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   )

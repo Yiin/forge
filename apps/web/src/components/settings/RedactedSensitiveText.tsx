@@ -44,21 +44,23 @@ export function RedactedSensitiveText({
   if (!trimmed) return null
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            'min-w-0 cursor-pointer rounded-sm font-mono text-[11px] leading-none transition hover:text-foreground',
-            revealed
-              ? 'text-muted-foreground'
-              : 'select-none text-muted-foreground blur-[2px]',
-            className,
-          )}
-          onClick={() => setRevealed((current) => !current)}
-          aria-label={ariaLabel}
-        >
-          {revealed ? trimmed : redacted}
-        </button>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            className={cn(
+              'min-w-0 cursor-pointer rounded-sm font-mono text-[11px] leading-none transition hover:text-foreground',
+              revealed
+                ? 'text-muted-foreground'
+                : 'select-none text-muted-foreground blur-[2px]',
+              className,
+            )}
+            onClick={() => setRevealed((current) => !current)}
+            aria-label={ariaLabel}
+          />
+        }
+      >
+        {revealed ? trimmed : redacted}
       </TooltipTrigger>
       <TooltipContent side="top">
         {revealed ? hideTooltip : revealTooltip}

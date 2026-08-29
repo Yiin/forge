@@ -43,8 +43,8 @@ export function ConfirmDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div>{children}</div>
+          <AlertDialogDescription render={<div />}>
+            {children}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

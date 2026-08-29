@@ -12,6 +12,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -132,24 +133,15 @@ export function AccountLoginDialog({
   return (
     <Dialog
       open={open}
+      disablePointerDismissal
       onOpenChange={(next) => {
         if (next) return onOpenChange(true)
         if (state.status === 'running') return void requestClose()
         onOpenChange(false)
       }}
+      onOpenChangeComplete={() => onOpenChangeComplete?.(open)}
     >
-      <DialogContent
-        className="max-w-xl"
-        onPointerDownOutside={(event) => event.preventDefault()}
-        onInteractOutside={(event) => event.preventDefault()}
-        onEscapeKeyDown={(event) => {
-          if (state.status === 'running') {
-            event.preventDefault()
-            void requestClose()
-          }
-        }}
-        onAnimationEnd={() => onOpenChangeComplete?.(open)}
-      >
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <div className="flex min-w-0 items-center gap-2 pr-8">
             <DialogTitle className="truncate">
@@ -162,7 +154,7 @@ export function AccountLoginDialog({
             updates as the command runs.
           </DialogDescription>
         </DialogHeader>
-        <div className="min-w-0 space-y-4">
+        <DialogPanel className="min-w-0 space-y-4">
           {state.verificationUrl && (
             <div className="grid gap-1.5">
               <span className="text-xs font-medium">Verification page</span>
@@ -247,7 +239,7 @@ export function AccountLoginDialog({
               state.message ??
               'Waiting for an update.'}
           </div>
-        </div>
+        </DialogPanel>
         <DialogFooter>
           {state.status === 'running' ? (
             <Button

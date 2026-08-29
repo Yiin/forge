@@ -1,4 +1,4 @@
-import { ArrowUp, Paperclip } from 'lucide-react'
+import { Paperclip } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -8,10 +8,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Button, buttonVariants } from '@/components/ui/button'
+import { buttonVariants } from '@/components/ui/button'
 import {
   Tooltip,
-  TooltipContent,
+  TooltipPopup,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
@@ -43,6 +43,10 @@ import {
   type HarnessSelection,
 } from './harness-picker-logic'
 import { modelResponse } from './model-picker-logic'
+
+/** Ghost pill trigger: the composer footer's shared look for its selects. */
+const PILL_TRIGGER_CLASS =
+  'h-9 w-auto min-w-0 max-w-40 shrink-0 gap-1 border-transparent bg-transparent px-2 text-xs text-muted-foreground/70 shadow-none before:hidden hover:bg-accent/50 hover:text-foreground/80 sm:h-8 sm:max-w-48'
 
 const commandDefaults: ComposerCommand[] = [
   { id: 'btw', label: '/btw', group: 'Built-in', value: '/btw ' },
@@ -104,7 +108,7 @@ export function Composer({
     const node = textarea.current
     if (!node) return
     node.style.height = 'auto'
-    node.style.height = `${Math.min(140, Math.max(44, node.scrollHeight))}px`
+    node.style.height = `${Math.min(200, Math.max(70, node.scrollHeight))}px`
   }, [text])
   useEffect(() => {
     const events = volatile.filter(
@@ -341,15 +345,12 @@ export function Composer({
     if (files.length) addFiles(files)
   }
   const canSubmit = !sending && !!text.trim() && canSendUploads(uploads)
+  const stopping = protocol === 'pty' && running && onInterrupt
   return (
-    <div className="flex-none px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6">
+    <>
       <AskUserQuestionPanel sessionId={sessionId} />
       <form
-        className={cn(
-          'composer-root relative mx-auto flex w-full max-w-3xl flex-col rounded-xl border border-border bg-card p-2 shadow-sm transition-colors',
-          'focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/50',
-          dragging && 'border-primary ring-2 ring-primary/50',
-        )}
+        className="composer-root mx-auto w-full min-w-0 max-w-3xl"
         onSubmit={(event) => {
           event.preventDefault()
           void submit()
@@ -368,239 +369,313 @@ export function Composer({
           addFiles(event.dataTransfer.files)
         }}
       >
-        {dragging && (
-          <div className="pointer-events-none absolute -inset-3 z-5 grid place-items-center rounded-xl border-2 border-dashed border-primary bg-primary/10 text-sm font-medium text-primary">
-            Drop files to upload
-          </div>
-        )}
-        {uploads.items.length > 0 && (
-          <AttachmentChips
-            items={uploads.items}
-            onRetry={(id) => {
-              const item = uploads.items.find((value) => value.id === id)
-              if (item) void upload(item.file, id)
-            }}
-            onRemove={(id) =>
-              dispatchUploads((state) =>
-                attachmentUploadsReducer(state, { type: 'remove', id }),
-              )
-            }
-          />
-        )}
-        {trigger && (
-          <CommandMenu
-            commands={commands}
-            kind={trigger.kind}
-            query={trigger.query}
-            onSelect={select}
-            onDismiss={() => setTrigger(null)}
-          />
-        )}
-        <textarea
-          ref={textarea}
-          id="message-composer"
-          aria-label="Message composer"
-          placeholder={harness ? `Message ${harness}…` : 'Send a message…'}
-          value={text}
-          rows={1}
-          className="w-full resize-none overflow-y-auto border-0 bg-transparent px-2 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none"
-          onPaste={paste}
-          onChange={(event) => update(event.target.value)}
-          onKeyDown={(event) => {
-            if (trigger && event.key === 'Escape') {
-              event.preventDefault()
-              setTrigger(null)
-              return
-            }
-            if (
-              trigger &&
-              (event.key === 'ArrowDown' || event.key === 'ArrowUp')
-            ) {
-              event.preventDefault()
-              const item = document.querySelector<HTMLElement>(
-                '[data-composer-menu] [cmdk-item]',
-              )
-              item?.focus()
-              return
-            }
-            if (event.key === 'Enter' && !event.shiftKey) {
-              if (event.nativeEvent.isComposing) return
-              if (trigger) {
-                event.preventDefault()
-                const item = document.querySelector<HTMLElement>(
-                  '[data-composer-menu] [cmdk-item]',
-                )
-                item?.click()
-                return
-              }
-              event.preventDefault()
-              void submit()
-            }
-          }}
-        />
-        {sendError && (
-          <p className="px-2 pb-1 text-xs text-destructive" role="alert">
-            {sendError}
-          </p>
-        )}
-        <div className="flex items-center gap-1 px-1 pb-1">
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <label
-                  className={cn(
-                    buttonVariants({ variant: 'ghost', size: 'icon' }),
-                    'size-8 shrink-0 cursor-pointer pointer-coarse:size-11',
-                  )}
-                >
-                  <Paperclip className="size-4" />
-                  <input
-                    aria-label="Attach files"
-                    type="file"
-                    multiple
-                    className="sr-only"
-                    onChange={(event) => {
-                      addFiles(event.target.files ?? [])
-                      event.target.value = ''
-                    }}
-                  />
-                </label>
-              </TooltipTrigger>
-              <TooltipContent side="top">Attach files</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          {harnesses.length > 0 && (
-            <Select
-              value={
-                selection.accountId
-                  ? `${selection.harness}:${selection.accountId}`
-                  : ''
-              }
-              onValueChange={(value) => {
-                const separator = value.indexOf(':')
-                const nextSelection =
-                  separator < 0
-                    ? { harness: value }
-                    : {
-                        harness: value.slice(0, separator),
-                        accountId: value.slice(separator + 1),
-                      }
-                setSelection(nextSelection)
-                onSelectionChange?.(nextSelection)
-              }}
-            >
-              <SelectTrigger
-                size="sm"
-                aria-label="Harness"
-                className="h-8 max-w-[9rem] gap-1 border-transparent bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-accent hover:text-accent-foreground pointer-coarse:h-11 pointer-coarse:max-w-none"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {harnessOptions.map((option) => (
-                  <SelectGroup key={option.harness}>
-                    <SelectLabel>{option.label}</SelectLabel>
-                    {option.accounts.length === 0 ? (
-                      <SelectItem value={`${option.harness}:none`} disabled>
-                        {option.label} - {option.disabledReason}
-                      </SelectItem>
-                    ) : (
-                      option.accounts.map((account) => (
-                        <SelectItem
-                          key={`${option.harness}:${account.id}`}
-                          value={`${option.harness}:${account.id}`}
-                          disabled={account.disabled}
-                        >
-                          {account.label}
-                          {account.cooling && account.coolingLabel
-                            ? ` Cooling - ${account.coolingLabel}`
-                            : ''}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectGroup>
-                ))}
-              </SelectContent>
-            </Select>
+        <div className="group relative rounded-[22px] p-px transition-colors duration-200">
+          {dragging && (
+            <div className="pointer-events-none absolute -inset-2 z-5 grid place-items-center rounded-[24px] border-2 border-dashed border-primary bg-primary/10 text-sm font-medium text-primary">
+              Drop files to upload
+            </div>
           )}
-          {!draftMode && (
-            <TooltipProvider delayDuration={300}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span>
-                    <Select
-                      value={selection.model ?? ''}
-                      onValueChange={(value) => {
-                        const nextSelection = { ...selection, model: value }
-                        setSelection(nextSelection)
-                        onSelectionChange?.(nextSelection)
-                      }}
-                      disabled={models.length === 0}
-                    >
-                      <SelectTrigger
-                        size="sm"
-                        aria-label="Model"
-                        className="h-8 max-w-[11rem] gap-1 border-transparent bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-accent hover:text-accent-foreground pointer-coarse:h-11 pointer-coarse:max-w-none"
-                      >
-                        <SelectValue placeholder="Model" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {models.map((model) => (
-                          <SelectItem key={model.id} value={model.id}>
-                            {model.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </span>
-                </TooltipTrigger>
-                {models.length === 0 && (
-                  <TooltipContent side="top">
-                    This session does not expose model choices
-                  </TooltipContent>
-                )}
-              </Tooltip>
-            </TooltipProvider>
-          )}
-          <span className="flex-1" />
-          <span className="hidden items-center gap-1 pr-1 text-[11px] text-muted-foreground pointer-fine:flex">
-            <Kbd>Enter</Kbd> to send
-          </span>
-          {protocol === 'pty' && running && onInterrupt && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 pointer-coarse:h-11"
-              disabled={interrupting}
-              aria-label="End turn"
-              title="End the current PTY turn without closing the process"
-              onClick={() => void endTurn()}
-            >
-              {interrupting && <Spinner className="size-3.5" />}
-              {interrupting ? 'Ending…' : 'End turn'}
-            </Button>
-          )}
-          <Button
-            type="submit"
-            size="icon"
-            className="size-8 shrink-0 rounded-lg pointer-coarse:size-11"
-            disabled={!canSubmit || (accountsLoaded && !selected.accountId)}
-            title={
-              !canSendUploads(uploads)
-                ? 'Wait for uploads to finish or remove failed files'
-                : undefined
-            }
-            aria-label="Send"
-          >
-            {sending ? (
-              <Spinner className="size-4" />
-            ) : (
-              <ArrowUp className="size-4" />
+          <div
+            className={cn(
+              'chat-composer-glass rounded-[20px] border transition-[background-color] duration-200 has-focus-visible:border-foreground/40',
+              dragging
+                ? 'border-primary/70 bg-accent/45'
+                : 'border-black/12 dark:border-transparent dark:inset-ring-1 dark:inset-ring-white/5',
             )}
-          </Button>
+          >
+            {uploads.items.length > 0 && (
+              <div className="px-3 pt-3 sm:px-4">
+                <AttachmentChips
+                  items={uploads.items}
+                  onRetry={(id) => {
+                    const item = uploads.items.find((value) => value.id === id)
+                    if (item) void upload(item.file, id)
+                  }}
+                  onRemove={(id) =>
+                    dispatchUploads((state) =>
+                      attachmentUploadsReducer(state, { type: 'remove', id }),
+                    )
+                  }
+                />
+              </div>
+            )}
+            <div className="relative px-3 pt-3.5 pb-2 sm:px-4 sm:pt-4">
+              {trigger && (
+                <div className="absolute inset-x-0 bottom-full z-20 mb-2">
+                  <CommandMenu
+                    commands={commands}
+                    kind={trigger.kind}
+                    query={trigger.query}
+                    onSelect={select}
+                    onDismiss={() => setTrigger(null)}
+                  />
+                </div>
+              )}
+              <textarea
+                ref={textarea}
+                id="message-composer"
+                aria-label="Message composer"
+                placeholder={
+                  harness ? `Message ${harness}…` : 'Send a message…'
+                }
+                value={text}
+                rows={1}
+                className="max-h-50 min-h-17.5 w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-relaxed text-foreground placeholder:text-muted-foreground/50 focus:outline-none sm:text-[14px]"
+                onPaste={paste}
+                onChange={(event) => update(event.target.value)}
+                onKeyDown={(event) => {
+                  if (trigger && event.key === 'Escape') {
+                    event.preventDefault()
+                    setTrigger(null)
+                    return
+                  }
+                  if (
+                    trigger &&
+                    (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+                  ) {
+                    event.preventDefault()
+                    const item = document.querySelector<HTMLElement>(
+                      '[data-composer-menu] [cmdk-item]',
+                    )
+                    item?.focus()
+                    return
+                  }
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    if (event.nativeEvent.isComposing) return
+                    if (trigger) {
+                      event.preventDefault()
+                      const item = document.querySelector<HTMLElement>(
+                        '[data-composer-menu] [cmdk-item]',
+                      )
+                      item?.click()
+                      return
+                    }
+                    event.preventDefault()
+                    void submit()
+                  }
+                }}
+              />
+            </div>
+            {sendError && (
+              <p
+                className="px-3 pb-1 text-xs text-destructive sm:px-4"
+                role="alert"
+              >
+                {sendError}
+              </p>
+            )}
+            <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
+              <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <TooltipProvider delay={300}>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <label
+                          className={cn(
+                            buttonVariants({
+                              variant: 'ghost',
+                              size: 'icon-sm',
+                            }),
+                            'shrink-0 cursor-pointer text-muted-foreground/70 hover:text-foreground/80',
+                          )}
+                        />
+                      }
+                    >
+                      <Paperclip className="size-4" />
+                      <input
+                        aria-label="Attach files"
+                        type="file"
+                        multiple
+                        className="sr-only"
+                        onChange={(event) => {
+                          addFiles(event.target.files ?? [])
+                          event.target.value = ''
+                        }}
+                      />
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">Attach files</TooltipPopup>
+                  </Tooltip>
+                </TooltipProvider>
+                {harnesses.length > 0 && (
+                  <Select
+                    value={
+                      selection.accountId
+                        ? `${selection.harness}:${selection.accountId}`
+                        : ''
+                    }
+                    items={harnessOptions.flatMap((option) =>
+                      option.accounts.length === 0
+                        ? [
+                            {
+                              value: `${option.harness}:none`,
+                              label: option.disabledReason ?? 'Unavailable',
+                            },
+                          ]
+                        : option.accounts.map((account) => ({
+                            value: `${option.harness}:${account.id}`,
+                            label: account.label,
+                          })),
+                    )}
+                    onValueChange={(value) => {
+                      if (value === null) return
+                      const separator = value.indexOf(':')
+                      const nextSelection =
+                        separator < 0
+                          ? { harness: value }
+                          : {
+                              harness: value.slice(0, separator),
+                              accountId: value.slice(separator + 1),
+                            }
+                      setSelection(nextSelection)
+                      onSelectionChange?.(nextSelection)
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      aria-label="Harness"
+                      className={PILL_TRIGGER_CLASS}
+                    >
+                      <SelectValue placeholder="Harness" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {harnessOptions.map((option) => (
+                        <SelectGroup key={option.harness}>
+                          <SelectLabel>{option.label}</SelectLabel>
+                          {option.accounts.length === 0 ? (
+                            <SelectItem
+                              value={`${option.harness}:none`}
+                              disabled
+                            >
+                              {option.disabledReason ?? 'Unavailable'}
+                            </SelectItem>
+                          ) : (
+                            option.accounts.map((account) => (
+                              <SelectItem
+                                key={`${option.harness}:${account.id}`}
+                                value={`${option.harness}:${account.id}`}
+                                disabled={account.disabled}
+                              >
+                                {account.label}
+                                {account.cooling && account.coolingLabel
+                                  ? ` Cooling - ${account.coolingLabel}`
+                                  : ''}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {!draftMode && (
+                  <TooltipProvider delay={300}>
+                    <Tooltip>
+                      <TooltipTrigger render={<span />}>
+                        <Select
+                          value={selection.model ?? ''}
+                          items={models.map((model) => ({
+                            value: model.id,
+                            label: model.label,
+                          }))}
+                          onValueChange={(value) => {
+                            if (value === null) return
+                            const nextSelection = { ...selection, model: value }
+                            setSelection(nextSelection)
+                            onSelectionChange?.(nextSelection)
+                          }}
+                          disabled={models.length === 0}
+                        >
+                          <SelectTrigger
+                            size="sm"
+                            aria-label="Model"
+                            className={PILL_TRIGGER_CLASS}
+                          >
+                            <SelectValue placeholder="Model" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {models.map((model) => (
+                              <SelectItem key={model.id} value={model.id}>
+                                {model.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TooltipTrigger>
+                      {models.length === 0 && (
+                        <TooltipPopup side="top">
+                          This session does not expose model choices
+                        </TooltipPopup>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+              </div>
+              <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
+                <span className="hidden items-center gap-1 pr-1 text-[11px] text-muted-foreground pointer-fine:flex">
+                  <Kbd>Enter</Kbd> to send
+                </span>
+                {stopping && (
+                  <button
+                    type="button"
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:hover:scale-105 enabled:hover:bg-destructive disabled:opacity-40 sm:h-8 sm:w-8"
+                    disabled={interrupting}
+                    aria-label="End turn"
+                    title="End the current PTY turn without closing the process"
+                    onClick={() => void endTurn()}
+                  >
+                    {interrupting ? (
+                      <Spinner className="size-3.5" />
+                    ) : (
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 12 12"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <rect x="2" y="2" width="8" height="8" rx="1.5" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/90 text-primary-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer hover:scale-105 hover:bg-primary disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none sm:h-8 sm:w-8"
+                  disabled={
+                    !canSubmit || (accountsLoaded && !selected.accountId)
+                  }
+                  title={
+                    !canSendUploads(uploads)
+                      ? 'Wait for uploads to finish or remove failed files'
+                      : undefined
+                  }
+                  aria-label="Send"
+                >
+                  {sending ? (
+                    <Spinner className="size-3.5" />
+                  ) : (
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 14 14"
+                      fill="none"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </form>
-    </div>
+    </>
   )
 }

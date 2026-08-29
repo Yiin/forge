@@ -352,6 +352,17 @@ type E2eQuestion = {
   }
 }
 
+// Scroll checks need a reply that overflows the viewport, so the repeat count
+// is a knob. One repeat keeps the default reply short.
+function e2eReplyChunks(): string[] {
+  const repeat = Math.max(1, Number(process.env.FORGE_E2E_REPLY_REPEAT ?? 1))
+  return Array.from({ length: repeat }, (_value, index) => [
+    index === 0 ? 'first ' : ' first ',
+    'second ',
+    'third',
+  ]).flat()
+}
+
 function e2eQuestions(): E2eQuestion[] {
   if (process.env.FORGE_MOCK_ASK_QUESTION !== '1') return []
   const mode = process.env.FORGE_MOCK_ASK_QUESTION_MODE ?? 'single'
@@ -534,7 +545,7 @@ async function startE2eServer(): Promise<void> {
           role: 'system',
           content: {},
         })
-        for (const text of ['first ', 'second ', 'third'])
+        for (const text of e2eReplyChunks())
           publish({
             sessionId: id,
             type: 'text_delta',
@@ -566,7 +577,7 @@ async function startE2eServer(): Promise<void> {
             },
           })
         if (process.env.FORGE_MOCK_HANG_PROMPT !== '1') {
-          for (const text of ['first ', 'second ', 'third']) {
+          for (const text of e2eReplyChunks()) {
             const delay = Number(process.env.FORGE_FAKE_DELAY_MS ?? 0)
             if (delay)
               await new Promise((resolveDelay) =>

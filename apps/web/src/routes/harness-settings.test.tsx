@@ -194,7 +194,7 @@ describe('HarnessSettings', () => {
     expect(
       screen
         .getByRole('checkbox', {
-          name: 'Also delete the managed credential home',
+          name: 'Delete managed credential home',
         })
         .getAttribute('aria-checked'),
     ).toBe('true')

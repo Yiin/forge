@@ -1,5 +1,5 @@
 import { ChevronDown, File, FileImage } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Virtualizer } from 'virtua'
 import { useParams } from '@tanstack/react-router'
 import { useMessagesStore } from '../../stores/messages'
@@ -19,9 +19,12 @@ const EMPTY_MESSAGES: never[] = []
 export function Timeline({
   resumedWithRecap = false,
   targetSeq,
+  bottomInset = 0,
 }: {
   resumedWithRecap?: boolean
   targetSeq?: number
+  /** Height of the composer overlay, kept clear so the last row stays visible. */
+  bottomInset?: number
 }) {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
   const messages = useMessagesStore(
@@ -38,10 +41,29 @@ export function Timeline({
   )
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
-  useEffect(() => {
+  // The bottom spacer grows with the composer, so re-pin before paint whenever
+  // the inset changes; otherwise the last row hides under the composer.
+  // virtua sizes its box from row measurements that land after the commit, and
+  // its rows overflow that box, so `scrollHeight` still leaves the spacer out
+  // while the box is short. Aim past the end by the inset: the browser clamps
+  // the overshoot, and the timeline no longer parks one composer above bottom.
+  useLayoutEffect(() => {
     if (atBottom)
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [items, atBottom])
+      scrollRef.current?.scrollTo({
+        top: scrollRef.current.scrollHeight + bottomInset,
+      })
+  }, [items, atBottom, bottomInset])
+  // The clamp above uses the height virtua has applied so far, so pin again
+  // once the measured rows land and the spacer joins the scrollable area.
+  useEffect(() => {
+    const node = scrollRef.current
+    if (!node || !atBottom || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      node.scrollTo({ top: node.scrollHeight + bottomInset })
+    })
+    for (const child of node.children) observer.observe(child)
+    return () => observer.disconnect()
+  }, [atBottom, bottomInset])
   useEffect(() => {
     if (targetSeq === undefined) return
     const target = scrollRef.current?.querySelector(`[data-seq="${targetSeq}"]`)
@@ -51,10 +73,10 @@ export function Timeline({
     }
   }, [items, targetSeq])
   return (
-    <section className="chat-timeline-shell relative mx-auto min-h-0 w-full max-w-[900px] flex-1">
+    <section className="chat-timeline-shell relative min-h-0 w-full flex-1">
       <div
         ref={scrollRef}
-        className="chat-timeline h-full overflow-auto overscroll-contain px-4 py-5 [-webkit-overflow-scrolling:touch] sm:px-6"
+        className="chat-timeline h-full overflow-auto overscroll-contain px-3 py-5 [-webkit-overflow-scrolling:touch] sm:px-5"
         onScroll={(event) => {
           const node = event.currentTarget
           setAtBottom(
@@ -62,20 +84,25 @@ export function Timeline({
           )
         }}
       >
-        <Virtualizer<ChatRenderItem> data={items} shift>
+        {/* No `shift`: rows are only appended or folded in place, and `shift`
+            makes virtua re-index its size cache on every append, which offsets
+            every measured row by one and opens blank bands between rows. */}
+        <Virtualizer<ChatRenderItem> data={items}>
           {(item: ChatRenderItem) => (
             <RenderItem key={item.id} item={item} sessionId={sessionId} />
           )}
         </Virtualizer>
+        <div aria-hidden style={{ height: bottomInset }} />
       </div>
       {!atBottom && (
         <Button
-          className="chat-jump absolute bottom-7 left-1/2 -translate-x-1/2 rounded-full shadow-lg"
+          className="chat-jump absolute left-1/2 z-30 -translate-x-1/2 rounded-full border border-border/60 bg-card shadow-sm"
+          style={{ bottom: bottomInset + 4 }}
           variant="secondary"
           size="sm"
           onClick={() => {
             scrollRef.current?.scrollTo({
-              top: scrollRef.current.scrollHeight,
+              top: scrollRef.current.scrollHeight + bottomInset,
               behavior: 'smooth',
             })
             setAtBottom(true)
@@ -89,6 +116,29 @@ export function Timeline({
 }
 
 function RenderItem({
+  item,
+  sessionId,
+}: {
+  item: ReturnType<typeof toRenderModel>[number]
+  sessionId: string
+}) {
+  return (
+    <div
+      className={cn(
+        'mx-auto w-full min-w-0 max-w-3xl overflow-x-clip',
+        item.kind === 'tool' ||
+          item.kind === 'subagent' ||
+          item.kind === 'activity'
+          ? 'pb-2'
+          : 'pb-4',
+      )}
+    >
+      <RenderItemContent item={item} sessionId={sessionId} />
+    </div>
+  )
+}
+
+function RenderItemContent({
   item,
   sessionId,
 }: {
@@ -116,7 +166,7 @@ function SystemItem({
   return (
     <div
       className={cn(
-        'chat-system mx-auto mb-3 max-w-[760px] px-2 py-2 text-center text-xs',
+        'chat-system px-2 py-2 text-center text-xs',
         item.alert ? 'text-destructive' : 'text-muted-foreground',
       )}
       role={item.alert ? 'alert' : undefined}
@@ -156,13 +206,13 @@ function AttachmentItem({
   }, [item.id])
   if (removed)
     return (
-      <span className="chat-attachment mx-auto mb-3 flex w-fit max-w-[760px] items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground">
+      <span className="chat-attachment flex w-fit items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground">
         {item.filename} · file removed
       </span>
     )
   return (
     <a
-      className="chat-attachment mx-auto mb-3 flex w-fit max-w-[760px] items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm text-foreground no-underline hover:bg-accent"
+      className="chat-attachment flex w-fit items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm text-foreground no-underline hover:bg-accent"
       href={`/api/attachments/${encodeURIComponent(item.id)}`}
       target={item.mime?.startsWith('image/') ? '_blank' : undefined}
       rel="noreferrer"

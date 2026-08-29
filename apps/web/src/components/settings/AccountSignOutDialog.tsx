@@ -1,5 +1,5 @@
 import { LoaderCircle } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { toast } from 'sonner'
 import { logout } from '@/lib/accounts-api'
 import { isManagedAccountHome } from '@/lib/harness-accounts-logic'
@@ -12,6 +12,7 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
+  AlertDialogPanel,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
@@ -36,6 +37,7 @@ export function AccountSignOutDialog({
   onOpenChange,
   onFinished,
 }: Props) {
+  const deleteHomeLabelId = useId()
   const [checked, setChecked] = useState(false)
   const [pending, setPending] = useState(false)
   const canDelete = isManagedAccountHome({
@@ -85,19 +87,24 @@ export function AccountSignOutDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         {canDelete && (
-          <label className="flex items-start gap-3 rounded-md border p-3">
-            <Checkbox
-              checked={checked}
-              onCheckedChange={(value) => setChecked(value === true)}
-              aria-label="Also delete the managed credential home"
-            />
-            <span className="grid gap-1 text-sm">
-              <strong>Delete managed credential home</strong>
-              <span className="text-muted-foreground">
-                Remove this account&apos;s credential directory from the server.
+          <AlertDialogPanel>
+            <label className="flex items-start gap-3 rounded-md border p-3">
+              <Checkbox
+                checked={checked}
+                onCheckedChange={(value) => setChecked(value === true)}
+                aria-labelledby={deleteHomeLabelId}
+              />
+              <span className="grid gap-1 text-sm">
+                <strong id={deleteHomeLabelId}>
+                  Delete managed credential home
+                </strong>
+                <span className="text-muted-foreground">
+                  Remove this account&apos;s credential directory from the
+                  server.
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          </AlertDialogPanel>
         )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>

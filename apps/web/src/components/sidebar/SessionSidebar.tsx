@@ -28,7 +28,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+} from '@/components/ui/menu'
 import { api } from '../../lib/api'
 import { openProjectCreation } from '../ProjectCreationDialog'
 import { openNewDraft } from '../../lib/draft-entry'
@@ -264,8 +264,15 @@ export function SessionSidebar() {
       <div className="flex items-center gap-1 px-1">
         <Select
           value={scope}
+          items={[
+            { value: 'all', label: 'All projects' },
+            ...projects.map((project) => ({
+              value: project.id,
+              label: project.name,
+            })),
+          ]}
           onValueChange={(value) => {
-            setScope(value)
+            setScope(value ?? 'all')
             setSettledPageNumber(1)
           }}
         >
@@ -290,7 +297,10 @@ export function SessionSidebar() {
           size="icon"
           className={iconButtonClass}
           aria-label="New project"
-          onClick={openProjectCreation}
+          onClick={() => {
+            setDrawerOpen(false)
+            openProjectCreation()
+          }}
         >
           <FolderPlus className="size-4" />
         </Button>
@@ -453,33 +463,35 @@ function SessionRow({
         </button>
       )}
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn(
-              iconButtonClass,
-              'absolute right-0 opacity-0 focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100',
-            )}
-            aria-label={`Actions for ${session.title}`}
-          >
-            <MoreHorizontal className="size-4" />
-          </Button>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                iconButtonClass,
+                'absolute right-0 opacity-0 focus-visible:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100 pointer-coarse:opacity-100',
+              )}
+              aria-label={`Actions for ${session.title}`}
+            />
+          }
+        >
+          <MoreHorizontal className="size-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={onEdit}>Rename</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void onSettle(session, !settled)}>
+          <DropdownMenuItem onClick={onEdit}>Rename</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void onSettle(session, !settled)}>
             {settled ? 'Un-settle' : 'Settle'}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={toggleUnread}>
+          <DropdownMenuItem onClick={toggleUnread}>
             {session.unread ? 'Mark read' : 'Mark unread'}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void copyId()}>
+          <DropdownMenuItem onClick={() => void copyId()}>
             Copy session id
           </DropdownMenuItem>
           <DropdownMenuItem
             variant="destructive"
-            onSelect={() => onDelete(session)}
+            onClick={() => onDelete(session)}
           >
             Delete
           </DropdownMenuItem>

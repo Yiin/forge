@@ -197,10 +197,14 @@ describe('Composer', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getAllByText('Work').length).toBeGreaterThan(0),
+      expect(
+        screen.getByRole('combobox', { name: 'Harness' }).textContent,
+      ).toContain('Main'),
     )
     fireEvent.click(screen.getByRole('combobox', { name: 'Harness' }))
-    fireEvent.click(screen.getByRole('option', { name: 'Work' }))
+    const workOption = await screen.findByRole('option', { name: 'Work' })
+    fireEvent.keyDown(workOption, { key: 'ArrowDown' })
+    fireEvent.keyDown(workOption, { key: 'Enter' })
     await waitFor(() =>
       expect(onSelectionChange).toHaveBeenCalledWith({
         harness: 'claude',

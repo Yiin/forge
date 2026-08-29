@@ -2,13 +2,6 @@
    Tailwind theme live in app.css; components style themselves with
    shadcn/ui primitives and utility classes. */
 
-:root {
-  color-scheme: dark;
-}
-:root[data-theme='light'] {
-  color-scheme: light;
-}
-
 html {
   text-rendering: optimizeLegibility;
 }

@@ -82,8 +82,12 @@ export function DraftRoute() {
             </label>
             <Select
               value={draft.projectId}
+              items={projects.map((project) => ({
+                value: project.id,
+                label: project.name,
+              }))}
               onValueChange={(value) => {
-                if (value === draft.projectId) return
+                if (value === null || value === draft.projectId) return
                 const next = useDraftsStore.getState().getOrCreate(value)
                 void navigate({
                   to: '/draft/$draftId',

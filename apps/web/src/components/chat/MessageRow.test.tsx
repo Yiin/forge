@@ -74,7 +74,9 @@ describe('MessageRow', () => {
       />,
     )
 
-    const disclosure = screen.getByRole('button', { name: /searchdone/i })
+    const disclosure = screen.getByRole('button', {
+      name: /search.*completed/i,
+    })
     expect(disclosure.getAttribute('aria-expanded')).toBe('false')
     expect(disclosure.getAttribute('aria-controls')).toBe('tool-detail-tool-1')
     expect(screen.queryByText('{"query":"Forge"}')).toBeNull()
@@ -94,7 +96,9 @@ describe('MessageRow', () => {
     )
 
     expect(
-      screen.getByRole('button', { name: /\$ hostname.*check hostnamedone/i }),
+      screen.getByRole('button', {
+        name: /\$ hostname.*check hostname.*completed/i,
+      }),
     ).toBeTruthy()
     expect(screen.queryByText(/\{"command":"hostname"/)).toBeNull()
 

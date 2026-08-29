@@ -171,16 +171,18 @@ export function SettingResetButton({
 }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-5"
-          aria-label={`Reset ${label} to default`}
-          onClick={onClick}
-        >
-          <Undo2Icon className="size-3" />
-        </Button>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-5"
+            aria-label={`Reset ${label} to default`}
+            onClick={onClick}
+          />
+        }
+      >
+        <Undo2Icon className="size-3" />
       </TooltipTrigger>
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>

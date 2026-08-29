@@ -1,97 +1,25 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
+/* Streamdown ships its own utility classes, and Tailwind does not scan
+   node_modules by default. Without this the code-block action bar loses
+   `sticky` and `-mt-10` and drops below the header as an empty strip. */
+@source '../node_modules/streamdown/dist';
+
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
-/* Forge theme: neutral surfaces, emerald primary. Dark is the default;
-   [data-theme='light'] overrides. Legacy styles.css shares --background,
-   --border, and --muted-foreground with compatible values on purpose. */
-:root {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.93 0 0);
-  --card: oklch(0.185 0 0);
-  --card-foreground: oklch(0.93 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.93 0 0);
-  --primary: oklch(0.765 0.177 163.22);
-  --primary-foreground: oklch(0.262 0.051 172.55);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.93 0 0);
-  --muted: oklch(0.245 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --success: oklch(0.72 0.17 150);
-  --success-foreground: oklch(0.2 0.05 150);
-  --warning: oklch(0.78 0.16 80);
-  --warning-foreground: oklch(0.25 0.05 80);
-  --info: oklch(0.72 0.14 240);
-  --info-foreground: oklch(0.2 0.05 240);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.765 0.177 163.22 / 55%);
-  --chart-1: oklch(0.765 0.177 163.22);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.17 0 0);
-  --sidebar-foreground: oklch(0.93 0 0);
-  --sidebar-primary: oklch(0.765 0.177 163.22);
-  --sidebar-primary-foreground: oklch(0.262 0.051 172.55);
-  --sidebar-accent: oklch(0.245 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.765 0.177 163.22 / 55%);
-  --radius: 0.625rem;
-}
-
-:root[data-theme='light'] {
-  --background: oklch(0.977 0.001 106.42);
-  --foreground: oklch(0.205 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.205 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.205 0 0);
-  --primary: oklch(0.508 0.118 165.61);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.945 0.001 106.42);
-  --secondary-foreground: oklch(0.245 0 0);
-  --muted: oklch(0.945 0.001 106.42);
-  --muted-foreground: oklch(0.5 0.004 106.42);
-  --accent: oklch(0.94 0.004 106.42);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.505 0.213 27.518);
-  --destructive-foreground: oklch(0.985 0 0);
-  --success: oklch(0.55 0.15 150);
-  --success-foreground: oklch(0.985 0 0);
-  --warning: oklch(0.62 0.15 80);
-  --warning-foreground: oklch(0.2 0.05 80);
-  --info: oklch(0.52 0.14 240);
-  --info-foreground: oklch(0.985 0 0);
-  --border: oklch(0.897 0.002 106.42);
-  --input: oklch(0.897 0.002 106.42);
-  --ring: oklch(0.508 0.118 165.61 / 45%);
-  --chart-1: oklch(0.508 0.118 165.61);
-  --chart-2: oklch(0.596 0.145 163.22);
-  --chart-3: oklch(0.666 0.179 58.32);
-  --chart-4: oklch(0.558 0.253 302.32);
-  --chart-5: oklch(0.577 0.245 27.325);
-  --sidebar: oklch(0.962 0.001 106.42);
-  --sidebar-foreground: oklch(0.205 0 0);
-  --sidebar-primary: oklch(0.508 0.118 165.61);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.92 0.002 106.42);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.897 0.002 106.42);
-  --sidebar-ring: oklch(0.508 0.118 165.61 / 45%);
-}
-
 @theme inline {
+  --color-zinc-25: oklch(99.2% 0 0);
+  --animate-status-pulse: status-pulse 2s infinite;
+  --font-sans:
+    'DM Sans Variable', 'DM Sans', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', system-ui, sans-serif;
+  --font-mono:
+    'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Consolas, 'Liberation Mono',
+    Menlo, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface-raised: var(--surface-raised);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -132,13 +60,405 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  /* Duty-cycled indicator animation: long holds with stepped ramps, so the
+     compositor updates discrete frames instead of every vsync. */
+  @keyframes status-pulse {
+    0%,
+    40% {
+      opacity: 1;
+      animation-timing-function: steps(6);
+    }
+    50%,
+    90% {
+      opacity: 0.5;
+      animation-timing-function: steps(6);
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+}
+
+/* Forge theme: zinc surfaces, indigo primary. Light is the default;
+   [data-theme='dark'] overrides. Legacy styles.css shares --background,
+   --border, and --muted-foreground with compatible values on purpose. */
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+  --app-scrollbar-width: 6px;
+  --background: var(--color-zinc-25);
+  --app-chrome-background: var(--background);
+  --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
+  --foreground: var(--color-zinc-800);
+  --card: var(--color-white);
+  --card-foreground: var(--color-zinc-800);
+  --popover: var(--color-white);
+  --popover-foreground: var(--color-zinc-800);
+  --primary: oklch(0.488 0.217 264);
+  --primary-foreground: var(--color-white);
+  --secondary: var(--color-zinc-50);
+  --secondary-foreground: var(--color-zinc-800);
+  --muted: var(--color-zinc-50);
+  --muted-foreground: var(--color-zinc-500);
+  --accent: var(--color-zinc-100);
+  --accent-foreground: var(--color-zinc-900);
+  /* red-600, not red-500: white-on-destructive badges must clear WCAG AA. */
+  --destructive: var(--color-red-600);
+  --destructive-foreground: var(--color-red-700);
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-700);
+  --warning: var(--color-amber-500);
+  --warning-foreground: var(--color-amber-700);
+  --info: var(--color-blue-500);
+  --info-foreground: var(--color-blue-700);
+  --border: var(--color-zinc-200);
+  --input: var(--color-zinc-300);
+  --ring: oklch(0.488 0.217 264);
+  --chart-1: oklch(0.488 0.217 264);
+  --chart-2: var(--color-emerald-500);
+  --chart-3: var(--color-amber-500);
+  --chart-4: var(--color-violet-500);
+  --chart-5: var(--color-red-500);
+  --sidebar: var(--color-zinc-50);
+  --sidebar-foreground: var(--color-zinc-800);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--color-zinc-100);
+  --sidebar-accent-foreground: var(--color-zinc-900);
+  --sidebar-border: var(--color-zinc-200);
+  --sidebar-ring: var(--ring);
+
+  @variant dark {
+    color-scheme: dark;
+    --background: var(--color-zinc-950);
+    --app-chrome-background: var(--background);
+    --surface-raised: color-mix(in srgb, var(--card) 45%, transparent);
+    --foreground: var(--color-zinc-100);
+    --card: var(--color-zinc-900);
+    --card-foreground: var(--color-zinc-100);
+    --popover: var(--color-zinc-900);
+    --popover-foreground: var(--color-zinc-100);
+    --primary: oklch(0.588 0.217 264);
+    --primary-foreground: var(--color-white);
+    --secondary: var(--color-zinc-900);
+    --secondary-foreground: var(--color-zinc-100);
+    --muted: var(--color-zinc-900);
+    --muted-foreground: var(--color-zinc-400);
+    --accent: var(--color-zinc-900);
+    --accent-foreground: var(--color-zinc-100);
+    --destructive: color-mix(
+      in srgb,
+      var(--color-red-500) 90%,
+      var(--color-white)
+    );
+    --destructive-foreground: var(--color-red-400);
+    --success: var(--color-emerald-500);
+    --success-foreground: var(--color-emerald-400);
+    --warning: var(--color-amber-500);
+    --warning-foreground: var(--color-amber-400);
+    --info: var(--color-blue-500);
+    --info-foreground: var(--color-blue-400);
+    --border: --alpha(var(--color-white) / 6%);
+    --input: --alpha(var(--color-white) / 8%);
+    --ring: oklch(0.588 0.217 264);
+    --sidebar: var(--color-zinc-950);
+    --sidebar-foreground: var(--color-zinc-100);
+    --sidebar-accent: var(--color-zinc-900);
+    --sidebar-accent-foreground: var(--color-zinc-100);
+    --sidebar-border: var(--color-zinc-800);
+  }
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
+  html {
+    background-color: var(--app-chrome-background);
   }
+  body {
+    @apply relative bg-background text-foreground;
+    font-family: var(--font-sans);
+  }
+  pre,
+  code {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer components {
+  .chat-composer-glass {
+    background: var(--surface-raised);
+    box-shadow:
+      0 18px 48px -20px rgb(0 0 0 / 28%),
+      0 4px 14px -7px rgb(0 0 0 / 22%);
+  }
+
+  .chat-composer-shared-blur {
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+  }
+
+  /* Mix from --background (not --card): the lower chrome is a full-width
+     strip over the main view, and a card-tinted wash reads as a lighter
+     seam against it when no content is scrolled underneath. The backdrop
+     blur, not the tint, carries the frosted effect. */
+  .chat-composer-lower-chrome {
+    background: color-mix(in srgb, var(--background) 20%, transparent);
+    margin-top: -1px;
+    margin-inline-end: var(--app-scrollbar-width);
+    padding-top: 1px;
+  }
+
+  :root[data-theme='dark'] .chat-composer-glass {
+    background: var(--surface-raised);
+    box-shadow: none;
+  }
+
+  :root[data-theme='dark'] .chat-composer-lower-chrome {
+    background: color-mix(in srgb, var(--background) 45%, transparent);
+  }
+
+  @supports not (
+    (-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))
+  ) {
+    .chat-composer-glass {
+      background: var(--card);
+    }
+
+    .chat-composer-lower-chrome {
+      background: var(--background);
+    }
+  }
+}
+
+/* App-chrome grain. Baked into the body background (behind content) rather
+   than a fixed overlay on top: a full-viewport overlay forces the compositor
+   to re-blend every frame any animation produces, which multiplies idle GPU
+   cost. The overlay's 0.035 opacity lives in the SVG rect instead. */
+:root {
+  --surface-grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+}
+
+body {
+  background-image: var(--surface-grain);
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* Grain texture for chrome surfaces that float above the body. Layered over
+   the element's background-color, so it composes with bg-* utilities. */
+@utility surface-grain {
+  background-image: var(--surface-grain);
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: var(--app-scrollbar-width);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* Chat markdown rendering */
+.chat-markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p,
+.chat-markdown ul,
+.chat-markdown ol,
+.chat-markdown blockquote,
+.chat-markdown pre {
+  margin: 0.65rem 0;
+}
+
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  margin: 1.25rem 0 0.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--foreground);
+}
+
+.chat-markdown h1 {
+  font-size: 1.25rem;
+}
+
+.chat-markdown h2 {
+  font-size: 1.125rem;
+}
+
+.chat-markdown h3 {
+  font-size: 1rem;
+}
+
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  font-size: 0.875rem;
+}
+
+.chat-markdown h6 {
+  color: var(--muted-foreground);
+}
+
+.chat-markdown ul {
+  padding-left: 1.25rem;
+  list-style-type: disc;
+}
+
+.chat-markdown ol {
+  padding-left: 1.25rem;
+  list-style-type: decimal;
+}
+
+.chat-markdown ul ul {
+  list-style-type: circle;
+}
+
+.chat-markdown ol ol {
+  list-style-type: lower-alpha;
+}
+
+.chat-markdown li + li {
+  margin-top: 0.25rem;
+}
+
+.chat-markdown a {
+  color: var(--info-foreground);
+  text-decoration: none;
+}
+
+.chat-markdown a:hover,
+.chat-markdown a:focus-visible {
+  background-image: radial-gradient(
+    circle,
+    currentcolor 0.75px,
+    transparent 1px
+  );
+  background-position: left bottom;
+  background-repeat: repeat-x;
+  background-size: 4px 2px;
+}
+
+.chat-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.8rem;
+  color: var(--muted-foreground);
+}
+
+.chat-markdown pre {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--border) 78%, transparent)
+    transparent;
+}
+
+.chat-markdown pre::-webkit-scrollbar {
+  height: 7px;
+}
+
+.chat-markdown pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-markdown pre::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 78%, transparent);
+}
+
+.chat-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--muted);
+  padding: 0.8rem 0.9rem;
+  font-size: 0.75rem;
+}
+
+.chat-markdown pre code {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 0.75rem;
+}
+
+.chat-markdown :not(pre) > code {
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--muted);
+  padding: 0.1rem 0.35rem;
+  color: var(--foreground);
+  font-size: 0.75rem;
+}
+
+/* Streamdown renders each fenced block as its own container with a header
+   strip; `data-streamdown` is its stable hook. Give that container the
+   chrome the rest of the chat uses. */
+.chat-markdown [data-streamdown='code-block'] {
+  margin: 0.65rem 0;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--muted) 78%, var(--background));
+  padding: 0;
+}
+
+.chat-markdown [data-streamdown='code-block-header'] {
+  border-bottom: 1px solid var(--border);
+  background: var(--muted);
+  padding: 0.25rem 0.375rem 0.25rem 0.7rem;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+
+.chat-markdown [data-streamdown='code-block'] pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chat-markdown .shiki {
+  background: transparent !important;
 }

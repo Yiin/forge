@@ -119,8 +119,8 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
     </>
   )
   return (
-    <TooltipProvider delayDuration={300}>
-      <header className="session-header flex h-12 items-center gap-2 border-b border-border px-3">
+    <TooltipProvider delay={300}>
+      <header className="session-header flex h-[52px] items-center gap-2 border-b border-border px-3 sm:px-5">
         <span
           className={cn(
             'size-2 shrink-0 rounded-full',
@@ -152,14 +152,16 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
             open={infoSource === 'title'}
             onOpenChange={(open) => setInfoSource(open ? 'title' : null)}
           >
-            <PopoverTrigger asChild>
-              <button
-                className="min-w-0 truncate text-left text-sm font-medium text-foreground hover:text-primary"
-                title="Toggle session information"
-                type="button"
-              >
-                {current.title}
-              </button>
+            <PopoverTrigger
+              render={
+                <button
+                  className="min-w-0 truncate text-left text-sm font-medium text-foreground hover:text-primary"
+                  title="Toggle session information"
+                  type="button"
+                />
+              }
+            >
+              {current.title}
             </PopoverTrigger>
             <PopoverContent
               align="start"
@@ -178,28 +180,32 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
         )}
         <div className="ml-auto flex items-center gap-1">
           <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="grid size-8 shrink-0 place-items-center text-muted-foreground">
-                <Terminal className="size-3.5" aria-hidden="true" />
-              </span>
+            <TooltipTrigger
+              render={
+                <span className="grid size-8 shrink-0 place-items-center text-muted-foreground" />
+              }
+            >
+              <Terminal className="size-3.5" aria-hidden="true" />
             </TooltipTrigger>
             <TooltipContent>
               {current.harness ?? 'default harness'}
             </TooltipContent>
           </Tooltip>
           <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Rename session"
-                onClick={() => {
-                  setInfoSource(null)
-                  setEditing(true)
-                }}
-              >
-                <Pencil className="size-3.5" />
-              </Button>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Rename session"
+                  onClick={() => {
+                    setInfoSource(null)
+                    setEditing(true)
+                  }}
+                />
+              }
+            >
+              <Pencil className="size-3.5" />
             </TooltipTrigger>
             <TooltipContent>Rename session</TooltipContent>
           </Tooltip>
@@ -207,14 +213,16 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
             open={infoSource === 'menu'}
             onOpenChange={(open) => setInfoSource(open ? 'menu' : null)}
           >
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Session information"
-              >
-                <MoreHorizontal className="size-4" />
-              </Button>
+            <PopoverTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Session information"
+                />
+              }
+            >
+              <MoreHorizontal className="size-4" />
             </PopoverTrigger>
             <PopoverContent
               align="end"

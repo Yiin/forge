@@ -1,11 +1,4 @@
-import {
-  Check,
-  CircleAlert,
-  ChevronDown,
-  ChevronRight,
-  Clock3,
-  LoaderCircle,
-} from 'lucide-react'
+import { Bot, ChevronDown } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Message } from '@forge/protocol/message'
 import { connectForgeSocket, normalizeServerEvent } from '../../lib/socket'
@@ -18,19 +11,11 @@ import {
   type SubagentSession,
 } from './subagent'
 import { SubagentTranscript } from './SubagentTranscript'
+import { RunningDots } from './MessageRow'
 import { cn } from '../../lib/utils'
-import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 
 const EMPTY_MESSAGES: Message[] = []
-
-const STATUS_BADGE: Record<string, string> = {
-  running: 'border-primary/40 bg-primary/10 text-primary',
-  done: 'border-primary/40 bg-primary/10 text-primary',
-  errored: 'border-destructive/40 bg-destructive/10 text-destructive',
-  interrupted: 'border-destructive/40 bg-destructive/10 text-destructive',
-  unknown: 'border-border bg-muted text-muted-foreground',
-}
 
 export function SubagentCard({ child }: { child: SubagentSession }) {
   const [expanded, setExpanded] = useState(false)
@@ -87,64 +72,72 @@ export function SubagentCard({ child }: { child: SubagentSession }) {
     return () => socket.stop()
   }, [child.id, expanded])
 
-  const Icon =
-    status === 'running'
-      ? LoaderCircle
-      : status === 'done'
-        ? Check
-        : CircleAlert
+  const failed = status === 'errored' || status === 'interrupted'
   const statusText = status === 'unknown' ? 'status unknown' : status
   return (
     <article
-      className={cn(
-        'subagent-card mx-auto mb-3 max-w-[760px] overflow-hidden rounded-lg border bg-card',
-        status === 'running' ? 'border-primary/40' : 'border-border',
-      )}
+      className="subagent-card rounded-2xl border border-input bg-background p-3 shadow-xs/5 not-dark:bg-clip-padding dark:bg-input/32"
+      data-subagent-status={status}
     >
-      <button
-        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
-        type="button"
+      <div
+        className="-m-1 flex cursor-pointer items-center gap-1.5 rounded-md p-1 transition-colors select-none hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset focus-visible:outline-none"
+        role="button"
+        tabIndex={0}
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          setExpanded((value) => !value)
+        }}
       >
-        <Icon
+        <span
           className={cn(
-            'size-4 shrink-0 text-muted-foreground',
-            status === 'running' && 'animate-spin text-primary',
+            'flex size-5 shrink-0 items-center justify-center',
+            failed ? 'text-destructive' : 'text-muted-foreground/65',
           )}
-        />
-        <span className="grid min-w-0 flex-1 gap-1">
-          <span className="flex items-center gap-2">
-            <strong className="truncate text-sm font-medium text-foreground">
-              {child.title || 'Subagent'}
-            </strong>
-            <Badge
-              variant="outline"
-              className={cn('shrink-0 capitalize', STATUS_BADGE[status])}
-            >
-              {statusText}
-            </Badge>
+        >
+          <Bot
+            className="block size-3.5 shrink-0 stroke-[1.8] opacity-80"
+            aria-hidden
+          />
+        </span>
+        <p className="flex min-w-0 flex-1 items-baseline gap-1.5 text-[12px] leading-5">
+          <span
+            className={cn(
+              'min-w-0 shrink truncate font-medium',
+              failed ? 'text-destructive' : 'text-foreground/82',
+            )}
+          >
+            {child.title || 'Subagent'}
           </span>
-          <span className="truncate text-xs text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate text-muted-foreground/55">
             {tools ? `${tools} tools` : 'No tool calls'}
             {preview ? ` · ${preview}` : ''}
           </span>
-        </span>
-        {status === 'running' && (
-          <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-            <Clock3 className="size-3.5" aria-hidden="true" />
-            {elapsedSeconds(messages, now)}s
-          </span>
-        )}
-        {expanded ? (
-          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-        )}
-      </button>
+        </p>
+        <div className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground/70 tabular-nums">
+          {status === 'running' ? (
+            <>
+              <span className="sr-only">Running</span>
+              <RunningDots />
+              <span>{elapsedSeconds(messages, now)}s</span>
+            </>
+          ) : (
+            <span className="capitalize">{statusText}</span>
+          )}
+          <ChevronDown
+            className={cn(
+              'size-3 shrink-0 opacity-70 transition-transform duration-200',
+              expanded && 'rotate-180',
+            )}
+            aria-hidden
+          />
+        </div>
+      </div>
       {expanded && loadError ? (
         <div
-          className="flex items-center justify-between gap-3 border-t border-border p-3 text-xs text-muted-foreground"
+          className="mt-2 flex items-center justify-between gap-3 border-t border-border/45 pt-2 text-xs text-muted-foreground"
           role="alert"
         >
           <span>Could not load transcript.</span>
@@ -161,14 +154,16 @@ export function SubagentCard({ child }: { child: SubagentSession }) {
           </Button>
         </div>
       ) : expanded && !loaded && messages.length === 0 ? (
-        <div className="border-t border-border p-3 text-xs text-muted-foreground">
+        <div className="mt-2 border-t border-border/45 pt-2 text-xs text-muted-foreground">
           Loading transcript…
         </div>
       ) : expanded ? (
         messages.length ? (
-          <SubagentTranscript messages={messages} />
+          <div className="mt-2 border-t border-border/45 pt-2">
+            <SubagentTranscript messages={messages} />
+          </div>
         ) : (
-          <div className="border-t border-border p-3 text-xs text-muted-foreground">
+          <div className="mt-2 border-t border-border/45 pt-2 text-xs text-muted-foreground">
             No transcript items.
           </div>
         )

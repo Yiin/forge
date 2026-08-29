@@ -1,5 +1,5 @@
 import { LoaderCircle, Plus, RefreshCw } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type * as React from 'react'
 import { toast } from 'sonner'
 import type { HarnessConfig } from '@forge/protocol/config'
@@ -14,6 +14,7 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
+  AlertDialogPanel,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
@@ -49,6 +50,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
@@ -110,7 +112,7 @@ function LoginOptionsDialog({
             Choose the provider and authentication method.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3">
+        <DialogPanel className="grid gap-3">
           <Label>Provider</Label>
           <Input
             value={provider}
@@ -118,7 +120,10 @@ function LoginOptionsDialog({
             placeholder="Provider name"
           />
           <Label>Authentication method</Label>
-          <Select value={method} onValueChange={setMethod}>
+          <Select
+            value={method}
+            onValueChange={(value) => setMethod(value ?? '')}
+          >
             <SelectTrigger>
               <SelectValue placeholder="Select method" />
             </SelectTrigger>
@@ -130,7 +135,7 @@ function LoginOptionsDialog({
               ))}
             </SelectContent>
           </Select>
-        </div>
+        </DialogPanel>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
@@ -211,6 +216,7 @@ const labels: Record<string, string> = {
 }
 
 export function HarnessSettings() {
+  const removeHomeLabelId = useId()
   const [config, setConfig] = useState<Record<string, Harness>>({})
   const [snapshots, setSnapshots] = useState<HarnessAccountSnapshot[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -473,43 +479,49 @@ export function HarnessSettings() {
                 </span>
               )}
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label="Add harness"
-                    disabled={isAdding}
-                    onClick={() => setAddOpen(true)}
-                  >
-                    <Plus className="size-3" />
-                  </Button>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label="Add harness"
+                      disabled={isAdding}
+                      onClick={() => setAddOpen(true)}
+                    />
+                  }
+                >
+                  <Plus className="size-3" />
                 </TooltipTrigger>
                 <TooltipContent>Add harness</TooltipContent>
               </Tooltip>
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label="Refresh harness status"
-                    disabled={busy.has('refresh')}
-                    onClick={() => {
-                      setBusyState((current) => new Set(current).add('refresh'))
-                      void refresh().finally(() =>
-                        setBusyState((current) => {
-                          const next = new Set(current)
-                          next.delete('refresh')
-                          return next
-                        }),
-                      )
-                    }}
-                  >
-                    {busy.has('refresh') ? (
-                      <LoaderCircle className="size-3 animate-spin" />
-                    ) : (
-                      <RefreshCw className="size-3" />
-                    )}
-                  </Button>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label="Refresh harness status"
+                      disabled={busy.has('refresh')}
+                      onClick={() => {
+                        setBusyState((current) =>
+                          new Set(current).add('refresh'),
+                        )
+                        void refresh().finally(() =>
+                          setBusyState((current) => {
+                            const next = new Set(current)
+                            next.delete('refresh')
+                            return next
+                          }),
+                        )
+                      }}
+                    />
+                  }
+                >
+                  {busy.has('refresh') ? (
+                    <LoaderCircle className="size-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-3" />
+                  )}
                 </TooltipTrigger>
                 <TooltipContent>Refresh harness status</TooltipContent>
               </Tooltip>
@@ -785,20 +797,24 @@ export function HarnessSettings() {
                 harnessKind: deleteTarget.kind,
                 accountId: deleteTarget.id,
               }) && (
-                <label className="flex items-start gap-3 rounded-md border p-3">
-                  <Checkbox
-                    checked={removeHome}
-                    onCheckedChange={(value) => setRemoveHome(value === true)}
-                    aria-label="Also delete the managed credential home"
-                  />
-                  <span className="grid gap-1 text-sm">
-                    <strong>Delete managed credential home</strong>
-                    <span className="text-muted-foreground">
-                      Remove this account&apos;s credential directory from the
-                      server.
+                <AlertDialogPanel>
+                  <label className="flex items-start gap-3 rounded-md border p-3">
+                    <Checkbox
+                      checked={removeHome}
+                      onCheckedChange={(value) => setRemoveHome(value === true)}
+                      aria-labelledby={removeHomeLabelId}
+                    />
+                    <span className="grid gap-1 text-sm">
+                      <strong id={removeHomeLabelId}>
+                        Delete managed credential home
+                      </strong>
+                      <span className="text-muted-foreground">
+                        Remove this account&apos;s credential directory from the
+                        server.
+                      </span>
                     </span>
-                  </span>
-                </label>
+                  </label>
+                </AlertDialogPanel>
               )}
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>

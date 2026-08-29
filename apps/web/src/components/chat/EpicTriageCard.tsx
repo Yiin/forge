@@ -102,7 +102,10 @@ export function EpicTriageCard({
             <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               disabled={busy}
-              onClick={() => void act(card.beadId)}
+              onClick={() => {
+                setConfirmSkip(false)
+                void act(card.beadId)
+              }}
             >
               Skip child
             </AlertDialogAction>

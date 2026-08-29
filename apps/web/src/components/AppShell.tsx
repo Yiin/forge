@@ -183,7 +183,7 @@ export function AppShell() {
       </div>
       <main
         id="main-content"
-        className="min-w-0 flex-1 overflow-auto md:overflow-hidden"
+        className="min-w-0 flex-1 overflow-auto outline-none focus-visible:outline-none md:overflow-hidden"
         ref={mainRef}
         tabIndex={-1}
       >

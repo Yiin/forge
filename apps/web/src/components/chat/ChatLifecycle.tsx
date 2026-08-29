@@ -48,12 +48,14 @@ export function ChatLifecycle({
       </div>
     )
   return (
-    <div
-      className="chat-lifecycle-status mx-auto flex min-h-7 w-full max-w-[900px] items-center gap-1.5 px-4 py-1 text-xs text-muted-foreground"
-      role="status"
-      aria-live="polite"
-    >
-      {connectionLabel(connection, running)}
+    <div className="w-full px-3 sm:px-5">
+      <div
+        className="chat-lifecycle-status mx-auto flex min-h-7 w-full max-w-3xl items-center gap-1.5 py-1 text-xs text-muted-foreground"
+        role="status"
+        aria-live="polite"
+      >
+        {connectionLabel(connection, running)}
+      </div>
     </div>
   )
 }

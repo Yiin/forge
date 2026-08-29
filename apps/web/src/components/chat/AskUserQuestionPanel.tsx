@@ -84,48 +84,57 @@ function QuestionCard({
   }
   return (
     <section
-      className="ask-question-panel mx-auto mb-3 max-w-[760px] space-y-3 rounded-xl border border-border bg-card p-4"
+      className="ask-question-panel mx-auto mb-2 w-full min-w-0 max-w-3xl space-y-3 rounded-[20px] border border-border/65 bg-muted/20 p-4"
       aria-label="Question from Forge"
     >
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
+      <div className="flex items-center justify-between text-xs text-muted-foreground/65">
         <span>{question.header ?? 'Forge asks'}</span>
-        {remaining > 1 && <span>{remaining} questions</span>}
+        {remaining > 1 && (
+          <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-[10px] font-medium text-muted-foreground/60 tabular-nums">
+            {remaining} questions
+          </span>
+        )}
       </div>
-      <h2 className="text-sm font-medium text-foreground">
-        {question.question}
-      </h2>
+      <h2 className="text-sm text-foreground/90">{question.question}</h2>
       {error && (
         <p className="text-xs text-destructive" role="alert">
           {error}
         </p>
       )}
       {options.length > 0 && (
-        <div className="grid gap-2">
-          {options.map((option) => (
+        <div className="space-y-1.5">
+          {options.map((option, index) => (
             <button
               type="button"
               className={cn(
-                'flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
+                'group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25',
                 selected.includes(option.label)
-                  ? 'border-primary bg-primary/10 text-foreground'
-                  : 'border-border bg-background text-foreground hover:border-primary/50 hover:bg-accent',
+                  ? 'border-primary/30 bg-primary/8 text-foreground'
+                  : 'border-transparent bg-muted/22 text-foreground/85 hover:border-border/45 hover:bg-muted/34',
+                sending ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
               )}
               key={option.label}
               onClick={() => choose(option.label)}
               disabled={sending}
               aria-pressed={multi ? selected.includes(option.label) : undefined}
             >
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="truncate">{option.label}</span>
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate text-sm font-medium">
+                  {option.label}
+                </span>
                 {option.description && (
                   <span className="text-xs text-muted-foreground">
                     {option.description}
                   </span>
                 )}
               </span>
-              {selected.includes(option.label) && (
-                <Check className="size-4 shrink-0 text-primary" />
-              )}
+              {selected.includes(option.label) ? (
+                <Check className="size-3.5 shrink-0 text-primary" />
+              ) : index < 9 ? (
+                <kbd className="flex size-5 shrink-0 items-center justify-center rounded border border-border/50 bg-background/35 text-[11px] font-medium text-muted-foreground/70 tabular-nums transition-colors duration-150 group-hover:border-border/70 group-hover:text-muted-foreground">
+                  {index + 1}
+                </kbd>
+              ) : null}
             </button>
           ))}
         </div>

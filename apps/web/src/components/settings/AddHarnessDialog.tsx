@@ -9,6 +9,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -95,160 +96,164 @@ export function AddHarnessDialog({
             Set the harness identity and command Forge will start.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-3 gap-2">
-          {ADD_HARNESS_STEPS.map((name, index) => (
-            <button
-              key={name}
-              type="button"
-              className={cn(
-                'grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] gap-x-2 rounded-lg border px-3 py-2 text-left',
-                index === step
-                  ? 'border-primary bg-primary/10 ring-1 ring-primary/25'
-                  : index < step
-                    ? 'bg-background'
-                    : 'bg-muted/40',
-              )}
-              aria-current={index === step ? 'step' : undefined}
-              onClick={() => navigate(index)}
-            >
-              <span
-                className="row-span-2 mt-0.5 grid size-4 place-items-center rounded-full border"
-                aria-hidden
-              >
-                {index < step ? (
-                  <Check className="size-3" />
-                ) : (
-                  <Circle className="size-2 fill-current" />
-                )}
-              </span>
-              <span className="text-[10px] uppercase text-muted-foreground">
-                Step {index + 1}
-              </span>
-              <span className="truncate text-xs font-semibold">
-                {name}
-                {index < step && summaries[index]
-                  ? `: ${summaries[index]}`
-                  : ''}
-              </span>
-            </button>
-          ))}
-        </div>
-        {step === 0 && (
-          <div className="grid grid-cols-2 gap-2">
-            {HARNESS_KINDS.map((value) => (
+        <DialogPanel className="grid gap-4">
+          <div className="grid grid-cols-3 gap-2">
+            {ADD_HARNESS_STEPS.map((name, index) => (
               <button
+                key={name}
                 type="button"
-                key={value}
                 className={cn(
-                  'flex items-center gap-3 rounded-lg border px-3 py-3 text-left',
-                  value === kind && 'border-primary bg-primary/10',
+                  'grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] gap-x-2 rounded-lg border px-3 py-2 text-left',
+                  index === step
+                    ? 'border-primary bg-primary/10 ring-1 ring-primary/25'
+                    : index < step
+                      ? 'bg-background'
+                      : 'bg-muted/40',
                 )}
-                onClick={() => setKind(value)}
+                aria-current={index === step ? 'step' : undefined}
+                onClick={() => navigate(index)}
               >
-                <Cpu className="size-5" />
-                <span className="capitalize">{value}</span>
+                <span
+                  className="row-span-2 mt-0.5 grid size-4 place-items-center rounded-full border"
+                  aria-hidden
+                >
+                  {index < step ? (
+                    <Check className="size-3" />
+                  ) : (
+                    <Circle className="size-2 fill-current" />
+                  )}
+                </span>
+                <span className="text-[10px] uppercase text-muted-foreground">
+                  Step {index + 1}
+                </span>
+                <span className="truncate text-xs font-semibold">
+                  {name}
+                  {index < step && summaries[index]
+                    ? `: ${summaries[index]}`
+                    : ''}
+                </span>
               </button>
             ))}
           </div>
-        )}
-        {step === 1 && (
-          <div className="grid gap-4">
-            <label className="grid gap-2 text-sm">
-              Label
-              <Input
-                placeholder="e.g. Work"
-                value={label}
-                onChange={(event) => setLabel(event.target.value)}
-              />
-              <span className="text-xs text-muted-foreground">
-                Shown in the harness list. Optional.
-              </span>
-            </label>
-            <label className="grid gap-2 text-sm">
-              Harness ID
-              <Input
-                placeholder={`${kind}_work`}
-                value={id}
-                aria-invalid={attempted && Boolean(idError)}
-                onChange={(event) => setIdOverride(event.target.value)}
-              />
-              {attempted && idError ? (
-                <span className="text-xs text-destructive">{idError}</span>
-              ) : (
+          {step === 0 && (
+            <div className="grid grid-cols-2 gap-2">
+              {HARNESS_KINDS.map((value) => (
+                <button
+                  type="button"
+                  key={value}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg border px-3 py-3 text-left',
+                    value === kind && 'border-primary bg-primary/10',
+                  )}
+                  onClick={() => setKind(value)}
+                >
+                  <Cpu className="size-5" />
+                  <span className="capitalize">{value}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {step === 1 && (
+            <div className="grid gap-4">
+              <label className="grid gap-2 text-sm">
+                Label
+                <Input
+                  placeholder="e.g. Work"
+                  value={label}
+                  onChange={(event) => setLabel(event.target.value)}
+                />
                 <span className="text-xs text-muted-foreground">
-                  Routing key used by sessions and epics.
+                  Shown in the harness list. Optional.
                 </span>
-              )}
-            </label>
-          </div>
-        )}
-        {step === 2 && (
-          <div className="grid gap-4">
-            <label className="grid gap-2 text-sm">
-              Command
-              <Input
-                value={draft.command}
-                onChange={(event) =>
-                  updateDraft({ command: event.target.value })
-                }
-              />
-            </label>
-            <label className="grid gap-2 text-sm">
-              Arguments
-              <Textarea
-                value={draft.args.join('\n')}
-                onChange={(event) =>
-                  updateDraft({
-                    args: event.target.value.split('\n').filter(Boolean),
-                  })
-                }
-              />
-            </label>
-            <label className="grid gap-2 text-sm">
-              Environment variables (KEY=VALUE)
-              <Textarea
-                value={Object.entries(draft.env)
-                  .map(([key, value]) => `${key}=${value}`)
-                  .join('\n')}
-                onChange={(event) =>
-                  updateDraft({
-                    env: Object.fromEntries(
-                      event.target.value
-                        .split('\n')
-                        .filter(Boolean)
-                        .map((line) => {
-                          const index = line.indexOf('=')
-                          return index < 1
-                            ? null
-                            : [line.slice(0, index), line.slice(index + 1)]
-                        })
-                        .filter(
-                          (entry): entry is [string, string] => entry !== null,
-                        ),
-                    ),
-                  })
-                }
-              />
-            </label>
-            <label className="grid gap-2 text-sm">
-              Protocol
-              <Select
-                value={draft.protocol}
-                onValueChange={(value) =>
-                  updateDraft({ protocol: value as Draft['protocol'] })
-                }
-              >
-                <SelectTrigger aria-label="Protocol">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="acp">ACP</SelectItem>
-                  <SelectItem value="pty">PTY</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-          </div>
-        )}
+              </label>
+              <label className="grid gap-2 text-sm">
+                Harness ID
+                <Input
+                  placeholder={`${kind}_work`}
+                  value={id}
+                  aria-invalid={attempted && Boolean(idError)}
+                  onChange={(event) => setIdOverride(event.target.value)}
+                />
+                {attempted && idError ? (
+                  <span className="text-xs text-destructive">{idError}</span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    Routing key used by sessions and epics.
+                  </span>
+                )}
+              </label>
+            </div>
+          )}
+          {step === 2 && (
+            <div className="grid gap-4">
+              <label className="grid gap-2 text-sm">
+                Command
+                <Input
+                  value={draft.command}
+                  onChange={(event) =>
+                    updateDraft({ command: event.target.value })
+                  }
+                />
+              </label>
+              <label className="grid gap-2 text-sm">
+                Arguments
+                <Textarea
+                  value={draft.args.join('\n')}
+                  onChange={(event) =>
+                    updateDraft({
+                      args: event.target.value.split('\n').filter(Boolean),
+                    })
+                  }
+                />
+              </label>
+              <label className="grid gap-2 text-sm">
+                Environment variables (KEY=VALUE)
+                <Textarea
+                  value={Object.entries(draft.env)
+                    .map(([key, value]) => `${key}=${value}`)
+                    .join('\n')}
+                  onChange={(event) =>
+                    updateDraft({
+                      env: Object.fromEntries(
+                        event.target.value
+                          .split('\n')
+                          .filter(Boolean)
+                          .map((line) => {
+                            const index = line.indexOf('=')
+                            return index < 1
+                              ? null
+                              : [line.slice(0, index), line.slice(index + 1)]
+                          })
+                          .filter(
+                            (entry): entry is [string, string] =>
+                              entry !== null,
+                          ),
+                      ),
+                    })
+                  }
+                />
+              </label>
+              <label className="grid gap-2 text-sm">
+                Protocol
+                <Select
+                  value={draft.protocol}
+                  items={{ acp: 'ACP', pty: 'PTY' }}
+                  onValueChange={(value) =>
+                    updateDraft({ protocol: value as Draft['protocol'] })
+                  }
+                >
+                  <SelectTrigger aria-label="Protocol">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="acp">ACP</SelectItem>
+                    <SelectItem value="pty">PTY</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+            </div>
+          )}
+        </DialogPanel>
         <DialogFooter>
           <Button
             variant="outline"

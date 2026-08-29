@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { render } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Message } from '@forge/protocol/message'
 
 const state = { messages: [] as Message[] }
@@ -10,6 +10,7 @@ vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ sessionId: 'session-1' }),
 }))
 vi.mock('lucide-react', () => ({
+  Bot: () => null,
   Check: () => null,
   ChevronDown: () => null,
   ChevronRight: () => null,
@@ -18,14 +19,19 @@ vi.mock('lucide-react', () => ({
   FileText: () => null,
   LoaderCircle: () => null,
 }))
+const virtualizerProps: Record<string, unknown>[] = []
 vi.mock('virtua', () => ({
   Virtualizer: ({
     data,
     children,
+    ...rest
   }: {
     data: unknown[]
     children: (item: unknown) => unknown
-  }) => data.map(children),
+  }) => {
+    virtualizerProps.push(rest)
+    return data.map(children)
+  },
 }))
 vi.mock('../../stores/messages', () => ({
   useMessagesStore: (
@@ -34,6 +40,7 @@ vi.mock('../../stores/messages', () => ({
 }))
 vi.mock('./MessageRow', () => ({
   MessageRow: () => null,
+  RunningDots: () => null,
   ToolCallRow: () => null,
 }))
 
@@ -55,6 +62,10 @@ describe('Timeline', () => {
   beforeEach(() => {
     state.messages = []
     useSessionsStore.setState({ sessions: [] })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('keeps a pinned timeline at the latest streamed text', () => {
@@ -81,6 +92,80 @@ describe('Timeline', () => {
     view.rerender(<Timeline />)
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 1000 })
+  })
+
+  it('pins past the inset the bottom spacer reserves', () => {
+    // virtua applies its measured height after the commit, and its rows
+    // overflow that box, so `scrollHeight` can still leave the spacer out. A
+    // pin that stops at `scrollHeight` parks one composer above the bottom.
+    state.messages = [message('hello', 1)]
+    const scrollTo = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      value: scrollTo,
+      configurable: true,
+    })
+    const view = render(<Timeline bottomInset={120} />)
+    const timeline = view.container.querySelector(
+      '.chat-timeline',
+    ) as HTMLDivElement
+    Object.defineProperty(timeline, 'scrollHeight', {
+      value: 1000,
+      configurable: true,
+    })
+    Object.defineProperty(timeline, 'clientHeight', {
+      value: 500,
+      configurable: true,
+    })
+    scrollTo.mockClear()
+
+    state.messages = [message('hello world', 2)]
+    view.rerender(<Timeline bottomInset={120} />)
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1120 })
+  })
+
+  it('re-pins once the measured rows resize the scrolled content', () => {
+    const callbacks: ResizeObserverCallback[] = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          callbacks.push(callback)
+        }
+        observe() {}
+        disconnect() {}
+      },
+    )
+    state.messages = [message('hello', 1)]
+    const scrollTo = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      value: scrollTo,
+      configurable: true,
+    })
+    const view = render(<Timeline bottomInset={120} />)
+    const timeline = view.container.querySelector(
+      '.chat-timeline',
+    ) as HTMLDivElement
+    Object.defineProperty(timeline, 'scrollHeight', {
+      value: 4826,
+      configurable: true,
+    })
+    scrollTo.mockClear()
+
+    expect(callbacks).toHaveLength(1)
+    callbacks[0]([], {} as ResizeObserver)
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 4946 })
+  })
+
+  it('never asks virtua to shift its size cache', () => {
+    // Rows are only appended or folded in place. `shift` makes virtua
+    // re-index its size cache on every append, so each measured row lands on
+    // the next row's slot and blank bands open between rows.
+    state.messages = [message('hello', 1)]
+    virtualizerProps.length = 0
+    render(<Timeline />)
+    expect(virtualizerProps[0].shift).toBeFalsy()
   })
 
   it('renders a subagent card without an update loop', () => {

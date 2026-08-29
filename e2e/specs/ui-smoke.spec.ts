@@ -6,6 +6,8 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
   baseURL,
 }) => {
   const forge = await launchForge({
+    // The reply has to overflow the phone viewport so the timeline scrolls.
+    env: { FORGE_E2E_REPLY_REPEAT: '120' },
     fakeAgentEnv: { FORGE_MOCK_PROMPT_DELAY_MS: '120' },
   })
   try {
@@ -72,6 +74,30 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
       const box = await composer.boundingBox()
       expect(box?.y).toBeGreaterThan(0)
       expect(box?.y ?? 0).toBeLessThan(844)
+      // The composer floats over the timeline, so the reserved inset has to
+      // keep the last row clear of it, even once the reply scrolls.
+      const lastRow = page.locator(`${shell} .chat-row`).last()
+      await expect(lastRow).toBeVisible()
+      await expect
+        .poll(() =>
+          page
+            .locator(`${shell} .chat-timeline`)
+            .evaluate((node) => node.scrollTop),
+        )
+        .toBeGreaterThan(0)
+      const composerBox = page.locator(`${shell} .composer-root`)
+      const shortHeight = (await composerBox.boundingBox())?.height ?? 0
+      // A taller composer grows the reserved inset, so the timeline has to
+      // scroll further to keep the last row clear.
+      await composer.fill('line\n'.repeat(8))
+      await expect
+        .poll(async () => (await composerBox.boundingBox())?.height ?? 0)
+        .toBeGreaterThan(shortHeight)
+      const rowBox = await lastRow.boundingBox()
+      const formBox = await composerBox.boundingBox()
+      expect((rowBox?.y ?? 0) + (rowBox?.height ?? 0)).toBeLessThanOrEqual(
+        formBox?.y ?? 0,
+      )
     }
   } finally {
     await stopProxiedForge(page, forge)

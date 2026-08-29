@@ -380,7 +380,9 @@ function TierEditor({
               <Select
                 value={hop.harness}
                 onValueChange={(value) =>
-                  onChange(setTierHopHarness(policy, tierId, index, value))
+                  onChange(
+                    setTierHopHarness(policy, tierId, index, value ?? ''),
+                  )
                 }
               >
                 <SelectTrigger

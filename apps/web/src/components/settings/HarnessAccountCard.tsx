@@ -231,16 +231,18 @@ export function HarnessAccountCard({
               {headerAction}
               {onDelete && (
                 <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      className="size-5 p-0 text-muted-foreground hover:text-destructive"
-                      onClick={onDelete}
-                      aria-label={`Delete account ${accountId}`}
-                    >
-                      <Trash2 className="size-3" />
-                    </Button>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        className="size-5 p-0 text-muted-foreground hover:text-destructive"
+                        onClick={onDelete}
+                        aria-label={`Delete account ${accountId}`}
+                      />
+                    }
+                  >
+                    <Trash2 className="size-3" />
                   </TooltipTrigger>
                   <TooltipContent>Delete account</TooltipContent>
                 </Tooltip>
@@ -549,7 +551,13 @@ export function HarnessAccountCard({
                 {field.key === 'model' && models.length > 0 ? (
                   <Select
                     value={String(accountConfig?.model ?? '')}
-                    onValueChange={(value) => updateConfig('model', value)}
+                    items={models.map((model) => ({
+                      value: model.slug,
+                      label: `${model.subProvider ? `${model.subProvider} · ` : ''}${model.name}`,
+                    }))}
+                    onValueChange={(value) =>
+                      updateConfig('model', value ?? '')
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select model" />
@@ -566,7 +574,9 @@ export function HarnessAccountCard({
                 ) : field.control === 'select' ? (
                   <Select
                     value={String(accountConfig?.[field.key] ?? '')}
-                    onValueChange={(value) => updateConfig(field.key, value)}
+                    onValueChange={(value) =>
+                      updateConfig(field.key, value ?? '')
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select level" />

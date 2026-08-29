@@ -184,10 +184,11 @@ function DownloadCard({ file, href }: { file: FileViewerProps; href: string }) {
           {file.sha256 ? ` · ${file.sha256}` : ''}
         </EmptyDescription>
       </EmptyHeader>
-      <Button asChild className="pointer-coarse:h-11 pointer-coarse:px-5">
-        <a href={href} download={file.filename}>
-          <Download size={16} /> Download
-        </a>
+      <Button
+        className="pointer-coarse:h-11 pointer-coarse:px-5"
+        render={<a href={href} download={file.filename} />}
+      >
+        <Download size={16} /> Download
       </Button>
     </Empty>
   )

@@ -205,6 +205,7 @@ export function GeneralSettings() {
         >
           <Select
             value={shellTheme}
+            items={{ system: 'System', light: 'Light', dark: 'Dark' }}
             onValueChange={(value) => {
               if (value === 'system' || value === 'light' || value === 'dark')
                 setShellTheme(value)
@@ -240,11 +241,15 @@ export function GeneralSettings() {
         </SettingsRow>
       </SettingsSection>
       <SettingsSection title="About" description="Forge runtime information.">
-        <RequestState
-          state={aboutState}
-          error={aboutError}
-          onRetry={loadAbout}
-        />
+        {/* About only reads /api/status, so the success state has nothing to
+            report: showing "Saved." here would be wrong and leaves a gap. */}
+        {aboutState !== 'saved' && (
+          <RequestState
+            state={aboutState}
+            error={aboutError}
+            onRetry={loadAbout}
+          />
+        )}
         <SettingsRow label="Version" description="The running Forge version.">
           <code className="font-mono text-sm">
             {about.version ?? 'unknown'}
@@ -661,6 +666,7 @@ export function EpicSettings() {
         >
           <Select
             value={defaults.mode}
+            items={{ pool: 'Pool', serial: 'Serial', auto: 'Auto' }}
             onValueChange={(value) => {
               if (value === 'pool' || value === 'serial' || value === 'auto') {
                 setField('mode', value)

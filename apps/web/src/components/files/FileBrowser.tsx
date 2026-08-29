@@ -176,21 +176,23 @@ export function FileBrowser() {
   const segments = path.split('/').filter(Boolean)
 
   return (
-    <TooltipProvider delayDuration={300}>
+    <TooltipProvider delay={300}>
       <section className="flex h-full min-h-0 flex-col">
         <header className="flex min-h-13 items-center gap-1.5 border-b border-border px-2.5 py-2">
           {isFile && (
             <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="pointer-coarse:size-11"
-                  onClick={back}
-                  aria-label="Back to files"
-                >
-                  <ArrowLeft size={18} />
-                </Button>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="pointer-coarse:size-11"
+                    onClick={back}
+                    aria-label="Back to files"
+                  />
+                }
+              >
+                <ArrowLeft size={18} />
               </TooltipTrigger>
               <TooltipContent>Back to files</TooltipContent>
             </Tooltip>

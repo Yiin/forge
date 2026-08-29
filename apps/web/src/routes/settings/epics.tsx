@@ -129,6 +129,7 @@ export function EpicSettings() {
         >
           <Select
             value={defaults.mode}
+            items={{ pool: 'Pool', serial: 'Serial', auto: 'Auto' }}
             onValueChange={(value) => {
               if (value === 'pool' || value === 'serial' || value === 'auto')
                 update({ ...defaults, mode: value })

@@ -1,7 +1,7 @@
 import { Timeline } from '../components/chat/Timeline'
 import { Composer } from '../components/chat/Composer'
 import { SessionHeader } from '../components/chat/SessionHeader'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
 import { connectForgeSocket, normalizeServerEvent } from '../lib/socket'
@@ -17,6 +17,10 @@ import type { HarnessSelection } from '../components/chat/harness-picker-logic'
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
   const navigate = useNavigate()
+  const [composerOverlay, setComposerOverlay] = useState<HTMLDivElement | null>(
+    null,
+  )
+  const [composerHeight, setComposerHeight] = useState(0)
   const targetSeq = Number(new URLSearchParams(window.location.search).get('m'))
   const [sending, setSending] = useState(false)
   const [harness, setHarness] = useState<string>()
@@ -39,6 +43,21 @@ export function SessionRoute() {
       }),
     [sessionId],
   )
+  // The composer floats over the timeline, so the timeline reserves exactly
+  // as much room as the composer currently needs.
+  useLayoutEffect(() => {
+    if (!composerOverlay) return
+    const measure = () => {
+      const next = Math.ceil(composerOverlay.getBoundingClientRect().height)
+      if (next > 0)
+        setComposerHeight((current) => (current === next ? current : next))
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(composerOverlay)
+    return () => observer.disconnect()
+  }, [composerOverlay])
   useEffect(() => {
     let active = true
     let socket: ReturnType<typeof connectForgeSocket> | undefined
@@ -204,22 +223,38 @@ export function SessionRoute() {
       {!loading && !loadError && (
         <Timeline
           targetSeq={Number.isFinite(targetSeq) ? targetSeq : undefined}
+          bottomInset={composerHeight}
         />
       )}
       {!loading && !loadError && (
-        <Composer
-          sessionId={sessionId}
-          harness={harness}
-          accountId={accountId}
-          model={model}
-          protocol={protocol}
-          running={(sessionStatus ?? loadedStatus) === 'running'}
-          onInterrupt={async () => {
-            await api.interrupt({ sessionId })
-          }}
-          onSend={send}
-          sending={sending}
-        />
+        <div
+          ref={setComposerOverlay}
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+        >
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-1.5 bottom-0 z-0 px-3 sm:top-2 sm:px-5"
+          >
+            <div className="relative mx-auto h-full w-full max-w-3xl overflow-clip rounded-t-[20px]">
+              <div className="chat-composer-shared-blur absolute -inset-8" />
+            </div>
+          </div>
+          <div className="chat-composer-lower-chrome pointer-events-auto relative z-10 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:px-5 sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+            <Composer
+              sessionId={sessionId}
+              harness={harness}
+              accountId={accountId}
+              model={model}
+              protocol={protocol}
+              running={(sessionStatus ?? loadedStatus) === 'running'}
+              onInterrupt={async () => {
+                await api.interrupt({ sessionId })
+              }}
+              onSend={send}
+              sending={sending}
+            />
+          </div>
+        </div>
       )}
     </div>
   )

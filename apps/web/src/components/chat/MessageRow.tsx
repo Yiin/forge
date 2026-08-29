@@ -1,13 +1,20 @@
 import {
+  Bot,
   Check,
   ChevronDown,
-  ChevronRight,
-  CircleAlert,
+  Eye,
+  Globe,
+  Hammer,
+  Minus,
+  SquarePen,
+  Terminal,
+  Wrench,
+  X,
   Copy,
   GitBranch,
-  LoaderCircle,
   Pencil,
 } from 'lucide-react'
+import type { ComponentType, KeyboardEvent, SVGProps } from 'react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { ChatMarkdown } from './ChatMarkdown'
@@ -17,6 +24,10 @@ import { summarizeToolCall } from './tool-summary'
 import { api } from '../../lib/api'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
+
+const META_ROW_CLASS =
+  'mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100'
 
 export function MessageRow({
   item,
@@ -50,55 +61,28 @@ export function MessageRow({
   }
   if (item.thought)
     return (
-      <article
-        className="chat-row chat-thought mx-auto mb-3 max-w-[760px] border-l-2 border-border pl-3 text-muted-foreground"
-        data-seq={item.seq}
-      >
-        <button
-          className="inline-flex items-center gap-1.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          type="button"
-          aria-expanded={open}
-          aria-controls={`thought-${item.id}`}
-          onClick={() => setOpen(!open)}
+      <article className="chat-row chat-thought" data-seq={item.seq}>
+        <WorkEntryRow
+          icon={Bot}
+          heading="Thought"
+          expanded={open}
+          detailId={`thought-${item.id}`}
+          onToggle={() => setOpen(!open)}
         >
-          {open ? (
-            <ChevronDown className="size-3.5" />
-          ) : (
-            <ChevronRight className="size-3.5" />
-          )}
-          Thought
-        </button>
-        {open && (
-          <div id={`thought-${item.id}`} className="mt-1 pl-5">
-            <ChatMarkdown text={item.text} />
-          </div>
-        )}
+          <ChatMarkdown text={item.text} />
+        </WorkEntryRow>
       </article>
     )
-  return (
-    <article
-      className={cn(
-        'chat-row group/row mx-auto mb-3 flex max-w-[760px] flex-col',
-        `chat-${item.role}`,
-        item.role === 'user' && 'items-end',
-      )}
-      data-seq={item.seq}
-    >
-      <div
-        className={cn(
-          'mb-1 flex w-full items-center gap-1 text-xs text-muted-foreground',
-          item.role === 'user' && 'justify-end',
-        )}
+  if (item.role === 'user')
+    return (
+      <article
+        className="chat-row chat-user group flex flex-col items-end gap-1"
+        data-seq={item.seq}
       >
-        {item.role === 'agent' && (
-          <span className="mr-auto font-medium">Forge</span>
-        )}
-        <span
-          className={cn(
-            'flex items-center gap-1',
-            'opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 group-focus-within/row:opacity-100',
-          )}
-        >
+        <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3 text-sm text-foreground">
+          <SkillChipText text={item.text} skills={[]} />
+        </div>
+        <div className={META_ROW_CLASS}>
           <Button
             variant="ghost"
             size="icon-xs"
@@ -107,30 +91,35 @@ export function MessageRow({
           >
             <Copy className="size-3.5" />
           </Button>
-          {sessionId &&
-            (item.role === 'user' ? (
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => void fork(false)}
-              >
-                <Pencil className="size-3.5" /> Edit
-              </Button>
-            ) : (
-              <Button variant="ghost" size="xs" onClick={() => void fork(true)}>
-                <GitBranch className="size-3.5" /> Branch from here
-              </Button>
-            ))}
-        </span>
-        {item.role === 'user' && <span className="font-medium">You</span>}
+          {sessionId && (
+            <Button variant="ghost" size="xs" onClick={() => void fork(false)}>
+              <Pencil className="size-3.5" /> Edit
+            </Button>
+          )}
+        </div>
+      </article>
+    )
+  return (
+    <article
+      className="chat-row chat-agent group relative min-w-0 px-1 py-0.5"
+      data-seq={item.seq}
+    >
+      <ChatMarkdown text={item.text} />
+      <div className={META_ROW_CLASS}>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Copy message"
+          onClick={() => void copy()}
+        >
+          <Copy className="size-3.5" />
+        </Button>
+        {sessionId && (
+          <Button variant="ghost" size="xs" onClick={() => void fork(true)}>
+            <GitBranch className="size-3.5" /> Branch from here
+          </Button>
+        )}
       </div>
-      {item.role === 'user' ? (
-        <p className="max-w-[78%] rounded-2xl rounded-tr-md bg-muted px-4 py-2.5 text-sm text-foreground">
-          <SkillChipText text={item.text} skills={[]} />
-        </p>
-      ) : (
-        <ChatMarkdown text={item.text} />
-      )}
     </article>
   )
 }
@@ -141,70 +130,195 @@ export function ToolCallRow({
   item: Extract<ChatRenderItem, { kind: 'tool' }>
 }) {
   const [open, setOpen] = useState(false)
-  const Status =
-    item.state === 'running'
-      ? LoaderCircle
-      : item.state === 'done'
-        ? Check
-        : CircleAlert
-  const statusColor =
-    item.state === 'done'
-      ? 'text-primary'
-      : item.state === 'error'
-        ? 'text-destructive'
-        : 'text-muted-foreground'
   const summary = summarizeToolCall(item.name, item.input)
   return (
-    <article
-      className={cn(
-        'chat-tool mx-auto mb-3 max-w-[760px] overflow-hidden rounded-lg border bg-card',
-        item.state === 'running' ? 'border-primary/40' : 'border-border',
-      )}
-    >
-      <button
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs"
-        type="button"
-        aria-expanded={open}
-        aria-controls={`tool-detail-${item.id}`}
-        onClick={() => setOpen(!open)}
+    <article className="chat-tool">
+      <WorkEntryRow
+        icon={toolIcon(item.name, item.input)}
+        heading={summary.title}
+        preview={summary.detail}
+        state={item.state}
+        expanded={open}
+        detailId={`tool-detail-${item.id}`}
+        onToggle={() => setOpen(!open)}
       >
-        <Status
-          className={cn(
-            'size-3.5 shrink-0',
-            statusColor,
-            item.state === 'running' && 'animate-spin',
-          )}
-        />
-        <strong className="min-w-0 truncate font-medium text-foreground">
-          {summary.title}
-          {summary.detail && (
-            <span className="ml-2 font-normal text-muted-foreground">
-              {summary.detail}
-            </span>
-          )}
-        </strong>
-        <span className={cn('ml-auto', statusColor)}>{item.state}</span>
-        {open ? (
-          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-        )}
-      </button>
-      {open && (
-        <div
-          id={`tool-detail-${item.id}`}
-          className="space-y-2 border-t border-border px-3 py-2"
-        >
-          <pre className="overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
-            {JSON.stringify(item.input, null, 2)}
+        <pre className="max-h-64 overflow-auto break-words whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
+          {JSON.stringify(item.input, null, 2)}
+        </pre>
+        {item.output !== undefined && (
+          <pre className="mt-2 max-h-64 overflow-auto break-words whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
+            {JSON.stringify(item.output, null, 2)}
           </pre>
-          {item.output !== undefined && (
-            <pre className="overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
-              {JSON.stringify(item.output, null, 2)}
-            </pre>
-          )}
-        </div>
-      )}
+        )}
+      </WorkEntryRow>
     </article>
   )
+}
+
+/**
+ * One line of agent work: an icon, a heading, a truncated preview, and a
+ * status chip. Expanding reveals the raw detail under a hanging rule.
+ */
+export function WorkEntryRow({
+  icon: Icon,
+  heading,
+  preview,
+  state,
+  expanded,
+  detailId,
+  onToggle,
+  children,
+}: {
+  icon: ComponentType<SVGProps<SVGSVGElement>>
+  heading: string
+  preview?: string
+  state?: 'running' | 'done' | 'error'
+  expanded: boolean
+  detailId: string
+  onToggle: () => void
+  children: React.ReactNode
+}) {
+  const toggle = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    onToggle()
+  }
+  return (
+    <div
+      className="flex cursor-pointer flex-col rounded-md px-0.5 py-0.5 transition-colors hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset focus-visible:outline-none"
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      aria-controls={detailId}
+      onClick={onToggle}
+      onKeyDown={toggle}
+    >
+      <div className="flex items-center gap-1.5 select-none">
+        <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground/65">
+          <Icon
+            className="block size-3.5 shrink-0 stroke-[1.8] opacity-80"
+            aria-hidden
+          />
+        </span>
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <p className="flex w-full min-w-0 items-baseline gap-1.5 text-[12px] leading-5">
+            <span className="min-w-0 shrink truncate font-medium text-foreground/82">
+              {heading}
+            </span>
+            {preview && (
+              <span className="min-w-0 flex-1 truncate text-muted-foreground/55">
+                {preview}
+              </span>
+            )}
+          </p>
+          <div className="flex shrink-0 items-center gap-px text-muted-foreground/55">
+            <span className="flex size-4 shrink-0 items-center justify-center">
+              <ChevronDown
+                className={cn(
+                  'size-3 shrink-0 opacity-70 transition-transform duration-200',
+                  expanded && 'rotate-180',
+                )}
+                aria-hidden
+              />
+            </span>
+            <span className="flex size-4 shrink-0 items-center justify-center">
+              <StatusChip state={state} />
+            </span>
+          </div>
+        </div>
+      </div>
+      {expanded && (
+        <div
+          id={detailId}
+          className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StatusChip({ state }: { state?: 'running' | 'done' | 'error' }) {
+  if (state === undefined) return null
+  if (state === 'running')
+    return (
+      <>
+        <span className="sr-only">Running</span>
+        <RunningDots />
+      </>
+    )
+  if (state === 'error')
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={<span className="flex size-4 items-center justify-center" />}
+        >
+          <X className="block size-3 shrink-0 text-destructive" aria-hidden />
+          <span className="sr-only">Failed</span>
+        </TooltipTrigger>
+        <TooltipPopup>Failed</TooltipPopup>
+      </Tooltip>
+    )
+  if (state === 'done')
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={<span className="flex size-4 items-center justify-center" />}
+        >
+          <Check className="block size-3 shrink-0" aria-hidden />
+          <span className="sr-only">Completed</span>
+        </TooltipTrigger>
+        <TooltipPopup>Completed</TooltipPopup>
+      </Tooltip>
+    )
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<span className="flex size-4 items-center justify-center" />}
+      >
+        <Minus className="block size-3 shrink-0 opacity-70" aria-hidden />
+        <span className="sr-only">Empty</span>
+      </TooltipTrigger>
+      <TooltipPopup>Empty</TooltipPopup>
+    </Tooltip>
+  )
+}
+
+/** Three duty-cycled dots: the resting indicator for work still in flight. */
+export function RunningDots() {
+  return (
+    <span className="inline-flex items-center gap-[3px]" aria-hidden>
+      <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30 motion-reduce:animate-none" />
+      <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30 [animation-delay:200ms] motion-reduce:animate-none" />
+      <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30 [animation-delay:400ms] motion-reduce:animate-none" />
+    </span>
+  )
+}
+
+const READ_TOOL = /read|view|grep|glob|search|list|ls/i
+const WRITE_TOOL = /write|edit|patch|update|create|notebook/i
+const WEB_TOOL = /web|fetch|http|url|browser|search/i
+const AGENT_TOOL = /task|agent|spawn/i
+const BUILD_TOOL = /build|compile|make|install|deploy/i
+
+function toolIcon(
+  name: string,
+  input: unknown,
+): ComponentType<SVGProps<SVGSVGElement>> {
+  const clean = name.replace(/`/g, '').trim()
+  if (
+    input &&
+    typeof input === 'object' &&
+    !Array.isArray(input) &&
+    ('command' in input || 'cmd' in input)
+  )
+    return Terminal
+  if (AGENT_TOOL.test(clean)) return Bot
+  if (WEB_TOOL.test(clean)) return Globe
+  if (WRITE_TOOL.test(clean)) return SquarePen
+  if (READ_TOOL.test(clean)) return Eye
+  if (BUILD_TOOL.test(clean)) return Hammer
+  return Wrench
 }

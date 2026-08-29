@@ -166,18 +166,20 @@ export function RunRoute() {
     const state = actionState[name]
     return (
       <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={label}
-            disabled={state === 'pending'}
-            onClick={() =>
-              name === 'cancel' ? setConfirmCancel(true) : void action(name)
-            }
-          >
-            {state === 'pending' ? <Spinner /> : icon}
-          </Button>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={label}
+              disabled={state === 'pending'}
+              onClick={() =>
+                name === 'cancel' ? setConfirmCancel(true) : void action(name)
+              }
+            />
+          }
+        >
+          {state === 'pending' ? <Spinner /> : icon}
         </TooltipTrigger>
         <TooltipContent>{label}</TooltipContent>
       </Tooltip>
@@ -205,7 +207,7 @@ export function RunRoute() {
             </span>
           </div>
         </div>
-        <TooltipProvider delayDuration={300}>
+        <TooltipProvider delay={300}>
           <div className="flex items-center gap-1">
             {run.status === 'running'
               ? actionButton('pause', 'Pause run', <Pause />)
@@ -370,25 +372,27 @@ function IterationRow({
       onOpenChange={onToggle}
       className="rounded-lg border p-3"
     >
-      <CollapsibleTrigger asChild>
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 text-left"
-          aria-label={`${item.title || 'Untitled iteration'}, ${item.status}, attempt ${item.attempt}`}
-        >
-          <Badge variant={variant} className="gap-1">
-            <StatusIcon className="size-3" />
-          </Badge>
-          <span className="flex-1 truncate font-medium">{item.title}</span>
-          <span className="text-xs text-muted-foreground">
-            attempt {item.attempt}
-          </span>
-          {expanded ? (
-            <ChevronDown className="size-4 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="size-4 text-muted-foreground" />
-          )}
-        </button>
+      <CollapsibleTrigger
+        render={
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 text-left"
+            aria-label={`${item.title || 'Untitled iteration'}, ${item.status}, attempt ${item.attempt}`}
+          />
+        }
+      >
+        <Badge variant={variant} className="gap-1">
+          <StatusIcon className="size-3" />
+        </Badge>
+        <span className="flex-1 truncate font-medium">{item.title}</span>
+        <span className="text-xs text-muted-foreground">
+          attempt {item.attempt}
+        </span>
+        {expanded ? (
+          <ChevronDown className="size-4 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-4 text-muted-foreground" />
+        )}
       </CollapsibleTrigger>
       <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
         <code title="Worker session id" className="font-mono">
