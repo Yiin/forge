@@ -2,10 +2,12 @@ import { Hono } from 'hono'
 import type { DatabaseSync } from 'node:sqlite'
 import { resolve } from 'node:path'
 import { gitStatus, listRefs } from '../git/repo.js'
+import { listWorktrees, provisionWorktree, removeWorktree } from '../git/worktrees.js'
 import { runGit } from '../git/exec.js'
-import { gitRefsPageSchema, gitStatusSchema } from '@forge/protocol/git'
+import { createWorktreeRequestSchema, createWorktreeResponseSchema, gitRefsPageSchema, gitStatusSchema, removeWorktreeRequestSchema, worktreeListResponseSchema } from '@forge/protocol/git'
 
-export function gitRoutes(db: DatabaseSync) {
+export function gitRoutes(options: { db: DatabaseSync; dataDir: string }) {
+  const { db, dataDir } = options
   const app = new Hono()
   const project = (id: string) => db.prepare('SELECT path FROM projects WHERE id = ? AND archived_at IS NULL').get(id) as { path: string } | undefined
   const cwdFor = async (id: string, requested: string | undefined) => {
@@ -32,6 +34,33 @@ export function gitRoutes(db: DatabaseSync) {
       cursor: Number(c.req.query('cursor') ?? 0),
     })
     return c.json(gitRefsPageSchema.parse(page))
+  })
+  app.get('/api/projects/:id/git/worktrees', async (c) => {
+    const row = project(c.req.param('id'))
+    if (!row) return c.json({ error: 'Project not found' }, 404)
+    try { return c.json(worktreeListResponseSchema.parse({ worktrees: await listWorktrees(row.path) })) }
+    catch (error) { return c.json({ error: error instanceof Error ? error.message : String(error) }, 400) }
+  })
+  app.post('/api/projects/:id/git/worktrees', async (c) => {
+    const row = project(c.req.param('id'))
+    if (!row) return c.json({ error: 'Project not found' }, 404)
+    try {
+      const body = createWorktreeRequestSchema.parse(await c.req.json())
+      return c.json(createWorktreeResponseSchema.parse(await provisionWorktree({ ...body, repoPath: row.path, dataDir, projectId: c.req.param('id') })), 201)
+    } catch (error) { return c.json({ error: error instanceof Error ? error.message : String(error) }, 400) }
+  })
+  app.delete('/api/projects/:id/git/worktrees', async (c) => {
+    const row = project(c.req.param('id'))
+    if (!row) return c.json({ error: 'Project not found' }, 404)
+    try {
+      const body = removeWorktreeRequestSchema.parse(await c.req.json())
+      const worktrees = await listWorktrees(row.path)
+      if (!worktrees.some((worktree) => worktree.path === body.path)) return c.json({ error: 'path is not a registered worktree of this project' }, 400)
+      const running = db.prepare("SELECT 1 FROM sessions WHERE cwd = ? AND status = 'running' LIMIT 1").get(body.path)
+      if (running) return c.json({ error: 'A session is running in this worktree' }, 409)
+      await removeWorktree(row.path, body.path, body.force)
+      return c.json({ ok: true })
+    } catch (error) { return c.json({ error: error instanceof Error ? error.message : String(error) }, 400) }
   })
   return app
 }

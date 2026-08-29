@@ -92,6 +92,15 @@ export class ForgeApi {
     const suffix = query.toString() ? `?${query}` : ''
     return this.get(`/api/projects/${encodeURIComponent(projectId)}/git/branches${suffix}`)
   }
+  listWorktrees(projectId: string) {
+    return this.get(`/api/projects/${encodeURIComponent(projectId)}/git/worktrees`)
+  }
+  createWorktree(projectId: string, input: { baseRef: string; branch?: string }) {
+    return this.post(`/api/projects/${encodeURIComponent(projectId)}/git/worktrees`, null, input)
+  }
+  removeWorktree(projectId: string, input: { path: string; force?: boolean }) {
+    return this.request('DELETE', `/api/projects/${encodeURIComponent(projectId)}/git/worktrees`, input)
+  }
   listHarnesses() {
     return this.get('/api/harnesses')
   }
@@ -235,8 +244,14 @@ export class ForgeApi {
     if (!response.ok) throw await apiError(response)
     return await response.json()
   }
-  private async request(method: string, path: string) {
-    const response = await this.fetcher(`${this.baseUrl}${path}`, { method })
+  private async request(method: string, path: string, body?: unknown) {
+    const response = await this.fetcher(`${this.baseUrl}${path}`, {
+      method,
+      ...(body === undefined ? {} : {
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    })
     if (!response.ok) throw await apiError(response)
     return await response.json()
   }

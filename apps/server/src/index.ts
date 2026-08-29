@@ -146,7 +146,7 @@ export function createApp(
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
-    app.route('/', gitRoutes(uploadStore.database))
+    app.route('/', gitRoutes({ db: uploadStore.database, dataDir: uploadStore.dataDir }))
     app.route('/', fsBrowseRoutes())
     app.route('/', searchRoutes(uploadStore.database))
     app.route('/', harnessRoutes({ configState, db: uploadStore.database }))
@@ -498,6 +498,12 @@ async function startE2eServer(): Promise<void> {
           nextCursor: null,
           totalCount: 2,
         })
+      }
+      const worktreePath = url.pathname.match(/^\/api\/projects\/([^/]+)\/git\/worktrees$/)
+      if (worktreePath) {
+        if (request.method === 'GET') return response({ worktrees: [] })
+        if (request.method === 'POST') return response({ path: '/tmp/e2e-project-worktree', branch: 'forge/abcd1234' }, 201)
+        if (request.method === 'DELETE') return response({ ok: true })
       }
       const project = url.pathname.match(/^\/api\/projects\/([^/]+)\/sessions$/)
       if (request.method === 'POST' && project) {
