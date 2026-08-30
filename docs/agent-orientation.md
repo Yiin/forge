@@ -14,7 +14,7 @@ defines product limits. `docs/architecture.md` is historical.
 - `apps/web/src/routes.tsx`: route tree, root entry, draft, session, and Settings paths.
 - `apps/server`: Hono HTTP, WebSocket, sessions, and uploads. Account logic is in
   `apps/server/src/accounts/`.
-- `apps/server/drizzle`: raw SQL migrations. `src/db/migrate.ts` replays every file on each boot.
+- `apps/server/drizzle`: raw SQL migrations. `src/db/migrate.ts` replays every file on each boot, sorted by file name and ledgered by name. Before adding one, run `ls apps/server/drizzle | tail -1` and use the next number after the highest present (two files already share `0017`; never rename a shipped migration).
 - `packages/protocol`: Zod wire schemas shared by server, web, and dashboards.
 - `packages/protocol/src/status.ts` is vendored into `packages/forge-client` with a drift check. Change it and run the sync.
 - `e2e`: Playwright flows. Use `.agents/skills/test-forge-app/SKILL.md` for live QA.
