@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   listWorktrees,
+  deleteMergedTemporaryBranch,
   provisionWorktree,
   removeWorktree,
   worktreePathFor,
@@ -13,6 +14,106 @@ import {
 import { runGit } from './exec.js'
 
 describe('git worktrees', () => {
+  test('deletes only merged temporary branches', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-branch-cleanup-'))
+    const repo = join(root, 'repo')
+    const dataDir = join(root, 'data')
+    await mkdir(repo)
+    try {
+      await runGit(repo, ['init', '-b', 'main'])
+      await runGit(repo, ['config', 'user.email', 'forge@example.test'])
+      await runGit(repo, ['config', 'user.name', 'Forge'])
+      await writeFile(join(repo, 'README'), 'test')
+      await runGit(repo, ['add', '.'])
+      await runGit(repo, ['commit', '-m', 'initial'])
+
+      const merged = await provisionWorktree({
+        repoPath: repo,
+        dataDir,
+        projectId: 'project',
+        baseRef: 'main',
+      })
+      await writeFile(join(merged.path, 'merged.txt'), 'merged')
+      await runGit(merged.path, ['add', '.'])
+      await runGit(merged.path, ['commit', '-m', 'merged change'])
+      await removeWorktree(repo, merged.path)
+      await runGit(repo, ['merge', '--ff-only', merged.branch])
+      await expect(
+        deleteMergedTemporaryBranch({
+          repoPath: repo,
+          branch: merged.branch,
+          defaultBranch: 'main',
+          hasSessionReference: false,
+        }),
+      ).resolves.toBe(true)
+      const mergedRef = await runGit(
+        repo,
+        ['show-ref', '--verify', `refs/heads/${merged.branch}`],
+        false,
+      )
+      expect(mergedRef.code).not.toBe(0)
+
+      const unmerged = await provisionWorktree({
+        repoPath: repo,
+        dataDir,
+        projectId: 'project',
+        baseRef: 'main',
+      })
+      await writeFile(join(unmerged.path, 'unmerged.txt'), 'unmerged')
+      await runGit(unmerged.path, ['add', '.'])
+      await runGit(unmerged.path, ['commit', '-m', 'unmerged change'])
+      await removeWorktree(repo, unmerged.path)
+      await expect(
+        deleteMergedTemporaryBranch({
+          repoPath: repo,
+          branch: unmerged.branch,
+          defaultBranch: 'main',
+          hasSessionReference: false,
+        }),
+      ).resolves.toBe(false)
+      await expect(
+        runGit(
+          repo,
+          ['show-ref', '--verify', `refs/heads/${unmerged.branch}`],
+          false,
+        ),
+      ).resolves.toMatchObject({ code: 0 })
+
+      await expect(
+        deleteMergedTemporaryBranch({
+          repoPath: repo,
+          branch: 'main',
+          defaultBranch: 'main',
+          hasSessionReference: false,
+        }),
+      ).resolves.toBe(false)
+
+      const referenced = await provisionWorktree({
+        repoPath: repo,
+        dataDir,
+        projectId: 'project',
+        baseRef: 'main',
+      })
+      await removeWorktree(repo, referenced.path)
+      await expect(
+        deleteMergedTemporaryBranch({
+          repoPath: repo,
+          branch: referenced.branch,
+          defaultBranch: 'main',
+          hasSessionReference: true,
+        }),
+      ).resolves.toBe(false)
+      const referencedRef = await runGit(
+        repo,
+        ['show-ref', '--verify', `refs/heads/${referenced.branch}`],
+        false,
+      )
+      expect(referencedRef.code).toBe(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('provisions, lists, and removes worktrees outside the repository', async () => {
     const root = await mkdtemp(join(tmpdir(), 'forge-worktrees-'))
     const repo = join(root, 'repo')

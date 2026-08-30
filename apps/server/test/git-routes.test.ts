@@ -104,8 +104,64 @@ describe('git routes', () => {
         ).status,
       ).toBe(200)
       expect(
+        (
+          await runGit(
+            projectPath,
+            ['show-ref', '--verify', 'refs/heads/feature/test'],
+            false,
+          )
+        ).code,
+      ).toBe(0)
+      expect(
         (await app.request('/api/projects/missing/git/worktrees')).status,
       ).toBe(404)
+    } finally {
+      await rm(projectPath, { recursive: true, force: true })
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('does not remove a dirty temporary worktree or its branch', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const projectPath = await mkdtemp(`${tmpdir()}/forge-project-dirty-`)
+    const dataDir = await mkdtemp(`${tmpdir()}/forge-data-dirty-`)
+    try {
+      await runGit(projectPath, ['init', '-b', 'main'])
+      await runGit(projectPath, ['config', 'user.email', 'forge@example.test'])
+      await runGit(projectPath, ['config', 'user.name', 'Forge'])
+      await writeFile(`${projectPath}/README`, 'test')
+      await runGit(projectPath, ['add', '.'])
+      await runGit(projectPath, ['commit', '-m', 'initial'])
+      db.prepare(
+        'INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)',
+      ).run('p1', 'Project', projectPath, 1)
+      const app = createApp(new UploadStore(db, { dataDir }))
+      const created = await app.request('/api/projects/p1/git/worktrees', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ baseRef: 'main' }),
+      })
+      const worktree = (await created.json()) as {
+        path: string
+        branch: string
+      }
+      await writeFile(`${worktree.path}/dirty.txt`, 'keep me')
+      const removed = await app.request('/api/projects/p1/git/worktrees', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: worktree.path }),
+      })
+      expect(removed.status).toBe(400)
+      expect(
+        (
+          await runGit(
+            projectPath,
+            ['show-ref', '--verify', `refs/heads/${worktree.branch}`],
+            false,
+          )
+        ).code,
+      ).toBe(0)
     } finally {
       await rm(projectPath, { recursive: true, force: true })
       await rm(dataDir, { recursive: true, force: true })

@@ -12,6 +12,29 @@ export function isTemporaryWorktreeBranch(name: string) {
   return /^forge\/[a-f0-9]{8}$/.test(name)
 }
 
+export async function deleteMergedTemporaryBranch(input: {
+  repoPath: string
+  branch: string
+  defaultBranch: string | null
+  hasSessionReference: boolean
+}) {
+  if (
+    !isTemporaryWorktreeBranch(input.branch) ||
+    !input.defaultBranch ||
+    input.hasSessionReference
+  )
+    return false
+
+  const merged = await runGit(
+    input.repoPath,
+    ['merge-base', '--is-ancestor', input.branch, input.defaultBranch],
+    false,
+  )
+  if (merged.code !== 0) return false
+  await runGit(input.repoPath, ['branch', '-d', input.branch])
+  return true
+}
+
 export const MAX_SESSION_WORKTREES_PER_PROJECT = 16
 
 export class WorktreeLimitError extends Error {

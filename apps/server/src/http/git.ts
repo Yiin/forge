@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { resolve } from 'node:path'
 import { gitStatus, listRefs } from '../git/repo.js'
 import {
+  deleteMergedTemporaryBranch,
   listWorktrees,
   provisionWorktree,
   removeWorktree,
@@ -124,6 +125,8 @@ export function gitRoutes(options: { db: DatabaseSync; dataDir: string }) {
           { error: 'path is not a registered worktree of this project' },
           400,
         )
+      const target = worktrees.find((worktree) => worktree.path === body.path)!
+      const dirty = (await gitStatus(body.path)).dirty
       const running = db
         .prepare(
           "SELECT 1 FROM sessions WHERE cwd = ? AND status = 'running' LIMIT 1",
@@ -132,6 +135,22 @@ export function gitRoutes(options: { db: DatabaseSync; dataDir: string }) {
       if (running)
         return c.json({ error: 'A session is running in this worktree' }, 409)
       await removeWorktree(row.path, body.path, body.force)
+      const hasSessionReference = Boolean(
+        db
+          .prepare(
+            'SELECT 1 FROM sessions WHERE cwd = ? OR worktree_path = ? LIMIT 1',
+          )
+          .get(body.path, body.path),
+      )
+      if (!dirty) {
+        const status = await gitStatus(row.path)
+        await deleteMergedTemporaryBranch({
+          repoPath: row.path,
+          branch: target.branch ?? '',
+          defaultBranch: status.defaultBranch ?? status.branch,
+          hasSessionReference,
+        })
+      }
       return c.json({ ok: true })
     } catch (error) {
       return c.json(
