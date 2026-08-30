@@ -92,12 +92,10 @@ export function WorkspaceBar({
     baseRef?: string
   }) => {
     if (draftId) {
-      useDraftsStore
-        .getState()
-        .update(draftId, {
-          workspaceMode: next.mode,
-          baseRef: next.baseRef ?? next.branch,
-        })
+      useDraftsStore.getState().update(draftId, {
+        workspaceMode: next.mode,
+        baseRef: next.baseRef ?? next.branch,
+      })
       return
     }
     if (!sessionId) return

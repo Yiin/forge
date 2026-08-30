@@ -306,13 +306,20 @@ export function ProjectSettings() {
     (typeof projects)[number] | null
   >(null)
   const [archiveError, setArchiveError] = useState<string | null>(null)
-  const [worktrees, setWorktrees] = useState<Record<string, Array<{
-    path: string
-    branch: string | null
-    dirty: boolean
-    activeSession: boolean
-  }>>>({})
-  const [worktreeState, setWorktreeState] = useState<Record<string, 'loading' | 'error' | 'ready'>>({})
+  const [worktrees, setWorktrees] = useState<
+    Record<
+      string,
+      Array<{
+        path: string
+        branch: string | null
+        dirty: boolean
+        activeSession: boolean
+      }>
+    >
+  >({})
+  const [worktreeState, setWorktreeState] = useState<
+    Record<string, 'loading' | 'error' | 'ready'>
+  >({})
   const [removing, setRemoving] = useState<string | null>(null)
   const [worktreeError, setWorktreeError] = useState<string | null>(null)
   const load = () => {
@@ -430,7 +437,9 @@ export function ProjectSettings() {
                 )}
                 {worktreeState[project.id] === 'ready' &&
                   worktrees[project.id]?.length === 0 && (
-                    <p className="text-sm text-muted-foreground">No session worktrees.</p>
+                    <p className="text-sm text-muted-foreground">
+                      No session worktrees.
+                    </p>
                   )}
                 {worktrees[project.id]?.map((worktree) => (
                   <div
@@ -455,11 +464,17 @@ export function ProjectSettings() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={worktree.activeSession || removing === worktree.path}
+                      disabled={
+                        worktree.activeSession || removing === worktree.path
+                      }
                       aria-label={`Remove worktree ${worktree.branch ?? worktree.path}`}
-                      onClick={() => void removeWorktree(project.id, worktree.path)}
+                      onClick={() =>
+                        void removeWorktree(project.id, worktree.path)
+                      }
                     >
-                      {removing === worktree.path && <Spinner className="size-4" />}
+                      {removing === worktree.path && (
+                        <Spinner className="size-4" />
+                      )}
                       Remove
                     </Button>
                   </div>
@@ -535,12 +550,14 @@ export function ProjectSettings() {
   async function loadWorktrees(projectId: string) {
     setWorktreeState((current) => ({ ...current, [projectId]: 'loading' }))
     try {
-      const value = (await api.listWorktrees(projectId)) as { worktrees: Array<{
-        path: string
-        branch: string | null
-        dirty: boolean
-        activeSession: boolean
-      }> }
+      const value = (await api.listWorktrees(projectId)) as {
+        worktrees: Array<{
+          path: string
+          branch: string | null
+          dirty: boolean
+          activeSession: boolean
+        }>
+      }
       setWorktrees((current) => ({ ...current, [projectId]: value.worktrees }))
       setWorktreeState((current) => ({ ...current, [projectId]: 'ready' }))
     } catch {
@@ -555,7 +572,9 @@ export function ProjectSettings() {
       await api.removeWorktree(projectId, { path })
       setWorktrees((current) => ({
         ...current,
-        [projectId]: current[projectId]?.filter((worktree) => worktree.path !== path) ?? [],
+        [projectId]:
+          current[projectId]?.filter((worktree) => worktree.path !== path) ??
+          [],
       }))
     } catch (cause: unknown) {
       setWorktreeError(cause instanceof Error ? cause.message : String(cause))

@@ -198,18 +198,16 @@ describe('message folding', () => {
         message({ seq: index + 1, itemId: `ses-1-item-${index + 1}` }),
       ),
     )
-    useMessagesStore
-      .getState()
-      .loadMessages(
-        'ses-2',
-        Array.from({ length: 4 }, (_, index) =>
-          message({
-            sessionId: 'ses-2',
-            seq: index + 6,
-            itemId: `ses-2-item-${index + 1}`,
-          }),
-        ),
-      )
+    useMessagesStore.getState().loadMessages(
+      'ses-2',
+      Array.from({ length: 4 }, (_, index) =>
+        message({
+          sessionId: 'ses-2',
+          seq: index + 6,
+          itemId: `ses-2-item-${index + 1}`,
+        }),
+      ),
+    )
     useMessagesStore.getState().loadMessages(
       'ses-1',
       Array.from({ length: 5 }, (_, index) =>

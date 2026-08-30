@@ -85,22 +85,48 @@ export class ForgeApi {
   }
   gitStatus(projectId: string, cwd?: string) {
     const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''
-    return this.get(`/api/projects/${encodeURIComponent(projectId)}/git/status${query}`)
+    return this.get(
+      `/api/projects/${encodeURIComponent(projectId)}/git/status${query}`,
+    )
   }
-  gitBranches(projectId: string, params: { cwd?: string; query?: string; limit?: number; cursor?: number } = {}) {
+  gitBranches(
+    projectId: string,
+    params: {
+      cwd?: string
+      query?: string
+      limit?: number
+      cursor?: number
+    } = {},
+  ) {
     const query = new URLSearchParams()
-    for (const [key, value] of Object.entries(params)) if (value !== undefined) query.set(key, String(value))
+    for (const [key, value] of Object.entries(params))
+      if (value !== undefined) query.set(key, String(value))
     const suffix = query.toString() ? `?${query}` : ''
-    return this.get(`/api/projects/${encodeURIComponent(projectId)}/git/branches${suffix}`)
+    return this.get(
+      `/api/projects/${encodeURIComponent(projectId)}/git/branches${suffix}`,
+    )
   }
   listWorktrees(projectId: string) {
-    return this.get(`/api/projects/${encodeURIComponent(projectId)}/git/worktrees`)
+    return this.get(
+      `/api/projects/${encodeURIComponent(projectId)}/git/worktrees`,
+    )
   }
-  createWorktree(projectId: string, input: { baseRef: string; branch?: string }) {
-    return this.post(`/api/projects/${encodeURIComponent(projectId)}/git/worktrees`, null, input)
+  createWorktree(
+    projectId: string,
+    input: { baseRef: string; branch?: string },
+  ) {
+    return this.post(
+      `/api/projects/${encodeURIComponent(projectId)}/git/worktrees`,
+      null,
+      input,
+    )
   }
   removeWorktree(projectId: string, input: { path: string; force?: boolean }) {
-    return this.request('DELETE', `/api/projects/${encodeURIComponent(projectId)}/git/worktrees`, input)
+    return this.request(
+      'DELETE',
+      `/api/projects/${encodeURIComponent(projectId)}/git/worktrees`,
+      input,
+    )
   }
   listHarnesses() {
     return this.get('/api/harnesses')
@@ -149,8 +175,15 @@ export class ForgeApi {
       `/api/sessions/${encodeURIComponent(sessionId)}`,
     )
   }
-  setSessionWorkspace(sessionId: string, input: Omit<SetSessionWorkspace, 'sessionId'>) {
-    return this.request('PATCH', `/api/sessions/${encodeURIComponent(sessionId)}/workspace`, { sessionId, ...input })
+  setSessionWorkspace(
+    sessionId: string,
+    input: Omit<SetSessionWorkspace, 'sessionId'>,
+  ) {
+    return this.request(
+      'PATCH',
+      `/api/sessions/${encodeURIComponent(sessionId)}/workspace`,
+      { sessionId, ...input },
+    )
   }
   prompt(input: Prompt) {
     return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)
@@ -251,10 +284,12 @@ export class ForgeApi {
   private async request(method: string, path: string, body?: unknown) {
     const response = await this.fetcher(`${this.baseUrl}${path}`, {
       method,
-      ...(body === undefined ? {} : {
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      }),
+      ...(body === undefined
+        ? {}
+        : {
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          }),
     })
     if (!response.ok) throw await apiError(response)
     return await response.json()

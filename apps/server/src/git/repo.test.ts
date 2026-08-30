@@ -25,13 +25,21 @@ describe('git repo readers', () => {
       await git(root, 'branch', 'feature/demo')
       await git(root, 'worktree', 'add', worktree, 'feature/demo')
       const status = await gitStatus(root)
-      expect(status).toMatchObject({ isRepo: true, branch: 'main', detached: false })
+      expect(status).toMatchObject({
+        isRepo: true,
+        branch: 'main',
+        detached: false,
+      })
       const page = await listRefs(root, { limit: 1 })
       expect(page.totalCount).toBe(2)
       expect(page.nextCursor).toBe(1)
       expect(page.refs[0]?.name).toBe('main')
-      expect((await listRefs(root, { query: 'FEATURE' })).refs[0]?.worktreePath).toBe(worktree)
-      expect(await gitStatus(join(root, 'missing'))).toMatchObject({ isRepo: false })
+      expect(
+        (await listRefs(root, { query: 'FEATURE' })).refs[0]?.worktreePath,
+      ).toBe(worktree)
+      expect(await gitStatus(join(root, 'missing'))).toMatchObject({
+        isRepo: false,
+      })
     } finally {
       await rm(worktree, { recursive: true, force: true })
       await rm(root, { recursive: true, force: true })

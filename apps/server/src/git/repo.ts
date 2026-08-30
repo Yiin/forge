@@ -61,7 +61,9 @@ export async function gitStatus(cwd: string): Promise<GitStatus> {
     isRepo: true,
     branch: branch || null,
     defaultBranch: main,
-    hasRemote: remoteResult.output.split(/\r?\n/).some((line) => line.trim() === 'origin'),
+    hasRemote: remoteResult.output
+      .split(/\r?\n/)
+      .some((line) => line.trim() === 'origin'),
     detached: !branch,
     dirty: dirtyResult.output.trim().length > 0,
   }
@@ -86,7 +88,13 @@ export async function listRefs(
 ): Promise<GitRefsPage> {
   const probe = await runGit(cwd, ['rev-parse', '--git-dir'], false)
   if (probe.code !== 0)
-    return { isRepo: false, hasRemote: false, refs: [], nextCursor: null, totalCount: 0 }
+    return {
+      isRepo: false,
+      hasRemote: false,
+      refs: [],
+      nextCursor: null,
+      totalCount: 0,
+    }
   const [local, remote, worktrees, status] = await Promise.all([
     runGit(cwd, ['branch', '--no-color', '--no-column']),
     runGit(cwd, ['branch', '--no-color', '--no-column', '--remotes']),
@@ -99,21 +107,49 @@ export async function listRefs(
     if (!line.trim()) continue
     const current = line.startsWith('* ')
     const name = line.replace(/^[*+]\s+/, '').trim()
-    refs.push({ name, current, isDefault: name === status.defaultBranch, isRemote: false, remoteName: null, worktreePath: paths.get(name) ?? null })
+    refs.push({
+      name,
+      current,
+      isDefault: name === status.defaultBranch,
+      isRemote: false,
+      remoteName: null,
+      worktreePath: paths.get(name) ?? null,
+    })
   }
   for (const line of remote.output.split(/\r?\n/)) {
     const name = line.replace(/^\s+/, '').trim()
     if (!name || name.endsWith('/HEAD')) continue
     const slash = name.indexOf('/')
     const remoteName = slash < 0 ? name : name.slice(0, slash)
-    refs.push({ name, current: false, isDefault: false, isRemote: true, remoteName, worktreePath: null })
+    refs.push({
+      name,
+      current: false,
+      isDefault: false,
+      isRemote: true,
+      remoteName,
+      worktreePath: null,
+    })
   }
   const query = options.query?.toLocaleLowerCase()
-  const filtered = query ? refs.filter((ref) => ref.name.toLocaleLowerCase().includes(query)) : refs
-  filtered.sort((a, b) => Number(b.current) - Number(a.current) || Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name))
+  const filtered = query
+    ? refs.filter((ref) => ref.name.toLocaleLowerCase().includes(query))
+    : refs
+  filtered.sort(
+    (a, b) =>
+      Number(b.current) - Number(a.current) ||
+      Number(b.isDefault) - Number(a.isDefault) ||
+      a.name.localeCompare(b.name),
+  )
   const cursor = Math.max(0, options.cursor ?? 0)
   const limit = Math.min(200, Math.max(1, options.limit ?? 50))
   const page = filtered.slice(cursor, cursor + limit)
-  const next = cursor + page.length < filtered.length ? cursor + page.length : null
-  return { isRepo: true, hasRemote: status.hasRemote, refs: page, nextCursor: next, totalCount: filtered.length }
+  const next =
+    cursor + page.length < filtered.length ? cursor + page.length : null
+  return {
+    isRepo: true,
+    hasRemote: status.hasRemote,
+    refs: page,
+    nextCursor: next,
+    totalCount: filtered.length,
+  }
 }
