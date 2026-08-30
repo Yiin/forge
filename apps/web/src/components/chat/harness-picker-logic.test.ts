@@ -61,6 +61,24 @@ describe('harness picker logic', () => {
     })
   })
 
+  it('prefers the identity email over the stored label', () => {
+    const options = buildHarnessOptions(
+      [{ key: 'claude', name: 'Claude' }],
+      [
+        account({
+          label: 'Claude Account 1',
+          identity: { status: 'authenticated', email: 'me@example.com' },
+        }),
+        account({ id: 'work', label: 'Claude Account 2' }),
+      ],
+      0,
+    )
+    expect(options[0]!.accounts.map((item) => item.label)).toEqual([
+      'Claude 1 - me@example.com',
+      'Claude Account 2',
+    ])
+  })
+
   it('marks cooling accounts and keeps them selectable', () => {
     const options = buildHarnessOptions(
       ['claude'],

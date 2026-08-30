@@ -1,5 +1,9 @@
 import type { Account } from '@/lib/accounts-api'
-import { formatCooldown } from '@/lib/harness-accounts-logic'
+import {
+  KIND_LABELS,
+  formatAccountDisplayName,
+  formatCooldown,
+} from '@/lib/harness-accounts-logic'
 
 export type HarnessOptionAccount = {
   id: string
@@ -30,14 +34,20 @@ export function buildHarnessOptions(
   return harnesses.flatMap((entry) => {
     const harness = typeof entry === 'string' ? entry : entry.key
     if (typeof entry !== 'string' && entry.enabled === false) return []
+    const harnessLabel = typeof entry === 'string' ? entry : entry.name || entry.key
     const optionAccounts = accounts
       .filter((account) => account.harness === harness)
-      .map((account) => {
+      .map((account, index) => {
         const cooling =
           account.cooldownUntil !== null && account.cooldownUntil > nowMs
         return {
           id: account.id,
-          label: account.label,
+          label: formatAccountDisplayName({
+            kindLabel: KIND_LABELS[account.kind] ?? harnessLabel,
+            ordinal: index + 1,
+            label: account.label,
+            identity: account.identity,
+          }),
           cooling,
           coolingLabel:
             cooling && account.cooldownUntil !== null
@@ -53,7 +63,7 @@ export function buildHarnessOptions(
     return [
       {
         harness,
-        label: typeof entry === 'string' ? harness : entry.name || harness,
+        label: harnessLabel,
         accounts: optionAccounts,
       },
     ]

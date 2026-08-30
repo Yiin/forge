@@ -321,7 +321,7 @@ export function startServer(
     const account = accountStore.get(accountId)
     const entry = account && configState.current.harness[account.harnessKey]
     if (!account || !entry || entry.protocol !== 'acp') return
-    if (!['claude', 'kimi', 'opencode'].includes(account.harnessKey)) return
+    if (!['claude', 'kimi', 'opencode'].includes(account.kind)) return
     void refreshAccountModels(db, {
       accountId,
       harnessKey: account.harnessKey,
