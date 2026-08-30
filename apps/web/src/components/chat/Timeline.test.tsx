@@ -2,8 +2,12 @@
 import { render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Message } from '@forge/protocol/message'
+import type { PendingUserMessage } from '../../stores/messages'
 
-const state = { messages: [] as Message[] }
+const state = {
+  messages: [] as Message[],
+  pending: [] as PendingUserMessage[],
+}
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children }: { children: unknown }) => children,
@@ -35,8 +39,15 @@ vi.mock('virtua', () => ({
 }))
 vi.mock('../../stores/messages', () => ({
   useMessagesStore: (
-    selector: (value: { bySession: Record<string, Message[]> }) => unknown,
-  ) => selector({ bySession: { 'session-1': state.messages } }),
+    selector: (value: {
+      bySession: Record<string, Message[]>
+      pendingBySession: Record<string, PendingUserMessage[]>
+    }) => unknown,
+  ) =>
+    selector({
+      bySession: { 'session-1': state.messages },
+      pendingBySession: { 'session-1': state.pending },
+    }),
 }))
 vi.mock('./MessageRow', () => ({
   MessageRow: () => null,
@@ -61,6 +72,7 @@ const message = (text: string, seq: number): Message => ({
 describe('Timeline', () => {
   beforeEach(() => {
     state.messages = []
+    state.pending = []
     useSessionsStore.setState({ sessions: [] })
   })
 
