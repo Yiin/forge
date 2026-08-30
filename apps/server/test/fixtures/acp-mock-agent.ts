@@ -93,7 +93,23 @@ class MockAgent implements acp.Agent {
         numberFlag('UNSOLICITED_UPDATES_AFTER_NEW_DELAY_MS', 300),
       )
     }
-    return { sessionId }
+    return {
+      sessionId,
+      models: {
+        currentModelId: 'mock-fast',
+        availableModels: [
+          { modelId: 'mock-fast', name: 'Mock Fast' },
+          { modelId: 'mock-smart', name: 'Mock Smart' },
+        ],
+      },
+    }
+  }
+
+  async unstable_setSessionModel(
+    params: acp.SetSessionModelRequest,
+  ): Promise<acp.SetSessionModelResponse> {
+    logRequest('session/set_model', params)
+    return {}
   }
 
   async loadSession(

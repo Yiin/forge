@@ -85,6 +85,29 @@ describe('ACP client', () => {
     ).toBe(cwd)
   })
 
+  it('sends session/set_model when selecting an advertised model', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'forge-acp-model-'))
+    const requestLogPath = join(cwd, 'requests.jsonl')
+    const client = await spawnAcpClient(
+      entry({ REQUEST_LOG_PATH: requestLogPath }),
+      { cwd },
+    )
+    clients.push(client)
+    const session = await client.newSession(cwd)
+
+    expect(client.capabilities.setModel).toBe(true)
+    await client.setModel(session.sessionId, 'mock-smart')
+
+    const requests = (await readFile(requestLogPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { method: string; params: unknown })
+    expect(requests).toContainEqual({
+      method: 'session/set_model',
+      params: { sessionId: session.sessionId, modelId: 'mock-smart' },
+    })
+  })
+
   it('rejects unadvertised load sessions and overlapping prompts', async () => {
     const client = await spawnAcpClient(
       entry({ OMIT_LOAD_SESSION_CAPABILITY: '1', HANG_PROMPT: '1' }),
