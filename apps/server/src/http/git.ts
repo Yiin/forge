@@ -127,18 +127,18 @@ export function gitRoutes(options: { db: DatabaseSync; dataDir: string }) {
         )
       const target = worktrees.find((worktree) => worktree.path === body.path)!
       const dirty = (await gitStatus(body.path)).dirty
-      const running = db
+      const activeSession = db
         .prepare(
-          "SELECT 1 FROM sessions WHERE cwd = ? AND status = 'running' LIMIT 1",
+          "SELECT 1 FROM sessions WHERE cwd = ? AND status != 'archived' LIMIT 1",
         )
         .get(body.path)
-      if (running)
-        return c.json({ error: 'A session is running in this worktree' }, 409)
+      if (activeSession)
+        return c.json({ error: 'A session is using this worktree' }, 409)
       await removeWorktree(row.path, body.path, body.force)
       const hasSessionReference = Boolean(
         db
           .prepare(
-            'SELECT 1 FROM sessions WHERE cwd = ? OR worktree_path = ? LIMIT 1',
+            "SELECT 1 FROM sessions WHERE status != 'archived' AND (cwd = ? OR worktree_path = ?) LIMIT 1",
           )
           .get(body.path, body.path),
       )

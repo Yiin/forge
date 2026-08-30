@@ -85,7 +85,10 @@ describe('git routes', () => {
       })
       expect(duplicate.status).toBe(400)
       db.prepare(
-        "INSERT INTO sessions (id, project_id, harness, title, cwd, kind, status, auto_resume, created_at, last_activity_at) VALUES ('s1', 'p1', 'test', 'test', ?, 'chat', 'running', 0, 1, 1)",
+        "INSERT INTO sessions (id, project_id, harness, title, cwd, kind, status, auto_resume, created_at, last_activity_at) VALUES ('s1', 'p1', 'test', 'test', ?, 'chat', 'idle', 0, 1, 1)",
+      ).run(created.path)
+      db.prepare(
+        "INSERT INTO sessions (id, project_id, harness, title, cwd, kind, status, auto_resume, created_at, last_activity_at) VALUES ('s2', 'p1', 'test', 'test', ?, 'chat', 'idle', 0, 1, 1)",
       ).run(created.path)
       const blocked = await app.request('/api/projects/p1/git/worktrees', {
         method: 'DELETE',
@@ -93,7 +96,9 @@ describe('git routes', () => {
         body: JSON.stringify({ path: created.path }),
       })
       expect(blocked.status).toBe(409)
-      db.prepare("UPDATE sessions SET status = 'idle' WHERE id = 's1'").run()
+      db.prepare(
+        "UPDATE sessions SET status = 'archived' WHERE id IN ('s1', 's2')",
+      ).run()
       expect(
         (
           await app.request('/api/projects/p1/git/worktrees', {
@@ -103,6 +108,9 @@ describe('git routes', () => {
           })
         ).status,
       ).toBe(200)
+      expect(
+        await (await app.request('/api/projects/p1/git/worktrees')).json(),
+      ).toEqual({ worktrees: [] })
       expect(
         (
           await runGit(
