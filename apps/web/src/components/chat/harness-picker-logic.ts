@@ -34,7 +34,8 @@ export function buildHarnessOptions(
   return harnesses.flatMap((entry) => {
     const harness = typeof entry === 'string' ? entry : entry.key
     if (typeof entry !== 'string' && entry.enabled === false) return []
-    const harnessLabel = typeof entry === 'string' ? entry : entry.name || entry.key
+    const harnessLabel =
+      typeof entry === 'string' ? entry : entry.name || entry.key
     const optionAccounts = accounts
       .filter((account) => account.harness === harness)
       .map((account, index) => {
