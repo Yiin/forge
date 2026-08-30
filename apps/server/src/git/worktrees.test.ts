@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   listWorktrees,
   deleteMergedTemporaryBranch,
+  pruneWorktrees,
+  pruneWorktreesForRepositories,
   provisionWorktree,
   removeWorktree,
   worktreePathFor,
@@ -14,6 +16,49 @@ import {
 import { runGit } from './exec.js'
 
 describe('git worktrees', () => {
+  test('prunes stale registrations without deleting worktree files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-worktree-prune-'))
+    const repo = join(root, 'repo')
+    const worktree = join(root, 'worktree')
+    try {
+      await mkdir(repo)
+      await runGit(repo, ['init', '-b', 'main'])
+      await runGit(repo, ['config', 'user.email', 'forge@example.test'])
+      await runGit(repo, ['config', 'user.name', 'Forge'])
+      await writeFile(join(repo, 'README'), 'test')
+      await runGit(repo, ['add', '.'])
+      await runGit(repo, ['commit', '-m', 'initial'])
+      await runGit(repo, ['worktree', 'add', worktree, '-b', 'stale'])
+      await writeFile(join(worktree, 'keep.txt'), 'keep')
+
+      await expect(pruneWorktrees(repo)).resolves.toBe(true)
+      await expect(readFile(join(worktree, 'keep.txt'), 'utf8')).resolves.toBe(
+        'keep',
+      )
+      await rm(worktree, { recursive: true, force: true })
+      await expect(pruneWorktrees(repo)).resolves.toBe(true)
+      expect(
+        (await listWorktrees(repo)).some(({ path }) => path === worktree),
+      ).toBe(false)
+
+      await expect(pruneWorktrees(join(root, 'missing'))).resolves.toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('prunes each repository once and tolerates prune failures', async () => {
+    const calls: string[] = []
+    await expect(
+      pruneWorktreesForRepositories(['/one', '/one', '/two'], async (path) => {
+        calls.push(path)
+        if (path === '/two') throw new Error('missing repository')
+        return true
+      }),
+    ).resolves.toBeUndefined()
+    expect(calls.sort()).toEqual(['/one', '/two'])
+  })
+
   test('deletes only merged temporary branches', async () => {
     const root = await mkdtemp(join(tmpdir(), 'forge-branch-cleanup-'))
     const repo = join(root, 'repo')

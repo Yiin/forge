@@ -63,6 +63,7 @@ import { unsupportedUsageProbe, UsagePoller } from './accounts/usagePoller.js'
 import { codexUsageProbe } from './accounts/probes/codex.js'
 import { claudeUsageProbe } from './accounts/probes/claude.js'
 import { refreshAccountModels } from './accounts/models.js'
+import { pruneWorktreesForRepositories } from './git/worktrees.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -237,6 +238,15 @@ export function startServer(
   mkdirSync(dataDir, { recursive: true })
   const db = new DatabaseSync(process.env.FORGE_DB ?? join(dataDir, 'forge.db'))
   migrate(db)
+  void pruneWorktreesForRepositories(
+    (
+      db
+        .prepare('SELECT DISTINCT path FROM projects WHERE path IS NOT NULL')
+        .all() as Array<{
+        path: string
+      }>
+    ).map((project) => project.path),
+  )
   clearExpiredLimits(db, Date.now())
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })

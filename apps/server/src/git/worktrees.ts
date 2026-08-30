@@ -4,6 +4,26 @@ import { join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { runGit } from './exec.js'
 
+export async function pruneWorktrees(repoPath: string) {
+  try {
+    const result = await runGit(repoPath, ['worktree', 'prune'], false)
+    return result.code === 0
+  } catch {
+    return false
+  }
+}
+
+export async function pruneWorktreesForRepositories(
+  repoPaths: Iterable<string>,
+  prune: (repoPath: string) => Promise<boolean> = pruneWorktrees,
+) {
+  await Promise.all(
+    [...new Set(repoPaths)].map(async (repoPath) => {
+      await prune(repoPath).catch(() => false)
+    }),
+  )
+}
+
 export function temporaryWorktreeBranchName() {
   return `forge/${randomBytes(4).toString('hex')}`
 }
