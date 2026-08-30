@@ -30,9 +30,19 @@ export function sideChatRoutes(manager: SessionManager) {
       : c.json({ error: 'Side chat not found' }, 404),
   )
   app.post('/api/sessions/:id/discard', async (c) =>
-    (await manager.discard(c.req.param('id')))
-      ? c.json({ ok: true })
-      : c.json({ error: 'Side chat not found' }, 404),
+    (async () => {
+      try {
+        const removed = await manager.discard(
+          c.req.param('id'),
+          c.req.query('removeWorktree') === 'true',
+        )
+        return removed
+          ? c.json({ ok: true })
+          : c.json({ error: 'Side chat not found' }, 404)
+      } catch (error) {
+        return c.json({ error: errorMessage(error) }, 409)
+      }
+    })(),
   )
   return app
 }

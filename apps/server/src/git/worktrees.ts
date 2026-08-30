@@ -68,6 +68,15 @@ export class WorktreeLimitError extends Error {
   }
 }
 
+export class WorktreeRemovalError extends Error {
+  readonly status = 409
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'WorktreeRemovalError'
+  }
+}
+
 const provisioningLocks = new Map<string, Promise<void>>()
 
 export function worktreePathFor(

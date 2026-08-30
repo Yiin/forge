@@ -13,6 +13,7 @@ import { sessionResponse, sessionResponses } from './session-response.js'
 import { gitStatus } from '../git/repo.js'
 import { runGit } from '../git/exec.js'
 import { readAccountModels } from '../accounts/models.js'
+import { WorktreeRemovalError } from '../git/worktrees.js'
 
 export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
   const app = new Hono()
@@ -211,6 +212,16 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
     return c.json({ ok: true })
   })
   const remove = async (c: Context) => {
+    const removeWorktree = c.req.query('removeWorktree') === 'true'
+    if (removeWorktree) {
+      try {
+        await manager.removeSessionWorktree(c.req.param('id') ?? '')
+      } catch (error) {
+        const status =
+          error instanceof WorktreeRemovalError ? error.status : 400
+        return c.json({ error: errorMessage(error) }, status)
+      }
+    }
     const removed = uploads
       ? await uploads.deleteSession(c.req.param('id') ?? '')
       : false

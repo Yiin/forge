@@ -5,6 +5,7 @@ import { EventBus } from '../events/bus.js'
 import { createProject, createSession } from '../db/queries.js'
 import { SessionManager } from '../sessions/manager.js'
 import { sessionRoutes } from './sessions.js'
+import { UploadStore } from '../uploads/store.js'
 
 describe('prompt REST lifecycle', () => {
   it('returns after acceptance and keeps request idempotency synchronous', async () => {
@@ -88,5 +89,51 @@ describe('prompt REST lifecycle', () => {
         .get(session.id),
     ).toEqual({ type: 'turn_end' })
     manager.close()
+  })
+
+  it('only removes a worktree when the explicit delete option is set', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp/worktree',
+      worktreePath: '/tmp/worktree',
+    })
+    const calls: string[] = []
+    const manager = {
+      database: db,
+      removeSessionWorktree: async (id: string) => {
+        calls.push(id)
+        return true
+      },
+    } as unknown as SessionManager
+    const store = new UploadStore(db, { dataDir: '/tmp/forge-test-delete' })
+    const app = sessionRoutes(manager, store)
+
+    expect(
+      (await app.request(`/api/sessions/${session.id}`, { method: 'DELETE' }))
+        .status,
+    ).toBe(200)
+    expect(calls).toEqual([])
+    const second = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat 2',
+      cwd: '/tmp/worktree',
+      worktreePath: '/tmp/worktree',
+    })
+    expect(
+      (
+        await app.request(`/api/sessions/${second.id}?removeWorktree=true`, {
+          method: 'DELETE',
+        })
+      ).status,
+    ).toBe(200)
+    expect(calls).toEqual([second.id])
+    store.close()
+    db.close()
   })
 })

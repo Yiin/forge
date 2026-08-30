@@ -13,7 +13,13 @@ import type { UploadStore } from '../uploads/store.js'
 import { detectProviderError, recordLimit } from '../accounts/limits.js'
 import { errorMessage } from '../error-message.js'
 import { gitStatus } from '../git/repo.js'
-import { provisionWorktree } from '../git/worktrees.js'
+import {
+  deleteMergedTemporaryBranch,
+  listWorktrees,
+  provisionWorktree,
+  removeWorktree,
+  WorktreeRemovalError,
+} from '../git/worktrees.js'
 import type { WorkspaceChoice } from '@forge/protocol/commands'
 
 type Db = DatabaseSync
@@ -715,9 +721,10 @@ export class SessionManager {
     this.forgetHandle(id)
     this.status(id, 'idle')
   }
-  async discard(id: string) {
+  async discard(id: string, removeWorktree = false) {
     await this.handles.get(id)?.cancel()
     await this.handles.get(id)?.kill()
+    if (removeWorktree) await this.removeSessionWorktree(id)
     this.forgetHandle(id)
     return Boolean(
       this.db
@@ -726,6 +733,51 @@ export class SessionManager {
         )
         .run(id).changes,
     )
+  }
+
+  async removeSessionWorktree(id: string) {
+    const session = this.db
+      .prepare(
+        `SELECT sessions.*, projects.path AS project_path
+         FROM sessions JOIN projects ON projects.id = sessions.project_id
+         WHERE sessions.id = ?`,
+      )
+      .get(id) as
+      | (SessionRow & {
+          worktree_path?: string | null
+          branch?: string | null
+          project_path: string
+        })
+      | undefined
+    if (!session) throw new WorktreeRemovalError('Session not found')
+    if (!session.worktree_path) return false
+    await this.releaseHandle(id)
+
+    const activeSession = this.db
+      .prepare(
+        "SELECT 1 FROM sessions WHERE id != ? AND status != 'archived' AND (cwd = ? OR worktree_path = ?) LIMIT 1",
+      )
+      .get(id, session.worktree_path, session.worktree_path)
+    if (activeSession)
+      throw new WorktreeRemovalError('A session is using this worktree')
+
+    const target = (await listWorktrees(session.project_path)).find(
+      (worktree) => worktree.path === session.worktree_path,
+    )
+    if (!target)
+      throw new WorktreeRemovalError('Session worktree is not registered')
+    const status = await gitStatus(session.worktree_path)
+    if (status.dirty)
+      throw new WorktreeRemovalError('The worktree has uncommitted changes')
+    await removeWorktree(session.project_path, session.worktree_path)
+    const projectStatus = await gitStatus(session.project_path)
+    await deleteMergedTemporaryBranch({
+      repoPath: session.project_path,
+      branch: target.branch ?? session.branch ?? '',
+      defaultBranch: projectStatus.defaultBranch ?? projectStatus.branch,
+      hasSessionReference: false,
+    })
+    return true
   }
   keep(id: string) {
     return Boolean(
