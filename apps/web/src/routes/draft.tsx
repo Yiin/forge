@@ -152,6 +152,7 @@ export function DraftRoute() {
               attachmentIds,
               harness: selectedHarness.harness,
               accountId: selectedHarness.accountId,
+              model: selectedHarness.model,
               clientItemId,
               workspace: {
                 mode: draft.workspaceMode ?? 'local',

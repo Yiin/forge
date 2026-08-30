@@ -244,6 +244,78 @@ describe('Composer', () => {
     )
   })
 
+  it('keeps the selected model when switching accounts of the same harness', async () => {
+    vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([
+      {
+        id: 'main',
+        harness: 'claude',
+        harnessKey: 'claude-code-acp',
+        kind: 'claude',
+        label: 'Main',
+        storageDir: '/tmp/main',
+        homePath: '/tmp/main',
+        enabled: true,
+        authStatus: 'authenticated',
+        email: null,
+        cooldownUntil: null,
+        cooldownReason: null,
+        lastUsedAt: null,
+      },
+      {
+        id: 'work',
+        harness: 'claude',
+        harnessKey: 'claude-code-acp',
+        kind: 'claude',
+        label: 'Work',
+        storageDir: '/tmp/work',
+        homePath: '/tmp/work',
+        enabled: true,
+        authStatus: 'authenticated',
+        email: null,
+        cooldownUntil: null,
+        cooldownReason: null,
+        lastUsedAt: null,
+      },
+    ])
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ harnesses: [{ key: 'claude' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    )
+    const onSelectionChange = vi.fn()
+    render(
+      <Composer
+        sessionId="session-1"
+        harness="claude"
+        accountId="main"
+        model="opus"
+        onSend={vi.fn().mockResolvedValue(undefined)}
+        onSelectionChange={onSelectionChange}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('combobox', { name: 'Harness' }).textContent,
+      ).toContain('Main'),
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: 'Harness' }))
+    const workOption = await screen.findByRole('option', { name: 'Work' })
+    fireEvent.keyDown(workOption, { key: 'ArrowDown' })
+    fireEvent.keyDown(workOption, { key: 'Enter' })
+    await waitFor(() =>
+      expect(onSelectionChange).toHaveBeenCalledWith({
+        harness: 'claude',
+        accountId: 'work',
+        model: 'opus',
+      }),
+    )
+  })
+
   it('does not render dead accountless harness rows', async () => {
     vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([])
     vi.spyOn(accountsApi, 'listHarnesses').mockResolvedValue([

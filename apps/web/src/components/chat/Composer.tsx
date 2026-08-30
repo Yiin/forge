@@ -605,13 +605,18 @@ export function Composer({
                     onValueChange={(value) => {
                       if (value === null) return
                       const separator = value.indexOf(':')
-                      const nextSelection =
+                      const picked =
                         separator < 0
                           ? { harness: value }
                           : {
                               harness: value.slice(0, separator),
                               accountId: value.slice(separator + 1),
                             }
+                      // A model id only carries over within the same harness.
+                      const nextSelection =
+                        picked.harness === selection.harness
+                          ? { ...selection, ...picked }
+                          : picked
                       setSelection(nextSelection)
                       onSelectionChange?.(nextSelection)
                     }}
