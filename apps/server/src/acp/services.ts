@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve, relative, isAbsolute, sep } from 'node:path'
 import { z } from 'zod'
-import * as acp from '@zed-industries/agent-client-protocol'
+import * as acp from '@agentclientprotocol/sdk'
 import type { ClientHandlers } from './client.js'
 import { isUserQuestion, type QuestionManager } from './questions.js'
 

@@ -1,6 +1,6 @@
 import { appendFileSync } from 'node:fs'
 import { Readable, Writable } from 'node:stream'
-import * as acp from '@zed-industries/agent-client-protocol'
+import * as acp from '@agentclientprotocol/sdk'
 
 const env = process.env
 const flag = (name: string) => env[`FORGE_MOCK_${name}`] === '1'
@@ -111,6 +111,12 @@ class MockAgent implements acp.Agent {
       })
     }
     return {}
+  }
+
+  async unstable_forkSession(
+    _params: acp.ForkSessionRequest,
+  ): Promise<acp.ForkSessionResponse> {
+    return { sessionId }
   }
 
   async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {

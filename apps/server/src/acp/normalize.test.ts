@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import * as acp from '@zed-industries/agent-client-protocol'
+import * as acp from '@agentclientprotocol/sdk'
 import { createProject, createSession, replaySince } from '../db/queries.js'
 import { AcpNormalizer } from './normalize.js'
 

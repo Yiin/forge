@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream'
 import { spawn as spawnNode } from 'node:child_process'
-import * as acp from '@zed-industries/agent-client-protocol'
+import * as acp from '@agentclientprotocol/sdk'
 import type { HarnessConfig } from '@forge/protocol/config'
 import { detectProviderError, recordLimit } from '../accounts/limits.js'
 import {
@@ -58,7 +58,7 @@ export type ClientHandlers = {
   ) => Promise<acp.WaitForTerminalExitResponse>
   onTerminalKill?: (
     request: acp.KillTerminalCommandRequest,
-  ) => Promise<acp.KillTerminalResponse | void>
+  ) => Promise<acp.KillTerminalCommandResponse | void>
   onExtRequest?: (
     method: string,
     params: Record<string, unknown>,
@@ -402,7 +402,7 @@ export async function spawnAcpClient(
     setModel: async (sessionId, modelId) => {
       if (!sessionFeatures.get(sessionId)?.model)
         throw new CapabilityUnsupportedError('setModel')
-      return race(connection.setSessionModel({ sessionId, modelId }))
+      return race(connection.unstable_setSessionModel({ sessionId, modelId }))
     },
     configOptions: (sessionId) => configOptions.get(sessionId) ?? [],
     setConfigOption: async (sessionId, configId, value) => {

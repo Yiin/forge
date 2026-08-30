@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { spawn } from 'node:child_process'
 import { Readable, Writable } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
-import * as acp from '@zed-industries/agent-client-protocol'
+import * as acp from '@agentclientprotocol/sdk'
 import { spawnMockAgent } from './helpers/mock-agent.js'
 
 const children: ReturnType<typeof spawn>[] = []

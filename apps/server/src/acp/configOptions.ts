@@ -1,8 +1,8 @@
-import type * as acp from '@zed-industries/agent-client-protocol'
+import type * as acp from '@agentclientprotocol/sdk'
 import type {
   AnyMessage,
   AnyResponse,
-} from '@zed-industries/agent-client-protocol/dist/jsonrpc.js'
+} from '@agentclientprotocol/sdk/dist/jsonrpc.js'
 
 export type SessionConfigOption =
   | {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import * as acp from '@zed-industries/agent-client-protocol'
+import * as acp from '@agentclientprotocol/sdk'
 import { classifyQuestion, isUserQuestion } from './questions.js'
 
 const permission = (rawInput: unknown, title?: string) =>

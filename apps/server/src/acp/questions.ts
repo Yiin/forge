@@ -1,4 +1,4 @@
-import * as acp from '@zed-industries/agent-client-protocol'
+import * as acp from '@agentclientprotocol/sdk'
 import { appendMessage } from '../db/queries.js'
 import type { EventBus } from '../events/bus.js'
 
