@@ -5,7 +5,7 @@ import { SessionHeader } from '../components/chat/SessionHeader'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
-import { connectForgeSocket } from '../lib/socket'
+import { connectForgeSocket, normalizeMessage } from '../lib/socket'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore, type SessionSummary } from '../stores/sessions'
 import { PathSwitcher } from '../components/chat/PathSwitcher'
@@ -129,7 +129,9 @@ export function SessionRoute() {
           )
           .then((messages: unknown) => {
             if (!Array.isArray(messages)) return
-            useMessagesStore.getState().loadMessages(sessionId, messages)
+            useMessagesStore
+              .getState()
+              .loadMessages(sessionId, messages.map(normalizeMessage))
           })
           .catch(() => undefined)
       } catch (error) {

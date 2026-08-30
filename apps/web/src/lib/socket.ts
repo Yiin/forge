@@ -1,4 +1,5 @@
 import { Ephemeral, ServerEvent } from '@forge/protocol/events'
+import type { Message } from '@forge/protocol/message'
 import { SubscribeFrame } from '@forge/protocol/ws'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore } from '../stores/sessions'
@@ -183,9 +184,23 @@ export function normalizeServerEvent(value: unknown): unknown {
         candidate.content && typeof candidate.content === 'object'
           ? { type: candidate.type, ...candidate.content }
           : { type: candidate.type },
-      createdAt: new Date().toISOString(),
+      // Replayed history carries its own timestamp, and subagent placement
+      // reads it, so keep the row's value and stamp only live frames.
+      createdAt:
+        typeof candidate.createdAt === 'string'
+          ? candidate.createdAt
+          : new Date().toISOString(),
     },
   }
 }
 export const connectForgeSocket = (options?: SocketOptions) =>
   new ForgeSocket(options).start()
+// History rows arrive in the same wire shape as socket frames, so the timeline
+// has to normalize them too. A row that carries its type outside `content`
+// renders as nothing, and it also replaces the folded socket copy of that seq.
+export function normalizeMessage(value: unknown): Message {
+  const event = normalizeServerEvent(value)
+  return event && typeof event === 'object' && 'msg' in event
+    ? (event.msg as Message)
+    : (value as Message)
+}

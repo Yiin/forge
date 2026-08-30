@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ForgeSocket, type ForgeWebSocket } from './socket'
+import { ForgeSocket, normalizeMessage, type ForgeWebSocket } from './socket'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore } from '../stores/sessions'
 
@@ -119,5 +119,42 @@ describe('ForgeSocket', () => {
     expect(useSessionsStore.getState().contextWindow['ses-1']).toEqual(usage)
     expect(useMessagesStore.getState().volatile).toHaveLength(0)
     socket.stop()
+  })
+})
+
+describe('normalizeMessage', () => {
+  it('moves the row type into the content so history rows render', () => {
+    expect(
+      normalizeMessage({
+        seq: 7,
+        sessionId: 'ses-1',
+        type: 'text_delta',
+        role: 'agent',
+        content: { text: 'hello' },
+        createdAt: '2024-01-01T00:00:00.000Z',
+      }),
+    ).toEqual({
+      seq: 7,
+      sessionId: 'ses-1',
+      turnId: 'ses-1-turn',
+      itemId: 'ses-1-text_delta',
+      role: 'agent',
+      type: 'text_delta',
+      content: { type: 'text_delta', text: 'hello' },
+      createdAt: '2024-01-01T00:00:00.000Z',
+    })
+  })
+  it('keeps a row that already carries the full message shape', () => {
+    const message = {
+      seq: 3,
+      sessionId: 'ses-1',
+      turnId: 'turn-1',
+      itemId: 'item-1',
+      role: 'agent',
+      type: 'text_delta',
+      content: { type: 'text_delta', text: 'kept' },
+      createdAt: '2024-01-01T00:00:00.000Z',
+    }
+    expect(normalizeMessage(message)).toEqual(message)
   })
 })
