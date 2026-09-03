@@ -24,6 +24,7 @@ import {
 } from '../git/worktrees.js'
 import type { WorkspaceChoice } from '@forge/protocol/commands'
 import type { QueuedPrompt } from '@forge/protocol/session'
+import { rewriteSkillInvocation } from '../skills/registry.js'
 
 type Db = DatabaseSync
 export type SessionRow = {
@@ -733,9 +734,12 @@ export class SessionManager {
           .run(JSON.stringify(merged), row.id)
         row = { ...row, config_options: JSON.stringify(merged) }
       }
+      const dispatchText = /^\$[a-z0-9][a-z0-9-]*(?=\s|$)/.test(text)
+        ? await rewriteSkillInvocation(row.cwd, text)
+        : text
       this.runPrompt(handle, row, accepted.turnId, [
         ...accepted.attachments,
-        { kind: 'text', text },
+        { kind: 'text', text: dispatchText },
       ])
     })().catch((error: unknown) =>
       this.failPrompt(accepted.row, accepted.turnId, error),

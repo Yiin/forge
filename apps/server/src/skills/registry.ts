@@ -7,6 +7,7 @@ import type { Skill } from '@forge/protocol/skills'
 type CacheEntry = { mtimeMs: number; skills: Skill[] }
 const cache = new Map<string, CacheEntry>()
 const validName = /^[a-z0-9][a-z0-9-]*$/
+const invocation = /^\$([a-z0-9][a-z0-9-]*)(?=\s|$)/
 
 function scalar(value: string) {
   const trimmed = value.trim()
@@ -40,6 +41,19 @@ async function readSkill(directory: string): Promise<Skill | undefined> {
   const resolvedName = name || directory.split('/').pop() || ''
   if (!validName.test(resolvedName)) return undefined
   return { name: resolvedName, description }
+}
+
+async function readSkillSource(directory: string): Promise<
+  (Skill & { content: string }) | undefined
+> {
+  let content: string
+  try {
+    content = await readFile(join(directory, 'SKILL.md'), 'utf8')
+  } catch {
+    return undefined
+  }
+  const skill = await readSkill(directory)
+  return skill ? { ...skill, content } : undefined
 }
 
 async function scanRoot(root: string): Promise<Skill[]> {
@@ -90,4 +104,45 @@ export async function listSkills(
     }
   }
   return [...found.values()]
+}
+
+/**
+ * Resolve a workspace skill in the same order used by the skills menu.
+ * The complete source is returned so providers without native skills can
+ * receive the instructions inline.
+ */
+export async function findSkill(
+  workspaceRoot: string,
+  name: string,
+  globalRoot = join(homedir(), '.agents', 'skills'),
+): Promise<(Skill & { content: string }) | undefined> {
+  if (!validName.test(name)) return undefined
+  for (const root of skillRoots(workspaceRoot, globalRoot)) {
+    let entries: Dirent<string>[]
+    try {
+      entries = await readdir(root, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries
+      .filter((candidate) => candidate.isDirectory())
+      .sort((a, b) => a.name.localeCompare(b.name))) {
+      const skill = await readSkillSource(join(root, entry.name))
+      if (skill?.name === name) return skill
+    }
+  }
+  return undefined
+}
+
+export async function rewriteSkillInvocation(
+  workspaceRoot: string,
+  text: string,
+  globalRoot = join(homedir(), '.agents', 'skills'),
+): Promise<string> {
+  const match = invocation.exec(text)
+  if (!match?.[1]) return text
+  const skill = await findSkill(workspaceRoot, match[1], globalRoot)
+  if (!skill) return text
+  const argumentsText = text.slice(match[0].length).trimStart()
+  return `The user invoked the /${skill.name} skill. Follow its instructions below.\n\n${skill.content}\n\nARGUMENTS: ${argumentsText}`
 }

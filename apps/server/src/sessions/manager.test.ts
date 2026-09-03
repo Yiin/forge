@@ -1,4 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import { migrate } from '../db/migrate.js'
 import { createProject, createSession } from '../db/queries.js'
@@ -522,6 +525,89 @@ describe('session harness selection', () => {
           .get(session.id) as { harness: string }
       ).harness,
     ).toBe('second')
+  })
+})
+
+describe('skill invocation', () => {
+  it('rewrites a listed workspace skill only for harness dispatch', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const workspace = await mkdtemp(join(tmpdir(), 'forge-skill-invoke-'))
+    const skillDir = join(workspace, '.agents', 'skills', 'beads')
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, 'SKILL.md'),
+      '---\nname: beads\ndescription: Track work\n---\n\nUse bd for task tracking.\n',
+    )
+    const project = createProject(db, { name: 'test', path: workspace })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: workspace,
+    })
+    let dispatched = ''
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: (content) => {
+          dispatched =
+            typeof content === 'string'
+              ? content
+              : content.find((item) => item.kind === 'text')?.text ?? ''
+        },
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+
+    await manager.prompt(session.id, '$beads inspect this')
+    await new Promise<void>((resolve) => setTimeout(resolve, 25))
+
+    expect(dispatched).toContain('The user invoked the /beads skill.')
+    expect(dispatched).toContain('Use bd for task tracking.')
+    expect(dispatched).toContain('ARGUMENTS: inspect this')
+    expect(
+      db
+        .prepare("SELECT json_extract(content, '$.text') AS text FROM messages WHERE type = 'text_delta'")
+        .get(),
+    ).toEqual({ text: '$beads inspect this' })
+  })
+
+  it('passes unknown and indented dollar prompts through unchanged', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const workspace = await mkdtemp(join(tmpdir(), 'forge-skill-invoke-'))
+    const project = createProject(db, { name: 'test', path: workspace })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: workspace,
+    })
+    const dispatched: string[] = []
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: (content) => {
+          dispatched.push(
+            typeof content === 'string'
+              ? content
+              : content.find((item) => item.kind === 'text')?.text ?? '',
+          )
+        },
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+
+    await manager.prompt(session.id, '$missing')
+    for (let attempt = 0; attempt < 10 && dispatched.length < 1; attempt += 1)
+      await new Promise<void>((resolve) => setTimeout(resolve, 10))
+    await manager.prompt(session.id, ' $missing')
+    for (let attempt = 0; attempt < 10 && dispatched.length < 2; attempt += 1)
+      await new Promise<void>((resolve) => setTimeout(resolve, 10))
+
+    expect(dispatched).toHaveLength(2)
+    expect(dispatched).toEqual(expect.arrayContaining(['$missing', ' $missing']))
   })
 })
 
