@@ -118,6 +118,19 @@ defines product limits. `docs/architecture.md` is historical.
 - Session kinds are `chat`, `subagent`, and `epic_worker`.
 - Change `packages/protocol` schemas and all consumers together.
 
+## Chat composer and turn lifecycle (2026-09-03, forge-dwb)
+
+- User rows are plain text, not markdown: `MessageRow.tsx:76-86` renders the bubble with `SkillChipText`; only thoughts and agent text go through `ChatMarkdown` (Streamdown). Streamdown's `remarkPlugins` prop replaces the `gfm` + `codeMeta` defaults.
+- `ChatLifecycle` is a sibling above `Timeline` in `routes/session.tsx:224-241`. Anything that must scroll with the conversation must join Timeline's `items` memo (`Timeline.tsx:41-44`); the auto-pin effect keys on `items`.
+- The ACP prompt is text-only end to end: `HarnessHandle.prompt(content: string)` (`sessions/harness.ts:22`) and one hardcoded text block in `acp/harness.ts:267-270`. Attachments stop at the `attachment_ref` row. claude-code-acp 0.16.2 accepts an ACP `image` block only as inline base64 (`file://` uris are ignored); `resource_link` degrades to a markdown link. Uploads have no mime allowlist and a 1 GiB cap (`uploads/store.ts:8`).
+- Composer paste, drop, and the paperclip all converge on `addFiles` -> `upload` (`Composer.tsx:296-329, 423-429`). `upload()` no-ops in draft mode although the draft upload route exists (`http/uploads.ts:7-20`).
+- Forge Claude accounts set `CLAUDE_CONFIG_DIR` to `~/.forge/accounts/claude/<id>`, which holds only credentials. The harness has no user-level skills; only project-level `.claude/skills` and `.agents/skills` (and `~/.agents/skills`) are reachable. No skills endpoint or scanner exists; `availableCommands` arrives as ACP objects `{name, description}`, is ephemeral, and has no REST source (`acp/normalize.ts:66-68` getter is dead).
+- `this.turns` (`sessions/manager.ts:348`) is the only definition of "a turn is running". `acceptPrompt` (`:438`) and `AcpNormalizer.beginTurn` (`acp/normalize.ts:70`) overwrite it unconditionally. `AcpClient.prompt` throws `Prompt already active` on a concurrent prompt (`acp/client.ts:385`); ACP cannot steer, so any queue dispatches one prompt per turn end.
+- A mid-turn prompt does not fail the HTTP call; the failure lands as a `turn_interrupted` (reason `error`) row plus a raw `error` row. `turn_interrupted.reason` is free-form `z.string().optional()` (`packages/protocol/src/message.ts:69-72`); `render-model.ts:238` interpolates it verbatim.
+- `server_restart` has one producer, `sessions/recovery.ts:58`, on every boot with a running session. A spawned child with no `'error'` listener kills the server (`acp/services.ts:159`, `http/harnesses.ts:107`, `acp/client.ts:165`); claude-code-acp sends the whole Bash line as `command` with empty `args`, so any pipe is an ENOENT crash, then systemd restarts the unit.
+- Ephemeral WS frames are never replayed (`packages/protocol/src/events.ts:25`); durable composer state needs a REST hydration path on mount.
+- `apps/web/src/components/composer/AttachmentChips.tsx` (mounted at `Composer.tsx:473-487`) is the house pattern for a removable-item strip inside the composer card.
+
 ## Do not
 
 - Do not add a default-project setting. Draft entry owns project recency.
