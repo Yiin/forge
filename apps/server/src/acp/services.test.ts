@@ -104,6 +104,72 @@ describe('ACP client services', () => {
     ).rejects.toThrow('not found')
   })
 
+  it('runs a piped command through a shell', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-acp-'))
+    dirs.push(dir)
+    const services = createAcpServices({ cwd: dir, projectRoot: dir })
+    const terminal = await services.onTerminalCreate?.({
+      sessionId: 'session',
+      command: 'echo hello | tr a-z A-Z',
+    })
+
+    expect(
+      await services.onTerminalWaitForExit?.({
+        sessionId: 'session',
+        terminalId: terminal!.terminalId,
+      }),
+    ).toEqual({ exitCode: 0, signal: null })
+    expect(
+      await services.onTerminalOutput?.({
+        sessionId: 'session',
+        terminalId: terminal!.terminalId,
+      }),
+    ).toMatchObject({ output: 'HELLO\n' })
+  })
+
+  it('runs an explicit argv without a shell', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-acp-'))
+    dirs.push(dir)
+    const services = createAcpServices({ cwd: dir, projectRoot: dir })
+    const terminal = await services.onTerminalCreate?.({
+      sessionId: 'session',
+      command: 'echo',
+      args: ['$HOME'],
+    })
+
+    await services.onTerminalWaitForExit?.({
+      sessionId: 'session',
+      terminalId: terminal!.terminalId,
+    })
+    expect(
+      await services.onTerminalOutput?.({
+        sessionId: 'session',
+        terminalId: terminal!.terminalId,
+      }),
+    ).toMatchObject({ output: '$HOME\n' })
+  })
+
+  it('kills a shell-wrapped terminal', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-acp-'))
+    dirs.push(dir)
+    const services = createAcpServices({ cwd: dir, projectRoot: dir })
+    const terminal = await services.onTerminalCreate?.({
+      sessionId: 'session',
+      command: 'sleep 30',
+    })
+
+    await services.onTerminalKill?.({
+      sessionId: 'session',
+      terminalId: terminal!.terminalId,
+    })
+    const result = await services.onTerminalWaitForExit?.({
+      sessionId: 'session',
+      terminalId: terminal!.terminalId,
+    })
+    expect(result!.signal).toBe('SIGTERM')
+    await services.releaseSession('session')
+  })
+
   it('reports a missing command as a failed terminal instead of crashing', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'forge-acp-'))
     dirs.push(dir)
