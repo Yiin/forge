@@ -70,6 +70,7 @@ export const MessageContent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('turn_interrupted'),
     reason: z.string().optional(),
+    version: z.string().optional(),
   }),
   z.object({
     type: z.literal('error'),

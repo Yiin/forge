@@ -11,6 +11,11 @@ type Db = {
   }
 }
 
+export type PreviousServerBoot = {
+  version: string
+  stopped_at: number | null
+}
+
 const id = (prefix: string) =>
   `${prefix}${crypto.randomUUID().replaceAll('-', '')}`
 
@@ -36,6 +41,8 @@ export async function recoverSessions(
   db: Db,
   manager: SessionManager,
   bus: EventBus,
+  previousBoot?: PreviousServerBoot,
+  currentVersion?: string,
 ) {
   db.prepare(
     "UPDATE sessions SET status = 'archived' WHERE retention = 'discardable' AND status != 'archived'",
@@ -44,6 +51,13 @@ export async function recoverSessions(
     .prepare("SELECT * FROM sessions WHERE status = 'running'")
     .all()
   for (const row of running) {
+    const reason = !previousBoot
+      ? 'server_restart'
+      : previousBoot.version !== currentVersion
+        ? 'server_updated'
+        : previousBoot.stopped_at !== null
+          ? 'server_restart'
+          : 'server_crashed'
     const turn = db
       .prepare(
         "SELECT turn_id FROM messages WHERE session_id = ? AND type = 'turn_start' ORDER BY seq DESC LIMIT 1",
@@ -55,7 +69,13 @@ export async function recoverSessions(
       itemId: id('item_'),
       role: 'system',
       type: 'turn_interrupted',
-      content: { type: 'turn_interrupted', reason: 'server_restart' },
+      content: {
+        type: 'turn_interrupted',
+        reason,
+        ...(reason === 'server_updated' && currentVersion
+          ? { version: currentVersion }
+          : {}),
+      },
       eventBus: bus,
     })
     db.prepare(

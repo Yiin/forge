@@ -15,6 +15,60 @@ function setup() {
 }
 
 describe('session recovery', () => {
+  async function recoveredReason(
+    previousBoot: { version: string; stopped_at: number | null } | undefined,
+    currentVersion = '1.0.0',
+  ) {
+    const { db, project, bus } = setup()
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'fake',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    db.prepare("UPDATE sessions SET status = 'running' WHERE id = ?").run(
+      session.id,
+    )
+    const manager = new SessionManager(db, bus, () => {
+      throw new Error('not used')
+    })
+    await recoverSessions(db, manager, bus, previousBoot, currentVersion)
+    const message = db
+      .prepare(
+        "SELECT content FROM messages WHERE session_id = ? AND type = 'turn_interrupted'",
+      )
+      .get(session.id) as { content: string }
+    expect(
+      db
+        .prepare(
+          "SELECT count(*) AS count FROM messages WHERE session_id = ? AND type = 'turn_interrupted'",
+        )
+        .get(session.id),
+    ).toEqual({ count: 1 })
+    return JSON.parse(message.content)
+  }
+
+  it.each([
+    [
+      'server_updated',
+      { version: '0.9.0', stopped_at: 123 },
+      { type: 'turn_interrupted', reason: 'server_updated', version: '1.0.0' },
+    ],
+    [
+      'server_restart',
+      { version: '1.0.0', stopped_at: 123 },
+      { type: 'turn_interrupted', reason: 'server_restart' },
+    ],
+    [
+      'server_crashed',
+      { version: '1.0.0', stopped_at: null },
+      { type: 'turn_interrupted', reason: 'server_crashed' },
+    ],
+    ['first boot fallback', undefined, { type: 'turn_interrupted', reason: 'server_restart' }],
+  ])('labels %s recovery', async (_label, previousBoot, expected) => {
+    await expect(recoveredReason(previousBoot)).resolves.toEqual(expected)
+  })
+
   it('settles running sessions once and nudges a proven provider resume', async () => {
     const { db, project, bus } = setup()
     const session = createSession(db, {
@@ -67,6 +121,17 @@ describe('session recovery', () => {
         )
         .get(session.id),
     ).toEqual({ count: 1 })
+    expect(
+      JSON.parse(
+        (
+          db
+            .prepare(
+              "SELECT content FROM messages WHERE session_id = ? AND type = 'turn_interrupted'",
+            )
+            .get(session.id) as { content: string }
+        ).content,
+      ),
+    ).toEqual({ type: 'turn_interrupted', reason: 'server_restart' })
     expect(nudges).toBe(1)
     await recoverSessions(db, manager, bus)
     expect(

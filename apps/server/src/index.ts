@@ -36,7 +36,10 @@ import {
   type EpicSessionInput,
   type WorkerSession,
 } from './epics/runner.js'
-import { recoverSessions } from './sessions/recovery.js'
+import {
+  recoverSessions,
+  type PreviousServerBoot,
+} from './sessions/recovery.js'
 import { harnessRoutes } from './http/harnesses.js'
 import {
   harnessHealthRoutes,
@@ -240,6 +243,26 @@ export function startServer(
   mkdirSync(dataDir, { recursive: true })
   const db = new DatabaseSync(process.env.FORGE_DB ?? join(dataDir, 'forge.db'))
   migrate(db)
+  const currentVersion = process.env.FORGE_VERSION ?? version
+  const previousBoot = db
+    .prepare('SELECT version, stopped_at FROM server_boots WHERE id = 1')
+    .get() as PreviousServerBoot | undefined
+  db.prepare(
+    `INSERT INTO server_boots (id, version, started_at, stopped_at)
+     VALUES (1, ?, ?, NULL)
+     ON CONFLICT(id) DO UPDATE SET
+       version = excluded.version,
+       started_at = excluded.started_at,
+       stopped_at = NULL`,
+  ).run(currentVersion, Date.now())
+  const markStopped = () => {
+    db.prepare('UPDATE server_boots SET stopped_at = ? WHERE id = 1').run(
+      Date.now(),
+    )
+    process.exit(0)
+  }
+  process.once('SIGTERM', markStopped)
+  process.once('SIGINT', markStopped)
   void pruneWorktreesForRepositories(
     (
       db
@@ -347,7 +370,7 @@ export function startServer(
   const harnessHealth = createHarnessHealthReader({ db, configState, manager })
   // Settle persisted turns before exposing the port. Respawn work continues
   // from the settled state without delaying health checks.
-  void recoverSessions(db, manager, bus)
+  void recoverSessions(db, manager, bus, previousBoot, currentVersion)
   const app = createApp(
     uploadStore,
     {
@@ -377,6 +400,8 @@ export function startServer(
   const server = serve({ fetch: app.fetch, port })
   injectWebSocket(server)
   server.on('close', () => {
+    process.removeListener('SIGTERM', markStopped)
+    process.removeListener('SIGINT', markStopped)
     loginManager.close()
     usagePoller.stop()
   })
