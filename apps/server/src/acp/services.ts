@@ -175,14 +175,20 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
         limit: checked.outputByteLimit ?? 1024 * 1024,
         truncated: false,
         exit: new Promise((resolveExit) => {
+          child.once('error', (error) => {
+            terminal.status = { exitCode: 127, signal: null }
+            appendOutput(terminal, Buffer.from(`${error.message}\n`))
+            resolveExit(terminal.status)
+          })
           child.once('exit', (exitCode, signal) => {
+            if (terminal.status) return
             terminal.status = { exitCode, signal }
             resolveExit(terminal.status)
           })
         }),
       }
-      child.stdout.on('data', (chunk: Buffer) => appendOutput(terminal, chunk))
-      child.stderr.on('data', (chunk: Buffer) => appendOutput(terminal, chunk))
+      child.stdout?.on('data', (chunk: Buffer) => appendOutput(terminal, chunk))
+      child.stderr?.on('data', (chunk: Buffer) => appendOutput(terminal, chunk))
       const terminalId = makeTerminalId()
       terminals.set(`${checked.sessionId}:${terminalId}`, terminal)
       return { terminalId }

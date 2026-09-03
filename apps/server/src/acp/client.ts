@@ -179,6 +179,7 @@ export async function spawnAcpClient(
         spawn(command: string[], options: Record<string, unknown>): any
       }
     | undefined
+  let spawnError: Error | undefined
   const process: any = bun
     ? bun.spawn([entry.command, ...entry.args], {
         env: { ...globalThis.process.env, ...entry.env },
@@ -197,9 +198,13 @@ export async function spawnAcpClient(
           stdin: child.stdin!,
           stdout: child.stdout!,
           stderr: child.stderr!,
-          exited: new Promise<number>((resolve) =>
-            child.once('exit', (code) => resolve(code ?? 0)),
-          ),
+          exited: new Promise<number>((resolve) => {
+            child.once('error', (error) => {
+              spawnError = error
+              resolve(1)
+            })
+            child.once('exit', (code) => resolve(code ?? 0))
+          }),
           kill: (signal: string) => child.kill(signal as NodeJS.Signals),
         }
       })()
@@ -224,7 +229,10 @@ export async function spawnAcpClient(
   const death = new Promise<never>((_, reject) => (rejectDeath = reject))
   void death.catch(() => undefined)
   void process.exited.then((exitCode: number) => {
-    dead = new AgentProcessDiedError(exitCode, stderr.toString())
+    dead = new AgentProcessDiedError(
+      exitCode,
+      [stderr.toString(), spawnError?.message].filter(Boolean).join('\n'),
+    )
     rejectConfigPending?.(dead)
     const match = detectProviderError(dead.stderrTail)
     const accountId = handlers.capabilityStore?.accountId

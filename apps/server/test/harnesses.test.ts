@@ -27,8 +27,8 @@ describe('harness settings routes', () => {
 
     config.harness.bad = {
       ...config.harness.mock!,
-      command: 'sh',
-      args: ['-c', 'echo bad-harness >&2; exit 1'],
+      command: 'definitely-not-a-real-binary-xyz',
+      args: [],
     }
     // The test route owns its config instance in production. This request pins
     // the error contract through a persisted replacement in the same API.
@@ -43,6 +43,6 @@ describe('harness settings routes', () => {
       body: JSON.stringify({ name: 'bad' }),
     })
     expect(bad.status).toBe(422)
-    expect((await bad.json()).ok).toBe(false)
+    expect(await bad.json()).toMatchObject({ ok: false })
   }, 20_000)
 })

@@ -103,4 +103,27 @@ describe('ACP client services', () => {
       }),
     ).rejects.toThrow('not found')
   })
+
+  it('reports a missing command as a failed terminal instead of crashing', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-acp-'))
+    dirs.push(dir)
+    const services = createAcpServices({ cwd: dir, projectRoot: dir })
+    const terminal = await services.onTerminalCreate?.({
+      sessionId: 'session',
+      command: 'definitely-not-a-real-binary-xyz',
+    })
+
+    const result = await services.onTerminalWaitForExit?.({
+      sessionId: 'session',
+      terminalId: terminal!.terminalId,
+    })
+
+    expect(result?.exitCode).not.toBe(0)
+    expect(
+      await services.onTerminalOutput?.({
+        sessionId: 'session',
+        terminalId: terminal!.terminalId,
+      }),
+    ).toMatchObject({ exitStatus: { exitCode: 127, signal: null } })
+  })
 })

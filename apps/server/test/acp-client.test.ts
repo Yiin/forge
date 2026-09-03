@@ -148,4 +148,17 @@ describe('ACP client', () => {
     ).rejects.toBeInstanceOf(AgentProcessDiedError)
     expect(exits).toHaveLength(1)
   })
+
+  it('reports a missing binary as AgentProcessDiedError', async () => {
+    await expect(
+      spawnAcpClient({
+        name: 'missing',
+        command: 'definitely-not-a-real-binary-xyz',
+        args: [],
+        env: {},
+        protocol: 'acp',
+        enabled: true,
+      }),
+    ).rejects.toBeInstanceOf(AgentProcessDiedError)
+  })
 })
