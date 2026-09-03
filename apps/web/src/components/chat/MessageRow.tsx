@@ -81,7 +81,7 @@ export function MessageRow({
         data-pending={item.pending ? 'true' : undefined}
         aria-busy={item.pending ? true : undefined}
       >
-        <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3 text-sm text-foreground">
+        <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3 text-sm text-foreground whitespace-pre-wrap break-words">
           <SkillChipText text={item.text} skills={[]} />
         </div>
         {!item.pending && (

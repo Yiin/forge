@@ -61,6 +61,42 @@ describe('MessageRow', () => {
     ).toBeTruthy()
   })
 
+  it('keeps user message line breaks in the bubble', () => {
+    const view = render(
+      <MessageRow
+        item={{
+          kind: 'message',
+          id: 'u1',
+          seq: 1,
+          role: 'user',
+          text: '1. foo\n2. bar',
+        }}
+      />,
+    )
+
+    const bubble = view.container.querySelector('.chat-user div')
+    expect(bubble?.classList.contains('whitespace-pre-wrap')).toBe(true)
+    expect(bubble?.textContent).toContain('1. foo\n2. bar')
+  })
+
+  it('keeps literal tags in user messages', () => {
+    const view = render(
+      <MessageRow
+        item={{
+          kind: 'message',
+          id: 'u2',
+          seq: 2,
+          role: 'user',
+          text: 'hi\n<after>',
+        }}
+      />,
+    )
+
+    expect(view.container.querySelector('.chat-user div')?.textContent).toBe(
+      'hi\n<after>',
+    )
+  })
+
   it('exposes tool detail disclosures', () => {
     render(
       <ToolCallRow
