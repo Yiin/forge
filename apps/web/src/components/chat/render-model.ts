@@ -6,6 +6,7 @@ import { interruptReasonText } from './interrupt-copy'
 export type ToolState = 'running' | 'done' | 'error'
 export type ActivityState = ToolState | 'unknown'
 export type ChatRenderItem =
+  | { kind: 'working'; id: string }
   | {
       kind: 'message'
       id: string

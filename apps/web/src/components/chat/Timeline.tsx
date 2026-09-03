@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Virtualizer } from 'virtua'
 import { useParams } from '@tanstack/react-router'
 import { useMessagesStore } from '../../stores/messages'
-import { MessageRow, ToolCallRow } from './MessageRow'
+import { MessageRow, RunningDots, ToolCallRow } from './MessageRow'
 import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
 import { AnsweredQuestionRow } from './AnsweredQuestionRow'
@@ -21,12 +21,14 @@ export function Timeline({
   targetSeq,
   bottomInset = 0,
   skills = [],
+  running = false,
 }: {
   resumedWithRecap?: boolean
   targetSeq?: number
   /** Height of the composer overlay, kept clear so the last row stays visible. */
   bottomInset?: number
   skills?: string[]
+  running?: boolean
 }) {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
   const messages = useMessagesStore(
@@ -41,8 +43,13 @@ export function Timeline({
     [sessions, sessionId],
   )
   const items = useMemo(
-    () => toRenderModel(messages, resumedWithRecap, children, pending),
-    [messages, resumedWithRecap, children, pending],
+    () => {
+      const base = toRenderModel(messages, resumedWithRecap, children, pending)
+      return running
+        ? [...base, { kind: 'working' as const, id: 'working-indicator' }]
+        : base
+    },
+    [messages, resumedWithRecap, children, pending, running],
   )
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -170,7 +177,21 @@ function RenderItemContent({
   if (item.kind === 'epic-triage') return <EpicTriageCard card={item.card} />
   if (item.kind === 'attachment') return <AttachmentItem item={item} />
   if (item.kind === 'system') return <SystemItem item={item} />
+  if (item.kind === 'working') return <WorkingRow />
   return null
+}
+
+function WorkingRow() {
+  return (
+    <div
+      className="chat-working flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground"
+      role="status"
+      aria-live="polite"
+    >
+      <RunningDots />
+      Working
+    </div>
+  )
 }
 
 function SystemItem({

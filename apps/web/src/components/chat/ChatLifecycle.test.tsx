@@ -11,7 +11,6 @@ describe('ChatLifecycle', () => {
         loading
         onRetry={onRetry}
         connection="connecting"
-        running={false}
         empty={false}
       />,
     )
@@ -22,7 +21,6 @@ describe('ChatLifecycle', () => {
         error="Session could not be loaded (503)"
         onRetry={onRetry}
         connection="disconnected"
-        running={false}
         empty={false}
       />,
     )
@@ -31,13 +29,12 @@ describe('ChatLifecycle', () => {
     expect(onRetry).toHaveBeenCalledOnce()
   })
 
-  it('names reconnecting, ready, and working states without a start card', () => {
+  it('keeps reconnecting text but hides the connected status band', () => {
     const view = render(
       <ChatLifecycle
         loading={false}
         onRetry={vi.fn()}
         connection="reconnecting"
-        running
         empty
       />,
     )
@@ -48,20 +45,10 @@ describe('ChatLifecycle', () => {
         loading={false}
         onRetry={vi.fn()}
         connection="connected"
-        running
         empty={false}
       />,
     )
-    expect(screen.getByRole('status').textContent).toContain('Working')
-    view.rerender(
-      <ChatLifecycle
-        loading={false}
-        onRetry={vi.fn()}
-        connection="connected"
-        running={false}
-        empty={false}
-      />,
-    )
-    expect(screen.getByRole('status').textContent).toContain('Ready')
+    expect(view.container.textContent).toBe('')
+    expect(screen.queryByRole('status')).toBeNull()
   })
 })

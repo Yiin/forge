@@ -180,6 +180,17 @@ describe('Timeline', () => {
     expect(virtualizerProps[0].shift).toBeFalsy()
   })
 
+  it('renders the Working row last only while running', () => {
+    state.messages = [message('hello', 1)]
+    const view = render(<Timeline running />)
+    const working = view.container.querySelector('.chat-working')
+    expect(working).not.toBeNull()
+    expect(working?.parentElement?.lastElementChild).toBe(working)
+
+    view.rerender(<Timeline />)
+    expect(view.container.querySelector('.chat-working')).toBeNull()
+  })
+
   it('renders a subagent card without an update loop', () => {
     state.messages = [message('hello', 1)]
     useSessionsStore.setState({

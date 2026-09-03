@@ -264,13 +264,13 @@ export function SessionRoute() {
           setRetryAttempt((attempt) => attempt + 1)
         }}
         connection={connection}
-        running={(sessionStatus ?? loadedStatus) === 'running'}
       />
       {!loading && !loadError && (
         <Timeline
           targetSeq={Number.isFinite(targetSeq) ? targetSeq : undefined}
           bottomInset={composerHeight}
           skills={skills}
+          running={(sessionStatus ?? loadedStatus) === 'running'}
         />
       )}
       {!loading && !loadError && (

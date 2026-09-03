@@ -1,6 +1,5 @@
 import {
   CircleAlert,
-  CircleCheck,
   LoaderCircle,
   RefreshCw,
   WifiOff,
@@ -13,14 +12,12 @@ export function ChatLifecycle({
   error,
   onRetry,
   connection,
-  running,
   empty: _empty,
 }: {
   loading: boolean
   error?: string
   onRetry: () => void
   connection: ConnectionState
-  running: boolean
   empty?: boolean
 }) {
   if (loading)
@@ -47,6 +44,7 @@ export function ChatLifecycle({
         </Button>
       </div>
     )
+  if (connection === 'connected') return null
   return (
     <div className="w-full px-3 sm:px-5">
       <div
@@ -54,20 +52,13 @@ export function ChatLifecycle({
         role="status"
         aria-live="polite"
       >
-        {connectionLabel(connection, running)}
+        {connectionLabel(connection)}
       </div>
     </div>
   )
 }
 
-function connectionLabel(state: ConnectionState, running: boolean) {
-  if (state === 'connected')
-    return (
-      <>
-        <CircleCheck className="size-[15px]" aria-hidden="true" />
-        {running ? 'Working' : 'Ready'}
-      </>
-    )
+function connectionLabel(state: ConnectionState) {
   if (state === 'reconnecting')
     return (
       <>
