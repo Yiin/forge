@@ -1,4 +1,5 @@
 import type { HarnessConfig } from '@forge/protocol/config'
+import * as acp from '@agentclientprotocol/sdk'
 import { getHarnessCapabilities } from '../config.js'
 import { createAcpServices } from './services.js'
 import { spawnAcpClient, type AcpClient } from './client.js'
@@ -16,6 +17,12 @@ import { readClaudeContextUsage } from '../accounts/context/claudeTranscript.js'
 import { readCodexRollout } from '../accounts/context/codexRollout.js'
 import { recordUsageSnapshot } from '../accounts/usage.js'
 import { writeAccountModels } from '../accounts/models.js'
+import { pathToFileURL } from 'node:url'
+import {
+  MAX_INLINE_IMAGE_BYTES,
+  MAX_INLINE_TOTAL_BYTES,
+} from '../uploads/store.js'
+import type { PromptContent } from '../sessions/harness.js'
 
 type Db = {
   exec(sql: string): unknown
@@ -264,10 +271,42 @@ export function acpHarness(
     }
     return {
       availableModels,
-      prompt: async (content) => {
-        await normalizer.promptTurn(client, sessionId ?? '', [
-          { type: 'text', text: content },
-        ])
+      prompt: async (content: string | PromptContent[]) => {
+        const parts = typeof content === 'string'
+          ? [{ kind: 'text', text: content } satisfies PromptContent]
+          : [
+              ...content.filter((part) => part.kind !== 'text'),
+              ...content.filter((part) => part.kind === 'text'),
+            ]
+        let inlineImageBytes = 0
+        const blocks: acp.ContentBlock[] = []
+        for (const part of parts) {
+          if (part.kind === 'text') {
+            blocks.push({ type: 'text', text: part.text })
+          } else if (part.kind === 'image') {
+            const canInline =
+              client.capabilities.agent.promptCapabilities?.image === true &&
+              part.bytes.byteLength <= MAX_INLINE_IMAGE_BYTES &&
+              inlineImageBytes + part.bytes.byteLength <= MAX_INLINE_TOTAL_BYTES
+            inlineImageBytes += part.bytes.byteLength
+            blocks.push(canInline
+              ? { type: 'image', data: part.bytes.toString('base64'), mimeType: part.mime }
+              : {
+                  type: 'resource_link',
+                  uri: pathToFileURL(part.path ?? 'image').toString(),
+                  name: part.path ? part.path.split('/').pop() ?? 'image' : 'image',
+                  mimeType: part.mime,
+                })
+          } else {
+            blocks.push({
+              type: 'resource_link',
+              uri: pathToFileURL(part.path).toString(),
+              name: part.name,
+              mimeType: part.mime,
+            })
+          }
+        }
+        await normalizer.promptTurn(client, sessionId ?? '', blocks)
         publishContextWindow()
       },
       cancel: () => client.cancel(sessionId ?? ''),

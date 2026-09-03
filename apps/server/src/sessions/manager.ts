@@ -1,4 +1,6 @@
 import { appendMessage, createSession, getSession } from '../db/queries.js'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { EventBus } from '../events/bus.js'
 import type { DatabaseSync } from 'node:sqlite'
 import type {
@@ -434,6 +436,7 @@ export class SessionManager {
       }
     }
     const turnId = makeId('turn_')
+    const attachments: import('./harness.js').PromptContent[] = []
     if (!this.firstPrompt.has(id)) this.firstPrompt.set(id, text)
     this.turns.set(id, turnId)
     appendMessage(this.db, {
@@ -462,7 +465,22 @@ export class SessionManager {
             rel_path: string | null
           }
         | undefined
-      if (attachment?.rel_path)
+      if (attachment?.rel_path) {
+        const absolutePath = join(this.dataDir, attachment.rel_path)
+        if (attachment.mime.startsWith('image/'))
+          attachments.push({
+            kind: 'image',
+            mime: attachment.mime,
+            bytes: await readFile(absolutePath),
+            path: absolutePath,
+          })
+        else
+          attachments.push({
+            kind: 'file',
+            path: absolutePath,
+            name: attachment.filename,
+            mime: attachment.mime,
+          })
         appendMessage(this.db, {
           sessionId: id,
           turnId,
@@ -479,6 +497,7 @@ export class SessionManager {
           },
           eventBus: this.bus,
         })
+      }
     }
     appendMessage(this.db, {
       sessionId: id,
@@ -490,7 +509,7 @@ export class SessionManager {
       eventBus: this.bus,
     })
     this.status(id, 'running')
-    return { row, turnId, model }
+    return { row, turnId, model, attachments }
   }
 
   async prompt(
@@ -554,7 +573,10 @@ export class SessionManager {
           .run(JSON.stringify(merged), row.id)
         row = { ...row, config_options: JSON.stringify(merged) }
       }
-      this.runPrompt(handle, row, accepted.turnId, text)
+      this.runPrompt(handle, row, accepted.turnId, [
+        ...accepted.attachments,
+        { kind: 'text', text },
+      ])
     })().catch((error: unknown) =>
       this.failPrompt(accepted.row, accepted.turnId, error),
     )
@@ -564,10 +586,10 @@ export class SessionManager {
     handle: HarnessHandle,
     row: SessionRow,
     turnId: string,
-    text: string,
+    content: import('./harness.js').PromptContent[],
   ) {
     try {
-      const result = handle.prompt(text)
+      const result = handle.prompt(content)
       if (result && typeof result === 'object' && 'then' in result)
         void Promise.resolve(result).then(
           () => this.finishPrompt(row, turnId),

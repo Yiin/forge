@@ -18,8 +18,13 @@ export type HarnessItem = MessageContent & {
   turnId?: string
 }
 
+export type PromptContent =
+  | { kind: 'text'; text: string }
+  | { kind: 'image'; mime: string; bytes: Buffer; path?: string }
+  | { kind: 'file'; path: string; name: string; mime: string }
+
 export type HarnessHandle = {
-  prompt(content: string): Promise<void> | void
+  prompt(content: string | PromptContent[]): Promise<void> | void
   cancel(): Promise<void> | void
   kill(): Promise<void> | void
   setModel?(modelId: string): Promise<void> | void

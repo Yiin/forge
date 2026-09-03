@@ -6,6 +6,8 @@ import type { DatabaseSync } from 'node:sqlite'
 import { EventBus } from '../events/bus.js'
 
 export const MAX_UPLOAD_BYTES = 1024 ** 3
+export const MAX_INLINE_IMAGE_BYTES = 10 * 1024 * 1024
+export const MAX_INLINE_TOTAL_BYTES = 25 * 1024 * 1024
 const SAFE_FILENAME_LIMIT = 120
 
 type UploadRow = {

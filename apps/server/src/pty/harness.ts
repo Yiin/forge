@@ -6,6 +6,7 @@ import type {
   HarnessItem,
   HarnessProcess,
   HarnessSession,
+  PromptContent,
 } from '../sessions/harness.js'
 
 type PtyOptions = Pick<HarnessConfig, 'command' | 'args' | 'env'> &
@@ -161,7 +162,14 @@ export function createPtyHarness(options: PtyOptions): HarnessProcess {
       pty.onExit(exit)
 
       const handle: HarnessHandle = {
-        prompt(text) {
+        prompt(content: string | PromptContent[]) {
+          const text = typeof content === 'string'
+            ? content
+            : content
+                .filter((part) => part.kind !== 'text')
+                .map((part) => part.kind === 'file' ? part.path : '[image]')
+                .concat(content.filter((part) => part.kind === 'text').map((part) => part.text))
+                .join('\n')
           if (active) throw new Error('PTY turn already running')
           active = true
           received = false
