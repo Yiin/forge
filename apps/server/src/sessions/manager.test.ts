@@ -284,6 +284,132 @@ describe('session harness selection', () => {
     ).toEqual({ type: 'turn_end' })
   })
 
+  it('queues boundary prompts and drains one oldest prompt after each turn', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    let release!: () => void
+    let calls = 0
+    const prompts: string[] = []
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: (content) => {
+          prompts.push(
+            typeof content === 'string'
+              ? content
+              : content.find((item) => item.kind === 'text')?.text ?? '',
+          )
+          calls += 1
+          if (calls === 1)
+            return new Promise<void>((resolve) => {
+              release = resolve
+            })
+          return Promise.resolve()
+        },
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+
+    await manager.prompt(session.id, 'one', 'request-1')
+    await manager.prompt(
+      session.id,
+      'two',
+      'request-2',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'turn-boundary',
+    )
+    await manager.prompt(
+      session.id,
+      'three',
+      'request-3',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'turn-boundary',
+    )
+
+    expect(prompts).toEqual(['one'])
+    expect(
+      db
+        .prepare(
+          'SELECT text FROM queued_prompts WHERE session_id = ? ORDER BY created_at, id',
+        )
+        .all(session.id),
+    ).toEqual([{ text: 'two' }, { text: 'three' }])
+    release()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(prompts).toEqual(['one', 'two'])
+    expect(
+      db
+        .prepare('SELECT text FROM queued_prompts WHERE session_id = ?')
+        .all(session.id),
+    ).toEqual([{ text: 'three' }])
+  })
+
+  it('drains a queued prompt after the active prompt fails', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    let calls = 0
+    const prompts: string[] = []
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: async (content) => {
+          prompts.push(
+            typeof content === 'string'
+              ? content
+              : content.find((item) => item.kind === 'text')?.text ?? '',
+          )
+          calls += 1
+          if (calls === 1) throw new Error('failed')
+        },
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+    await manager.prompt(session.id, 'one')
+    await manager.prompt(
+      session.id,
+      'two',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'turn-boundary',
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(prompts).toEqual(['one', 'two'])
+    expect(
+      db.prepare('SELECT count(*) AS count FROM queued_prompts').get(),
+    ).toEqual({ count: 0 })
+  })
+
   it('publishes user rows before a cold harness finishes spawning', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)

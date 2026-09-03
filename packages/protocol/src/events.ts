@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { Message } from './message.js'
+import { queuedPromptSchema } from './session.js'
 
 export const contextWindowUsageSchema = z.object({
   usedTokens: z.number().int().nonnegative(),
@@ -29,6 +30,12 @@ export const Ephemeral = z.discriminatedUnion('type', [
     seq: z.null(),
     sessionId: z.string(),
     commands: z.array(z.unknown()),
+  }),
+  z.object({
+    type: z.literal('queuedPrompts'),
+    seq: z.null(),
+    sessionId: z.string(),
+    prompts: z.array(queuedPromptSchema),
   }),
   z.object({
     type: z.literal('uploadProgress'),

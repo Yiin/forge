@@ -23,6 +23,7 @@ import {
   WorktreeRemovalError,
 } from '../git/worktrees.js'
 import type { WorkspaceChoice } from '@forge/protocol/commands'
+import type { QueuedPrompt } from '@forge/protocol/session'
 
 type Db = DatabaseSync
 export type SessionRow = {
@@ -235,6 +236,7 @@ export class SessionManager {
         this.status(row.id, 'idle')
         this.maybeTitle(row.id, row.title, this.firstPrompt.get(row.id) ?? '')
         this.scheduleReap(row.id)
+        void this.drainQueue(row.id)
       }
     }
     const onExit = () => {
@@ -348,7 +350,123 @@ export class SessionManager {
     await result.handle.prompt('The server restarted mid-turn. Continue.')
   }
   private readonly turns = new Map<string, string>()
+  private readonly queueBusy = new Set<string>()
   private readonly firstPrompt = new Map<string, string>()
+
+  private queuedPromptRows(sessionId: string) {
+    return this.db
+      .prepare(
+        'SELECT id, session_id, text, created_at FROM queued_prompts WHERE session_id = ? ORDER BY created_at, id',
+      )
+      .all(sessionId) as Array<{
+      id: string
+      session_id: string
+      text: string
+      created_at: number
+    }>
+  }
+
+  private queuedPrompt(row: {
+    id: string
+    session_id: string
+    text: string
+    created_at: number
+  }): QueuedPrompt {
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      text: row.text,
+      createdAt: Number(row.created_at),
+    }
+  }
+
+  private publishQueuedPrompts(sessionId: string) {
+    this.bus.publishEphemeral({
+      type: 'queuedPrompts',
+      seq: null,
+      sessionId,
+      prompts: this.queuedPromptRows(sessionId).map((row) =>
+        this.queuedPrompt(row),
+      ),
+    })
+  }
+
+  queuedPrompts(sessionId: string) {
+    if (!getSession(this.db, sessionId)) return undefined
+    return this.queuedPromptRows(sessionId).map((row) => this.queuedPrompt(row))
+  }
+
+  deleteQueuedPrompt(sessionId: string, promptId: string) {
+    const result = this.db
+      .prepare('DELETE FROM queued_prompts WHERE id = ? AND session_id = ?')
+      .run(promptId, sessionId) as { changes?: number }
+    if (!result.changes) return false
+    this.publishQueuedPrompts(sessionId)
+    return true
+  }
+
+  updateQueuedPrompt(sessionId: string, promptId: string, text: string) {
+    const result = this.db
+      .prepare(
+        'UPDATE queued_prompts SET text = ? WHERE id = ? AND session_id = ?',
+      )
+      .run(text, promptId, sessionId) as { changes?: number }
+    if (!result.changes) return undefined
+    this.publishQueuedPrompts(sessionId)
+    const row = this.db
+      .prepare(
+        'SELECT id, session_id, text, created_at FROM queued_prompts WHERE id = ?',
+      )
+      .get(promptId) as {
+      id: string
+      session_id: string
+      text: string
+      created_at: number
+    }
+    return this.queuedPrompt(row)
+  }
+
+  async drainQueuedPrompt(sessionId: string) {
+    return this.drainQueue(sessionId)
+  }
+
+  private async drainQueue(sessionId: string) {
+    if (this.queueBusy.has(sessionId) || this.turns.has(sessionId)) return
+    const queued = this.db
+      .prepare(
+        'SELECT * FROM queued_prompts WHERE session_id = ? ORDER BY created_at, id LIMIT 1',
+      )
+      .get(sessionId) as
+      | {
+          id: string
+          text: string
+          attachment_ids: string | null
+          model: string | null
+          config_options: string | null
+          client_item_id: string | null
+        }
+      | undefined
+    if (!queued) return
+    this.queueBusy.add(sessionId)
+    try {
+      this.db.prepare('DELETE FROM queued_prompts WHERE id = ?').run(queued.id)
+      this.publishQueuedPrompts(sessionId)
+      await this.prompt(
+        sessionId,
+        queued.text,
+        makeId('queue_'),
+        queued.attachment_ids ? JSON.parse(queued.attachment_ids) : undefined,
+        undefined,
+        undefined,
+        queued.model ?? undefined,
+        queued.client_item_id ?? undefined,
+        queued.config_options ? JSON.parse(queued.config_options) : undefined,
+        'immediate',
+      )
+    } finally {
+      this.queueBusy.delete(sessionId)
+    }
+  }
   private maybeTitle(id: string, current: string, prompt: string) {
     let row: { user_titled?: number } | undefined
     try {
@@ -394,16 +512,55 @@ export class SessionManager {
     accountId?: string | null,
     model?: string,
     clientItemId?: string,
+    configOptions?: Record<string, string | boolean>,
+    delivery?: 'immediate' | 'turn-boundary',
   ) {
     let row = getSession(this.db, id) as SessionRow | undefined
     if (!row) throw new Error('Session not found')
     if (requestId) {
       const seen = this.db
         .prepare(
-          "SELECT 1 FROM messages WHERE session_id = ? AND type = 'turn_start' AND json_extract(content, '$.requestId') = ?",
+          `SELECT 1 FROM messages
+           WHERE session_id = ? AND type = 'turn_start'
+             AND json_extract(content, '$.requestId') = ?
+           UNION ALL
+           SELECT 1 FROM queued_prompts
+           WHERE session_id = ? AND request_id = ?`,
         )
-        .get(id, requestId)
+        .get(id, requestId, id, requestId)
       if (seen) return
+    }
+    if (delivery === 'turn-boundary' && this.turns.has(id)) {
+      this.db
+        .prepare(
+          `INSERT INTO queued_prompts
+           (id, session_id, text, attachment_ids, model, config_options, client_item_id, request_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          makeId('queued_'),
+          id,
+          text,
+          attachmentIds ? JSON.stringify(attachmentIds) : null,
+          model ?? null,
+          configOptions ? JSON.stringify(configOptions) : null,
+          clientItemId ?? null,
+          requestId ?? null,
+          Math.max(
+            Date.now(),
+            Number(
+              (
+                this.db
+                  .prepare(
+                    'SELECT COALESCE(MAX(created_at), 0) AS created_at FROM queued_prompts WHERE session_id = ?',
+                  )
+                  .get(id) as { created_at: number }
+              ).created_at,
+            ) + 1,
+          ),
+        )
+      this.publishQueuedPrompts(id)
+      return
     }
     const nextHarness = harness ?? row.harness
     const nextAccount =
@@ -522,6 +679,7 @@ export class SessionManager {
     model?: string,
     clientItemId?: string,
     configOptions?: Record<string, string | boolean>,
+    delivery?: 'immediate' | 'turn-boundary',
   ) {
     const accepted = await this.acceptPrompt(
       id,
@@ -532,6 +690,8 @@ export class SessionManager {
       accountId,
       model,
       clientItemId,
+      configOptions,
+      delivery,
     )
     if (!accepted) return
     // Startup errors become timeline errors after acceptance. This keeps the
@@ -628,6 +788,7 @@ export class SessionManager {
       eventBus: this.bus,
     })
     this.status(row.id, 'errored')
+    void this.drainQueue(row.id)
   }
 
   private finishPrompt(row: SessionRow, turnId: string) {
@@ -646,6 +807,7 @@ export class SessionManager {
       this.status(row.id, 'idle')
       this.maybeTitle(row.id, row.title, this.firstPrompt.get(row.id) ?? '')
       this.scheduleReap(row.id)
+      void this.drainQueue(row.id)
     }
   }
 

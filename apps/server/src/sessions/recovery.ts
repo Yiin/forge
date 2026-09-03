@@ -92,4 +92,8 @@ export async function recoverSessions(
       })
     }
   }
+  const queued = db
+    .prepare('SELECT DISTINCT session_id FROM queued_prompts')
+    .all() as Array<{ session_id: string }>
+  for (const row of queued) await manager.drainQueuedPrompt(row.session_id)
 }

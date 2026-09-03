@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { z } from 'zod'
 import {
   createSession as schema,
   prompt as promptSchema,
@@ -109,11 +110,37 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
         value.data.model,
         value.data.clientItemId,
         value.data.configOptions,
+        value.data.delivery,
       )
       return c.json({ ok: true })
     } catch (error) {
       return c.json({ error: errorMessage(error) }, 404)
     }
+  })
+  app.get('/api/sessions/:id/queued', (c) => {
+    const prompts = manager.queuedPrompts(c.req.param('id'))
+    return prompts
+      ? c.json({ prompts })
+      : c.json({ error: 'Session not found' }, 404)
+  })
+  app.delete('/api/sessions/:id/queued/:promptId', (c) => {
+    const deleted = manager.deleteQueuedPrompt(
+      c.req.param('id'),
+      c.req.param('promptId'),
+    )
+    return deleted ? c.body(null, 204) : c.json({ error: 'Not found' }, 404)
+  })
+  app.patch('/api/sessions/:id/queued/:promptId', async (c) => {
+    const value = z
+      .object({ text: z.string().min(1) })
+      .safeParse(await c.req.json())
+    if (!value.success) return c.json({ error: value.error.message }, 400)
+    const prompt = manager.updateQueuedPrompt(
+      c.req.param('id'),
+      c.req.param('promptId'),
+      value.data.text,
+    )
+    return prompt ? c.json(prompt) : c.json({ error: 'Not found' }, 404)
   })
   app.get('/api/sessions/:id/models', (c) => {
     const row = manager.database

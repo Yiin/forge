@@ -30,3 +30,12 @@ export const sessionResponseSchema = z.object({
 })
 
 export type SessionResponse = z.infer<typeof sessionResponseSchema>
+
+export const queuedPromptSchema = z.object({
+  id: z.string(),
+  sessionId: z.string(),
+  text: z.string(),
+  createdAt: z.number().int(),
+})
+
+export type QueuedPrompt = z.infer<typeof queuedPromptSchema>

@@ -38,6 +38,7 @@ export const prompt = z.object({
   configOptions: z
     .record(z.string().min(1), z.union([z.string(), z.boolean()]))
     .optional(),
+  delivery: z.enum(['immediate', 'turn-boundary']).optional(),
 })
 export const promoteDraft = z.object({
   draftId: id,
