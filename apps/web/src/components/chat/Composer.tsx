@@ -153,8 +153,8 @@ export function Composer({
     )
     const latest = events.at(-1)
     if (latest)
-      setCommands([
-        ...commandDefaults,
+      setCommands((items) => [
+        ...items.filter((item) => item.group !== 'Harness'),
         ...latest.commands.flatMap((value, index) =>
           typeof value === 'string'
             ? [
@@ -165,10 +165,49 @@ export function Composer({
                   value,
                 },
               ]
-            : [],
+            : typeof value === 'object' &&
+                value !== null &&
+                typeof (value as { name?: unknown }).name === 'string' &&
+                (value as { name: string }).name.trim()
+              ? [
+                  {
+                    id: `h-${index}`,
+                    label: `/${(value as { name: string }).name}`,
+                    group: 'Harness' as const,
+                    value: `/${(value as { name: string }).name}`,
+                  },
+                ]
+              : [],
         ),
       ])
   }, [volatile, sessionId])
+  useEffect(() => {
+    const path = draftMode
+      ? draftProjectId
+        ? `/api/projects/${encodeURIComponent(draftProjectId)}/skills`
+        : null
+      : `/api/sessions/${encodeURIComponent(sessionId)}/skills`
+    if (!path) return
+    void fetch(path)
+      .then((response) => (response.ok ? response.json() : null))
+      .then(
+        (
+          value: {
+            skills?: Array<{ name: string; description: string }>
+          } | null,
+        ) =>
+          setCommands((items) => [
+            ...items,
+            ...(value?.skills ?? []).map((skill) => ({
+              id: `skill-${skill.name}`,
+              label: `$${skill.name}`,
+              group: 'Skills' as const,
+              value: `$${skill.name} `,
+            })),
+          ]),
+      )
+      .catch(() => undefined)
+  }, [draftMode, draftProjectId, sessionId])
   useEffect(() => {
     if (draftMode) return
     void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`)

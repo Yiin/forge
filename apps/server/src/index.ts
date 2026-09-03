@@ -13,6 +13,7 @@ import { uploadRoutes } from './http/uploads.js'
 import { attachmentRoutes } from './http/attachments.js'
 import { fsBrowseRoutes } from './http/fsBrowse.js'
 import { projectFileRoutes } from './http/projectFiles.js'
+import { skillRoutes } from './http/skills.js'
 import { gitRoutes } from './http/git.js'
 import { statusRoutes } from './http/status.js'
 import { migrate } from './db/migrate.js'
@@ -149,6 +150,7 @@ export function createApp(
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
+    app.route('/', skillRoutes(uploadStore.database))
     app.route(
       '/',
       gitRoutes({ db: uploadStore.database, dataDir: uploadStore.dataDir }),

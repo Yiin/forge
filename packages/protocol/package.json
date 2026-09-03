@@ -16,7 +16,8 @@
     "./beads": "./src/beads.ts",
     "./accounts": "./src/accounts.ts",
     "./git": "./src/git.ts",
-    "./models": "./src/models.ts"
+    "./models": "./src/models.ts",
+    "./skills": "./src/skills.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

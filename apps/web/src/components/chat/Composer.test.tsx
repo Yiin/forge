@@ -11,10 +11,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Composer } from './Composer'
 import { accountsApi } from '../../lib/accounts-api'
 import { api } from '../../lib/api'
+import { useMessagesStore } from '../../stores/messages'
 
 describe('Composer', () => {
   afterEach(() => {
     cleanup()
+    useMessagesStore.setState({ volatile: [] })
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
@@ -90,6 +92,63 @@ describe('Composer', () => {
     fireEvent.change(composer, { target: { value: '/help' } })
     fireEvent.keyDown(composer, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByText('/btw')).toBeNull())
+  })
+
+  it('loads skills for the dollar menu and inserts the selected skill', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.endsWith('/skills'))
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                skills: [{ name: 'beads', description: 'Track work' }],
+              }),
+              { status: 200 },
+            ),
+          )
+        return Promise.resolve(new Response('{}', { status: 404 }))
+      }),
+    )
+    const composer = renderComposer()
+    fireEvent.change(composer, { target: { value: '$' } })
+    expect(await screen.findByText('$beads')).toBeTruthy()
+    fireEvent.click(screen.getByRole('option', { name: /\$beads/ }))
+    expect(composer).toHaveProperty('value', '$beads ')
+  })
+
+  it('maps object-shaped available commands into the slash menu', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+    const composer = renderComposer()
+    useMessagesStore.setState({
+      volatile: [
+        {
+          type: 'availableCommands',
+          seq: null,
+          sessionId: 'session-1',
+          commands: [{ name: 'review', description: 'Review changes' }],
+        },
+      ],
+    })
+    fireEvent.change(composer, { target: { value: '/' } })
+    expect(await screen.findByText('/review')).toBeTruthy()
+    useMessagesStore.setState({ volatile: [] })
   })
 
   it('retains the draft and announces a failed send', async () => {
