@@ -188,6 +188,22 @@ export class ForgeApi {
   prompt(input: Prompt) {
     return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)
   }
+  listQueued(sessionId: string) {
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/queued`)
+  }
+  deleteQueued(sessionId: string, promptId: string) {
+    return this.request(
+      'DELETE',
+      `/api/sessions/${encodeURIComponent(sessionId)}/queued/${encodeURIComponent(promptId)}`,
+    )
+  }
+  patchQueued(sessionId: string, promptId: string, text: string) {
+    return this.request(
+      'PATCH',
+      `/api/sessions/${encodeURIComponent(sessionId)}/queued/${encodeURIComponent(promptId)}`,
+      { text },
+    )
+  }
   promoteDraft(input: PromoteDraft, requestId: string) {
     return this.post(
       `/api/drafts/${encodeURIComponent(input.draftId)}/promote`,
@@ -292,6 +308,7 @@ export class ForgeApi {
           }),
     })
     if (!response.ok) throw await apiError(response)
+    if (response.status === 204) return undefined
     return await response.json()
   }
   private async put(path: string, body: unknown) {

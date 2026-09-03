@@ -120,6 +120,30 @@ describe('ForgeSocket', () => {
     expect(useMessagesStore.getState().volatile).toHaveLength(0)
     socket.stop()
   })
+
+  it('stores queued prompt snapshots only for subscribed sessions', () => {
+    const socket = new ForgeSocket({
+      sessions: ['ses-1'],
+      createWebSocket: () => new MockSocket(),
+    }).start()
+    const mock = MockSocket.sockets[0]
+    mock.open()
+    mock.message({
+      type: 'queuedPrompts',
+      seq: null,
+      sessionId: 'ses-2',
+      prompts: [{ id: 'q2', sessionId: 'ses-2', text: 'no', createdAt: 1 }],
+    })
+    expect(useMessagesStore.getState().queuedBySession['ses-2']).toBeUndefined()
+    mock.message({
+      type: 'queuedPrompts',
+      seq: null,
+      sessionId: 'ses-1',
+      prompts: [{ id: 'q1', sessionId: 'ses-1', text: 'yes', createdAt: 1 }],
+    })
+    expect(useMessagesStore.getState().queuedBySession['ses-1']).toHaveLength(1)
+    socket.stop()
+  })
 })
 
 describe('normalizeMessage', () => {

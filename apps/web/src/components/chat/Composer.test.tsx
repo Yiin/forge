@@ -12,6 +12,7 @@ import { Composer } from './Composer'
 import { accountsApi } from '../../lib/accounts-api'
 import { api } from '../../lib/api'
 import { useMessagesStore } from '../../stores/messages'
+import type { HarnessSelection } from './harness-picker-logic'
 
 describe('Composer', () => {
   afterEach(() => {
@@ -24,6 +25,14 @@ describe('Composer', () => {
   const renderComposer = (
     onSend = vi.fn().mockResolvedValue(undefined),
     onTextChange?: (text: string) => void,
+    options: {
+      running?: boolean
+      onQueue?: (
+        text: string,
+        attachmentIds: string[],
+        selection: HarnessSelection,
+      ) => Promise<void>
+    } = {},
   ) => {
     vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([
       {
@@ -48,6 +57,8 @@ describe('Composer', () => {
         harness="claude"
         accountId="main"
         onSend={onSend}
+        onQueue={options.onQueue}
+        running={options.running}
         onTextChange={onTextChange}
       />,
     )
@@ -68,6 +79,23 @@ describe('Composer', () => {
       harness: 'claude',
       accountId: 'main',
     })
+  })
+
+  it('queues on Enter while running and labels the send control', () => {
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    const onQueue = vi.fn().mockResolvedValue(undefined)
+    const composer = renderComposer(onSend, undefined, {
+      running: true,
+      onQueue,
+    })
+    fireEvent.change(composer, { target: { value: 'wait for turn' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onQueue).toHaveBeenCalledWith('wait for turn', [], {
+      harness: 'claude',
+      accountId: 'main',
+    })
+    expect(screen.getByRole('button', { name: 'Queue message' })).toBeTruthy()
   })
 
   it('lets the trigger menu consume Enter and Escape', async () => {

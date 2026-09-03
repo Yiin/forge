@@ -14,6 +14,7 @@ import { registerShortcuts } from '../lib/shortcuts'
 import { ChatLifecycle } from '../components/chat/ChatLifecycle'
 import type { ConnectionState } from '../lib/socket'
 import type { HarnessSelection } from '../components/chat/harness-picker-logic'
+import type { QueuedPrompt } from '@forge/protocol/session'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
@@ -134,6 +135,15 @@ export function SessionRoute() {
               .loadMessages(sessionId, messages.map(normalizeMessage))
           })
           .catch(() => undefined)
+        void api
+          .listQueued(sessionId)
+          .then((value) => {
+            const prompts = Array.isArray(value)
+              ? value
+              : (value as { prompts?: unknown[] }).prompts ?? []
+            useMessagesStore.getState().setQueued(sessionId, prompts as QueuedPrompt[])
+          })
+          .catch(() => undefined)
       } catch (error) {
         if (active) {
           setLoading(false)
@@ -217,6 +227,22 @@ export function SessionRoute() {
       setSending(false)
     }
   }
+  const queue = async (
+    text: string,
+    attachmentIds: string[],
+    selection: HarnessSelection,
+  ) => {
+    await api.prompt({
+      sessionId,
+      text,
+      attachmentIds,
+      harness: selection.harness || harness,
+      accountId: selection.accountId,
+      model: selection.model,
+      configOptions: selection.configOptions,
+      delivery: 'turn-boundary',
+    })
+  }
   return (
     <div className="session-view relative flex h-full min-h-0 flex-col">
       {!loading && !loadError && <SessionHeader sessionId={sessionId} />}
@@ -274,6 +300,7 @@ export function SessionRoute() {
                 await api.interrupt({ sessionId })
               }}
               onSend={send}
+              onQueue={queue}
               sending={sending}
             />
           </div>

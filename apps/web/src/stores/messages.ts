@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Ephemeral, ServerEvent } from '@forge/protocol/events'
 import type { Message, MessageContent } from '@forge/protocol/message'
+import type { QueuedPrompt } from '@forge/protocol/session'
 
 export type TimelineItem = Message
 export type VolatileEvent = Ephemeral
@@ -15,6 +16,7 @@ type FoldedMessagesState = Pick<MessagesState, 'bySession' | 'lastSeq'> &
 type MessagesState = {
   bySession: Record<string, TimelineItem[]>
   pendingBySession: Record<string, PendingUserMessage[]>
+  queuedBySession: Record<string, QueuedPrompt[]>
   lastSeq: number
   volatile: VolatileEvent[]
   applyEvent: (event: ServerEvent) => void
@@ -22,6 +24,9 @@ type MessagesState = {
   addPending: (pending: PendingUserMessage) => void
   removePending: (sessionId: string, itemId: string) => void
   clearPending: (sessionId: string) => void
+  setQueued: (sessionId: string, prompts: QueuedPrompt[]) => void
+  removeQueued: (sessionId: string, promptId: string) => void
+  updateQueued: (sessionId: string, prompt: QueuedPrompt) => void
   applyEphemeral: (event: VolatileEvent) => void
   reset: () => void
 }
@@ -92,6 +97,7 @@ export function foldEvent(
 export const useMessagesStore = create<MessagesState>((set) => ({
   bySession: {},
   pendingBySession: {},
+  queuedBySession: {},
   lastSeq: 0,
   volatile: [],
   applyEvent: (event) => set((state) => foldEvent(state, event)),
@@ -145,8 +151,30 @@ export const useMessagesStore = create<MessagesState>((set) => ({
     set((state) => ({
       pendingBySession: { ...state.pendingBySession, [sessionId]: [] },
     })),
+  setQueued: (sessionId, prompts) =>
+    set((state) => ({
+      queuedBySession: { ...state.queuedBySession, [sessionId]: prompts },
+    })),
+  removeQueued: (sessionId, promptId) =>
+    set((state) => ({
+      queuedBySession: {
+        ...state.queuedBySession,
+        [sessionId]: (state.queuedBySession[sessionId] ?? []).filter(
+          (prompt) => prompt.id !== promptId,
+        ),
+      },
+    })),
+  updateQueued: (sessionId, prompt) =>
+    set((state) => ({
+      queuedBySession: {
+        ...state.queuedBySession,
+        [sessionId]: (state.queuedBySession[sessionId] ?? []).map((current) =>
+          current.id === prompt.id ? prompt : current,
+        ),
+      },
+    })),
   applyEphemeral: (event) =>
     set((state) => ({ volatile: [...state.volatile, event] })),
   reset: () =>
-    set({ bySession: {}, pendingBySession: {}, lastSeq: 0, volatile: [] }),
+    set({ bySession: {}, pendingBySession: {}, queuedBySession: {}, lastSeq: 0, volatile: [] }),
 }))

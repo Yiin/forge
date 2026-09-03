@@ -136,6 +136,11 @@ export class ForgeSocket {
           .setContextWindow(frame.sessionId, frame.usage)
         return
       }
+      if (frame.type === 'queuedPrompts') {
+        if (this.options.sessions === 'all' || this.options.sessions.includes(frame.sessionId))
+          useMessagesStore.getState().setQueued(frame.sessionId, frame.prompts)
+        return
+      }
       return useMessagesStore.getState().applyEphemeral(frame)
     }
     const event = ServerEvent.safeParse(value)

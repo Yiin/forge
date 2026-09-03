@@ -23,6 +23,8 @@ import type { ClipboardEvent } from 'react'
 import { api } from '../../lib/api'
 import { useMessagesStore } from '../../stores/messages'
 import { AttachmentChips } from '../composer/AttachmentChips'
+import { QueuedPrompts } from '../composer/QueuedPrompts'
+import type { QueuedPrompt } from '@forge/protocol/session'
 import {
   attachmentUploadsReducer,
   canSendUploads,
@@ -67,6 +69,7 @@ const commandDefaults: ComposerCommand[] = [
   { id: 'help', label: '/help', group: 'Built-in', value: '/help' },
   { id: 'clear', label: '/clear', group: 'Built-in', value: '/clear' },
 ]
+const EMPTY_QUEUED_PROMPTS: QueuedPrompt[] = []
 
 function clipboardExtension(type: string) {
   switch (type) {
@@ -92,6 +95,7 @@ export function Composer({
   running = false,
   onInterrupt,
   onSend,
+  onQueue,
   sending = false,
   draftMode = false,
   draftProjectId,
@@ -107,6 +111,11 @@ export function Composer({
   running?: boolean
   onInterrupt?: () => Promise<void>
   onSend: (
+    text: string,
+    attachmentIds: string[],
+    selection: HarnessSelection,
+  ) => Promise<void>
+  onQueue?: (
     text: string,
     attachmentIds: string[],
     selection: HarnessSelection,
@@ -137,6 +146,9 @@ export function Composer({
   const submitting = useRef(false)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const volatile = useMessagesStore((state) => state.volatile)
+  const queued = useMessagesStore(
+    (state) => state.queuedBySession[sessionId] ?? EMPTY_QUEUED_PROMPTS,
+  )
   const contextWindow = useSessionsStore(
     (state) => state.contextWindow[sessionId],
   )
@@ -448,7 +460,8 @@ export function Composer({
     dispatchUploads(initialAttachmentUploads)
     try {
       const changedOptions = pendingChanges(configOptions, configSelections)
-      await onSend(
+      const dispatch = running && onQueue ? onQueue : onSend
+      await dispatch(
         value,
         attachmentIds,
         Object.keys(changedOptions).length > 0
@@ -539,6 +552,28 @@ export function Composer({
                 : 'border-black/12 dark:border-transparent dark:inset-ring-1 dark:inset-ring-white/5',
             )}
           >
+            {queued.length > 0 && (
+              <>
+                <QueuedPrompts
+                  items={queued}
+                  onRemove={(id) => {
+                    void api.deleteQueued(sessionId, id).then(() => {
+                      useMessagesStore.getState().removeQueued(sessionId, id)
+                    })
+                  }}
+                  onEdit={(item: QueuedPrompt) => {
+                    void api.deleteQueued(sessionId, item.id).then(() => {
+                      useMessagesStore.getState().removeQueued(sessionId, item.id)
+                      update(item.text)
+                      textarea.current?.focus()
+                    })
+                  }}
+                />
+                <p className="px-2 pt-1 text-xs text-muted-foreground">
+                  Sends when the current turn ends.
+                </p>
+              </>
+            )}
             {uploads.items.length > 0 && (
               <div className="px-3 pt-3 sm:px-4">
                 <AttachmentChips
@@ -840,7 +875,7 @@ export function Composer({
                       ? 'Wait for uploads to finish or remove failed files'
                       : undefined
                   }
-                  aria-label="Send"
+                  aria-label={running ? 'Queue message' : 'Send'}
                 >
                   {sending ? (
                     <Spinner className="size-3.5" />
