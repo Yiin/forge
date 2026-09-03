@@ -176,5 +176,11 @@ export const useMessagesStore = create<MessagesState>((set) => ({
   applyEphemeral: (event) =>
     set((state) => ({ volatile: [...state.volatile, event] })),
   reset: () =>
-    set({ bySession: {}, pendingBySession: {}, queuedBySession: {}, lastSeq: 0, volatile: [] }),
+    set({
+      bySession: {},
+      pendingBySession: {},
+      queuedBySession: {},
+      lastSeq: 0,
+      volatile: [],
+    }),
 }))

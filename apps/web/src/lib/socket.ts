@@ -137,7 +137,10 @@ export class ForgeSocket {
         return
       }
       if (frame.type === 'queuedPrompts') {
-        if (this.options.sessions === 'all' || this.options.sessions.includes(frame.sessionId))
+        if (
+          this.options.sessions === 'all' ||
+          this.options.sessions.includes(frame.sessionId)
+        )
           useMessagesStore.getState().setQueued(frame.sessionId, frame.prompts)
         return
       }

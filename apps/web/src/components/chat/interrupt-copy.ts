@@ -8,10 +8,7 @@ const INTERRUPT_REASON_COPY: Record<string, string> = {
   error: 'The turn failed.',
 }
 
-export function interruptReasonText(
-  reason?: string,
-  version?: string,
-): string {
+export function interruptReasonText(reason?: string, version?: string): string {
   if (reason === 'server_updated') {
     return version
       ? `Forge updated to v${version} and restarted. This turn stopped.`

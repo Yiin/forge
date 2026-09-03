@@ -563,7 +563,9 @@ export function Composer({
                   }}
                   onEdit={(item: QueuedPrompt) => {
                     void api.deleteQueued(sessionId, item.id).then(() => {
-                      useMessagesStore.getState().removeQueued(sessionId, item.id)
+                      useMessagesStore
+                        .getState()
+                        .removeQueued(sessionId, item.id)
                       update(item.text)
                       textarea.current?.focus()
                     })

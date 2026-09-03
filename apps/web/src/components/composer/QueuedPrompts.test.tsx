@@ -12,7 +12,9 @@ describe('QueuedPrompts', () => {
     render(<QueuedPrompts items={[item]} onRemove={onRemove} onEdit={onEdit} />)
 
     expect(screen.getByText('queued text')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Remove queued message' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Remove queued message' }),
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Edit queued message' }))
     expect(onRemove).toHaveBeenCalledWith('q1')
     expect(onEdit).toHaveBeenCalledWith(item)

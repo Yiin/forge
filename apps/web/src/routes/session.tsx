@@ -147,8 +147,10 @@ export function SessionRoute() {
           .then((value) => {
             const prompts = Array.isArray(value)
               ? value
-              : (value as { prompts?: unknown[] }).prompts ?? []
-            useMessagesStore.getState().setQueued(sessionId, prompts as QueuedPrompt[])
+              : ((value as { prompts?: unknown[] }).prompts ?? [])
+            useMessagesStore
+              .getState()
+              .setQueued(sessionId, prompts as QueuedPrompt[])
           })
           .catch(() => undefined)
       } catch (error) {

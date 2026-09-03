@@ -43,9 +43,9 @@ async function readSkill(directory: string): Promise<Skill | undefined> {
   return { name: resolvedName, description }
 }
 
-async function readSkillSource(directory: string): Promise<
-  (Skill & { content: string }) | undefined
-> {
+async function readSkillSource(
+  directory: string,
+): Promise<(Skill & { content: string }) | undefined> {
   let content: string
   try {
     content = await readFile(join(directory, 'SKILL.md'), 'utf8')

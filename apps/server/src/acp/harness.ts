@@ -272,12 +272,13 @@ export function acpHarness(
     return {
       availableModels,
       prompt: async (content: string | PromptContent[]) => {
-        const parts = typeof content === 'string'
-          ? [{ kind: 'text', text: content } satisfies PromptContent]
-          : [
-              ...content.filter((part) => part.kind !== 'text'),
-              ...content.filter((part) => part.kind === 'text'),
-            ]
+        const parts =
+          typeof content === 'string'
+            ? [{ kind: 'text', text: content } satisfies PromptContent]
+            : [
+                ...content.filter((part) => part.kind !== 'text'),
+                ...content.filter((part) => part.kind === 'text'),
+              ]
         let inlineImageBytes = 0
         const blocks: acp.ContentBlock[] = []
         for (const part of parts) {
@@ -289,14 +290,22 @@ export function acpHarness(
               part.bytes.byteLength <= MAX_INLINE_IMAGE_BYTES &&
               inlineImageBytes + part.bytes.byteLength <= MAX_INLINE_TOTAL_BYTES
             inlineImageBytes += part.bytes.byteLength
-            blocks.push(canInline
-              ? { type: 'image', data: part.bytes.toString('base64'), mimeType: part.mime }
-              : {
-                  type: 'resource_link',
-                  uri: pathToFileURL(part.path ?? 'image').toString(),
-                  name: part.path ? part.path.split('/').pop() ?? 'image' : 'image',
-                  mimeType: part.mime,
-                })
+            blocks.push(
+              canInline
+                ? {
+                    type: 'image',
+                    data: part.bytes.toString('base64'),
+                    mimeType: part.mime,
+                  }
+                : {
+                    type: 'resource_link',
+                    uri: pathToFileURL(part.path ?? 'image').toString(),
+                    name: part.path
+                      ? (part.path.split('/').pop() ?? 'image')
+                      : 'image',
+                    mimeType: part.mime,
+                  },
+            )
           } else {
             blocks.push({
               type: 'resource_link',

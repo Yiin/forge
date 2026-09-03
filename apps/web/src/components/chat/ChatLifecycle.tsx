@@ -1,9 +1,4 @@
-import {
-  CircleAlert,
-  LoaderCircle,
-  RefreshCw,
-  WifiOff,
-} from 'lucide-react'
+import { CircleAlert, LoaderCircle, RefreshCw, WifiOff } from 'lucide-react'
 import type { ConnectionState } from '../../lib/socket'
 import { Button } from '../ui/button'
 

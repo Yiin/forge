@@ -168,24 +168,20 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
       const checked = createRequest.parse(request)
       const shellWrapped = !checked.args || checked.args.length === 0
       const command = shellWrapped ? 'sh' : checked.command
-      const args = shellWrapped ? ['-c', checked.command] : checked.args ?? []
-      const child = spawn(
-        command,
-        args,
-        {
-          cwd: checked.cwd
-            ? checkedPath(options.cwd, options.projectRoot, checked.cwd)
-            : options.cwd,
-          env: {
-            ...process.env,
-            ...Object.fromEntries(
-              (checked.env ?? []).map((entry) => [entry.name, entry.value]),
-            ),
-          },
-          stdio: ['ignore', 'pipe', 'pipe'],
-          detached: shellWrapped,
+      const args = shellWrapped ? ['-c', checked.command] : (checked.args ?? [])
+      const child = spawn(command, args, {
+        cwd: checked.cwd
+          ? checkedPath(options.cwd, options.projectRoot, checked.cwd)
+          : options.cwd,
+        env: {
+          ...process.env,
+          ...Object.fromEntries(
+            (checked.env ?? []).map((entry) => [entry.name, entry.value]),
+          ),
         },
-      )
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: shellWrapped,
+      })
       const terminal: Terminal = {
         process: child,
         chunks: [],

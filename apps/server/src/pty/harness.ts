@@ -163,13 +163,18 @@ export function createPtyHarness(options: PtyOptions): HarnessProcess {
 
       const handle: HarnessHandle = {
         prompt(content: string | PromptContent[]) {
-          const text = typeof content === 'string'
-            ? content
-            : content
-                .filter((part) => part.kind !== 'text')
-                .map((part) => part.kind === 'file' ? part.path : '[image]')
-                .concat(content.filter((part) => part.kind === 'text').map((part) => part.text))
-                .join('\n')
+          const text =
+            typeof content === 'string'
+              ? content
+              : content
+                  .filter((part) => part.kind !== 'text')
+                  .map((part) => (part.kind === 'file' ? part.path : '[image]'))
+                  .concat(
+                    content
+                      .filter((part) => part.kind === 'text')
+                      .map((part) => part.text),
+                  )
+                  .join('\n')
           if (active) throw new Error('PTY turn already running')
           active = true
           received = false

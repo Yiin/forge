@@ -64,7 +64,11 @@ describe('session recovery', () => {
       { version: '1.0.0', stopped_at: null },
       { type: 'turn_interrupted', reason: 'server_crashed' },
     ],
-    ['first boot fallback', undefined, { type: 'turn_interrupted', reason: 'server_restart' }],
+    [
+      'first boot fallback',
+      undefined,
+      { type: 'turn_interrupted', reason: 'server_restart' },
+    ],
   ])('labels %s recovery', async (_label, previousBoot, expected) => {
     await expect(recoveredReason(previousBoot)).resolves.toEqual(expected)
   })

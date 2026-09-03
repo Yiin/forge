@@ -42,15 +42,12 @@ export function Timeline({
     () => sessions.filter((session) => session.parentSessionId === sessionId),
     [sessions, sessionId],
   )
-  const items = useMemo(
-    () => {
-      const base = toRenderModel(messages, resumedWithRecap, children, pending)
-      return running
-        ? [...base, { kind: 'working' as const, id: 'working-indicator' }]
-        : base
-    },
-    [messages, resumedWithRecap, children, pending, running],
-  )
+  const items = useMemo(() => {
+    const base = toRenderModel(messages, resumedWithRecap, children, pending)
+    return running
+      ? [...base, { kind: 'working' as const, id: 'working-indicator' }]
+      : base
+  }, [messages, resumedWithRecap, children, pending, running])
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
   // The bottom spacer grows with the composer, so re-pin before paint whenever

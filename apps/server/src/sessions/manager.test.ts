@@ -349,7 +349,7 @@ describe('session harness selection', () => {
           prompts.push(
             typeof content === 'string'
               ? content
-              : content.find((item) => item.kind === 'text')?.text ?? '',
+              : (content.find((item) => item.kind === 'text')?.text ?? ''),
           )
           calls += 1
           if (calls === 1)
@@ -426,7 +426,7 @@ describe('session harness selection', () => {
           prompts.push(
             typeof content === 'string'
               ? content
-              : content.find((item) => item.kind === 'text')?.text ?? '',
+              : (content.find((item) => item.kind === 'text')?.text ?? ''),
           )
           calls += 1
           if (calls === 1) throw new Error('failed')
@@ -596,7 +596,7 @@ describe('skill invocation', () => {
           dispatched =
             typeof content === 'string'
               ? content
-              : content.find((item) => item.kind === 'text')?.text ?? ''
+              : (content.find((item) => item.kind === 'text')?.text ?? '')
         },
         cancel: () => undefined,
         kill: () => undefined,
@@ -611,7 +611,9 @@ describe('skill invocation', () => {
     expect(dispatched).toContain('ARGUMENTS: inspect this')
     expect(
       db
-        .prepare("SELECT json_extract(content, '$.text') AS text FROM messages WHERE type = 'text_delta'")
+        .prepare(
+          "SELECT json_extract(content, '$.text') AS text FROM messages WHERE type = 'text_delta'",
+        )
         .get(),
     ).toEqual({ text: '$beads inspect this' })
   })
@@ -634,7 +636,7 @@ describe('skill invocation', () => {
           dispatched.push(
             typeof content === 'string'
               ? content
-              : content.find((item) => item.kind === 'text')?.text ?? '',
+              : (content.find((item) => item.kind === 'text')?.text ?? ''),
           )
         },
         cancel: () => undefined,
@@ -661,7 +663,9 @@ describe('skill invocation', () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 10))
 
     expect(dispatched).toHaveLength(2)
-    expect(dispatched).toEqual(expect.arrayContaining(['$missing', ' $missing']))
+    expect(dispatched).toEqual(
+      expect.arrayContaining(['$missing', ' $missing']),
+    )
   })
 })
 
