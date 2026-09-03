@@ -152,7 +152,7 @@ describe('chat render model', () => {
       ),
     ).toEqual([
       { kind: 'system', id: 'resumed-recap', text: 'Resumed with recap' },
-      { kind: 'system', id: 'i', text: 'Turn interrupted: cancelled' },
+      { kind: 'system', id: 'i', text: 'You stopped this turn.' },
     ])
   })
   it('keeps process details available without crowding the error row', () => {

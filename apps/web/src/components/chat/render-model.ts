@@ -1,6 +1,7 @@
 import type { Message } from '@forge/protocol/message'
 import type { SubagentSession } from './subagent'
 import type { PendingUserMessage } from '../../stores/messages'
+import { interruptReasonText } from './interrupt-copy'
 
 export type ToolState = 'running' | 'done' | 'error'
 export type ActivityState = ToolState | 'unknown'
@@ -234,9 +235,7 @@ export function toRenderModel(
       result.push({
         kind: 'system',
         id: message.itemId,
-        text: content.reason
-          ? `Turn interrupted: ${content.reason}`
-          : 'Turn interrupted',
+        text: interruptReasonText(content.reason, content.version),
       })
     } else if (content.type === 'error') {
       result.push({
