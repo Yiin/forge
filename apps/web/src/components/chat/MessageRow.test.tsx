@@ -97,6 +97,25 @@ describe('MessageRow', () => {
     )
   })
 
+  it('chips only skills listed by the workspace', () => {
+    const view = render(
+      <MessageRow
+        item={{
+          kind: 'message',
+          id: 'u3',
+          seq: 3,
+          role: 'user',
+          text: '$beads $unknown',
+        }}
+        skills={['beads']}
+      />,
+    )
+
+    expect(view.container.textContent).toBe('$beads $unknown')
+    expect(view.container.querySelectorAll('span')).toHaveLength(1)
+    expect(view.container.querySelector('span')?.textContent).toBe('$beads')
+  })
+
   it('exposes tool detail disclosures', () => {
     render(
       <ToolCallRow

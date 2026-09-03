@@ -32,9 +32,11 @@ const META_ROW_CLASS =
 export function MessageRow({
   item,
   sessionId,
+  skills = [],
 }: {
   item: Extract<ChatRenderItem, { kind: 'message' }>
   sessionId?: string
+  skills?: string[]
 }) {
   const [open, setOpen] = useState(!item.thought)
   const copy = async () => {
@@ -82,7 +84,7 @@ export function MessageRow({
         aria-busy={item.pending ? true : undefined}
       >
         <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3 text-sm text-foreground whitespace-pre-wrap break-words">
-          <SkillChipText text={item.text} skills={[]} />
+          <SkillChipText text={item.text} skills={skills} />
         </div>
         {!item.pending && (
           <div className={META_ROW_CLASS}>

@@ -17,7 +17,13 @@ import { Button } from '../ui/button'
 
 const EMPTY_MESSAGES: Message[] = []
 
-export function SubagentCard({ child }: { child: SubagentSession }) {
+export function SubagentCard({
+  child,
+  skills = [],
+}: {
+  child: SubagentSession
+  skills?: string[]
+}) {
   const [expanded, setExpanded] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState(false)
@@ -160,7 +166,7 @@ export function SubagentCard({ child }: { child: SubagentSession }) {
       ) : expanded ? (
         messages.length ? (
           <div className="mt-2 border-t border-border/45 pt-2">
-            <SubagentTranscript messages={messages} />
+            <SubagentTranscript messages={messages} skills={skills} />
           </div>
         ) : (
           <div className="mt-2 border-t border-border/45 pt-2 text-xs text-muted-foreground">

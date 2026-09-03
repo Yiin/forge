@@ -20,11 +20,13 @@ export function Timeline({
   resumedWithRecap = false,
   targetSeq,
   bottomInset = 0,
+  skills = [],
 }: {
   resumedWithRecap?: boolean
   targetSeq?: number
   /** Height of the composer overlay, kept clear so the last row stays visible. */
   bottomInset?: number
+  skills?: string[]
 }) {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
   const messages = useMessagesStore(
@@ -92,7 +94,12 @@ export function Timeline({
             every measured row by one and opens blank bands between rows. */}
         <Virtualizer<ChatRenderItem> data={items}>
           {(item: ChatRenderItem) => (
-            <RenderItem key={item.id} item={item} sessionId={sessionId} />
+            <RenderItem
+              key={item.id}
+              item={item}
+              sessionId={sessionId}
+              skills={skills}
+            />
           )}
         </Virtualizer>
         <div aria-hidden style={{ height: bottomInset }} />
@@ -121,9 +128,11 @@ export function Timeline({
 function RenderItem({
   item,
   sessionId,
+  skills,
 }: {
   item: ReturnType<typeof toRenderModel>[number]
   sessionId: string
+  skills: string[]
 }) {
   return (
     <div
@@ -136,7 +145,7 @@ function RenderItem({
           : 'pb-4',
       )}
     >
-      <RenderItemContent item={item} sessionId={sessionId} />
+      <RenderItemContent item={item} sessionId={sessionId} skills={skills} />
     </div>
   )
 }
@@ -144,16 +153,19 @@ function RenderItem({
 function RenderItemContent({
   item,
   sessionId,
+  skills,
 }: {
   item: ReturnType<typeof toRenderModel>[number]
   sessionId: string
+  skills: string[]
 }) {
   if (item.kind === 'message')
-    return <MessageRow item={item} sessionId={sessionId} />
+    return <MessageRow item={item} sessionId={sessionId} skills={skills} />
   if (item.kind === 'tool') return <ToolCallRow item={item} />
   if (item.kind === 'answered-question')
     return <AnsweredQuestionRow question={item.question} answer={item.answer} />
-  if (item.kind === 'subagent') return <SubagentCard child={item.child} />
+  if (item.kind === 'subagent')
+    return <SubagentCard child={item.child} skills={skills} />
   if (item.kind === 'activity') return <ActivityStack item={item} />
   if (item.kind === 'epic-triage') return <EpicTriageCard card={item.card} />
   if (item.kind === 'attachment') return <AttachmentItem item={item} />

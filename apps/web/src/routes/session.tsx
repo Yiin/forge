@@ -34,6 +34,7 @@ export function SessionRoute() {
   const [loadError, setLoadError] = useState<string>()
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [retryAttempt, setRetryAttempt] = useState(0)
+  const [skills, setSkills] = useState<string[]>([])
   const sessionStatus = useSessionsStore(
     (state) =>
       state.sessions.find((session) => session.id === sessionId)?.status,
@@ -87,6 +88,12 @@ export function SessionRoute() {
         setLoadedStatus(session.status)
         setLoading(false)
         setLoadError(undefined)
+        void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/skills`)
+          .then((response) => (response.ok ? response.json() : null))
+          .then((value: { skills?: Array<{ name: string }> } | null) =>
+            setSkills((value?.skills ?? []).map((skill) => skill.name)),
+          )
+          .catch(() => setSkills([]))
         socket = connectForgeSocket({
           sessions: [sessionId],
           onConnectionChange: (state) => active && setConnection(state),
@@ -263,6 +270,7 @@ export function SessionRoute() {
         <Timeline
           targetSeq={Number.isFinite(targetSeq) ? targetSeq : undefined}
           bottomInset={composerHeight}
+          skills={skills}
         />
       )}
       {!loading && !loadError && (

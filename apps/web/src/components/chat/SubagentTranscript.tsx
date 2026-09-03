@@ -7,7 +7,13 @@ import type { ChatRenderItem } from './render-model'
 import { ActivityStack } from './ActivityStack'
 import { AttachmentItem } from './TranscriptItems'
 
-export function SubagentTranscript({ messages }: { messages: Message[] }) {
+export function SubagentTranscript({
+  messages,
+  skills = [],
+}: {
+  messages: Message[]
+  skills?: string[]
+}) {
   const items = useMemo(() => toRenderModel(messages), [messages])
   return (
     <div
@@ -17,7 +23,7 @@ export function SubagentTranscript({ messages }: { messages: Message[] }) {
       <Virtualizer<ChatRenderItem> data={items}>
         {(item: ChatRenderItem) => {
           if (item.kind === 'message')
-            return <MessageRow key={item.id} item={item} />
+            return <MessageRow key={item.id} item={item} skills={skills} />
           if (item.kind === 'tool')
             return <ToolCallRow key={item.id} item={item} />
           if (item.kind === 'activity')

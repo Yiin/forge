@@ -12,7 +12,7 @@ export function SkillChipText({
   let cursor = 0
   for (const match of text.matchAll(SKILL_TOKEN)) {
     const name = match[2] ?? ''
-    if (skills.length > 0 && !skills.includes(name)) continue
+    if (!skills.includes(name)) continue
     const start = (match.index ?? 0) + (match[1]?.length ?? 0)
     nodes.push(
       text.slice(cursor, start),
