@@ -68,6 +68,21 @@ const commandDefaults: ComposerCommand[] = [
   { id: 'clear', label: '/clear', group: 'Built-in', value: '/clear' },
 ]
 
+function clipboardExtension(type: string) {
+  switch (type) {
+    case 'image/png':
+      return 'png'
+    case 'image/jpeg':
+      return 'jpg'
+    case 'image/gif':
+      return 'gif'
+    case 'image/webp':
+      return 'webp'
+    default:
+      return 'bin'
+  }
+}
+
 export function Composer({
   sessionId,
   harness,
@@ -294,7 +309,7 @@ export function Composer({
     })
   }
   const upload = async (file: File, retryId?: string) => {
-    if (draftMode) return
+    if (draftMode && !draftProjectId) return
     const temp = `local-${crypto.randomUUID()}`
     const id = retryId ?? temp
     if (retryId)
@@ -421,11 +436,26 @@ export function Composer({
     }
   }
   const addFiles = (files: FileList | File[]) => {
-    for (const file of files) void upload(file)
+    for (const file of files) {
+      const normalized = file.name
+        ? file
+        : new File(
+            [file],
+            `pasted-${Date.now()}.${clipboardExtension(file.type)}`,
+            {
+              type: file.type,
+              lastModified: file.lastModified,
+            },
+          )
+      void upload(normalized)
+    }
   }
   const paste = (event: ClipboardEvent) => {
     const files = [...event.clipboardData.files]
-    if (files.length) addFiles(files)
+    if (files.length) {
+      event.preventDefault()
+      addFiles(files)
+    }
   }
   const canSubmit = !sending && !!text.trim() && canSendUploads(uploads)
   const stopping = protocol === 'pty' && running && onInterrupt

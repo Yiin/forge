@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import {
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -9,6 +10,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Composer } from './Composer'
 import { accountsApi } from '../../lib/accounts-api'
+import { api } from '../../lib/api'
 
 describe('Composer', () => {
   afterEach(() => {
@@ -575,5 +577,106 @@ describe('Composer', () => {
       />,
     )
     expect(screen.queryByRole('button', { name: 'Reasoning' })).toBeNull()
+  })
+
+  it('stages a pasted image in a draft and uploads it to the draft project', async () => {
+    const upload = vi.spyOn(api, 'upload').mockResolvedValue({
+      attachmentId: 'attachment-1',
+      putUrl: 'https://uploads.test/attachment-1',
+    })
+    render(
+      <Composer
+        sessionId="draft-1"
+        draftMode
+        draftProjectId="project-1"
+        harness="claude"
+        accountId="main"
+        onSend={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+    const composer = screen.getByLabelText('Message composer')
+    const file = new File(['image'], 'pasted.png', { type: 'image/png' })
+
+    fireEvent.paste(composer, { clipboardData: { files: [file] } })
+
+    await waitFor(() => expect(screen.getByText('pasted.png')).toBeTruthy())
+    expect(upload).toHaveBeenCalledWith(
+      'draft-1',
+      file,
+      expect.any(Function),
+      'project-1',
+    )
+  })
+
+  it('prevents the browser from inserting pasted files into the composer', () => {
+    vi.spyOn(api, 'upload').mockResolvedValue({
+      attachmentId: 'attachment-1',
+      putUrl: 'https://uploads.test/attachment-1',
+    })
+    renderComposer()
+    const composer = screen.getByLabelText('Message composer')
+    const event = createEvent.paste(composer, {
+      clipboardData: {
+        files: [new File(['image'], 'image.png', { type: 'image/png' })],
+      },
+    })
+    const preventDefault = vi.spyOn(event, 'preventDefault')
+
+    fireEvent(composer, event)
+
+    expect(preventDefault).toHaveBeenCalledOnce()
+  })
+
+  it('does not prevent or stage a text-only paste', () => {
+    const upload = vi.spyOn(api, 'upload')
+    renderComposer()
+    const composer = screen.getByLabelText('Message composer')
+    const event = createEvent.paste(composer, {
+      clipboardData: { files: [] },
+    })
+    const preventDefault = vi.spyOn(event, 'preventDefault')
+
+    fireEvent(composer, event)
+
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(upload).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull()
+  })
+
+  it('names a nameless pasted image before upload', async () => {
+    const upload = vi.spyOn(api, 'upload').mockResolvedValue({
+      attachmentId: 'attachment-1',
+      putUrl: 'https://uploads.test/attachment-1',
+    })
+    renderComposer()
+    const composer = screen.getByLabelText('Message composer')
+    const file = new File(['image'], '', { type: 'image/png' })
+
+    fireEvent.paste(composer, { clipboardData: { files: [file] } })
+
+    await waitFor(() => expect(upload).toHaveBeenCalledOnce())
+    const uploaded = upload.mock.calls[0][1]
+    expect(uploaded.name).toMatch(/^pasted-\d+\.png$/)
+  })
+
+  it('keeps uploads disabled in draft mode without a project id', () => {
+    const upload = vi.spyOn(api, 'upload')
+    render(
+      <Composer
+        sessionId="draft-1"
+        draftMode
+        harness="claude"
+        accountId="main"
+        onSend={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+    fireEvent.paste(screen.getByLabelText('Message composer'), {
+      clipboardData: {
+        files: [new File(['image'], 'image.png', { type: 'image/png' })],
+      },
+    })
+
+    expect(upload).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull()
   })
 })
