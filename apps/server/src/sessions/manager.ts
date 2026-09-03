@@ -45,6 +45,15 @@ export type SessionRow = {
 const makeId = (prefix: string) =>
   `${prefix}${crypto.randomUUID().replaceAll('-', '')}`
 
+export class PromptBusyError extends Error {
+  readonly status = 409
+
+  constructor() {
+    super('Session is already running a turn')
+    this.name = 'PromptBusyError'
+  }
+}
+
 function recoveryRecap(db: Db, sessionId: string) {
   const rows = db
     .prepare(
@@ -531,6 +540,8 @@ export class SessionManager {
         .get(id, requestId, id, requestId)
       if (seen) return
     }
+    if ((delivery ?? 'immediate') === 'immediate' && this.turns.has(id))
+      throw new PromptBusyError()
     if (delivery === 'turn-boundary' && this.turns.has(id)) {
       this.db
         .prepare(

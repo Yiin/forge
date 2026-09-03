@@ -57,7 +57,7 @@ type Db = {
 }
 export type WorkerSession = {
   id: string
-  prompt(text: string): Promise<void>
+  prompt(text: string, delivery?: 'immediate' | 'turn-boundary'): Promise<void>
   cancel(): Promise<void>
 }
 export type SessionManager = {
@@ -764,6 +764,7 @@ export class EpicRunner {
           if (session) {
             await session.prompt(
               `Merge ${input.baseBranch} into your branch now. Conflicts: ${(conflict as ConflictReport).files.join(', ')}`,
+              'turn-boundary',
             )
             this.db
               .prepare(

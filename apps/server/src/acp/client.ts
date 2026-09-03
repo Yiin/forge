@@ -29,6 +29,13 @@ export class AgentProcessDiedError extends Error {
   }
 }
 
+export class PromptBusyError extends Error {
+  constructor(readonly sessionId: string) {
+    super(`Prompt already active for session ${sessionId}`)
+    this.name = 'PromptBusyError'
+  }
+}
+
 export type ClientHandlers = {
   /** Working directory for the ACP child process itself. */
   cwd?: string
@@ -96,6 +103,7 @@ export type AcpClient = {
   fork(sessionId: string, cwd: string): Promise<acp.NewSessionResponse>
   forkSession(sessionId: string, cwd: string): Promise<acp.NewSessionResponse>
   prompt(sessionId: string, blocks: acp.ContentBlock[]): Promise<PromptResponse>
+  isPrompting?(sessionId: string): boolean
   cancel(sessionId: string): Promise<void>
   setMode(
     sessionId: string,
@@ -389,9 +397,9 @@ export async function spawnAcpClient(
       return response
     },
     forkSession: (sessionId, cwd) => acpClient.fork(sessionId, cwd),
+    isPrompting: (sessionId) => activePrompts.has(sessionId),
     prompt: async (sessionId, blocks) => {
-      if (activePrompts.has(sessionId))
-        throw new Error(`Prompt already active for session ${sessionId}`)
+      if (activePrompts.has(sessionId)) throw new PromptBusyError(sessionId)
       if (sessionFeatures.get(sessionId)?.mode === undefined)
         sessionFeatures.set(sessionId, { mode: false, model: false })
       activePrompts.add(sessionId)

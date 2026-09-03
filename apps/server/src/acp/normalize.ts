@@ -4,6 +4,7 @@ import type {
   AgentProcessDiedError,
   AcpClient,
 } from './client.js'
+import { PromptBusyError } from './client.js'
 import { appendMessage, type AppendMessage } from '../db/queries.js'
 import type { EventBus } from '../events/bus.js'
 import {
@@ -352,6 +353,7 @@ export class AcpNormalizer {
     blocks: acp.ContentBlock[],
     signal?: AbortSignal,
   ) {
+    if (client.isPrompting?.(sessionId)) throw new PromptBusyError(sessionId)
     const turnId = this.beginTurn(sessionId)
     let cancelled = false
     const abort = () => {
@@ -365,6 +367,7 @@ export class AcpNormalizer {
       else this.endTurn(sessionId, response)
       return response
     } catch (error) {
+      if (error instanceof PromptBusyError) throw error
       if (error instanceof Error && error.name === 'AgentProcessDiedError')
         this.processDied(sessionId, error as AgentProcessDiedError)
       else this.interrupt(sessionId, cancelled ? 'cancelled' : 'error')

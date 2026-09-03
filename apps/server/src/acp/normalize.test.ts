@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as acp from '@agentclientprotocol/sdk'
 import { createProject, createSession, replaySince } from '../db/queries.js'
 import { AcpNormalizer } from './normalize.js'
+import type { AcpClient } from './client.js'
 
 const databases: DatabaseSync[] = []
 afterEach(() => {
@@ -310,6 +311,22 @@ describe('ACP update normalization', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('rejects a busy prompt without creating a second turn', async () => {
+    const { db, session } = fixture()
+    const normalizer = new AcpNormalizer({ db })
+    normalizer.beginTurn(session.id, 'running-turn')
+    const client = {
+      isPrompting: () => true,
+      prompt: vi.fn(),
+    } as unknown as AcpClient
+
+    await expect(normalizer.promptTurn(client, session.id, [])).rejects.toThrow(
+      'Prompt already active',
+    )
+    const rows = replaySince(db, 0, [session.id]) as Array<{ type: string }>
+    expect(rows.map((row) => row.type)).toEqual(['turn_start'])
   })
 
   it('starts a new item after a tool call separates text', async () => {

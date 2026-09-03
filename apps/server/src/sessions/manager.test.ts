@@ -161,6 +161,49 @@ describe('session harness selection', () => {
     expect(new Set(rows.map((row) => row.turn_id))).toEqual(new Set(['turn-1']))
   })
 
+  it('leaves the running turn intact when an immediate prompt is rejected', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    let release!: () => void
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: () => new Promise<void>((resolve) => (release = resolve)),
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+
+    await manager.prompt(session.id, 'one')
+    await expect(manager.prompt(session.id, 'two')).rejects.toThrow(
+      'already running',
+    )
+    expect(
+      db
+        .prepare(
+          "SELECT type FROM messages WHERE session_id = ? AND type IN ('turn_start', 'turn_interrupted', 'error')",
+        )
+        .all(session.id),
+    ).toEqual([{ type: 'turn_start' }])
+
+    release()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(
+      db
+        .prepare(
+          "SELECT type FROM messages WHERE session_id = ? AND type IN ('turn_start', 'turn_end') ORDER BY seq",
+        )
+        .all(session.id),
+    ).toEqual([{ type: 'turn_start' }, { type: 'turn_end' }])
+    manager.close()
+  })
+
   it('rejects a harness without a managed account', () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)
@@ -601,6 +644,17 @@ describe('skill invocation', () => {
 
     await manager.prompt(session.id, '$missing')
     for (let attempt = 0; attempt < 10 && dispatched.length < 1; attempt += 1)
+      await new Promise<void>((resolve) => setTimeout(resolve, 10))
+    for (
+      let attempt = 0;
+      attempt < 10 &&
+      !db
+        .prepare(
+          "SELECT 1 FROM messages WHERE session_id = ? AND type = 'turn_end'",
+        )
+        .get(session.id);
+      attempt += 1
+    )
       await new Promise<void>((resolve) => setTimeout(resolve, 10))
     await manager.prompt(session.id, ' $missing')
     for (let attempt = 0; attempt < 10 && dispatched.length < 2; attempt += 1)

@@ -7,7 +7,7 @@ import {
   answerQuestion as answerSchema,
   setSessionWorkspace as workspaceSchema,
 } from '@forge/protocol/commands'
-import type { SessionManager } from '../sessions/manager.js'
+import { PromptBusyError, type SessionManager } from '../sessions/manager.js'
 import type { UploadStore } from '../uploads/store.js'
 import { errorMessage } from '../error-message.js'
 import { sessionResponse, sessionResponses } from './session-response.js'
@@ -114,6 +114,8 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
       )
       return c.json({ ok: true })
     } catch (error) {
+      if (error instanceof PromptBusyError)
+        return c.json({ error: error.message }, 409)
       return c.json({ error: errorMessage(error) }, 404)
     }
   })
