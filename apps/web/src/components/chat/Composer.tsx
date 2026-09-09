@@ -510,7 +510,7 @@ export function Composer({
     }
   }
   const canSubmit = !sending && !!text.trim() && canSendUploads(uploads)
-  const stopping = protocol === 'pty' && running && onInterrupt
+  const stopping = running && onInterrupt
   const accountSnapshot = accountSnapshots.find(
     (snapshot) => snapshot.accountId === selected.accountId,
   )
@@ -848,7 +848,7 @@ export function Composer({
                     className="flex h-9 w-9 items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:hover:scale-105 enabled:hover:bg-destructive disabled:opacity-40 sm:h-8 sm:w-8"
                     disabled={interrupting}
                     aria-label="End turn"
-                    title="End the current PTY turn without closing the process"
+                    title="Stop the current turn"
                     onClick={() => void endTurn()}
                   >
                     {interrupting ? (
