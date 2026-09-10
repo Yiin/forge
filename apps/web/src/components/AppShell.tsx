@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from '@tanstack/react-router'
 import { useEffect, useRef, type CSSProperties } from 'react'
+import { ArrowLeft, ArrowRight, Plus } from 'lucide-react'
 import { Drawer } from 'vaul'
 import { AppBar } from './AppBar'
 import { cn } from '@/lib/utils'
@@ -19,6 +20,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useSessionsStore } from '../stores/sessions'
 import { ProjectCreationDialog } from './ProjectCreationDialog'
 import { openNewDraft } from '../lib/draft-entry'
+import { Button } from './ui/button'
 export function AppShell() {
   const location = useLocation()
   const store = useShellStore()
@@ -33,7 +35,17 @@ export function AppShell() {
       ? 'Runs'
       : location.pathname.startsWith('/files')
         ? 'Files'
-        : 'Chat'
+      : 'Chat'
+  const currentSession = useSessionsStore((state) =>
+    state.sessions.find((item) => item.id === location.pathname.slice(3)),
+  )
+  const currentProject = useSessionsStore((state) =>
+    state.projects.find(
+      (item) =>
+        item.id ===
+        (currentSession?.projectId ?? currentSession?.project_id),
+    ),
+  )
   useEffect(() => {
     void loadSettings()
       .then(() => {
@@ -119,10 +131,54 @@ export function AppShell() {
       </a>
       <CommandPalette />
       <ProjectCreationDialog />
+      <header className="hidden h-[38px] shrink-0 items-center gap-2 border-b border-border bg-background px-3 md:flex">
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Go back"
+            onClick={() => window.history.back()}
+          >
+            <ArrowLeft />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Go forward"
+            onClick={() => window.history.forward()}
+          >
+            <ArrowRight />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="New session"
+            onClick={() => void openNewDraft(navigate)}
+          >
+            <Plus />
+          </Button>
+        </div>
+        <div className="min-w-0 truncate text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">
+            {currentSession?.title ?? title}
+          </span>
+          {currentSession && (
+            <span>
+              {' · '}
+              {currentSession.harness ?? 'default'}
+              {' · '}
+              {currentProject?.name ?? 'No project'}
+              {' · '}
+              {currentSession.worktreePath ?? currentProject?.path ?? 'No target'}
+            </span>
+          )}
+        </div>
+      </header>
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
       <aside
         className={cn(
-          'relative hidden shrink-0 border-r border-sidebar-border bg-sidebar md:flex',
-          !store.sidebarOpen && 'md:w-14',
+          'shell-sidebar relative hidden shrink-0 border-r border-sidebar-border bg-sidebar md:flex',
+          !store.sidebarOpen && 'md:w-0 md:border-r-0',
         )}
         style={
           store.sidebarOpen
@@ -141,13 +197,22 @@ export function AppShell() {
           aria-label="Resize sidebar"
           aria-orientation="vertical"
           aria-valuenow={store.sidebarWidth}
-          aria-valuemin={216}
-          aria-valuemax={360}
+          aria-valuemin={208}
+          aria-valuemax={400}
           tabIndex={0}
           className="absolute top-0 -right-[3px] h-full w-1.5 cursor-ew-resize outline-none focus-visible:bg-ring/50"
           onKeyDown={(event) => {
-            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            if (
+              event.key !== 'ArrowLeft' &&
+              event.key !== 'ArrowRight' &&
+              event.key !== 'Home'
+            )
+              return
             event.preventDefault()
+            if (event.key === 'Home') {
+              store.resetSidebarWidth()
+              return
+            }
             store.setSidebarWidth(
               store.sidebarWidth + (event.key === 'ArrowRight' ? 16 : -16),
             )
@@ -190,6 +255,7 @@ export function AppShell() {
         <Outlet />
       </main>
       <Toaster theme={resolveTheme(store.theme)} />
+      </div>
     </div>
   )
 }

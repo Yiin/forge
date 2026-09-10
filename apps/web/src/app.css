@@ -12,10 +12,10 @@
   --color-zinc-25: oklch(99.2% 0 0);
   --animate-status-pulse: status-pulse 2s infinite;
   --font-sans:
-    'DM Sans Variable', 'DM Sans', -apple-system, BlinkMacSystemFont,
+    'Geist Variable', 'Geist', -apple-system, BlinkMacSystemFont,
     'Segoe UI', system-ui, sans-serif;
   --font-mono:
-    'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Consolas, 'Liberation Mono',
+    'Geist Mono', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Consolas, 'Liberation Mono',
     Menlo, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -247,6 +247,12 @@ body {
   background-image: var(--surface-grain);
   background-repeat: repeat;
   background-size: 256px 256px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .shell-sidebar {
+    transition: width 200ms ease;
+  }
 }
 
 /* Grain texture for chrome surfaces that float above the body. Layered over

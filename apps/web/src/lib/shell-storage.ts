@@ -1,17 +1,22 @@
 const WIDTH_KEY = 'forge.shell.sidebar-width'
 const THEME_KEY = 'forge.shell.theme'
 const SESSION_KEY = 'forge.shell.last-session'
+export const SIDEBAR_WIDTH_DEFAULT = 256
+export const SIDEBAR_WIDTH_MIN = 208
+export const SIDEBAR_WIDTH_MAX = 400
 
 export type Theme = 'system' | 'dark' | 'light'
 export type ResolvedTheme = Exclude<Theme, 'system'>
 export const readSidebarWidth = (storage: Storage = localStorage) => {
-  const value = Number(storage.getItem(WIDTH_KEY) ?? 240)
-  return Number.isFinite(value) ? Math.min(360, Math.max(216, value)) : 240
+  const value = Number(storage.getItem(WIDTH_KEY) ?? SIDEBAR_WIDTH_DEFAULT)
+  return Number.isFinite(value)
+    ? Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, value))
+    : SIDEBAR_WIDTH_DEFAULT
 }
 export const writeSidebarWidth = (
   width: number,
   storage: Storage = localStorage,
-) => storage.setItem(WIDTH_KEY, String(Math.min(360, Math.max(216, width))))
+) => storage.setItem(WIDTH_KEY, String(Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, width))))
 export const readTheme = (storage: Storage = localStorage): Theme => {
   const value = storage.getItem(THEME_KEY)
   return value === 'light' || value === 'dark' || value === 'system'

@@ -120,7 +120,7 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
   )
   return (
     <TooltipProvider delay={300}>
-      <header className="session-header flex h-[52px] items-center gap-2 border-b border-border px-3 sm:px-5">
+      <header className="session-header flex h-[38px] items-center gap-2 border-b border-border px-3 sm:px-5">
         <span
           className={cn(
             'size-2 shrink-0 rounded-full',
