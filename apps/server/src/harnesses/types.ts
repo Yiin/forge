@@ -2,9 +2,11 @@ import type {
   AdapterKind,
   HarnessCapabilities,
   HarnessEvent,
+  DispatchOptions,
   ModelOptions,
   NativeBinding,
   PromptInput,
+  QuestionAnswer,
 } from '@forge/protocol/harness'
 
 export type {
@@ -14,6 +16,8 @@ export type {
   ModelOptions,
   NativeBinding,
   PromptInput,
+  DispatchOptions,
+  QuestionAnswer,
 }
 export type SessionConfigOption = {
   id: string
@@ -42,20 +46,25 @@ export type HarnessReceipt = {
   receiptId: string
   runId: string
   turnId: string
+  completion: { completionId: string; runId: string; turnId: string }
 }
 export type HarnessHandle = {
   prompt(
     input: PromptInput[] | string,
+    options?: DispatchOptions,
+    identity?: { runId: string; turnId: string },
   ): Promise<HarnessReceipt> | HarnessReceipt
   steer?(
     input: PromptInput[] | string,
+    options?: DispatchOptions,
+    identity?: { runId: string; turnId: string },
   ): Promise<HarnessReceipt> | HarnessReceipt
   cancel(): Promise<void> | void
   kill(): Promise<void> | void
   replyPermission?(requestId: string, optionId: string): Promise<void> | void
   replyQuestion?(
     requestId: string,
-    answers: Record<string, string[]>,
+    answers: Record<string, QuestionAnswer>,
   ): Promise<void> | void
   setModel?(modelId: string): Promise<void> | void
   configOptions?(): SessionConfigOption[]

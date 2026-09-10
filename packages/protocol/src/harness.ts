@@ -30,6 +30,10 @@ export const modelOptionsSchema = z.object({
   permissionMode: z.enum(['manual', 'auto', 'yolo']).optional(),
 })
 export type ModelOptions = z.infer<typeof modelOptionsSchema>
+export const dispatchOptionsSchema = modelOptionsSchema.extend({
+  permissionMode: z.enum(['manual', 'auto', 'yolo']).default('manual'),
+})
+export type DispatchOptions = z.infer<typeof dispatchOptionsSchema>
 
 export const promptInputSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string() }),
@@ -55,6 +59,13 @@ export const permissionRequestSchema = z.object({
 })
 export type PermissionRequest = z.infer<typeof permissionRequestSchema>
 
+export const questionAnswerSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('selected'), optionIds: z.array(id) }),
+  z.object({ type: z.literal('free_text'), text: z.string() }),
+  z.object({ type: z.literal('skipped') }),
+])
+export type QuestionAnswer = z.infer<typeof questionAnswerSchema>
+
 export const questionRequestSchema = z.object({
   requestId: id,
   questions: z.array(
@@ -66,12 +77,13 @@ export const questionRequestSchema = z.object({
         z.object({ id, label: z.string(), description: z.string().optional() }),
       ),
       multiSelect: z.boolean().default(false),
+      allowFreeInput: z.boolean().default(false),
     }),
   ),
 })
 export type QuestionRequest = z.infer<typeof questionRequestSchema>
 
-export const harnessEventSchema = z.discriminatedUnion('type', [
+const rawHarnessEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('run_started'), runId: id }),
   z.object({ type: z.literal('turn_started'), turnId: id }),
   z.object({
@@ -169,6 +181,7 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('turn_completed'),
+    runId: id.optional(),
     turnId: id,
     stopReason: z.string().optional(),
   }),
@@ -179,4 +192,17 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
     message: z.string(),
   }),
 ])
-export type HarnessEvent = z.infer<typeof harnessEventSchema>
+
+// Intersection with a record keeps the neutral envelope supplied by native
+// adapters while accepting legacy producers during the staged cutover.
+export const harnessEventSchema = z.intersection(
+  rawHarnessEventSchema,
+  z.record(z.string(), z.unknown()),
+)
+export type HarnessEvent = z.infer<typeof rawHarnessEventSchema> & {
+  runtimeGeneration?: string
+  deliveryId?: string
+  providerRunId?: string
+  providerTurnId?: string
+  providerItemId?: string
+}
