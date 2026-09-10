@@ -11,12 +11,15 @@
 @theme inline {
   --color-zinc-25: oklch(99.2% 0 0);
   --animate-status-pulse: status-pulse 2s infinite;
-  --font-sans:
-    'DM Sans Variable', 'DM Sans', -apple-system, BlinkMacSystemFont,
-    'Segoe UI', system-ui, sans-serif;
-  --font-mono:
-    'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Consolas, 'Liberation Mono',
-    Menlo, monospace;
+  /* Geist / Geist Mono per docs/comet-ui-contract.md. The `geist` package is
+     not yet installed (apps/web/src/main.tsx still imports
+     @fontsource-variable/dm-sans and @fontsource/jetbrains-mono), so these
+     stacks currently render their system fallback. Installing the font
+     files is tracked as a follow-up child issue. */
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'SF Mono', 'SFMono-Regular', Consolas,
+    'Liberation Mono', Menlo, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-surface-raised: var(--surface-raised);
@@ -82,93 +85,117 @@
   }
 }
 
-/* Forge theme: zinc surfaces, indigo primary. Light is the default;
-   [data-theme='dark'] overrides. Legacy styles.css shares --background,
-   --border, and --muted-foreground with compatible values on purpose. */
+/* Forge theme: measured from the pinned Comet source (crates/ui/src/theme.rs,
+   commit a1adfde23448a0e04256931d64a7c72a95b11db7), mapped through the
+   existing shadcn/Tailwind semantic variable names below so components keep
+   working unchanged. See docs/comet-ui-contract.md for the full source
+   citation table. Light is the default; [data-theme='dark'] overrides.
+   Legacy styles.css shares --background, --border, and --muted-foreground
+   with compatible values on purpose. */
 :root {
   color-scheme: light;
   --radius: 0.625rem;
   --app-scrollbar-width: 6px;
-  --background: var(--color-zinc-25);
+  /* content plane: theme.rs light() bg = grey(0xff) */
+  --background: var(--color-white);
   --app-chrome-background: var(--background);
   --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
-  --foreground: var(--color-zinc-800);
+  /* theme.rs light() text = neutral(0.25) */
+  --foreground: oklch(0.25 0 0);
   --card: var(--color-white);
-  --card-foreground: var(--color-zinc-800);
+  --card-foreground: oklch(0.25 0 0);
   --popover: var(--color-white);
-  --popover-foreground: var(--color-zinc-800);
-  --primary: oklch(0.488 0.217 264);
-  --primary-foreground: var(--color-white);
-  --secondary: var(--color-zinc-50);
-  --secondary-foreground: var(--color-zinc-800);
-  --muted: var(--color-zinc-50);
-  --muted-foreground: var(--color-zinc-500);
-  --accent: var(--color-zinc-100);
-  --accent-foreground: var(--color-zinc-900);
-  /* red-600, not red-500: white-on-destructive badges must clear WCAG AA. */
-  --destructive: var(--color-red-600);
-  --destructive-foreground: var(--color-red-700);
-  --success: var(--color-emerald-500);
-  --success-foreground: var(--color-emerald-700);
-  --warning: var(--color-amber-500);
-  --warning-foreground: var(--color-amber-700);
+  --popover-foreground: oklch(0.25 0 0);
+  /* theme.rs AccentColor::Zeron light = oklch(0.511 0.262 276.966) */
+  --primary: oklch(0.511 0.262 276.966);
+  --primary-foreground: oklch(0.985 0 0);
+  /* shell surface: theme.rs light() surface = neutral(0.968) */
+  --secondary: oklch(0.968 0 0);
+  --secondary-foreground: oklch(0.25 0 0);
+  --muted: oklch(0.968 0 0);
+  /* theme.rs light() text_muted = neutral(0.439) */
+  --muted-foreground: oklch(0.439 0 0);
+  /* raised/opaque plate: theme.rs light() surface_raised = neutral(0.940) */
+  --accent: oklch(0.94 0 0);
+  --accent-foreground: oklch(0.25 0 0);
+  /* theme.rs light() danger = oklch(0.577 0.245 27.325) (red-600) */
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.505 0.213 27.518);
+  /* theme.rs light() success = oklch(0.596 0.145 163.225) (emerald-600) */
+  --success: oklch(0.596 0.145 163.225);
+  --success-foreground: oklch(0.508 0.118 165.612);
+  /* theme.rs light() warning = oklch(0.555 0.163 48.998) (amber-700) */
+  --warning: oklch(0.555 0.163 48.998);
+  --warning-foreground: oklch(0.473 0.137 46.201);
+  /* Comet has no "info" role; keep Forge's existing blue for this slot. */
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-700);
-  --border: var(--color-zinc-200);
-  --input: var(--color-zinc-300);
-  --ring: oklch(0.488 0.217 264);
-  --chart-1: oklch(0.488 0.217 264);
-  --chart-2: var(--color-emerald-500);
-  --chart-3: var(--color-amber-500);
+  /* theme.rs light() border = hsla(0, 0, 0, 0.10) */
+  --border: --alpha(var(--color-black) / 10%);
+  /* theme.rs light() border_strong = hsla(0, 0, 0, 0.17) */
+  --input: --alpha(var(--color-black) / 17%);
+  --ring: oklch(0.511 0.262 276.966);
+  --chart-1: oklch(0.511 0.262 276.966);
+  --chart-2: oklch(0.596 0.145 163.225);
+  --chart-3: oklch(0.555 0.163 48.998);
   --chart-4: var(--color-violet-500);
-  --chart-5: var(--color-red-500);
-  --sidebar: var(--color-zinc-50);
-  --sidebar-foreground: var(--color-zinc-800);
+  --chart-5: oklch(0.577 0.245 27.325);
+  --sidebar: oklch(0.968 0 0);
+  --sidebar-foreground: oklch(0.25 0 0);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: var(--color-zinc-100);
-  --sidebar-accent-foreground: var(--color-zinc-900);
-  --sidebar-border: var(--color-zinc-200);
+  --sidebar-accent: oklch(0.94 0 0);
+  --sidebar-accent-foreground: oklch(0.25 0 0);
+  --sidebar-border: --alpha(var(--color-black) / 10%);
   --sidebar-ring: var(--ring);
 
   @variant dark {
     color-scheme: dark;
-    --background: var(--color-zinc-950);
+    /* content plane: theme.rs dark() bg = grey(6), sampled #060606 */
+    --background: #060606;
     --app-chrome-background: var(--background);
     --surface-raised: color-mix(in srgb, var(--card) 45%, transparent);
-    --foreground: var(--color-zinc-100);
-    --card: var(--color-zinc-900);
-    --card-foreground: var(--color-zinc-100);
-    --popover: var(--color-zinc-900);
-    --popover-foreground: var(--color-zinc-100);
-    --primary: oklch(0.588 0.217 264);
-    --primary-foreground: var(--color-white);
-    --secondary: var(--color-zinc-900);
-    --secondary-foreground: var(--color-zinc-100);
-    --muted: var(--color-zinc-900);
-    --muted-foreground: var(--color-zinc-400);
-    --accent: var(--color-zinc-900);
-    --accent-foreground: var(--color-zinc-100);
-    --destructive: color-mix(
-      in srgb,
-      var(--color-red-500) 90%,
-      var(--color-white)
-    );
-    --destructive-foreground: var(--color-red-400);
-    --success: var(--color-emerald-500);
-    --success-foreground: var(--color-emerald-400);
-    --warning: var(--color-amber-500);
-    --warning-foreground: var(--color-amber-400);
+    /* theme.rs dark() text = neutral(0.922) */
+    --foreground: oklch(0.922 0 0);
+    /* theme.rs dark() surface_card = grey(0x0e) */
+    --card: #0e0e0e;
+    --card-foreground: oklch(0.922 0 0);
+    /* theme.rs dark() surface_dialog = grey(0x10) */
+    --popover: #101010;
+    --popover-foreground: oklch(0.922 0 0);
+    /* theme.rs AccentColor::Zeron dark = oklch(0.673 0.182 276.935) */
+    --primary: oklch(0.673 0.182 276.935);
+    --primary-foreground: oklch(0.985 0 0);
+    /* shell surface: theme.rs dark() surface = grey(13), sampled #0d0d0d */
+    --secondary: #0d0d0d;
+    --secondary-foreground: oklch(0.922 0 0);
+    --muted: #0d0d0d;
+    /* theme.rs dark() text_muted = neutral(0.708) */
+    --muted-foreground: oklch(0.708 0 0);
+    /* raised/overlay plate: theme.rs dark() surface_overlay = grey(0x16) */
+    --accent: #161616;
+    --accent-foreground: oklch(0.922 0 0);
+    /* theme.rs dark() danger = oklch(0.704 0.191 22.216) (red-400) */
+    --destructive: oklch(0.704 0.191 22.216);
+    --destructive-foreground: oklch(0.808 0.114 19.571);
+    /* theme.rs dark() success = oklch(0.765 0.177 163.223) (emerald-400) */
+    --success: oklch(0.765 0.177 163.223);
+    --success-foreground: oklch(0.845 0.143 164.978);
+    /* theme.rs dark() warning = oklch(0.828 0.189 84.429) (amber-400) */
+    --warning: oklch(0.828 0.189 84.429);
+    --warning-foreground: oklch(0.924 0.12 95.746);
     --info: var(--color-blue-500);
     --info-foreground: var(--color-blue-400);
-    --border: --alpha(var(--color-white) / 6%);
-    --input: --alpha(var(--color-white) / 8%);
-    --ring: oklch(0.588 0.217 264);
-    --sidebar: var(--color-zinc-950);
-    --sidebar-foreground: var(--color-zinc-100);
-    --sidebar-accent: var(--color-zinc-900);
-    --sidebar-accent-foreground: var(--color-zinc-100);
-    --sidebar-border: var(--color-zinc-800);
+    /* theme.rs dark() border = hsla(0, 0, 1, 0.08) */
+    --border: --alpha(var(--color-white) / 8%);
+    /* theme.rs dark() border_strong = hsla(0, 0, 1, 0.14) */
+    --input: --alpha(var(--color-white) / 14%);
+    --ring: oklch(0.673 0.182 276.935);
+    --sidebar: #0d0d0d;
+    --sidebar-foreground: oklch(0.922 0 0);
+    --sidebar-accent: #161616;
+    --sidebar-accent-foreground: oklch(0.922 0 0);
+    --sidebar-border: --alpha(var(--color-white) / 8%);
   }
 }
 
