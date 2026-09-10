@@ -5,11 +5,11 @@ import { gitStatus, listRefs } from '../git/repo.js'
 import {
   deleteMergedTemporaryBranch,
   listWorktrees,
+  readWorktrees,
   provisionWorktree,
   removeWorktree,
   WorktreeLimitError,
 } from '../git/worktrees.js'
-import { runGit } from '../git/exec.js'
 import {
   createWorktreeRequestSchema,
   createWorktreeResponseSchema,
@@ -33,15 +33,9 @@ export function gitRoutes(options: { db: DatabaseSync; dataDir: string }) {
     const root = resolve(row.path)
     const cwd = resolve(requested || root)
     if (cwd === root) return { cwd }
-    const listed = await runGit(
-      root,
-      ['worktree', 'list', '--porcelain'],
-      false,
+    const allowed = (await readWorktrees(root, undefined, false)).map((entry) =>
+      resolve(entry.path),
     )
-    const allowed = listed.output
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith('worktree '))
-      .map((line) => resolve(line.slice('worktree '.length)))
     return allowed.includes(cwd)
       ? { cwd }
       : {

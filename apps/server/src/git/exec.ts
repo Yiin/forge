@@ -1,55 +1,125 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { spawn } from 'node:child_process'
+import {
+  signalProcessGroup,
+  waitForProcessGroupExit,
+} from '../harnesses/process-group.js'
 
-declare const Bun: {
-  spawn(
-    command: string[],
-    options: { cwd: string; stdout: 'pipe'; stderr: 'pipe' },
-  ): {
-    stdout: ReadableStream<Uint8Array>
-    stderr: ReadableStream<Uint8Array>
-    exited: Promise<number>
-  }
+export type GitOptions = {
+  stdin?: string
+  signal?: AbortSignal
+  timeoutMs?: number
+  maxOutputBytes?: number
+  readOnly?: boolean
 }
 
-const nodeExec = promisify(execFile)
-
+/** Bounded streams stay separate for machine output. `output` preserves existing callers. */
 export async function runGit(
   cwd: string,
   args: string[],
   check = true,
-): Promise<{ output: string; code: number }> {
-  const bun = (globalThis as typeof globalThis & { Bun?: typeof Bun }).Bun
-  if (!bun) {
-    try {
-      const result = await nodeExec('git', args, { cwd })
-      return { output: result.stdout + result.stderr, code: 0 }
-    } catch (error) {
-      const failure = error as {
-        stdout?: string
-        stderr?: string
-        code?: number
+  options: GitOptions = {},
+): Promise<{ output: string; stdout: string; stderr: string; code: number }> {
+  const limit = options.maxOutputBytes ?? 16 * 1024 * 1024
+  if (Buffer.byteLength(options.stdin ?? '') > limit)
+    throw new Error('Git input limit exceeded')
+  options.signal?.throwIfAborted()
+  return new Promise((resolve, reject) => {
+    const group = process.platform !== 'win32'
+    const child = spawn('git', args, {
+      cwd,
+      detached: group,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: options.readOnly
+        ? { ...process.env, GIT_OPTIONAL_LOCKS: '0' }
+        : process.env,
+    })
+    const stdout: Buffer[] = [],
+      stderr: Buffer[] = []
+    let size = 0,
+      code = 1,
+      closed = false,
+      settled = false
+    let failure: Error | undefined
+    let spawnFailure = false
+    let cleanup: Promise<void> | undefined
+    let drainTimer: ReturnType<typeof setTimeout> | undefined
+    const terminate = () =>
+      (cleanup ??= Promise.resolve().then(async () => {
+        if (!child.pid) return
+        if (group) {
+          signalProcessGroup(child.pid, 'SIGKILL')
+          await waitForProcessGroupExit(child.pid, performance.now() + 1000)
+        } else child.kill('SIGKILL')
+      }))
+    const finish = async () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      clearTimeout(drainTimer)
+      options.signal?.removeEventListener('abort', abort)
+      try {
+        await terminate()
+      } catch (error) {
+        failure ??= error as Error
       }
-      const output = (failure.stdout ?? '') + (failure.stderr ?? '')
-      if (check)
-        throw new Error(
-          `git ${args.join(' ')} failed (${failure.code ?? 1}): ${output}`,
+      child.stdin.destroy()
+      child.stdout.destroy()
+      child.stderr.destroy()
+      const out = Buffer.concat(stdout).toString('utf8'),
+        err = Buffer.concat(stderr).toString('utf8')
+      if (failure && spawnFailure && !check)
+        resolve({ output: out + err, stdout: out, stderr: err, code: 1 })
+      else if (failure) reject(failure)
+      else if (check && code !== 0)
+        reject(
+          new Error(`git ${args.join(' ')} failed (${code}): ${out}${err}`),
         )
-      return { output, code: failure.code ?? 1 }
+      else resolve({ output: out + err, stdout: out, stderr: err, code })
     }
-  }
-  const proc = bun.spawn(['git', ...args], {
-    cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
+    const stop = (error: Error) => {
+      failure ??= error
+      void finish()
+    }
+    const abort = () => stop(new Error('Git operation interrupted'))
+    options.signal?.addEventListener('abort', abort, { once: true })
+    const timer = setTimeout(
+      () => stop(new Error('Git operation timed out')),
+      options.timeoutMs ?? (options.readOnly ? 6000 : 60_000),
+    )
+    const collect = (chunks: Buffer[]) => (chunk: Buffer) => {
+      if (settled) return
+      size += chunk.length
+      if (size > limit) stop(new Error('Git output limit exceeded'))
+      else chunks.push(chunk)
+    }
+    child.stdout.on('data', collect(stdout))
+    child.stderr.on('data', collect(stderr))
+    child.stdout.on('error', stop)
+    child.stderr.on('error', stop)
+    child.on('error', (error) => {
+      spawnFailure = !failure
+      stop(error)
+    })
+    child.stdin.on('error', (error) => {
+      if ((error as NodeJS.ErrnoException).code !== 'EPIPE') stop(error)
+    })
+    child.on('exit', (exitCode) => {
+      code = exitCode ?? 1
+      if (settled) return
+      // The leader can exit while a hook or helper still retains its output pipes.
+      void terminate().catch(stop)
+      if (!closed)
+        drainTimer = setTimeout(
+          () => stop(new Error('Git output did not close')),
+          1000,
+        )
+    })
+    child.on('close', (exitCode) => {
+      closed = true
+      code = exitCode ?? 1
+      void finish()
+    })
+    if (options.signal?.aborted) abort()
+    if (!settled) child.stdin.end(options.stdin)
   })
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-  const output = stdout + stderr
-  if (check && code !== 0)
-    throw new Error(`git ${args.join(' ')} failed (${code}): ${output}`)
-  return { output, code }
 }

@@ -12,6 +12,8 @@ import { UploadStore } from './uploads/store.js'
 import { uploadRoutes } from './http/uploads.js'
 import { attachmentRoutes } from './http/attachments.js'
 import { fsBrowseRoutes } from './http/fsBrowse.js'
+import { WorkspaceFiles } from './workspace/files.js'
+import { workspaceFileRoutes } from './http/workspaceFiles.js'
 import { projectFileRoutes } from './http/projectFiles.js'
 import { skillRoutes } from './http/skills.js'
 import { gitRoutes } from './http/git.js'
@@ -138,6 +140,7 @@ export function createApp(
   loginManager?: LoginManager,
   usagePoller?: UsagePoller,
   refreshModels?: (accountId: string) => void,
+  workspaceFiles?: WorkspaceFiles,
 ) {
   const app = new Hono()
 
@@ -146,13 +149,17 @@ export function createApp(
   if (uploadStore) {
     app.route('/', projectRoutes(uploadStore.database, uploadStore))
     if (manager) {
-      app.route('/', sessionRoutes(manager, uploadStore))
+      app.route(
+        '/',
+        sessionRoutes(manager, uploadStore, workspaceFiles?.targets),
+      )
       app.route('/', forkRoutes(manager))
       app.route('/', sideChatRoutes(manager))
     }
     app.route('/', uploadRoutes(uploadStore))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
+    if (workspaceFiles) app.route('/', workspaceFileRoutes(workspaceFiles))
     app.route('/', skillRoutes(uploadStore.database))
     app.route(
       '/',
@@ -255,6 +262,7 @@ export function startServer(
   mkdirSync(dataDir, { recursive: true })
   const db = new DatabaseSync(process.env.FORGE_DB ?? join(dataDir, 'forge.db'))
   migrate(db)
+  const workspaceFiles = new WorkspaceFiles(db)
   const currentVersion = process.env.FORGE_VERSION ?? version
   const previousBoot = db
     .prepare('SELECT version, stopped_at FROM server_boots WHERE id = 1')
@@ -267,7 +275,8 @@ export function startServer(
        started_at = excluded.started_at,
        stopped_at = NULL`,
   ).run(currentVersion, Date.now())
-  const markStopped = () => {
+  const markStopped = async () => {
+    await workspaceFiles.close()
     db.prepare('UPDATE server_boots SET stopped_at = ? WHERE id = 1').run(
       Date.now(),
     )
@@ -405,13 +414,21 @@ export function startServer(
     loginManager,
     usagePoller,
     refreshModels,
+    workspaceFiles,
   )
   usagePoller.start()
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
   app.get('/ws', websocketRoute(upgradeWebSocket, db, bus))
   const server = serve({ fetch: app.fetch, port })
   injectWebSocket(server)
+  // Stop SSE and file work before waiting for HTTP connections to close.
+  const closeServer = server.close.bind(server)
+  server.close = ((callback?: (error?: Error) => void) => {
+    void workspaceFiles.close().then(() => closeServer(callback))
+    return server
+  }) as typeof server.close
   server.on('close', () => {
+    void workspaceFiles.close()
     process.removeListener('SIGTERM', markStopped)
     process.removeListener('SIGINT', markStopped)
     loginManager.close()

@@ -1,41 +1,9 @@
 import { Hono } from 'hono'
-import { readdir, realpath, stat } from 'node:fs/promises'
-import { extname, isAbsolute, join, resolve } from 'node:path'
+import { readdir, stat } from 'node:fs/promises'
+import { extname, join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
+import { MIME, safePath } from '../workspace/paths.js'
 import { fileResponse } from './rangeStream.js'
-
-const MIME: Record<string, string> = {
-  '.css': 'text/css',
-  '.csv': 'text/csv',
-  '.gif': 'image/gif',
-  '.html': 'text/html',
-  '.jpeg': 'image/jpeg',
-  '.jpg': 'image/jpeg',
-  '.js': 'text/javascript',
-  '.json': 'application/json',
-  '.md': 'text/markdown',
-  '.mp3': 'audio/mpeg',
-  '.mp4': 'video/mp4',
-  '.pdf': 'application/pdf',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.ts': 'text/typescript',
-  '.txt': 'text/plain',
-  '.wav': 'audio/wav',
-  '.webm': 'video/webm',
-}
-
-async function safePath(rootInput: string, input: string, directory?: boolean) {
-  if (isAbsolute(input) || input.includes('\0')) throw new Error('Invalid path')
-  const root = await realpath(rootInput)
-  const path = await realpath(resolve(root, input || '.'))
-  if (path !== root && !path.startsWith(`${root}/`))
-    throw new Error('Invalid path')
-  const info = await stat(path)
-  if (directory !== undefined && info.isDirectory() !== directory)
-    throw new Error('Invalid path')
-  return { path, info }
-}
 
 export function projectFileRoutes(db: DatabaseSync) {
   const app = new Hono()

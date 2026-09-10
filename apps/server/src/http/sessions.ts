@@ -14,9 +14,15 @@ import { sessionResponse, sessionResponses } from './session-response.js'
 import { gitStatus } from '../git/repo.js'
 import { runGit } from '../git/exec.js'
 import { readAccountModels } from '../accounts/models.js'
+import { WorkspaceTargets } from '../workspace/target.js'
+import { WorkspaceError } from '../workspace/paths.js'
 import { WorktreeRemovalError } from '../git/worktrees.js'
 
-export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
+export function sessionRoutes(
+  manager: SessionManager,
+  uploads?: UploadStore,
+  workspaceTargets = new WorkspaceTargets(manager.database),
+) {
   const app = new Hono()
   app.post('/api/sessions', async (c) => {
     const value = schema.safeParse(await c.req.json())
@@ -173,50 +179,68 @@ export function sessionRoutes(manager: SessionManager, uploads?: UploadStore) {
       sessionId: c.req.param('id'),
     })
     if (!value.success) return c.json({ error: value.error.message }, 400)
-    const row = manager.database
-      .prepare(
-        `SELECT sessions.*, projects.path AS project_path
+    try {
+      return await workspaceTargets.mutate(
+        { kind: 'session', sessionId: value.data.sessionId },
+        async (signal) => {
+          const row = manager.database
+            .prepare(
+              `SELECT sessions.*, projects.path AS project_path
          FROM sessions JOIN projects ON projects.id = sessions.project_id
          WHERE sessions.id = ? AND sessions.deleted_at IS NULL`,
-      )
-      .get(value.data.sessionId) as
-      (Record<string, unknown> & { project_path: string }) | undefined
-    if (!row) return c.json({ error: 'Session not found' }, 404)
-    if (row.status === 'running')
-      return c.json({ error: 'Session is running' }, 409)
-    try {
-      if (value.data.mode === 'local' && value.data.branch) {
-        const status = await gitStatus(row.project_path)
-        if (status.dirty)
-          return c.json(
-            { error: 'The working tree has uncommitted changes' },
-            409,
+            )
+            .get(value.data.sessionId) as
+            (Record<string, unknown> & { project_path: string }) | undefined
+          if (!row) return c.json({ error: 'Session not found' }, 404)
+          if (row.status === 'running')
+            return c.json({ error: 'Session is running' }, 409)
+          if (value.data.mode === 'local' && value.data.branch) {
+            const status = await gitStatus(
+              row.project_path,
+              workspaceTargets.temporaryPaths,
+              { signal },
+            )
+            if (status.dirty)
+              return c.json(
+                { error: 'The working tree has uncommitted changes' },
+                409,
+              )
+            await runGit(
+              row.project_path,
+              ['checkout', value.data.branch],
+              true,
+              { signal },
+            )
+          }
+          const workspace = await manager.resolveWorkspace(
+            row.project_id as string,
+            row.project_path,
+            value.data,
+            signal,
           )
-        await runGit(row.project_path, ['checkout', value.data.branch])
-      }
-      const workspace = await manager.resolveWorkspace(
-        row.project_id as string,
-        row.project_path,
-        value.data,
+          signal.throwIfAborted()
+          manager.database
+            .prepare(
+              'UPDATE sessions SET cwd = ?, worktree_path = ?, branch = ? WHERE id = ?',
+            )
+            .run(
+              workspace.cwd,
+              workspace.worktreePath,
+              workspace.branch,
+              value.data.sessionId,
+            )
+          if (workspace.cwd !== row.cwd)
+            await manager.releaseHandle(value.data.sessionId)
+          const updated = manager.database
+            .prepare('SELECT * FROM sessions WHERE id = ?')
+            .get(value.data.sessionId) as Record<string, unknown>
+          return c.json(sessionResponse(updated))
+        },
+        c.req.raw.signal,
       )
-      manager.database
-        .prepare(
-          'UPDATE sessions SET cwd = ?, worktree_path = ?, branch = ? WHERE id = ?',
-        )
-        .run(
-          workspace.cwd,
-          workspace.worktreePath,
-          workspace.branch,
-          value.data.sessionId,
-        )
-      if (workspace.cwd !== row.cwd)
-        await manager.releaseHandle(value.data.sessionId)
-      const updated = manager.database
-        .prepare('SELECT * FROM sessions WHERE id = ?')
-        .get(value.data.sessionId) as Record<string, unknown>
-      return c.json(sessionResponse(updated))
     } catch (error) {
-      return c.json({ error: errorMessage(error) }, 400)
+      const status = error instanceof WorkspaceError ? error.status : 400
+      return c.json({ error: errorMessage(error) }, status)
     }
   })
   app.post('/api/sessions/:id/interrupt', async (c) => {
