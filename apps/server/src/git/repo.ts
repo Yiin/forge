@@ -1,4 +1,8 @@
-import { runGit } from './exec.js'
+import { realpath } from 'node:fs/promises'
+import { join } from 'node:path'
+import { runGit, type GitOptions } from './exec.js'
+import { readWorktrees } from './worktrees.js'
+import { temporaryMatches, type OwnedTemporary } from '../workspace/paths.js'
 
 export type GitStatus = {
   isRepo: boolean
@@ -35,11 +39,12 @@ const emptyStatus = (): GitStatus => ({
   dirty: false,
 })
 
-async function defaultBranch(cwd: string) {
+async function defaultBranch(cwd: string, options?: GitOptions) {
   const result = await runGit(
     cwd,
     ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'],
     false,
+    options,
   )
   const ref = result.output.trim()
   return result.code === 0 && ref.startsWith('refs/remotes/origin/')
@@ -47,16 +52,46 @@ async function defaultBranch(cwd: string) {
     : null
 }
 
-export async function gitStatus(cwd: string): Promise<GitStatus> {
-  const probe = await runGit(cwd, ['rev-parse', '--git-dir'], false)
+export async function gitStatus(
+  cwd: string,
+  ownedTemporaryPaths?: ReadonlyMap<string, OwnedTemporary>,
+  options?: GitOptions,
+): Promise<GitStatus> {
+  const probe = await runGit(cwd, ['rev-parse', '--git-dir'], false, options)
   if (probe.code !== 0) return emptyStatus()
   const [branchResult, remoteResult, dirtyResult, main] = await Promise.all([
-    runGit(cwd, ['branch', '--show-current']),
-    runGit(cwd, ['remote']),
-    runGit(cwd, ['status', '--porcelain']),
-    defaultBranch(cwd),
+    runGit(cwd, ['branch', '--show-current'], true, options),
+    runGit(cwd, ['remote'], true, options),
+    runGit(
+      cwd,
+      ['status', '--porcelain', '-z', '--untracked-files=all'],
+      true,
+      { ...options, readOnly: true },
+    ),
+    defaultBranch(cwd, options),
   ])
   const branch = branchResult.output.trim()
+  const root = ownedTemporaryPaths?.size
+    ? await realpath(
+        (
+          await runGit(cwd, ['rev-parse', '--show-toplevel'], true, options)
+        ).stdout.replace(/\n$/, ''),
+      )
+    : cwd
+  let dirty = false
+  for (const entry of dirtyResult.stdout.split('\0')) {
+    if (!entry) continue
+    const owned = entry.startsWith('?? ')
+      ? ownedTemporaryPaths?.get(join(root, entry.slice(3)))
+      : undefined
+    if (
+      !owned ||
+      !(await temporaryMatches(owned, join(root, entry.slice(3))))
+    ) {
+      dirty = true
+      break
+    }
+  }
   return {
     isRepo: true,
     branch: branch || null,
@@ -65,21 +100,8 @@ export async function gitStatus(cwd: string): Promise<GitStatus> {
       .split(/\r?\n/)
       .some((line) => line.trim() === 'origin'),
     detached: !branch,
-    dirty: dirtyResult.output.trim().length > 0,
+    dirty,
   }
-}
-
-function worktreeBranches(output: string) {
-  const paths = new Map<string, string>()
-  for (const block of output.split(/\r?\n\r?\n/)) {
-    const lines = block.split(/\r?\n/)
-    const path = lines.find((line) => line.startsWith('worktree '))?.slice(9)
-    const branch = lines
-      .find((line) => line.startsWith('branch refs/heads/'))
-      ?.slice('branch refs/heads/'.length)
-    if (path && branch) paths.set(branch, path)
-  }
-  return paths
 }
 
 export async function listRefs(
@@ -98,10 +120,14 @@ export async function listRefs(
   const [local, remote, worktrees, status] = await Promise.all([
     runGit(cwd, ['branch', '--no-color', '--no-column']),
     runGit(cwd, ['branch', '--no-color', '--no-column', '--remotes']),
-    runGit(cwd, ['worktree', 'list', '--porcelain']),
+    readWorktrees(cwd),
     gitStatus(cwd),
   ])
-  const paths = worktreeBranches(worktrees.output)
+  const paths = new Map(
+    worktrees
+      .filter((entry) => entry.branch !== null)
+      .map((entry) => [entry.branch!, entry.path]),
+  )
   const refs: GitRef[] = []
   for (const line of local.output.split(/\r?\n/)) {
     if (!line.trim()) continue

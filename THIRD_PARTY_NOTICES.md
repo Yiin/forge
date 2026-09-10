@@ -3,6 +3,8 @@
 Forge UI behavior is source-derived from Comet/Zeron commit
 `a1adfde23448a0e04256931d64a7c72a95b11db7`. The provider marks in
 `apps/web/src/assets/providers/` come from that commit's `crates/ui/assets/icons/`.
+Workspace path validation, text rules, search ranking, and limits in
+`apps/server/src/workspace/` also follow that commit.
 This notice records the upstream MIT terms for those assets and the source-derived work.
 
 ## Comet/Zeron

@@ -136,8 +136,9 @@ export class SessionManager {
     projectId: string,
     projectPath: string,
     workspace?: WorkspaceChoice,
+    signal?: AbortSignal,
   ) {
-    const status = await gitStatus(projectPath)
+    const status = await gitStatus(projectPath, undefined, { signal })
     if (!workspace || workspace.mode === 'local') {
       return {
         cwd: projectPath,
@@ -152,6 +153,7 @@ export class SessionManager {
       baseRef:
         workspace.baseRef ?? status.defaultBranch ?? status.branch ?? 'HEAD',
       branch: workspace.branch,
+      signal,
     })
     return {
       cwd: worktree.path,

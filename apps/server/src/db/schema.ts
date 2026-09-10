@@ -1,5 +1,16 @@
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
+export const workspaceTargetRevisions = sqliteTable(
+  'workspace_target_revisions',
+  {
+    targetKey: text('target_key').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    checkoutKey: text('checkout_key').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    revision: integer('revision').notNull(),
+  },
+)
+
 export const projects = sqliteTable('projects', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),

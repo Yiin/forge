@@ -19,7 +19,8 @@
     "./models": "./src/models.ts",
     "./skills": "./src/skills.ts",
     "./harness": "./src/harness.ts",
-    "./timeline": "./src/timeline.ts"
+    "./timeline": "./src/timeline.ts",
+    "./workspace": "./src/workspace.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
