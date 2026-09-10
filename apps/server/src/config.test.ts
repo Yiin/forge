@@ -75,7 +75,9 @@ describe('default harness configuration', () => {
     saveConfigSync(file, config)
     const converted = convertConfigFileSync(file)
     expect(converted.harness.opencode.adapterKind).toBe('native')
-    expect(await readFile(`${file}.pre-native-cutover`, 'utf8')).toContain('dataDir')
+    expect(await readFile(`${file}.pre-native-cutover`, 'utf8')).toContain(
+      'dataDir',
+    )
     const bad = join(root, 'bad.toml')
     await writeFile(bad, 'not = [valid')
     await expect(() => convertConfigFileSync(bad)).toThrow()

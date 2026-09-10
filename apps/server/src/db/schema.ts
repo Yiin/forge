@@ -19,7 +19,9 @@ export const sessions = sqliteTable('sessions', {
   branch: text('branch'),
   providerSessionId: text('provider_session_id'),
   adapterKind: text('adapter_kind'),
-  nativeResumeState: text('native_resume_state').notNull().default('not_eligible'),
+  nativeResumeState: text('native_resume_state')
+    .notNull()
+    .default('not_eligible'),
   nativeResumeError: text('native_resume_error'),
   model: text('model'),
   kind: text('kind').notNull(),
@@ -36,7 +38,9 @@ export const sessions = sqliteTable('sessions', {
   deletedAt: integer('deleted_at'),
 })
 export const nativeSessionBindings = sqliteTable('native_session_bindings', {
-  sessionId: text('session_id').primaryKey().references(() => sessions.id),
+  sessionId: text('session_id')
+    .primaryKey()
+    .references(() => sessions.id),
   provider: text('provider').notNull(),
   accountId: text('account_id'),
   cwd: text('cwd').notNull(),

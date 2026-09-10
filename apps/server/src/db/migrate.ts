@@ -10,19 +10,125 @@ type SqliteLike = {
   }
 }
 
-function replayLegacyMigration(sqlite: SqliteLike, sql: string) {
-  // Legacy files use one statement per line or trigger block. Splitting here
-  // lets a partially upgraded database continue after one duplicate ALTER.
-  for (const statement of sql.split(/;\s*(?=\n|$)/)) {
-    const trimmed = statement.trim()
-    if (!trimmed) continue
-    try {
-      sqlite.exec(`${trimmed};`)
-    } catch (error) {
-      if (!/(duplicate column|already exists|no such table: draft_promotions_new)/i.test(String(error)))
-        throw error
+type Column = { name: string; notnull: number; pk: number }
+
+function columns(sqlite: SqliteLike, table: string) {
+  return sqlite
+    .prepare('SELECT name, "notnull", pk FROM pragma_table_info(?)')
+    .all(table) as Column[]
+}
+
+function quoteIdentifier(name: string) {
+  return `"${name.replaceAll('"', '""')}"`
+}
+
+// Old migrations could stop between copying rows and dropping the source table.
+// Keep the destination rows, copy missing rows, and refuse conflicting copies.
+function finishLegacyCopy(
+  sqlite: SqliteLike,
+  source: string,
+  target: string,
+  key: string,
+) {
+  const sourceColumns = columns(sqlite, source).map((column) => column.name)
+  const targetColumns = new Set(
+    columns(sqlite, target).map((column) => column.name),
+  )
+  if (
+    !sourceColumns.includes(key) ||
+    sourceColumns.some((column) => !targetColumns.has(column))
+  ) {
+    throw new Error(
+      `Cannot recover migration from ${source} to ${target}: incompatible columns`,
+    )
+  }
+  const from = quoteIdentifier(source)
+  const to = quoteIdentifier(target)
+  const id = quoteIdentifier(key)
+  const names = sourceColumns.map(quoteIdentifier)
+  const mismatches = names
+    .map((name) => `source.${name} IS NOT target.${name}`)
+    .join(' OR ')
+  const conflict = sqlite
+    .prepare(
+      `SELECT 1 FROM ${from} AS source JOIN ${to} AS target
+    ON source.${id} = target.${id} WHERE ${mismatches} LIMIT 1`,
+    )
+    .get()
+  if (conflict)
+    throw new Error(
+      `Cannot recover migration from ${source} to ${target}: conflicting rows`,
+    )
+  sqlite.exec(`INSERT INTO ${to} (${names.join(', ')})
+    SELECT ${names.map((name) => `source.${name}`).join(', ')} FROM ${from} AS source
+    WHERE NOT EXISTS (SELECT 1 FROM ${to} AS target WHERE target.${id} = source.${id})`)
+  sqlite.exec(`DROP TABLE ${from}`)
+}
+
+function recoverLegacyRebuilds(sqlite: SqliteLike) {
+  if (columns(sqlite, 'attachments_legacy').length) {
+    if (columns(sqlite, 'attachments').length) {
+      finishLegacyCopy(sqlite, 'attachments_legacy', 'attachments', 'id')
+    } else {
+      sqlite.exec('ALTER TABLE attachments_legacy RENAME TO attachments')
     }
   }
+  if (columns(sqlite, 'draft_promotions_new').length) {
+    if (columns(sqlite, 'draft_promotions').length) {
+      finishLegacyCopy(
+        sqlite,
+        'draft_promotions',
+        'draft_promotions_new',
+        'request_id',
+      )
+    }
+    sqlite.exec('ALTER TABLE draft_promotions_new RENAME TO draft_promotions')
+  }
+}
+
+function replayLegacyMigration(sqlite: SqliteLike, file: string, sql: string) {
+  if (file === '0009_draft_promotion.sql') {
+    const attachments = columns(sqlite, 'attachments')
+    if (attachments.some((column) => column.name === 'draft_id')) {
+      if (
+        !attachments.some((column) => column.name === 'project_id') ||
+        !attachments.some(
+          (column) => column.name === 'session_id' && column.notnull === 0,
+        )
+      ) {
+        throw new Error(
+          'Cannot recover attachments migration: incomplete draft schema',
+        )
+      }
+      // The rebuild already ran. Rebuilding again discards draft ownership.
+      sqlite.exec(`CREATE TABLE IF NOT EXISTS draft_promotions (
+        draft_id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL UNIQUE,
+        session_id TEXT NOT NULL REFERENCES sessions(id)
+      )`)
+      return
+    }
+  }
+  if (file === '0016_draft_promotions_request_key.sql') {
+    const promotions = columns(sqlite, 'draft_promotions')
+    if (
+      promotions.some(
+        (column) => column.name === 'request_id' && column.pk === 1,
+      )
+    )
+      return
+  }
+
+  // Shipped ADD COLUMN statements occupy whole lines. Remove only those whose
+  // columns exist, then let SQLite parse the complete script, including triggers.
+  const pending = sql.replace(
+    /^ALTER TABLE (\w+) ADD COLUMN (\w+) [^\r\n]*;$/gm,
+    (statement, table: string, column: string) =>
+      columns(sqlite, table).some((existing) => existing.name === column)
+        ? ''
+        : statement,
+  )
+  if (pending.trim()) sqlite.exec(pending)
 }
 
 export function migrate(sqlite: SqliteLike) {
@@ -30,69 +136,36 @@ export function migrate(sqlite: SqliteLike) {
   const files = readdirSync(dir)
     .filter((name) => name.endsWith('.sql'))
     .sort()
-  const hadLedger = Boolean(
-    sqlite
-      .prepare(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
-      )
-      .get(),
-  )
 
-  sqlite.exec(
-    `CREATE TABLE IF NOT EXISTS schema_migrations (
+  sqlite.exec('BEGIN IMMEDIATE')
+  try {
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
       name TEXT PRIMARY KEY,
       applied_at INTEGER NOT NULL
-    )`,
-  )
-
-  if (!hadLedger) {
-    const hasExistingSchema = sqlite
-      .prepare(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
-      )
-      .get()
-    if (hasExistingSchema) {
-      sqlite.exec('BEGIN')
-      try {
-        // Pre-ledger databases can contain any prefix of the old schema.
-        // Replay every migration and ignore only already-applied DDL.
-        for (const file of files) {
-          replayLegacyMigration(sqlite, readFileSync(dir + file, 'utf8'))
-        }
-        const insert = sqlite.prepare(
-          'INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)',
-        )
-        const now = Date.now()
-        for (const file of files) insert.run(file, now)
-        sqlite.exec('COMMIT')
-      } catch (error) {
-        sqlite.exec('ROLLBACK')
-        throw error
-      }
-      return
-    }
-  }
-
-  const applied = new Set(
-    (
-      sqlite.prepare('SELECT name FROM schema_migrations').all() as Array<{
-        name: string
-      }>
-    ).map((row) => row.name),
-  )
-  const insert = sqlite.prepare(
-    'INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)',
-  )
-  for (const file of files) {
-    if (applied.has(file)) continue
-    sqlite.exec('BEGIN')
-    try {
-      sqlite.exec(readFileSync(dir + file, 'utf8'))
+    )`)
+    const applied = new Set(
+      (
+        sqlite.prepare('SELECT name FROM schema_migrations').all() as Array<{
+          name: string
+        }>
+      ).map((row) => row.name),
+    )
+    // A failed pre-ledger upgrade from an older server can leave an empty ledger.
+    const legacy = applied.size === 0 && columns(sqlite, 'sessions').length > 0
+    if (legacy) recoverLegacyRebuilds(sqlite)
+    const insert = sqlite.prepare(
+      'INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)',
+    )
+    for (const file of files) {
+      if (applied.has(file)) continue
+      const sql = readFileSync(dir + file, 'utf8')
+      if (legacy) replayLegacyMigration(sqlite, file, sql)
+      else sqlite.exec(sql)
       insert.run(file, Date.now())
-      sqlite.exec('COMMIT')
-    } catch (error) {
-      sqlite.exec('ROLLBACK')
-      throw error
     }
+    sqlite.exec('COMMIT')
+  } catch (error) {
+    sqlite.exec('ROLLBACK')
+    throw error
   }
 }

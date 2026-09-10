@@ -17,9 +17,9 @@
     "./accounts": "./src/accounts.ts",
     "./git": "./src/git.ts",
     "./models": "./src/models.ts",
-    "./skills": "./src/skills.ts"
-    ,"./harness": "./src/harness.ts"
-    ,"./timeline": "./src/timeline.ts"
+    "./skills": "./src/skills.ts",
+    "./harness": "./src/harness.ts",
+    "./timeline": "./src/timeline.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
