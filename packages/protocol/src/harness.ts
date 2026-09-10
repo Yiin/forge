@@ -26,17 +26,42 @@ export const modelOptionsSchema = z.object({
   permissionMode: z.enum(['manual', 'auto', 'yolo']).optional(),
 })
 export type ModelOptions = z.infer<typeof modelOptionsSchema>
+// Codex AskForApproval and SandboxPolicy variants retain explicit restrictions.
+export const approvalPolicySchema = z.union([
+  z.enum(['untrusted', 'on-request', 'always', 'never']),
+  z.strictObject({
+    granular: z.strictObject({
+      sandbox_approval: z.boolean(),
+      rules: z.boolean(),
+      mcp_elicitations: z.boolean(),
+      request_permissions: z.boolean().optional(),
+      skill_approval: z.boolean().optional(),
+    }),
+  }),
+])
+export const sandboxPolicySchema = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('dangerFullAccess') }),
+  z.strictObject({
+    type: z.literal('readOnly'),
+    networkAccess: z.boolean().optional(),
+  }),
+  z.strictObject({
+    type: z.literal('workspaceWrite'),
+    writableRoots: z.array(z.string()).optional(),
+    networkAccess: z.boolean().optional(),
+    excludeSlashTmp: z.boolean().optional(),
+    excludeTmpdirEnvVar: z.boolean().optional(),
+  }),
+  z.strictObject({
+    type: z.literal('externalSandbox'),
+    networkAccess: z.enum(['restricted', 'enabled']).optional(),
+  }),
+])
 export const dispatchOptionsSchema = modelOptionsSchema.extend({
   permissionMode: z.enum(['manual', 'auto', 'yolo']).default('manual'),
-  approvalPolicy: z.enum(['untrusted', 'on-request', 'always']).optional(),
-  sandboxPolicy: z
-    .object({
-      type: z.enum(['readOnly', 'workspaceWrite', 'fullAccess']),
-      writableRoots: z.array(z.string()).optional(),
-      networkAccess: z.boolean().optional(),
-    })
-    .optional(),
-  serviceTier: z.string().optional(),
+  approvalPolicy: approvalPolicySchema.nullish(),
+  sandboxPolicy: sandboxPolicySchema.nullish(),
+  serviceTier: z.string().nullish(),
 })
 export type DispatchOptions = z.infer<typeof dispatchOptionsSchema>
 export const promptInputSchema = z.discriminatedUnion('type', [
@@ -53,14 +78,55 @@ export const promptInputSchema = z.discriminatedUnion('type', [
   }),
 ])
 export type PromptInput = z.infer<typeof promptInputSchema>
+const fileSystemSpecialPathSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.enum(['root', 'minimal', 'tmpdir', 'slash_tmp']) }),
+  z.strictObject({
+    kind: z.literal('project_roots'),
+    subpath: z.string().nullish(),
+  }),
+  z.strictObject({
+    kind: z.literal('unknown'),
+    path: z.string(),
+    subpath: z.string().nullish(),
+  }),
+])
+export const fileSystemPathSchema = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('path'), path: z.string() }),
+  z.strictObject({ type: z.literal('glob_pattern'), pattern: z.string() }),
+  z.strictObject({
+    type: z.literal('special'),
+    value: fileSystemSpecialPathSchema,
+  }),
+])
+// Unknown grant fields must fail instead of silently losing a restriction.
+export const permissionProfileSchema = z.strictObject({
+  network: z.strictObject({ enabled: z.boolean().nullish() }).nullish(),
+  fileSystem: z
+    .strictObject({
+      entries: z
+        .array(
+          z.strictObject({
+            path: fileSystemPathSchema,
+            access: z.enum(['read', 'write', 'deny']),
+          }),
+        )
+        .nullish(),
+      globScanMaxDepth: z.number().int().positive().nullish(),
+      read: z.array(z.string()).nullish(),
+      write: z.array(z.string()).nullish(),
+    })
+    .nullish(),
+})
+export type PermissionProfile = z.infer<typeof permissionProfileSchema>
+export const permissionGrantScopeSchema = z.enum(['turn', 'session'])
 export const permissionRequestSchema = z.object({
   requestId: id,
   toolCallId: id.nullable(),
   title: z.string(),
   detail: z.string().optional(),
   options: z.array(z.object({ id, label: z.string() })),
-  permissions: z.unknown().optional(),
-  scope: z.enum(['turn', 'run', 'session']).optional(),
+  permissions: permissionProfileSchema.optional(),
+  scope: permissionGrantScopeSchema.optional(),
   approvalId: id.optional(),
   kind: z.string().optional(),
 })
@@ -70,14 +136,15 @@ export const permissionReplySchema = z.discriminatedUnion('type', [
     type: z.literal('selected'),
     requestId: id,
     optionId: id,
-    grant: z.unknown().optional(),
-    scope: z.string().optional(),
+    grant: permissionProfileSchema.optional(),
+    scope: permissionGrantScopeSchema.optional(),
   }),
   z.object({
     type: z.literal('granted'),
     requestId: id,
-    permissions: z.unknown(),
-    scope: z.string(),
+    permissions: permissionProfileSchema,
+    scope: permissionGrantScopeSchema,
+    strictAutoReview: z.boolean().nullish(),
   }),
   z.object({
     type: z.literal('denied'),
@@ -106,14 +173,29 @@ const question = z.object({
   ),
   multiSelect: z.boolean().default(false),
   allowFreeInput: z.boolean().default(false),
-  isBlocking: z.boolean().optional(),
   isSecret: z.boolean().optional(),
 })
 export const questionRequestSchema = z.object({
   requestId: id,
+  isBlocking: z.boolean().optional(),
   questions: z.array(question),
 })
 export type QuestionRequest = z.infer<typeof questionRequestSchema>
+const failedOutcomeSchema = z.object({
+  status: z.literal('failed'),
+  code: z.string(),
+  message: z.string(),
+})
+export const terminalOutcomeSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('completed') }),
+  z.object({ status: z.literal('interrupted'), reason: z.string().optional() }),
+  failedOutcomeSchema,
+])
+export type TerminalOutcome = z.infer<typeof terminalOutcomeSchema>
+export const completionResultSchema = terminalOutcomeSchema.and(
+  z.object({ runId: id, turnId: id }),
+)
+export type CompletionResult = z.infer<typeof completionResultSchema>
 const envelope = {
   runId: id,
   runtimeGeneration: id,
@@ -152,7 +234,7 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
     ...turnItem,
     type: z.literal('child_finished'),
     childId: id,
-    status: z.enum(['completed', 'failed']),
+    outcome: terminalOutcomeSchema,
   }),
   z.object({
     ...turnItem,
@@ -204,13 +286,11 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
     ...envelope,
     type: z.literal('turn_completed'),
     turnId: id,
-    stopReason: z.string().optional(),
+    outcome: terminalOutcomeSchema,
   }),
-  z.object({
+  failedOutcomeSchema.omit({ status: true }).extend({
     ...envelope,
     type: z.literal('run_failed'),
-    code: z.string(),
-    message: z.string(),
   }),
 ])
 export type HarnessEvent = z.infer<typeof harnessEventSchema>

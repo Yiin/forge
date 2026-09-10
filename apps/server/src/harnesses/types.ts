@@ -1,3 +1,4 @@
+import { completionResultSchema } from '@forge/protocol/harness'
 import type {
   AdapterKind,
   HarnessCapabilities,
@@ -8,6 +9,7 @@ import type {
   PromptInput,
   QuestionAnswer,
   PermissionReply,
+  CompletionResult,
 } from '@forge/protocol/harness'
 
 export type {
@@ -20,6 +22,7 @@ export type {
   DispatchOptions,
   QuestionAnswer,
   PermissionReply,
+  CompletionResult,
 }
 export type SessionConfigOption = {
   id: string
@@ -50,16 +53,6 @@ export type HarnessReceipt = {
   turnId: string
   completion: CompletionHandle
 }
-export type CompletionResult =
-  | { status: 'completed'; runId: string; turnId: string }
-  | { status: 'interrupted'; runId: string; turnId: string; reason?: string }
-  | {
-      status: 'failed'
-      runId: string
-      turnId: string
-      code: string
-      message: string
-    }
 export type CompletionHandle = Promise<CompletionResult> & {
   completionId: string
   runId: string
@@ -70,12 +63,21 @@ export function createCompletionHandle(ids: {
   runId: string
   turnId: string
 }) {
-  let settle!: (result: CompletionResult) => void
-  const promise = new Promise<CompletionResult>((resolve) => {
-    settle = resolve
+  let resolve!: (result: CompletionResult) => void
+  const promise = new Promise<CompletionResult>((complete) => {
+    resolve = complete
   }) as CompletionHandle
   Object.assign(promise, ids)
-  return { handle: promise, settle }
+  return {
+    handle: promise,
+    settle(result: CompletionResult) {
+      const parsed = completionResultSchema.parse(result)
+      if (parsed.runId !== promise.runId || parsed.turnId !== promise.turnId) {
+        throw new Error('Completion result does not match the handle identity')
+      }
+      resolve(parsed)
+    },
+  }
 }
 export type HarnessHandle = {
   prompt(
