@@ -16,7 +16,11 @@ export const readSidebarWidth = (storage: Storage = localStorage) => {
 export const writeSidebarWidth = (
   width: number,
   storage: Storage = localStorage,
-) => storage.setItem(WIDTH_KEY, String(Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, width))))
+) =>
+  storage.setItem(
+    WIDTH_KEY,
+    String(Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, width))),
+  )
 export const readTheme = (storage: Storage = localStorage): Theme => {
   const value = storage.getItem(THEME_KEY)
   return value === 'light' || value === 'dark' || value === 'system'

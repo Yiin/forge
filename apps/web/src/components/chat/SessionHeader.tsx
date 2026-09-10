@@ -16,7 +16,15 @@ import {
   TooltipTrigger,
 } from '../ui/tooltip'
 
-export function SessionHeader({ sessionId }: { sessionId: string }) {
+export function SessionHeader({
+  sessionId,
+  className,
+  embedded = false,
+}: {
+  sessionId: string
+  className?: string
+  embedded?: boolean
+}) {
   const session = useSessionsStore((state) =>
     state.sessions.find((item) => item.id === sessionId),
   )
@@ -120,7 +128,14 @@ export function SessionHeader({ sessionId }: { sessionId: string }) {
   )
   return (
     <TooltipProvider delay={300}>
-      <header className="session-header flex h-[38px] items-center gap-2 border-b border-border px-3 sm:px-5">
+      <header
+        className={cn(
+          embedded
+            ? 'session-header contents'
+            : 'session-header flex h-[38px] items-center gap-2 border-b border-border px-3 sm:px-5',
+          className,
+        )}
+      >
         <span
           className={cn(
             'size-2 shrink-0 rounded-full',

@@ -254,7 +254,9 @@ export function SessionRoute() {
   }
   return (
     <div className="session-view relative flex h-full min-h-0 flex-col">
-      {!loading && !loadError && <SessionHeader sessionId={sessionId} />}
+      {!loading && !loadError && (
+        <SessionHeader className="md:hidden" sessionId={sessionId} />
+      )}
       {!loading && !loadError && <PathSwitcher sessionId={sessionId} />}
       <ChatLifecycle
         loading={loading}
