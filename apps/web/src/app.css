@@ -16,10 +16,12 @@
      @fontsource-variable/dm-sans and @fontsource/jetbrains-mono), so these
      stacks currently render their system fallback. Installing the font
      files is tracked as a follow-up child issue. */
-  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    system-ui, sans-serif;
-  --font-mono: 'Geist Mono', 'SF Mono', 'SFMono-Regular', Consolas,
-    'Liberation Mono', Menlo, monospace;
+  --font-sans:
+    'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
+    sans-serif;
+  --font-mono:
+    'Geist Mono', 'SF Mono', 'SFMono-Regular', Consolas, 'Liberation Mono',
+    Menlo, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-surface-raised: var(--surface-raised);
