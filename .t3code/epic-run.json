@@ -6,7 +6,10 @@
     "noPush": true
   },
   "execution": {
-    "mode": "sequential"
+    "mode": "parallel"
+  },
+  "parallel": {
+    "workers": 3
   },
   "limits": {
     "maxIterations": 250
