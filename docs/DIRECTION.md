@@ -1,71 +1,59 @@
-# Direction
+# Forge direction
 
-Decided 2026-08-25 with Yiin. This file is the source of truth for scope and stack.
-The epic planners must follow it. Change it only with Yiin's approval.
+Updated 2026-09-10 for epic `forge-kcj`. This file defines product scope. The
+measured visual and interaction contract is in [comet-ui-contract.md](comet-ui-contract.md).
 
-## What forge is
+## Product
 
-A personal agent workspace. It replaces the t3code fork (~600k lines) with a
-purpose-built app (target 30k-50k lines). One instance per machine on the
-tailnet. The web client is the only UI. Phones are first-class.
+Forge is a tailnet-only web workspace for provider-native agent sessions. It
+keeps Forge branding, projects, worktrees, accounts, Runs, Epics, search,
+archives, forks, uploads, and durable history. It supports Claude, Codex,
+OpenCode, Pi, Kimi, and Cursor through native adapters. Dedicated first-party
+or custom ACP transports remain supported for Grok, Gemini, Devin, Hermes, and
+other configured harnesses. ACP is not the shared runtime contract.
 
-## Stack (decided, do not relitigate)
+The session model separates provider instance, adapter kind, runtime generation,
+run, turn, item, native binding, account, and workspace target. A native
+binding is scoped to provider, account, and canonical cwd. Failed resume is
+visible. It never silently creates a fresh session.
 
-- Runtime: Bun. Single compiled binary with embedded web assets. Spike
-  `bun build --compile` + node-pty first; fall back to Node 24 + build-on-host
-  only if the spike fails.
-- Language: plain TypeScript. No Effect. Async functions, thrown errors,
-  small interfaces.
-- Harness layer: ACP (Agent Client Protocol) as the one adapter. A harness is
-  a config entry (command, args, env), not code. A `pty` protocol entry covers
-  non-ACP CLIs headlessly. No terminal UI.
-- Storage: SQLite, plain tables, append-only messages. Drizzle migrations,
-  raw SQL queries. No event sourcing, no projections.
-- Transport: Hono for HTTP commands, one WebSocket per client for events.
-  Cursor-based replay (`messages where id > last_seen`) so reconnect is
-  lossless by construction.
-- Web: React, Vite, TanStack Router, Zustand, shadcn/ui (heavily), xterm-free.
-- Schemas: zod, in a shared `packages/protocol` package that dashboards import.
-- Search: SQLite FTS5 over sessions, messages, epic runs.
-- Tooling: bun workspaces (isolated linker), oxlint, prettier, vitest. Integration tests against
-  a real server with a fake ACP agent.
-- Reuse open-source libraries wherever one exists (chat rendering, pdf.js for
-  viewing, file-tree components). Do not hand-roll solved problems.
+## UI and stack
 
-## Scope (features)
+The web UI follows the pinned Comet source contract. Sessions live in one
+sidebar. The main area has no horizontal session tabs. Workspace surfaces use
+session-scoped dock tabs for files, terminal, diffs, history, browser, and
+child transcripts. Panels are closed by default. The composer preserves drafts,
+attachments, queue state, and pending permission or question requests.
 
-- Projects: add/remove, t3code sidebar-v2 style.
-- Epic runner: first-party, polished. Subagent/model configuration like t3code.
-- Chat: great interface; fixes t3code's reconnection and subagent/epic UX issues.
-- Uploads: any file type, up to 1GB, stored next to the session, linked in chat
-  as reference paths. AskUserQuestion support.
-- File browser + viewer (pdf, images, etc).
-- Auto-resume in-progress sessions and epic runs on restart.
-- Great search.
-- In-chat-input skills UX like t3code.
-- Always full access (yolo), always build mode. No permission modes, no plan mode.
-- Intelligent title generation: describe what the session is about in plain
-  words; never surface bead/epic ids as titles.
-- First-class /btw and chat forks (t3code has a good epic to copy).
-- Copyable session id in the UI, so a session can be handed to an agent for
-  debugging forge itself.
-- Test harness early: a `test-forge-app` skill plus a fake ACP agent fixture,
-  built as one of the first children, so later work self-verifies its UI.
-- Worktrees; harness configs easily addable.
-- Dashboard integration: /api/health, /api/status, SSE events, a small client
-  package with the zod types.
-- Update story: GitHub release binary + systemd timer per host; update once,
-  it lands everywhere.
+Use TypeScript, Node production server, Bun, React, shadcn/ui Base UI, and
+Tailwind. Use Base UI `render`, not `asChild`. Keep protocol schemas provider
+neutral. Keep PTY for configured terminal processes. Keep bytes on HTTP.
 
-## Non-goals
+Desktop uses a resizable sidebar and optional right dock. Mobile uses a full
+screen session with a drawer for the sidebar, route-first files, Runs, search,
+and settings, plus a safe-area composer. Browser previews use separate-origin
+web behavior with an explicit external-open fallback.
 
-- No terminal UI. No Electron/desktop. No cloud relay. No migration of
-  t3code history. No ntfy notifications. No session diff view.
-- Auth: tailnet-only. Dashboards embed forge behind their own auth; forge
-  does not handle users or passwords.
+## Service contract
+
+The UI reads provider catalogs and model traits, session target and status,
+normalized transcript items, pending native requests, queue entries, and
+workspace surfaces. Commands include prompt, steer, abort, permission reply,
+question reply, resume, fork, surface open, and surface close. Every loaded
+history and live event uses one reducer and a replay cursor. Prompt acceptance,
+provider delivery, turn completion, and process exit remain separate states.
+
+## Stale decisions
+
+The former ACP-only harness, always-yolo policy, no-terminal rule, no-diff rule,
+no-permission rule, and no-plan rule are stale. They do not limit this epic.
+The old claim that Forge has no mobile or browser surface is also stale. The
+old “single compiled Bun binary” spike is not a product requirement; preserve
+the current Node production runtime and release workflow.
 
 ## Quality bar
 
-Every feature gets a polish pass: "we did X - is this the best
-implementation/UX, or is there something to improve, and how?" The result must
-be working, coherent, polished, and a joy to use.
+Test provider wire behavior with fake subprocesses or servers. Test real-server
+browser flows with isolated accounts and data. Preserve user IDs, messages,
+attachments, worktrees, forks, credentials, and epic history. Run focused tests,
+typecheck, lint, and the merged epic gate. Do not push or deploy from this epic.
