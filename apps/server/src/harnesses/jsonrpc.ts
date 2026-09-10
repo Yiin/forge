@@ -29,6 +29,7 @@ export type JsonlRpcOptions = Omit<
   runtimeGeneration: string
   maxPendingRequests?: number
   maxIncomingRequests?: number
+  /** Running handlers keep their slots until they settle, including after abort. */
   maxIncomingHandlers?: number
   maxQueuedIncomingFrames?: number
   maxQueuedIncomingBytes?: number
@@ -59,7 +60,10 @@ export class JsonlRpcTransport {
   readonly done: Promise<Error>
   private readonly controller = new AbortController()
   private readonly pending = new Map<RpcId, Pending>()
-  private readonly incoming = new Map<RpcId, JsonRpcRequest>()
+  private readonly incoming = new Map<
+    RpcId,
+    { request: JsonRpcRequest; controller: AbortController }
+  >()
   private readonly handlers = new Set<symbol>()
   private readonly queue: { message: JsonRpcIncoming; bytes: number }[] = []
   private queuedIncomingBytes = 0
@@ -205,9 +209,28 @@ export class JsonlRpcTransport {
   }
 
   respondError(request: JsonRpcRequest, code: number, message: string) {
-    if (!Number.isSafeInteger(code))
+    if (this.isLiveRequest(request) && !Number.isSafeInteger(code))
       return Promise.reject(new Error('Invalid JSON-RPC error code'))
     return this.reply(request, { error: { code, message } })
+  }
+
+  /**
+   * Retire an original request handle without sending a reply.
+   * Abort cancels queued replies. Bytes passed to Writable.write cannot be retracted.
+   * Running handlers must honor their signal and retain their slots until settlement.
+   */
+  dismiss(request: JsonRpcRequest): boolean {
+    if (!this.isLiveRequest(request)) return false
+    const incoming = this.incoming.get(request.id)!
+    this.incoming.delete(request.id)
+    this.replying.delete(request)
+    const index = this.queue.findIndex((item) => item.message === request)
+    if (index >= 0) {
+      const [item] = this.queue.splice(index, 1)
+      this.queuedIncomingBytes -= item!.bytes
+    }
+    incoming.controller.abort()
+    return true
   }
 
   close(reason = new Error('JSON-RPC transport closed')) {
@@ -217,27 +240,39 @@ export class JsonlRpcTransport {
   }
 
   private reply(request: JsonRpcRequest, response: Record<string, unknown>) {
-    if (
-      this.reason ||
-      this.wire.closed ||
-      this.incoming.get(request.id) !== request ||
-      this.replying.has(request) ||
-      request.runtimeGeneration !== this.options.runtimeGeneration
-    )
+    if (!this.isLiveRequest(request) || this.replying.has(request))
       return Promise.reject(
         new Error('JSON-RPC request is stale or already answered'),
       )
     // Reserve the handle while its reply is queued. A failed send can be retried.
     this.replying.add(request)
     return this.wire
-      .send(this.envelope({ id: request.id, ...response }))
-      .then(() => {
-        if (this.incoming.get(request.id) === request)
-          this.incoming.delete(request.id)
+      .send(this.envelope({ id: request.id, ...response }), {
+        signal: request.signal,
       })
+      .then(
+        () => {
+          this.dismiss(request)
+        },
+        (error: unknown) => {
+          // Request abort during shutdown must preserve the router's failure reason.
+          throw this.reason ?? error
+        },
+      )
       .finally(() => {
         this.replying.delete(request)
       })
+  }
+
+  private isLiveRequest(request: JsonRpcRequest): boolean {
+    return (
+      !!request &&
+      !this.reason &&
+      !this.wire.closed &&
+      this.incoming.get(request.id)?.request === request &&
+      request.runtimeGeneration === this.options.runtimeGeneration &&
+      !request.signal.aborted
+    )
   }
 
   private settle(id: RpcId, error?: Error, value?: unknown) {
@@ -253,11 +288,13 @@ export class JsonlRpcTransport {
     if (this.reason) return
     this.reason = reason
     for (const id of this.pending.keys()) this.settle(id, reason)
+    const incoming = [...this.incoming.values()]
     this.incoming.clear()
     this.replying.clear()
     this.handlers.clear()
     this.queue.length = 0
     this.queuedIncomingBytes = 0
+    for (const { controller } of incoming) controller.abort()
     this.controller.abort()
   }
 
@@ -266,6 +303,8 @@ export class JsonlRpcTransport {
       const item = this.queue.shift()
       if (!item) return
       this.queuedIncomingBytes -= item.bytes
+      if (item.message.type === 'request' && !this.isLiveRequest(item.message))
+        continue
       const token = Symbol()
       this.handlers.add(token)
       try {
@@ -278,15 +317,21 @@ export class JsonlRpcTransport {
             },
             () => {
               this.handlers.delete(token)
-              void this.close(new Error('JSON-RPC incoming handler failed'))
+              this.failIncoming(item.message)
+              this.drainIncoming()
             },
           )
         } else this.handlers.delete(token)
       } catch {
         this.handlers.delete(token)
-        void this.close(new Error('JSON-RPC incoming handler failed'))
+        this.failIncoming(item.message)
       }
     }
+  }
+
+  private failIncoming(message: JsonRpcIncoming) {
+    if (message.type === 'notification' || this.isLiveRequest(message))
+      void this.close(new Error('JSON-RPC incoming handler failed'))
   }
 
   private envelope(value: Record<string, unknown>) {
@@ -343,7 +388,6 @@ export class JsonlRpcTransport {
         method: value.method,
         params: value.params,
         runtimeGeneration: this.options.runtimeGeneration,
-        signal: this.controller.signal,
       }
       let message: JsonRpcIncoming
       if ('id' in value) {
@@ -356,9 +400,20 @@ export class JsonlRpcTransport {
           void this.close(new Error('JSON-RPC incoming request limit reached'))
           return
         }
-        message = Object.freeze({ ...common, type: 'request', id })
-        this.incoming.set(id, message)
-      } else message = Object.freeze({ ...common, type: 'notification' })
+        const controller = new AbortController()
+        message = Object.freeze({
+          ...common,
+          type: 'request',
+          id,
+          signal: controller.signal,
+        })
+        this.incoming.set(id, { request: message, controller })
+      } else
+        message = Object.freeze({
+          ...common,
+          type: 'notification',
+          signal: this.controller.signal,
+        })
       if (
         this.queue.length >= this.maxQueuedFrames ||
         this.queuedIncomingBytes + bytes > this.maxQueuedBytes

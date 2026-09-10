@@ -60,11 +60,20 @@ if (mode === 'bytes') {
   keepAlive()
   const reader = createInterface({ input: process.stdin })
   let outer
+  const dismissalReplies = []
+  let dismissalNotifications = 0
   reader.on('line', (line) => {
     const message = JSON.parse(line)
     if (mode === 'rpc-unversioned' && Object.hasOwn(message, 'jsonrpc'))
       throw new Error('Expected an unversioned envelope')
     if (!message.method) {
+      if (message.id === 7 || message.id === 8)
+        dismissalReplies.push({
+          id: message.id,
+          ...('error' in message
+            ? { error: message.error }
+            : { result: message.result }),
+        })
       if (outer && message.id === outer.id) {
         send({
           jsonrpc: '2.0',
@@ -78,7 +87,29 @@ if (mode === 'bytes') {
       return
     }
     if (message.method === 'pending') return
-    if (message.method === 'outer') {
+    if (message.method === 'dismissal/start') {
+      send({ jsonrpc: '2.0', id: 7, method: 'dismissal/approval', params: {} })
+      send({
+        jsonrpc: '2.0',
+        method: 'serverRequest/resolved',
+        params: { requestId: 7, threadId: 'fixture-thread' },
+      })
+      send({ jsonrpc: '2.0', id: 7, method: 'dismissal/replacement' })
+      send({ jsonrpc: '2.0', id: 8, method: 'dismissal/unrelated' })
+      send({ jsonrpc: '2.0', method: 'dismissal/tick' })
+      send({ jsonrpc: '2.0', id: message.id, result: true })
+    } else if (message.method === 'dismissal/client-note') {
+      dismissalNotifications++
+    } else if (message.method === 'dismissal/report') {
+      send({
+        jsonrpc: '2.0',
+        id: message.id,
+        result: {
+          replies: dismissalReplies,
+          notifications: dismissalNotifications,
+        },
+      })
+    } else if (message.method === 'outer') {
       outer = message
       send({ jsonrpc: '2.0', id: message.id, method: 'approval', params: {} })
     } else if (message.method === 'nested') {
