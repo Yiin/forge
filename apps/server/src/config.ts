@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  copyFileSync,
   writeFileSync,
 } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -285,7 +286,7 @@ export function loadConfigSync(path?: string): ForgeConfig {
     throw new Error(
       `${basename(file)}: invalid config: ${checked.error.message}`,
     )
-  activeConfig = checked.data
+  activeConfig = convertConfig(checked.data)
   return activeConfig
 }
 
@@ -299,6 +300,58 @@ const configBody = (config: ForgeConfig) => ({
   harness: config.harness,
   settings: config.settings,
 })
+
+const nativeHarnesses = new Set([
+  'claude-code-acp',
+  'codex-acp',
+  'kimi',
+  'opencode',
+  'pi',
+  'cursor',
+])
+
+function inferredAdapterKind(key: string, entry: HarnessConfig) {
+  if (entry.adapterKind) return entry.adapterKind
+  if (entry.protocol === 'pty') return 'pty' as const
+  if (nativeHarnesses.has(key)) return 'native' as const
+  return 'custom' as const
+}
+
+/** Convert an old config without changing its executable cutover semantics. */
+export function convertConfig(config: ForgeConfig): ForgeConfig {
+  return {
+    ...config,
+    harness: Object.fromEntries(
+      Object.entries(config.harness).map(([key, entry]) => [
+        key,
+        { ...entry, adapterKind: inferredAdapterKind(key, entry) },
+      ]),
+    ),
+  }
+}
+
+/** Atomically promote a config to explicit adapter kinds and retain recovery data. */
+export function convertConfigFileSync(path: string): ForgeConfig {
+  const file = resolve(path)
+  const original = readFileSync(file, 'utf8')
+  const parsed = forgeConfigSchema.parse(parse(original))
+  const converted = convertConfig(parsed)
+  const backup = `${file}.pre-native-cutover`
+  const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`
+  if (!existsSync(backup)) copyFileSync(file, backup)
+  try {
+    writeFileSync(temporary, stringify(stripUndefined(configBody(converted))))
+    renameSync(temporary, file)
+  } catch (error) {
+    try {
+      writeFileSync(file, original)
+    } catch {
+      // Preserve the original when possible.
+    }
+    throw error
+  }
+  return converted
+}
 
 export async function saveConfig(path: string, config: ForgeConfig) {
   const file = resolve(path)

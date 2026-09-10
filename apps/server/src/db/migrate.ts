@@ -10,6 +10,21 @@ type SqliteLike = {
   }
 }
 
+function replayLegacyMigration(sqlite: SqliteLike, sql: string) {
+  // Legacy files use one statement per line or trigger block. Splitting here
+  // lets a partially upgraded database continue after one duplicate ALTER.
+  for (const statement of sql.split(/;\s*(?=\n|$)/)) {
+    const trimmed = statement.trim()
+    if (!trimmed) continue
+    try {
+      sqlite.exec(`${trimmed};`)
+    } catch (error) {
+      if (!/(duplicate column|already exists|no such table: draft_promotions_new)/i.test(String(error)))
+        throw error
+    }
+  }
+}
+
 export function migrate(sqlite: SqliteLike) {
   const dir = fileURLToPath(new URL('../../drizzle/', import.meta.url))
   const files = readdirSync(dir)
@@ -39,24 +54,10 @@ export function migrate(sqlite: SqliteLike) {
     if (hasExistingSchema) {
       sqlite.exec('BEGIN')
       try {
-        // Existing databases predate the migration ledger. Apply the newest
-        // idempotent migration before recording the legacy baseline.
-        const newest = files.at(-1)
-        if (newest) {
-          try {
-            sqlite.exec(readFileSync(dir + newest, 'utf8'))
-          } catch (error) {
-            // A pre-ledger database may already contain the newest columns.
-            // The legacy path executes that migration once before recording
-            // the baseline, so treat those duplicate ALTERs as applied.
-            const hasIdentity = sqlite
-              .prepare(
-                "SELECT 1 FROM pragma_table_info('harness_accounts') WHERE name = 'identity'",
-              )
-              .get()
-            if (!hasIdentity || !String(error).includes('duplicate column'))
-              throw error
-          }
+        // Pre-ledger databases can contain any prefix of the old schema.
+        // Replay every migration and ignore only already-applied DDL.
+        for (const file of files) {
+          replayLegacyMigration(sqlite, readFileSync(dir + file, 'utf8'))
         }
         const insert = sqlite.prepare(
           'INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)',

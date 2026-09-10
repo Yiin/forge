@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { rolePolicy, type RolePolicy } from './rolePolicy.js'
 
+export const adapterKindSchema = z.enum(['native', 'acp', 'pty', 'custom'])
+
 export const harnessConfigSchema = z
   .object({
     name: z.string().trim().min(1),
@@ -8,6 +10,7 @@ export const harnessConfigSchema = z
     args: z.array(z.string()),
     env: z.record(z.string(), z.string()),
     protocol: z.enum(['acp', 'pty']),
+    adapterKind: adapterKindSchema.optional(),
     quietPeriodMs: z.number().int().positive().optional(),
     maxTurnMs: z.number().int().positive().optional(),
     enabled: z.boolean().default(true),

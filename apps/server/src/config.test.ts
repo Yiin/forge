@@ -1,9 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import {
   defaultConfig,
+  convertConfig,
+  convertConfigFileSync,
   reconcileConfig,
   resolveRunConfig,
   saveConfigSync,
@@ -55,6 +57,32 @@ describe('resolveRunConfig', () => {
 })
 
 describe('default harness configuration', () => {
+  test('classifies legacy entries without changing their commands', () => {
+    const config = defaultConfig(false)
+    const converted = convertConfig(config)
+    expect(converted.harness.kimi).toMatchObject({
+      adapterKind: 'native',
+      command: 'kimi',
+      args: ['acp'],
+    })
+    expect(converted.harness.grok.adapterKind).toBe('custom')
+  })
+
+  test('keeps a recovery copy and leaves the original on parse failure', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-config-cutover-'))
+    const file = join(root, 'forge.toml')
+    const config = defaultConfig(false)
+    saveConfigSync(file, config)
+    const converted = convertConfigFileSync(file)
+    expect(converted.harness.opencode.adapterKind).toBe('native')
+    expect(await readFile(`${file}.pre-native-cutover`, 'utf8')).toContain('dataDir')
+    const bad = join(root, 'bad.toml')
+    await writeFile(bad, 'not = [valid')
+    await expect(() => convertConfigFileSync(bad)).toThrow()
+    expect(await readFile(bad, 'utf8')).toBe('not = [valid')
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('omits shell and mock outside development', () => {
     expect(defaultConfig(false).harness).not.toHaveProperty('shell')
     expect(defaultConfig(false).harness).not.toHaveProperty('mock')

@@ -18,6 +18,9 @@ export const sessions = sqliteTable('sessions', {
   worktreePath: text('worktree_path'),
   branch: text('branch'),
   providerSessionId: text('provider_session_id'),
+  adapterKind: text('adapter_kind'),
+  nativeResumeState: text('native_resume_state').notNull().default('not_eligible'),
+  nativeResumeError: text('native_resume_error'),
   model: text('model'),
   kind: text('kind').notNull(),
   retention: text('retention').notNull().default('permanent'),
@@ -31,6 +34,16 @@ export const sessions = sqliteTable('sessions', {
   createdAt: integer('created_at').notNull(),
   lastActivityAt: integer('last_activity_at').notNull(),
   deletedAt: integer('deleted_at'),
+})
+export const nativeSessionBindings = sqliteTable('native_session_bindings', {
+  sessionId: text('session_id').primaryKey().references(() => sessions.id),
+  provider: text('provider').notNull(),
+  accountId: text('account_id'),
+  cwd: text('cwd').notNull(),
+  providerSessionId: text('provider_session_id'),
+  state: text('state').notNull().default('available'),
+  error: text('error'),
+  updatedAt: integer('updated_at').notNull(),
 })
 export const messages = sqliteTable(
   'messages',

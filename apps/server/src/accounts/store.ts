@@ -21,6 +21,7 @@ type AccountRow = {
   harness_key: string
   label: string
   kind: string
+  adapter_kind: 'native' | 'acp' | 'pty' | 'custom' | null
   home_path: string
   order_index: number
   disabled_at: number | null
@@ -41,6 +42,7 @@ const toAccount = (row: AccountRow): HarnessAccount => ({
   harnessKey: row.harness_key,
   label: row.label,
   kind: row.kind,
+  ...(row.adapter_kind ? { adapterKind: row.adapter_kind } : {}),
   homePath: row.home_path,
   orderIndex: row.order_index,
   disabledAt: row.disabled_at,
@@ -113,14 +115,15 @@ export class HarnessAccountStore {
     this.db
       .prepare(
         `INSERT INTO harness_accounts
-          (id, harness_key, label, kind, home_path, order_index, created_at, label_auto_generated, config)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+          (id, harness_key, label, kind, adapter_kind, home_path, order_index, created_at, label_auto_generated, config)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
       )
       .run(
         id,
         input.harnessKey,
         input.label,
         input.kind,
+        input.adapterKind ?? null,
         homePath,
         input.orderIndex ?? 0,
         now,
