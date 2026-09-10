@@ -5,6 +5,7 @@ import {
   renameSync,
   copyFileSync,
   writeFileSync,
+  unlinkSync,
 } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
@@ -331,22 +332,50 @@ export function convertConfig(config: ForgeConfig): ForgeConfig {
 }
 
 /** Atomically promote a config to explicit adapter kinds and retain recovery data. */
-export function convertConfigFileSync(path: string): ForgeConfig {
+type ConfigFileOps = {
+  readFileSync: (path: string, encoding: 'utf8') => string
+  existsSync: (path: string) => boolean
+  copyFileSync: (source: string, destination: string) => void
+  writeFileSync: (path: string, data: string) => void
+  renameSync: (source: string, destination: string) => void
+  unlinkSync: (path: string) => void
+}
+
+const configFileOps: ConfigFileOps = {
+  readFileSync,
+  existsSync,
+  copyFileSync,
+  writeFileSync,
+  renameSync,
+  unlinkSync,
+}
+
+export function convertConfigFileSync(
+  path: string,
+  operations: ConfigFileOps = configFileOps,
+): ForgeConfig {
   const file = resolve(path)
-  const original = readFileSync(file, 'utf8')
-  const parsed = forgeConfigSchema.parse(parse(original))
+  const original = operations.readFileSync(file, 'utf8')
+  const source = parse(original) as Record<string, unknown>
+  const parsed = forgeConfigSchema.parse({
+    ...source,
+    dataDir: source.dataDir ?? resolve(dirname(file), 'data'),
+  })
   const converted = convertConfig(parsed)
   const backup = `${file}.pre-native-cutover`
   const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`
-  if (!existsSync(backup)) copyFileSync(file, backup)
+  if (!operations.existsSync(backup)) operations.copyFileSync(file, backup)
   try {
-    writeFileSync(temporary, stringify(stripUndefined(configBody(converted))))
-    renameSync(temporary, file)
+    operations.writeFileSync(
+      temporary,
+      stringify(stripUndefined(configBody(converted))),
+    )
+    operations.renameSync(temporary, file)
   } catch (error) {
     try {
-      writeFileSync(file, original)
+      operations.unlinkSync(temporary)
     } catch {
-      // Preserve the original when possible.
+      // The temporary file may not exist when its write failed.
     }
     throw error
   }
