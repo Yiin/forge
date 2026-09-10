@@ -1,5 +1,6 @@
 import type { MessageContent } from '@forge/protocol/message'
-import type { SessionConfigOption } from '../acp/configOptions.js'
+import type { HarnessAdapter, SessionConfigOption } from '../harnesses/types.js'
+export type { HarnessAdapter }
 
 export type HarnessSession = {
   id: string
