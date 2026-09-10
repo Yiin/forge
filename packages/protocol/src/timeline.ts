@@ -1,5 +1,5 @@
-import { z } from 'zod'
 import { harnessEventSchema, type HarnessEvent } from './harness.js'
+import { z } from 'zod'
 
 export const timelineFrameSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -14,7 +14,6 @@ export const timelineFrameSchema = z.discriminatedUnion('kind', [
   }),
 ])
 export type TimelineFrame = z.infer<typeof timelineFrameSchema>
-
 export type TimelineState = {
   cursor: number
   events: HarnessEvent[]
@@ -22,8 +21,10 @@ export type TimelineState = {
   terminal: 'completed' | 'failed' | null
   terminalByRun: Map<string, 'completed' | 'failed'>
   activeRunId: string | null
+  activeTurnId: string | null
+  activeGeneration: string | null
+  generations: Set<string>
 }
-
 export const emptyTimeline = (): TimelineState => ({
   cursor: 0,
   events: [],
@@ -31,53 +32,81 @@ export const emptyTimeline = (): TimelineState => ({
   terminal: null,
   terminalByRun: new Map(),
   activeRunId: null,
+  activeTurnId: null,
+  activeGeneration: null,
+  generations: new Set(),
 })
-
 const eventKey = (event: HarnessEvent) =>
-  (('deliveryId' in event && event.deliveryId) ||
-    ('receiptId' in event && event.receiptId) ||
-    ('itemId' in event && event.itemId) ||
-    ('turnId' in event ? `${event.type}:${event.turnId}` : 'runId' in event ? `${event.type}:${event.runId}` : JSON.stringify(event))) as string
+  `${event.runtimeGeneration ?? 'legacy'}:${event.deliveryId ?? event.type + ':' + ('turnId' in event ? event.turnId : event.runId)}`
+
+function derive(events: HarnessEvent[]) {
+  const completedTurns = new Set<string>(),
+    terminalByRun = new Map<string, 'completed' | 'failed'>()
+  let activeRunId: string | null = null,
+    activeTurnId: string | null = null,
+    activeGeneration: string | null = null
+  const generations = new Set<string>()
+  for (const event of events) {
+    generations.add(event.runtimeGeneration)
+    if (event.type === 'run_started') {
+      activeRunId = event.runId
+      activeTurnId = null
+      activeGeneration = event.runtimeGeneration
+    }
+    if (event.type === 'turn_started') {
+      activeRunId = event.runId
+      activeTurnId = event.turnId
+      activeGeneration = event.runtimeGeneration
+    }
+    if (event.type === 'turn_completed') {
+      completedTurns.add(event.turnId)
+      const runId = event.runId ?? '__legacy__'
+      if (!terminalByRun.has(runId)) terminalByRun.set(runId, 'completed')
+    }
+    if (event.type === 'run_failed' && !terminalByRun.has(event.runId))
+      terminalByRun.set(event.runId, 'failed')
+  }
+  const runTerminal = activeRunId ? terminalByRun.get(activeRunId) : null
+  const terminal =
+    runTerminal === 'failed'
+      ? 'failed'
+      : activeTurnId && completedTurns.has(activeTurnId)
+        ? 'completed'
+        : activeRunId
+          ? null
+          : (terminalByRun.values().next().value ?? null)
+  return {
+    completedTurns,
+    terminalByRun,
+    activeRunId,
+    activeTurnId,
+    activeGeneration,
+    generations,
+    terminal,
+  }
+}
 
 export function reduceTimeline(
   state: TimelineState,
   frame: TimelineFrame,
 ): TimelineState {
+  if (frame.kind === 'snapshot' && frame.cursor < state.cursor) return state
+  if (frame.kind === 'delta' && frame.cursor <= state.cursor) return state
   const incoming = frame.kind === 'snapshot' ? frame.events : [frame.event]
-  if (frame.cursor <= state.cursor && frame.kind === 'delta') return state
-  const incomingKeys = new Set(incoming.map(eventKey))
-  const events = frame.kind === 'snapshot' && frame.cursor >= state.cursor
-    ? []
-    : frame.kind === 'snapshot'
-      ? state.events.filter((event) => !incomingKeys.has(eventKey(event)))
-    : [...state.events]
-  const seen = new Set(events.map(eventKey))
-  const completedTurns = new Set(state.completedTurns)
-  const terminalByRun = new Map(state.terminalByRun)
-  let activeRunId = state.activeRunId
-  for (const event of incoming) {
-    if (seen.has(eventKey(event))) continue
-    seen.add(eventKey(event))
-    events.push(event)
-    if (event.type === 'run_started') activeRunId = event.runId
-    if (event.type === 'turn_completed') {
-      completedTurns.add(event.turnId)
-      terminalByRun.set('runId' in event ? event.runId ?? '__legacy__' : '__legacy__', 'completed')
-    }
-    if (event.type === 'run_failed') terminalByRun.set(event.runId, 'failed')
-  }
-  return {
-    cursor: Math.max(state.cursor, frame.cursor),
-    events,
-    completedTurns,
-    terminal: activeRunId
-      ? terminalByRun.get(activeRunId) ?? null
-      : [...terminalByRun.values()].at(-1) ?? null,
-    terminalByRun,
-    activeRunId,
-  }
+  const seen = new Set(state.events.map(eventKey))
+  const accepted = incoming.filter(
+    (event) =>
+      !seen.has(eventKey(event)) &&
+      !(
+        state.activeGeneration &&
+        state.generations.has(event.runtimeGeneration) &&
+        event.runtimeGeneration !== state.activeGeneration
+      ),
+  )
+  const events =
+    frame.kind === 'snapshot' ? incoming : [...state.events, ...accepted]
+  return { cursor: frame.cursor, events, ...derive(events) }
 }
-
 export function foldTimeline(frames: TimelineFrame[]): TimelineState {
   return frames.reduce(reduceTimeline, emptyTimeline())
 }

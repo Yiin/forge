@@ -7,6 +7,7 @@ import type {
   NativeBinding,
   PromptInput,
   QuestionAnswer,
+  PermissionReply,
 } from '@forge/protocol/harness'
 
 export type {
@@ -18,6 +19,7 @@ export type {
   PromptInput,
   DispatchOptions,
   QuestionAnswer,
+  PermissionReply,
 }
 export type SessionConfigOption = {
   id: string
@@ -46,7 +48,34 @@ export type HarnessReceipt = {
   receiptId: string
   runId: string
   turnId: string
-  completion: { completionId: string; runId: string; turnId: string }
+  completion: CompletionHandle
+}
+export type CompletionResult =
+  | { status: 'completed'; runId: string; turnId: string }
+  | { status: 'interrupted'; runId: string; turnId: string; reason?: string }
+  | {
+      status: 'failed'
+      runId: string
+      turnId: string
+      code: string
+      message: string
+    }
+export type CompletionHandle = Promise<CompletionResult> & {
+  completionId: string
+  runId: string
+  turnId: string
+}
+export function createCompletionHandle(ids: {
+  completionId: string
+  runId: string
+  turnId: string
+}) {
+  let settle!: (result: CompletionResult) => void
+  const promise = new Promise<CompletionResult>((resolve) => {
+    settle = resolve
+  }) as CompletionHandle
+  Object.assign(promise, ids)
+  return { handle: promise, settle }
 }
 export type HarnessHandle = {
   prompt(
@@ -61,7 +90,7 @@ export type HarnessHandle = {
   ): Promise<HarnessReceipt> | HarnessReceipt
   cancel(): Promise<void> | void
   kill(): Promise<void> | void
-  replyPermission?(requestId: string, optionId: string): Promise<void> | void
+  replyPermission?(reply: PermissionReply): Promise<void> | void
   replyQuestion?(
     requestId: string,
     answers: Record<string, QuestionAnswer>,

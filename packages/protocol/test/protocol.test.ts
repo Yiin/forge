@@ -3,7 +3,13 @@ import { Ephemeral } from '../src/events.js'
 import { makeId, idSchemas } from '../src/ids.js'
 import { MessageContent, messageContentTypes } from '../src/message.js'
 import { StatusEvent } from '../src/status.js'
-import { harnessEventSchema, questionRequestSchema } from '../src/harness.js'
+import {
+  harnessEventSchema,
+  questionRequestSchema,
+  dispatchOptionsSchema,
+  permissionRequestSchema,
+  questionAnswerSchema,
+} from '../src/harness.js'
 
 const fixtures = [
   { type: 'text_delta', text: 'hello' },
@@ -47,18 +53,78 @@ const fixtures = [
 describe('protocol schemas', () => {
   it('retains native event identity and delivery envelope fields', () => {
     const event = {
-      type: 'text_delta', runId: 'run-1', turnId: 'turn-1', itemId: 'item-1', text: 'hi',
-      runtimeGeneration: 'generation-1', deliveryId: 'delivery-1', providerRunId: 'native-run',
-      providerTurnId: 'native-turn', providerItemId: 'native-item',
+      type: 'text_delta',
+      runId: 'run-1',
+      turnId: 'turn-1',
+      itemId: 'item-1',
+      text: 'hi',
+      runtimeGeneration: 'generation-1',
+      deliveryId: 'delivery-1',
+      providerRunId: 'native-run',
+      providerTurnId: 'native-turn',
+      providerItemId: 'native-item',
     }
     expect(harnessEventSchema.parse(event)).toEqual(event)
   })
 
   it('preserves free-input question rules and typed answer semantics', () => {
-    const request = { requestId: 'request-1', questions: [{
-      id: 'question-1', question: 'What next?', options: [], multiSelect: false, allowFreeInput: true,
-    }] }
+    const request = {
+      requestId: 'request-1',
+      questions: [
+        {
+          id: 'question-1',
+          question: 'What next?',
+          options: [],
+          multiSelect: false,
+          allowFreeInput: true,
+        },
+      ],
+    }
     expect(questionRequestSchema.parse(request)).toEqual(request)
+  })
+  it('rejects malformed native identities and retains provider policy details', () => {
+    expect(
+      harnessEventSchema.safeParse({
+        type: 'text_delta',
+        runId: 123,
+        runtimeGeneration: [],
+        deliveryId: {},
+        turnId: 't',
+        itemId: 'i',
+        text: 'x',
+      }).success,
+    ).toBe(false)
+    expect(
+      dispatchOptionsSchema.parse({
+        model: 'm',
+        approvalPolicy: 'untrusted',
+        sandboxPolicy: {
+          type: 'workspaceWrite',
+          writableRoots: ['/repo'],
+          networkAccess: false,
+        },
+        serviceTier: 'priority',
+      }),
+    ).toMatchObject({ approvalPolicy: 'untrusted', serviceTier: 'priority' })
+    expect(
+      permissionRequestSchema.parse({
+        requestId: 'p',
+        toolCallId: null,
+        title: 'Network',
+        options: [],
+        permissions: { network: { enabled: true } },
+        scope: 'turn',
+        approvalId: 'a',
+        kind: 'writeStdin',
+      }),
+    ).toMatchObject({ scope: 'turn', kind: 'writeStdin' })
+    expect(
+      questionAnswerSchema.parse({
+        type: 'selected_with_text',
+        optionIds: ['o'],
+        text: 'other',
+      }),
+    ).toEqual({ type: 'selected_with_text', optionIds: ['o'], text: 'other' })
   })
 
   it('round-trips every message content variant', () => {

@@ -1,10 +1,8 @@
 import { z } from 'zod'
 
 const id = z.string().min(1)
-
 export const adapterKindSchema = z.enum(['native', 'acp', 'pty', 'custom'])
 export type AdapterKind = z.infer<typeof adapterKindSchema>
-
 export const harnessCapabilitySchema = z.object({
   loadSession: z.boolean(),
   steer: z.boolean(),
@@ -15,7 +13,6 @@ export const harnessCapabilitySchema = z.object({
   models: z.boolean(),
 })
 export type HarnessCapabilities = z.infer<typeof harnessCapabilitySchema>
-
 export const nativeBindingSchema = z.object({
   provider: id,
   accountId: id.nullable(),
@@ -23,7 +20,6 @@ export const nativeBindingSchema = z.object({
   providerSessionId: id.nullable(),
 })
 export type NativeBinding = z.infer<typeof nativeBindingSchema>
-
 export const modelOptionsSchema = z.object({
   model: z.string().nullable().optional(),
   reasoning: z.string().nullable().optional(),
@@ -32,9 +28,17 @@ export const modelOptionsSchema = z.object({
 export type ModelOptions = z.infer<typeof modelOptionsSchema>
 export const dispatchOptionsSchema = modelOptionsSchema.extend({
   permissionMode: z.enum(['manual', 'auto', 'yolo']).default('manual'),
+  approvalPolicy: z.enum(['untrusted', 'on-request', 'always']).optional(),
+  sandboxPolicy: z
+    .object({
+      type: z.enum(['readOnly', 'workspaceWrite', 'fullAccess']),
+      writableRoots: z.array(z.string()).optional(),
+      networkAccess: z.boolean().optional(),
+    })
+    .optional(),
+  serviceTier: z.string().optional(),
 })
 export type DispatchOptions = z.infer<typeof dispatchOptionsSchema>
-
 export const promptInputSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string() }),
   z.object({
@@ -49,89 +53,110 @@ export const promptInputSchema = z.discriminatedUnion('type', [
   }),
 ])
 export type PromptInput = z.infer<typeof promptInputSchema>
-
 export const permissionRequestSchema = z.object({
   requestId: id,
   toolCallId: id.nullable(),
   title: z.string(),
   detail: z.string().optional(),
   options: z.array(z.object({ id, label: z.string() })),
+  permissions: z.unknown().optional(),
+  scope: z.enum(['turn', 'run', 'session']).optional(),
+  approvalId: id.optional(),
+  kind: z.string().optional(),
 })
 export type PermissionRequest = z.infer<typeof permissionRequestSchema>
-
+export const permissionReplySchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('selected'),
+    requestId: id,
+    optionId: id,
+    grant: z.unknown().optional(),
+    scope: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('granted'),
+    requestId: id,
+    permissions: z.unknown(),
+    scope: z.string(),
+  }),
+  z.object({
+    type: z.literal('denied'),
+    requestId: id,
+    reason: z.string().optional(),
+  }),
+])
+export type PermissionReply = z.infer<typeof permissionReplySchema>
 export const questionAnswerSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('selected'), optionIds: z.array(id) }),
   z.object({ type: z.literal('free_text'), text: z.string() }),
+  z.object({
+    type: z.literal('selected_with_text'),
+    optionIds: z.array(id),
+    text: z.string(),
+  }),
   z.object({ type: z.literal('skipped') }),
 ])
 export type QuestionAnswer = z.infer<typeof questionAnswerSchema>
-
+const question = z.object({
+  id,
+  header: z.string().optional(),
+  question: z.string(),
+  options: z.array(
+    z.object({ id, label: z.string(), description: z.string().optional() }),
+  ),
+  multiSelect: z.boolean().default(false),
+  allowFreeInput: z.boolean().default(false),
+  isBlocking: z.boolean().optional(),
+  isSecret: z.boolean().optional(),
+})
 export const questionRequestSchema = z.object({
   requestId: id,
-  questions: z.array(
-    z.object({
-      id,
-      header: z.string().optional(),
-      question: z.string(),
-      options: z.array(
-        z.object({ id, label: z.string(), description: z.string().optional() }),
-      ),
-      multiSelect: z.boolean().default(false),
-      allowFreeInput: z.boolean().default(false),
-    }),
-  ),
+  questions: z.array(question),
 })
 export type QuestionRequest = z.infer<typeof questionRequestSchema>
-
-const rawHarnessEventSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('run_started'), runId: id }),
-  z.object({ type: z.literal('turn_started'), turnId: id }),
+const envelope = {
+  runId: id,
+  runtimeGeneration: id,
+  deliveryId: id,
+  providerRunId: id.optional(),
+  providerTurnId: id.optional(),
+  providerItemId: id.optional(),
+}
+const turnItem = { ...envelope, turnId: id, itemId: id }
+export const harnessEventSchema = z.discriminatedUnion('type', [
+  z.object({ ...envelope, type: z.literal('run_started') }),
+  z.object({ ...envelope, type: z.literal('turn_started'), turnId: id }),
+  z.object({ ...turnItem, type: z.literal('text_delta'), text: z.string() }),
+  z.object({ ...turnItem, type: z.literal('thought_delta'), text: z.string() }),
   z.object({
-    type: z.literal('text_delta'),
-    turnId: id,
-    itemId: id,
-    text: z.string(),
-  }),
-  z.object({
-    type: z.literal('thought_delta'),
-    turnId: id,
-    itemId: id,
-    text: z.string(),
-  }),
-  z.object({
+    ...turnItem,
     type: z.literal('tool_started'),
-    turnId: id,
-    itemId: id,
     toolCallId: id,
     name: z.string(),
     input: z.unknown(),
   }),
   z.object({
+    ...turnItem,
     type: z.literal('tool_update'),
-    turnId: id,
-    itemId: id,
     toolCallId: id,
     status: z.string(),
     output: z.unknown().optional(),
   }),
   z.object({
+    ...turnItem,
     type: z.literal('child_started'),
-    turnId: id,
-    itemId: id,
     childId: id,
     description: z.string(),
   }),
   z.object({
+    ...turnItem,
     type: z.literal('child_finished'),
-    turnId: id,
-    itemId: id,
     childId: id,
     status: z.enum(['completed', 'failed']),
   }),
   z.object({
+    ...turnItem,
     type: z.literal('plan'),
-    turnId: id,
-    itemId: id,
     steps: z.array(
       z.object({
         id,
@@ -141,68 +166,51 @@ const rawHarnessEventSchema = z.discriminatedUnion('type', [
     ),
   }),
   z.object({
+    ...turnItem,
     type: z.literal('file_change'),
-    turnId: id,
-    itemId: id,
     path: z.string(),
     kind: z.enum(['created', 'modified', 'deleted']),
   }),
   z.object({
+    ...turnItem,
     type: z.literal('usage'),
-    turnId: id,
-    itemId: id,
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
     totalTokens: z.number().int().nonnegative(),
   }),
   z.object({
+    ...turnItem,
     type: z.literal('permission_requested'),
-    turnId: id,
-    itemId: id,
     request: permissionRequestSchema,
   }),
   z.object({
+    ...turnItem,
     type: z.literal('question_requested'),
-    turnId: id,
-    itemId: id,
     request: questionRequestSchema,
   }),
   z.object({
+    ...envelope,
     type: z.literal('prompt_accepted'),
-    runId: id,
     turnId: id,
     receiptId: id,
   }),
   z.object({
+    ...envelope,
     type: z.literal('steer_accepted'),
-    runId: id,
     turnId: id,
     receiptId: id,
   }),
   z.object({
+    ...envelope,
     type: z.literal('turn_completed'),
-    runId: id.optional(),
     turnId: id,
     stopReason: z.string().optional(),
   }),
   z.object({
+    ...envelope,
     type: z.literal('run_failed'),
-    runId: id,
     code: z.string(),
     message: z.string(),
   }),
 ])
-
-// Intersection with a record keeps the neutral envelope supplied by native
-// adapters while accepting legacy producers during the staged cutover.
-export const harnessEventSchema = z.intersection(
-  rawHarnessEventSchema,
-  z.record(z.string(), z.unknown()),
-)
-export type HarnessEvent = z.infer<typeof rawHarnessEventSchema> & {
-  runtimeGeneration?: string
-  deliveryId?: string
-  providerRunId?: string
-  providerTurnId?: string
-  providerItemId?: string
-}
+export type HarnessEvent = z.infer<typeof harnessEventSchema>
