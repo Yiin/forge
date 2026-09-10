@@ -20,6 +20,13 @@ export const nativeBindingSchema = z.object({
   providerSessionId: id.nullable(),
 })
 export type NativeBinding = z.infer<typeof nativeBindingSchema>
+// Adapters confirm the native session identity and canonical cwd before publication.
+export const confirmedNativeBindingSchema = nativeBindingSchema
+  .extend({ cwd: id, providerSessionId: id })
+  .readonly()
+export type ConfirmedNativeBinding = z.infer<
+  typeof confirmedNativeBindingSchema
+>
 export const modelOptionsSchema = z.object({
   model: z.string().nullable().optional(),
   reasoning: z.string().nullable().optional(),
@@ -204,11 +211,25 @@ const envelope = {
   providerTurnId: id.optional(),
   providerItemId: id.optional(),
 }
-const turnItem = { ...envelope, turnId: id, itemId: id }
+// Child-owned items retain their spawning root run and turn. The child is the owner.
+const turnItem = { ...envelope, turnId: id, itemId: id, childId: id.optional() }
+const childIdentity = {
+  // The Forge tool call that spawned this child, possibly owned by parentChildId.
+  parentToolCallId: id.optional(),
+  // The provider's agent ID, distinct from its session ID and tool call IDs.
+  providerChildId: id.optional(),
+  parentChildId: id.optional(),
+}
 export const harnessEventSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, type: z.literal('run_started') }),
   z.object({ ...envelope, type: z.literal('turn_started'), turnId: id }),
-  z.object({ ...turnItem, type: z.literal('text_delta'), text: z.string() }),
+  z.object({
+    ...turnItem,
+    type: z.literal('text_delta'),
+    text: z.string(),
+    // Omitted means assistant. Keep role and owner stable across one item's deltas.
+    role: z.enum(['user', 'assistant']).optional(),
+  }),
   z.object({ ...turnItem, type: z.literal('thought_delta'), text: z.string() }),
   z.object({
     ...turnItem,
@@ -228,7 +249,15 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
     ...turnItem,
     type: z.literal('child_started'),
     childId: id,
+    ...childIdentity,
     description: z.string(),
+  }),
+  // Metadata can arrive after child_finished. Omitted fields leave prior values intact.
+  z.strictObject({
+    ...turnItem,
+    type: z.literal('child_updated'),
+    childId: id,
+    ...childIdentity,
   }),
   z.object({
     ...turnItem,
@@ -269,6 +298,12 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
     ...turnItem,
     type: z.literal('question_requested'),
     request: questionRequestSchema,
+  }),
+  z.object({
+    ...turnItem,
+    type: z.literal('request_cancelled'),
+    requestId: id,
+    reason: z.string().optional(),
   }),
   z.object({
     ...envelope,

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { createCompletionHandle } from './types.js'
+import { describe, expect, expectTypeOf, it } from 'vitest'
+import {
+  createCompletionHandle,
+  type ConfirmedNativeBinding,
+  type HarnessHandle,
+  type NativeBinding,
+} from './types.js'
 
 describe('native completion handles', () => {
   it('waits for the provider settlement result', async () => {
@@ -68,5 +73,24 @@ describe('completion settlement identity and outcome', () => {
     expect(finished).toBe(false)
     settle({ status: 'completed', runId: 'r', turnId: 't' })
     await expect(handle).resolves.toMatchObject({ status: 'completed' })
+  })
+})
+
+describe('native binding type contract', () => {
+  it('requires a readonly nullable confirmed binding on every handle', () => {
+    expectTypeOf<Pick<HarnessHandle, 'binding'>>().toEqualTypeOf<{
+      readonly binding: ConfirmedNativeBinding | null
+    }>()
+    expectTypeOf<ConfirmedNativeBinding>().toEqualTypeOf<{
+      readonly provider: string
+      readonly accountId: string | null
+      readonly cwd: string
+      readonly providerSessionId: string
+    }>()
+    expectTypeOf<NativeBinding['providerSessionId']>().toEqualTypeOf<
+      string | null
+    >()
+    const startupBinding = null satisfies HarnessHandle['binding']
+    expect(startupBinding).toBeNull()
   })
 })

@@ -6,6 +6,7 @@ import type {
   DispatchOptions,
   ModelOptions,
   NativeBinding,
+  ConfirmedNativeBinding,
   PromptInput,
   QuestionAnswer,
   PermissionReply,
@@ -18,6 +19,7 @@ export type {
   HarnessEvent,
   ModelOptions,
   NativeBinding,
+  ConfirmedNativeBinding,
   PromptInput,
   DispatchOptions,
   QuestionAnswer,
@@ -80,6 +82,13 @@ export function createCompletionHandle(ids: {
   }
 }
 export type HarnessHandle = {
+  /**
+   * Read the adapter's confirmed binding through a getter. Null means unconfirmed.
+   * A generated ID or an initialize response without session identity is insufficient.
+   * Update the getter before emitting events from the confirming native frame.
+   * Failed resume must preserve the caller's persisted binding and never publish a replacement.
+   */
+  readonly binding: ConfirmedNativeBinding | null
   prompt(
     input: PromptInput[] | string,
     options?: DispatchOptions,
@@ -102,6 +111,11 @@ export type HarnessHandle = {
   setConfigOption?(configId: string, value: string | boolean): Promise<void>
   availableModels?: { id: string; displayName: string }[]
 }
+/**
+ * The engine buffers events until spawn/load returns, then reads handle.binding before draining them.
+ * It also reads the getter before processing each later event.
+ * Confirmation after return without an event remains unseen until another event arrives.
+ */
 export type HarnessAdapter = {
   kind: AdapterKind
   capabilities: HarnessCapabilities
