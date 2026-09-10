@@ -1,251 +1,323 @@
-import { once } from 'node:events'
-import type { Writable } from 'node:stream'
+import type { Readable, Writable } from 'node:stream'
+import { diagnosticError, positiveLimit } from './diagnostics.js'
 
-export type JsonRpcIncoming =
-  | { type: 'notification'; method: string; params: unknown }
-  | { type: 'request'; id: string | number; method: string; params: unknown }
-  | { type: 'overflow' }
-  | { type: 'eof' }
-
-type RpcMessage = Record<string, unknown>
-type Pending = {
-  resolve: (value: unknown) => void
-  reject: (error: Error) => void
-  timer?: ReturnType<typeof setTimeout>
-}
-
-const safeJson = (value: unknown) => {
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return '[unserializable]'
-  }
-}
-
-export function redactSecrets(value: string, secrets: readonly string[] = []) {
-  return secrets
-    .filter(Boolean)
-    .reduce((result, secret) => result.split(secret).join('[REDACTED]'), value)
-}
-
-export type JsonlRpcOptions = {
+export type JsonlOptions = {
   stdin: Writable
-  stdout: AsyncIterable<Uint8Array | string>
+  stdout: Readable
   maxLineBytes?: number
   maxQueuedBytes?: number
-  maxIncoming?: number
+  maxQueuedFrames?: number
   secrets?: readonly string[]
-  onIncoming?: (message: JsonRpcIncoming) => void | Promise<void>
+  /** Validate the serialized value, before allocating or queuing its frame. */
+  validateOutgoing?: (value: unknown) => void
+  /** Called in wire order. Async protocol work belongs outside the frame reader. */
+  onValue: (value: unknown, bytes: number) => void
 }
 
-/** Newline-delimited JSON-RPC with one lifetime decoder and id correlation. */
-export class JsonlRpcTransport {
-  private readonly pending = new Map<string, Pending>()
+type Write = {
+  bytes: Buffer
+  deadline?: number
+  resolve: () => void
+  reject: (error: Error) => void
+  cleanup: () => void
+  settled: boolean
+}
+
+/** Owns Node streams. Accepts CRLF, blank lines, and a valid final line at EOF. */
+export class JsonlTransport {
+  readonly done: Promise<Error>
+  private finish!: (reason: Error) => void
+  private reason?: Error
   private readonly maxLineBytes: number
   private readonly maxQueuedBytes: number
-  private readonly maxIncoming: number
-  private readonly secrets: readonly string[]
-  private writeChain = Promise.resolve()
+  private readonly maxQueuedFrames: number
+  private readonly decoder = new TextDecoder('utf8', {
+    fatal: true,
+    ignoreBOM: true,
+  })
+  private line = Buffer.alloc(0)
+  private lineBytes = 0
+  private readonly queue: Write[] = []
+  private active?: Write
   private queuedBytes = 0
-  private nextId = 0
-  private closed = false
-  private incoming = 0
-  private readonly loopPromise: Promise<void>
+  private onDrain?: () => void
 
-  constructor(private readonly options: JsonlRpcOptions) {
-    this.maxLineBytes = options.maxLineBytes ?? 1024 * 1024
-    this.maxQueuedBytes = options.maxQueuedBytes ?? 4 * 1024 * 1024
-    this.maxIncoming = options.maxIncoming ?? 256
-    this.secrets = options.secrets ?? []
-    this.loopPromise = this.readLoop()
-  }
-
-  request<T = unknown>(
-    method: string,
-    params?: unknown,
-    options?: { signal?: AbortSignal; timeoutMs?: number },
-  ) {
-    if (this.closed)
-      return Promise.reject(new Error(`${method}: transport is closed`))
-    const id = ++this.nextId
-    const key = String(id)
-    const promise = new Promise<T>((resolve, reject) => {
-      const pending: Pending = {
-        resolve: resolve as (value: unknown) => void,
-        reject,
-      }
-      if (options?.timeoutMs != null)
-        pending.timer = setTimeout(
-          () => this.fail(key, new Error(`${method}: timed out`)),
-          options.timeoutMs,
-        )
-      this.pending.set(key, pending)
-      if (options?.signal) {
-        if (options.signal.aborted)
-          this.fail(key, new Error(`${method}: cancelled`))
-        else
-          options.signal.addEventListener(
-            'abort',
-            () => this.fail(key, new Error(`${method}: cancelled`)),
-            { once: true },
-          )
-      }
-      void this.enqueue({
-        jsonrpc: '2.0',
-        id,
-        method,
-        ...(params === undefined ? {} : { params }),
-      }).catch((error) =>
-        this.fail(
-          key,
-          error instanceof Error ? error : new Error(String(error)),
-        ),
-      )
+  constructor(private readonly options: JsonlOptions) {
+    this.maxLineBytes = positiveLimit(
+      options.maxLineBytes ?? 1024 * 1024,
+      'line bytes',
+    )
+    this.maxQueuedBytes = positiveLimit(
+      options.maxQueuedBytes ?? 4 * 1024 * 1024,
+      'queued bytes',
+    )
+    this.maxQueuedFrames = positiveLimit(
+      options.maxQueuedFrames ?? 256,
+      'queued frames',
+    )
+    this.done = new Promise((resolve) => {
+      this.finish = resolve
     })
-    return promise
+    if (!options.stdin.closed) {
+      options.stdin.on('error', this.onWriteError)
+      options.stdin.once('close', this.onWriteClose)
+    }
+    if (!options.stdout.closed) {
+      options.stdout.on('error', this.onReadError)
+      options.stdout.once('close', this.onReadClose)
+      options.stdout.once('end', this.onEnd)
+      options.stdout.on('data', this.onData)
+    }
+    if (
+      options.stdin.destroyed ||
+      options.stdout.destroyed ||
+      options.stdout.readableEnded
+    )
+      this.close(new Error('JSONL stream is closed'))
   }
 
-  notify(method: string, params?: unknown) {
-    return this.enqueue({
-      jsonrpc: '2.0',
-      method,
-      ...(params === undefined ? {} : { params }),
-    })
-  }
-  respond(id: string | number, result: unknown) {
-    return this.enqueue({ jsonrpc: '2.0', id, result })
-  }
-  respondError(id: string | number, code: number, message: string) {
-    return this.enqueue({ jsonrpc: '2.0', id, error: { code, message } })
+  get closed() {
+    return this.reason !== undefined
   }
 
-  async close(reason = 'transport closed') {
-    if (this.closed) return this.loopPromise
-    this.closed = true
-    for (const [id] of this.pending) this.fail(id, new Error(reason))
-    await this.loopPromise.catch(() => undefined)
-  }
-
-  private fail(id: string, error: Error) {
-    const pending = this.pending.get(id)
-    if (!pending) return
-    this.pending.delete(id)
-    if (pending.timer) clearTimeout(pending.timer)
-    pending.reject(new Error(redactSecrets(error.message, this.secrets)))
-  }
-
-  private enqueue(message: RpcMessage) {
-    if (this.closed) return Promise.reject(new Error('transport is closed'))
-    const line = `${safeJson(message)}\n`
-    const bytes = Buffer.byteLength(line)
-    if (this.queuedBytes + bytes > this.maxQueuedBytes)
-      return Promise.reject(new Error('JSON-RPC write queue is full'))
-    this.queuedBytes += bytes
-    const write = this.writeChain
-      .then(async () => {
-        if (this.closed) throw new Error('transport is closed')
-        if (!this.options.stdin.write(line))
-          await once(this.options.stdin, 'drain')
-      })
-      .finally(() => {
-        this.queuedBytes -= bytes
-      })
-    this.writeChain = write.catch(() => undefined)
-    return write
-  }
-
-  private async readLoop() {
-    const decoder = new TextDecoder('utf-8', { fatal: true })
-    let buffer = ''
-    let bytes = 0
-    try {
-      for await (const chunk of this.options.stdout) {
-        const text =
-          typeof chunk === 'string'
-            ? chunk
-            : decoder.decode(chunk, { stream: true })
-        buffer += text
-        bytes += Buffer.byteLength(text)
-        if (bytes > this.maxLineBytes && !buffer.includes('\n'))
-          throw new Error('JSON-RPC frame exceeds limit')
-        let newline = buffer.indexOf('\n')
-        while (newline >= 0) {
-          const line = buffer.slice(0, newline).replace(/\r$/, '')
-          buffer = buffer.slice(newline + 1)
-          bytes = Buffer.byteLength(buffer)
-          newline = buffer.indexOf('\n')
-          if (Buffer.byteLength(line) > this.maxLineBytes)
-            throw new Error('JSON-RPC frame exceeds limit')
-          if (!line.trim()) continue
-          let message: RpcMessage
-          try {
-            message = JSON.parse(line) as RpcMessage
-          } catch {
-            throw new Error('Malformed JSON-RPC frame')
-          }
-          this.route(message)
-        }
-      }
-      if (buffer.trim()) {
-        if (Buffer.byteLength(buffer) > this.maxLineBytes)
-          throw new Error('JSON-RPC frame exceeds limit')
-        let message: RpcMessage
-        try {
-          message = JSON.parse(buffer) as RpcMessage
-        } catch {
-          throw new Error('Malformed final JSON-RPC frame')
-        }
-        this.route(message)
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      for (const [id] of this.pending) this.fail(id, new Error(message))
-    } finally {
-      this.closed = true
-      for (const [id] of this.pending)
-        this.fail(id, new Error('JSON-RPC stream ended'))
-      await this.options.onIncoming?.({ type: 'eof' })
+  get state() {
+    return {
+      bufferedBytes: this.lineBytes,
+      queuedBytes: this.queuedBytes,
+      queuedFrames: this.queue.length + (this.active ? 1 : 0),
     }
   }
 
-  private route(message: RpcMessage) {
-    const id = message.id
-    if (id !== undefined && message.method === undefined) {
-      const pending = this.pending.get(String(id))
-      if (!pending) return
-      this.pending.delete(String(id))
-      if (pending.timer) clearTimeout(pending.timer)
-      if (message.error && typeof message.error === 'object') {
-        const error = message.error as Record<string, unknown>
-        pending.reject(
-          new Error(
-            redactSecrets(String(error.message ?? 'RPC error'), this.secrets),
+  send(
+    value: unknown,
+    options: { signal?: AbortSignal; deadline?: number } = {},
+  ): Promise<void> {
+    const unavailable = () => {
+      if (this.reason) return this.reason
+      if (this.options.stdin.destroyed || this.options.stdin.writableEnded) {
+        void this.close(new Error('JSONL stdin closed'))
+        return this.reason
+      }
+      if (options.signal?.aborted) return new Error('JSONL write cancelled')
+      if (
+        options.deadline !== undefined &&
+        performance.now() >= options.deadline
+      )
+        return new Error('JSONL write timed out')
+      if (this.state.queuedFrames >= this.maxQueuedFrames)
+        return new Error('JSONL write queue is full')
+    }
+    const initialError = unavailable()
+    if (initialError) return Promise.reject(initialError)
+    let text: string | undefined
+    try {
+      text = JSON.stringify(value)
+    } catch {
+      /* Never include the value in errors. */
+    }
+    // Getters and toJSON can close, cancel, or reenter this transport.
+    const serializedError = unavailable()
+    if (serializedError) return Promise.reject(serializedError)
+    if (text === undefined)
+      return Promise.reject(new Error('Cannot encode JSONL value'))
+    const length = Buffer.byteLength(text)
+    if (length > this.maxLineBytes)
+      return Promise.reject(new Error('JSONL frame exceeds limit'))
+    if (this.queuedBytes + length + 1 > this.maxQueuedBytes)
+      return Promise.reject(new Error('JSONL write queue is full'))
+    if (this.options.validateOutgoing) {
+      try {
+        this.options.validateOutgoing(JSON.parse(text))
+      } catch (error) {
+        return Promise.reject(diagnosticError(error, this.options.secrets))
+      }
+      const validationError = unavailable()
+      if (validationError) return Promise.reject(validationError)
+      if (this.queuedBytes + length + 1 > this.maxQueuedBytes)
+        return Promise.reject(new Error('JSONL write queue is full'))
+    }
+    const bytes = Buffer.from(`${text}\n`)
+    return new Promise<void>((resolve, reject) => {
+      const write: Write = {
+        bytes,
+        deadline: options.deadline,
+        resolve,
+        reject,
+        cleanup: () => {},
+        settled: false,
+      }
+      const cancel = () => {
+        const index = this.queue.indexOf(write)
+        if (index >= 0) {
+          this.queue.splice(index, 1)
+          this.queuedBytes -= write.bytes.length
+        }
+        this.settle(write, new Error('JSONL write cancelled'))
+      }
+      options.signal?.addEventListener('abort', cancel, { once: true })
+      write.cleanup = () => options.signal?.removeEventListener('abort', cancel)
+      this.queue.push(write)
+      this.queuedBytes += bytes.length
+      this.pump()
+    })
+  }
+
+  close(reason = new Error('JSONL transport closed')): Promise<Error> {
+    if (this.reason) return this.done
+    this.reason = diagnosticError(reason, this.options.secrets)
+    this.line = Buffer.alloc(0)
+    this.lineBytes = 0
+    this.options.stdout.off('data', this.onData)
+    this.options.stdout.off('end', this.onEnd)
+    if (this.onDrain) this.options.stdin.off('drain', this.onDrain)
+    this.onDrain = undefined
+    if (this.active) this.settle(this.active, this.reason)
+    this.active = undefined
+    for (const write of this.queue) this.settle(write, this.reason)
+    this.queue.length = 0
+    this.queuedBytes = 0
+    // Keep error listeners until close. A pending write can still report EPIPE.
+    this.options.stdin.destroy()
+    this.options.stdout.destroy()
+    this.finish(this.reason)
+    return this.done
+  }
+
+  private settle(write: Write, error?: Error) {
+    if (write.settled) return
+    write.settled = true
+    write.cleanup()
+    if (error) write.reject(error)
+    else write.resolve()
+  }
+
+  private pump() {
+    if (this.reason || this.active) return
+    while (
+      this.queue[0]?.deadline !== undefined &&
+      performance.now() >= this.queue[0].deadline
+    ) {
+      const expired = this.queue.shift()!
+      this.queuedBytes -= expired.bytes.length
+      this.settle(expired, new Error('JSONL write timed out'))
+    }
+    const write = this.queue.shift()
+    if (!write) return
+    this.active = write
+    let callbackDone = false
+    let drained = false
+    let returned = false
+    const complete = () => {
+      if (!returned || !callbackDone || !drained || this.active !== write)
+        return
+      if (this.onDrain) this.options.stdin.off('drain', this.onDrain)
+      this.onDrain = undefined
+      this.active = undefined
+      this.queuedBytes -= write.bytes.length
+      this.settle(write)
+      this.pump()
+    }
+    this.onDrain = () => {
+      drained = true
+      complete()
+    }
+    this.options.stdin.once('drain', this.onDrain)
+    try {
+      const accepted = this.options.stdin.write(write.bytes, (error) => {
+        if (error) {
+          this.onWriteError()
+          return
+        }
+        callbackDone = true
+        complete()
+      })
+      drained ||= accepted
+      returned = true
+      complete()
+    } catch {
+      this.onWriteError()
+    }
+  }
+
+  private onWriteError = () => {
+    void this.close(new Error('JSONL stdin write failed'))
+  }
+  private onReadError = () => {
+    void this.close(new Error('JSONL stdout read failed'))
+  }
+  private onWriteClose = () => {
+    this.options.stdin.off('error', this.onWriteError)
+    // A child can close stdin before its final stdout bytes arrive.
+    if (this.active || this.queue.length)
+      void this.close(new Error('JSONL stdin closed'))
+  }
+  private onReadClose = () => {
+    this.options.stdout.off('error', this.onReadError)
+    void this.close(new Error('JSONL stdout closed'))
+  }
+  private onEnd = () => {
+    if (this.lineBytes) this.frame(this.line.subarray(0, this.lineBytes))
+    void this.close(new Error('JSONL stdout ended'))
+  }
+  private onData = (chunk: Buffer) => {
+    if (this.reason) return
+    // Node byte streams must not have setEncoding applied by a caller.
+    if (!(chunk instanceof Uint8Array)) {
+      void this.close(new Error('JSONL requires a byte stream'))
+      return
+    }
+    let offset = 0
+    while (offset < chunk.length && !this.reason) {
+      const newline = chunk.indexOf(10, offset)
+      const end = newline < 0 ? chunk.length : newline
+      const part = chunk.subarray(offset, end)
+      const required = this.lineBytes + part.length
+      if (required > this.maxLineBytes) {
+        void this.close(new Error('JSONL frame exceeds limit'))
+        return
+      }
+      if (required > this.line.length) {
+        const grown = Buffer.allocUnsafe(
+          Math.min(
+            this.maxLineBytes,
+            Math.max(required, this.line.length * 2, 4096),
           ),
         )
-      } else pending.resolve(message.result)
+        this.line.copy(grown, 0, 0, this.lineBytes)
+        this.line = grown
+      }
+      part.copy(this.line, this.lineBytes)
+      this.lineBytes = required
+      if (newline < 0) break
+      this.frame(this.line.subarray(0, this.lineBytes))
+      this.lineBytes = 0
+      offset = newline + 1
+    }
+  }
+  private frame(bytes: Buffer) {
+    let line: string
+    try {
+      line = this.decoder.decode(bytes)
+    } catch {
+      void this.close(new Error('Invalid JSONL UTF-8'))
       return
     }
-    if (typeof message.method !== 'string') return
-    if (++this.incoming > this.maxIncoming) {
-      this.incoming--
-      void this.options.onIncoming?.({ type: 'overflow' })
+    if (!line.trim()) return
+    let value: unknown
+    try {
+      value = JSON.parse(line)
+    } catch {
+      void this.close(new Error('Malformed JSONL frame'))
       return
     }
-    const incoming: JsonRpcIncoming =
-      id === undefined
-        ? {
-            type: 'notification',
-            method: message.method,
-            params: message.params,
-          }
-        : {
-            type: 'request',
-            id: id as string | number,
-            method: message.method,
-            params: message.params,
-          }
-    void Promise.resolve(this.options.onIncoming?.(incoming)).finally(() => {
-      this.incoming--
-    })
+    try {
+      const work: unknown = this.options.onValue(value, bytes.length)
+      if (work && typeof (work as Promise<unknown>).then === 'function') {
+        void Promise.resolve(work).catch(() => {})
+        void this.close(new Error('JSONL frame handler must be synchronous'))
+      }
+    } catch {
+      void this.close(new Error('JSONL handler failed'))
+    }
   }
 }
