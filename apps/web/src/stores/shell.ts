@@ -40,13 +40,11 @@ export const useShellStore = create<ShellState>((set, get) => ({
   setDrawerOpen: (drawerOpen) => set({ drawerOpen }),
   setSidebarWidth: (width) => {
     const next = Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, width))
+    if (next === get().sidebarWidth) return
     writeSidebarWidth(next)
     set({ sidebarWidth: next })
   },
-  resetSidebarWidth: () => {
-    writeSidebarWidth(SIDEBAR_WIDTH_DEFAULT)
-    set({ sidebarWidth: SIDEBAR_WIDTH_DEFAULT })
-  },
+  resetSidebarWidth: () => get().setSidebarWidth(SIDEBAR_WIDTH_DEFAULT),
   toggleTheme: () => {
     const theme = get().theme === 'dark' ? 'light' : 'dark'
     get().setTheme(theme)

@@ -5,6 +5,18 @@ import { api } from '../../lib/api'
 import { useSessionsStore } from '../../stores/sessions'
 import { registerShortcuts } from '../../lib/shortcuts'
 import { cn } from '../../lib/utils'
+import { folderName } from '../../lib/folder-name'
+import { accountKindForHarness } from '../../lib/harness-accounts-logic'
+import { harnessHealthResponseSchema } from '@forge/protocol/status'
+import claudeMark from '../../assets/providers/claude.svg'
+import codexMark from '../../assets/providers/openai.svg'
+import opencodeMark from '../../assets/providers/opencode.svg'
+import cursorMark from '../../assets/providers/cursor.svg'
+import grokMark from '../../assets/providers/grok.svg'
+import hermesMark from '../../assets/providers/hermes.svg'
+import piMark from '../../assets/providers/pi.svg'
+import devinMark from '../../assets/providers/devin.svg'
+
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
@@ -15,6 +27,17 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '../ui/tooltip'
+
+const providerMarks: Record<string, string> = {
+  claude: claudeMark,
+  codex: codexMark,
+  opencode: opencodeMark,
+  cursor: cursorMark,
+  grok: grokMark,
+  hermes: hermesMark,
+  pi: piMark,
+  devin: devinMark,
+}
 
 export function SessionHeader({
   sessionId,
@@ -30,10 +53,51 @@ export function SessionHeader({
   )
   const projects = useSessionsStore((state) => state.projects)
   const upsertSession = useSessionsStore((state) => state.upsertSession)
+  const [provider, setProvider] = useState<{
+    name: string
+    kind: string
+  } | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    setProvider(null)
+    void fetch('/api/harnesses/health', { signal: controller.signal })
+      .then((response) => {
+        if (controller.signal.aborted) return
+        if (!response.ok) throw new Error('Provider information unavailable')
+        return response.json()
+      })
+      .then((value) => {
+        if (controller.signal.aborted) return
+        const health = harnessHealthResponseSchema.parse(value)
+        const entry = health.find((item) => item.key === session?.harness)
+        if (!entry) return
+        const account = entry.accounts.find(
+          (item) => item.id === session?.accountId,
+        )
+        setProvider({
+          name: entry.name,
+          kind:
+            account?.kind ??
+            accountKindForHarness(entry.key, entry) ??
+            entry.key,
+        })
+      })
+      .catch(() => undefined)
+    return () => {
+      controller.abort()
+    }
+  }, [session?.harness, session?.accountId])
   const [editing, setEditing] = useState(false)
   const [infoSource, setInfoSource] = useState<'title' | 'menu' | null>(null)
   const [title, setTitle] = useState(session?.title ?? 'New session')
-  useEffect(() => setTitle(session?.title ?? 'New session'), [session?.title])
+  useEffect(
+    () => setTitle(session?.title ?? 'New session'),
+    [sessionId, session?.title],
+  )
+  useEffect(() => {
+    setEditing(false)
+    setInfoSource(null)
+  }, [sessionId])
   useEffect(
     () =>
       registerShortcuts({
@@ -71,7 +135,21 @@ export function SessionHeader({
       ? new Date(current.created_at)
       : undefined
   const projectId = current.projectId ?? current.project_id
-  const projectName = projects.find((project) => project.id === projectId)?.name
+  const project = projects.find((project) => project.id === projectId)
+  const projectName = project?.name
+  const workspacePath = current.cwd ?? current.worktreePath ?? project?.path
+  const workspaceLabel = workspacePath
+    ? workspacePath === project?.path && projectName
+      ? projectName
+      : folderName(workspacePath)
+    : 'Workspace unavailable'
+  const contextLabel =
+    current.contextMethod === 'exact'
+      ? 'Exact fork'
+      : 'Synthetic context · reduced confidence'
+  const providerName =
+    provider?.name ?? current.harness ?? 'Provider unavailable'
+  const providerMark = providerMarks[provider?.kind ?? current.harness ?? '']
   const infoPanel = (
     <>
       <strong className="block truncate text-foreground">
@@ -89,11 +167,25 @@ export function SessionHeader({
           </dd>
         </div>
         <div className="flex justify-between gap-2">
+          <dt>Workspace</dt>
+          <dd className="min-w-0 break-all text-right text-foreground">
+            {workspacePath ?? 'Unavailable'}
+          </dd>
+        </div>
+        <div className="flex justify-between gap-2">
           <dt>Model</dt>
           <dd className="truncate text-foreground">
             {current.model ?? 'default'}
           </dd>
         </div>
+        {current.contextMethod && (
+          <div className="flex justify-between gap-2">
+            <dt>Context</dt>
+            <dd className="min-w-0 text-right text-foreground">
+              {contextLabel}
+            </dd>
+          </div>
+        )}
         <div className="flex justify-between gap-2">
           <dt>Created</dt>
           <dd className="text-foreground">
@@ -128,7 +220,7 @@ export function SessionHeader({
   )
   return (
     <TooltipProvider delay={300}>
-      <header
+      <div
         className={cn(
           embedded
             ? 'session-header contents'
@@ -147,9 +239,34 @@ export function SessionHeader({
           )}
           aria-label={current.status ?? 'idle'}
         />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span className="flex min-w-0 shrink-0 items-center gap-2 text-muted-foreground" />
+            }
+          >
+            {providerMark ? (
+              <span
+                aria-hidden="true"
+                className="size-3.5 shrink-0 bg-current"
+                style={{
+                  maskImage: `url("${providerMark}")`,
+                  maskSize: 'contain',
+                  maskRepeat: 'no-repeat',
+                  maskPosition: 'center',
+                }}
+              />
+            ) : (
+              <Terminal className="size-3.5 shrink-0" aria-hidden="true" />
+            )}
+            <span className="max-w-20 truncate text-xs">{providerName}</span>
+          </TooltipTrigger>
+          <TooltipContent>{providerName}</TooltipContent>
+        </Tooltip>
         {editing ? (
           <Input
-            className="h-8 max-w-72"
+            className="h-8 min-w-0 max-w-72 flex-1"
+            aria-label="Session title"
             autoFocus
             value={title}
             onChange={(event) => setTitle(event.target.value)}
@@ -186,32 +303,33 @@ export function SessionHeader({
             </PopoverContent>
           </Popover>
         )}
+        <span
+          className="min-w-0 max-w-[30%] truncate text-xs text-muted-foreground"
+          title={workspacePath ?? workspaceLabel}
+        >
+          {workspaceLabel}
+        </span>
         {current.contextMethod && (
-          <Badge variant="outline" className="shrink-0 text-muted-foreground">
-            {current.contextMethod === 'exact'
-              ? 'Exact fork'
-              : 'Synthetic context · reduced confidence'}
+          <Badge
+            variant="outline"
+            className="min-w-0 max-w-[40%] shrink text-muted-foreground"
+            title={contextLabel}
+          >
+            <span className="truncate md:hidden">
+              {current.contextMethod === 'exact'
+                ? 'Exact fork'
+                : 'Synthetic fork'}
+            </span>
+            <span className="hidden truncate md:inline">{contextLabel}</span>
           </Badge>
         )}
         <div className="ml-auto flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="grid size-8 shrink-0 place-items-center text-muted-foreground" />
-              }
-            >
-              <Terminal className="size-3.5" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipContent>
-              {current.harness ?? 'default harness'}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
                 <Button
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon-xs"
                   aria-label="Rename session"
                   onClick={() => {
                     setInfoSource(null)
@@ -232,7 +350,7 @@ export function SessionHeader({
               render={
                 <Button
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon-xs"
                   aria-label="Session information"
                 />
               }
@@ -247,7 +365,7 @@ export function SessionHeader({
             </PopoverContent>
           </Popover>
         </div>
-      </header>
+      </div>
     </TooltipProvider>
   )
 }

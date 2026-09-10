@@ -845,7 +845,7 @@ export function Composer({
                 {stopping && (
                   <button
                     type="button"
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:hover:scale-105 enabled:hover:bg-destructive disabled:opacity-40 sm:h-8 sm:w-8"
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-solid text-solid-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:hover:scale-105 enabled:hover:bg-solid/90 disabled:opacity-40 sm:h-8 sm:w-8"
                     disabled={interrupting}
                     aria-label="End turn"
                     title="Stop the current turn"
@@ -868,7 +868,7 @@ export function Composer({
                 )}
                 <button
                   type="submit"
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/90 text-primary-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer hover:scale-105 hover:bg-primary disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none sm:h-8 sm:w-8"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-solid text-solid-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer hover:scale-105 hover:bg-solid/90 disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none sm:h-8 sm:w-8"
                   disabled={
                     !canSubmit || (accountsLoaded && !selected.accountId)
                   }

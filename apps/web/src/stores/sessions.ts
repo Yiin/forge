@@ -12,6 +12,7 @@ export type SessionSummary = {
   accountId?: string | null
   model?: string | null
   branch?: string | null
+  cwd?: string
   worktreePath?: string | null
   createdAt?: string
   created_at?: number

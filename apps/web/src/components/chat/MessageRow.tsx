@@ -83,7 +83,7 @@ export function MessageRow({
         data-pending={item.pending ? 'true' : undefined}
         aria-busy={item.pending ? true : undefined}
       >
-        <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3 text-sm text-foreground whitespace-pre-wrap break-words">
+        <div className="relative max-w-[80%] rounded-2xl border border-border bg-surface-raised p-3 text-sm text-foreground whitespace-pre-wrap break-words">
           <SkillChipText text={item.text} skills={skills} />
         </div>
         {!item.pending && (
@@ -216,12 +216,12 @@ export function WorkEntryRow({
               {heading}
             </span>
             {preview && (
-              <span className="min-w-0 flex-1 truncate text-muted-foreground/55">
+              <span className="min-w-0 flex-1 truncate text-faint-foreground">
                 {preview}
               </span>
             )}
           </p>
-          <div className="flex shrink-0 items-center gap-px text-muted-foreground/55">
+          <div className="flex shrink-0 items-center gap-px text-faint-foreground">
             <span className="flex size-4 shrink-0 items-center justify-center">
               <ChevronDown
                 className={cn(

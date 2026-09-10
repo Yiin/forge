@@ -21,7 +21,7 @@ export function AppBar({
   const setDrawerOpen = useShellStore((s) => s.setDrawerOpen)
   return (
     <TooltipProvider delay={300}>
-      <header className="flex h-12 items-center gap-1 border-b border-border bg-background px-2">
+      <header className="flex h-12 items-center gap-1 border-b border-border bg-app-chrome px-2">
         <Tooltip>
           <TooltipTrigger
             render={

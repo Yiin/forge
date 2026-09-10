@@ -18,6 +18,12 @@
     'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'SF Mono',
     'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   --color-background: var(--background);
+  --color-app-chrome: var(--app-chrome-background);
+  --color-dialog: var(--dialog);
+  --color-dialog-foreground: var(--foreground);
+  --color-faint-foreground: var(--faint-foreground);
+  --color-solid: var(--solid);
+  --color-solid-foreground: var(--solid-foreground);
   --color-foreground: var(--foreground);
   --color-surface-raised: var(--surface-raised);
   --color-card: var(--card);
@@ -82,93 +88,80 @@
   }
 }
 
-/* Forge theme: zinc surfaces, indigo primary. Light is the default;
-   [data-theme='dark'] overrides. Legacy styles.css shares --background,
-   --border, and --muted-foreground with compatible values on purpose. */
+/* Surface roles follow the measured Comet palette in docs/comet-ui-contract.md. */
 :root {
   color-scheme: light;
   --radius: 0.625rem;
   --app-scrollbar-width: 6px;
-  --background: var(--color-zinc-25);
-  --app-chrome-background: var(--background);
-  --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
-  --foreground: var(--color-zinc-800);
-  --card: var(--color-white);
-  --card-foreground: var(--color-zinc-800);
-  --popover: var(--color-white);
-  --popover-foreground: var(--color-zinc-800);
-  --primary: oklch(0.488 0.217 264);
-  --primary-foreground: var(--color-white);
-  --secondary: var(--color-zinc-50);
-  --secondary-foreground: var(--color-zinc-800);
-  --muted: var(--color-zinc-50);
-  --muted-foreground: var(--color-zinc-500);
-  --accent: var(--color-zinc-100);
-  --accent-foreground: var(--color-zinc-900);
-  /* red-600, not red-500: white-on-destructive badges must clear WCAG AA. */
-  --destructive: var(--color-red-600);
-  --destructive-foreground: var(--color-red-700);
-  --success: var(--color-emerald-500);
-  --success-foreground: var(--color-emerald-700);
-  --warning: var(--color-amber-500);
-  --warning-foreground: var(--color-amber-700);
+  --background: #ffffff;
+  --app-chrome-background: oklch(0.968 0 0);
+  --surface-raised: oklch(0.94 0 0);
+  --foreground: oklch(0.25 0 0);
+  --card: #ffffff;
+  --card-foreground: var(--foreground);
+  --dialog: #ffffff;
+  --popover: #ffffff;
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.511 0.262 276.966);
+  --primary-foreground: oklch(0.985 0 0);
+  --solid: oklch(0.205 0 0);
+  --solid-foreground: oklch(0.985 0 0);
+  --secondary: var(--surface-raised);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--surface-raised);
+  --muted-foreground: oklch(0.439 0 0);
+  --faint-foreground: oklch(0.535 0 0);
+  --accent: rgb(25.5 25.5 25.5 / 6%);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.505 0.213 27.518);
+  --success: oklch(0.596 0.145 163.225);
+  --success-foreground: oklch(0.508 0.118 165.612);
+  --warning: oklch(0.555 0.163 48.998);
+  --warning-foreground: oklch(0.473 0.137 46.201);
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-700);
-  --border: var(--color-zinc-200);
-  --input: var(--color-zinc-300);
-  --ring: oklch(0.488 0.217 264);
-  --chart-1: oklch(0.488 0.217 264);
-  --chart-2: var(--color-emerald-500);
-  --chart-3: var(--color-amber-500);
+  --border: rgb(0 0 0 / 10%);
+  --input: rgb(0 0 0 / 17%);
+  --ring: var(--primary);
+  --chart-1: var(--primary);
+  --chart-2: var(--success);
+  --chart-3: var(--warning);
   --chart-4: var(--color-violet-500);
-  --chart-5: var(--color-red-500);
-  --sidebar: var(--color-zinc-50);
-  --sidebar-foreground: var(--color-zinc-800);
+  --chart-5: var(--destructive);
+  --sidebar: var(--app-chrome-background);
+  --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: var(--color-zinc-100);
-  --sidebar-accent-foreground: var(--color-zinc-900);
-  --sidebar-border: var(--color-zinc-200);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
 
   @variant dark {
     color-scheme: dark;
-    --background: var(--color-zinc-950);
-    --app-chrome-background: var(--background);
-    --surface-raised: color-mix(in srgb, var(--card) 45%, transparent);
-    --foreground: var(--color-zinc-100);
-    --card: var(--color-zinc-900);
-    --card-foreground: var(--color-zinc-100);
-    --popover: var(--color-zinc-900);
-    --popover-foreground: var(--color-zinc-100);
-    --primary: oklch(0.588 0.217 264);
-    --primary-foreground: var(--color-white);
-    --secondary: var(--color-zinc-900);
-    --secondary-foreground: var(--color-zinc-100);
-    --muted: var(--color-zinc-900);
-    --muted-foreground: var(--color-zinc-400);
-    --accent: var(--color-zinc-900);
-    --accent-foreground: var(--color-zinc-100);
-    --destructive: color-mix(
-      in srgb,
-      var(--color-red-500) 90%,
-      var(--color-white)
-    );
-    --destructive-foreground: var(--color-red-400);
-    --success: var(--color-emerald-500);
-    --success-foreground: var(--color-emerald-400);
-    --warning: var(--color-amber-500);
-    --warning-foreground: var(--color-amber-400);
-    --info: var(--color-blue-500);
+    --background: #060606;
+    --app-chrome-background: #0d0d0d;
+    --surface-raised: oklch(0.235 0 0);
+    --foreground: oklch(0.922 0 0);
+    --card: #0e0e0e;
+    --dialog: #101010;
+    --popover: #161616;
+    --primary: oklch(0.673 0.182 276.935);
+    --solid: oklch(0.922 0 0);
+    --solid-foreground: #0e0e0e;
+    --muted-foreground: oklch(0.708 0 0);
+    --faint-foreground: oklch(0.556 0 0);
+    --accent: rgb(234.6 234.6 234.6 / 11%);
+    --destructive: oklch(0.704 0.191 22.216);
+    --destructive-foreground: oklch(0.808 0.114 19.571);
+    --success: oklch(0.765 0.177 163.223);
+    --success-foreground: oklch(0.845 0.143 164.978);
+    --warning: oklch(0.828 0.189 84.429);
+    --warning-foreground: oklch(0.924 0.12 95.746);
     --info-foreground: var(--color-blue-400);
-    --border: --alpha(var(--color-white) / 6%);
-    --input: --alpha(var(--color-white) / 8%);
-    --ring: oklch(0.588 0.217 264);
-    --sidebar: var(--color-zinc-950);
-    --sidebar-foreground: var(--color-zinc-100);
-    --sidebar-accent: var(--color-zinc-900);
-    --sidebar-accent-foreground: var(--color-zinc-100);
-    --sidebar-border: var(--color-zinc-800);
+    --border: rgb(255 255 255 / 8%);
+    --input: rgb(255 255 255 / 14%);
   }
 }
 
@@ -233,28 +226,6 @@
       background: var(--background);
     }
   }
-}
-
-/* App-chrome grain. Baked into the body background (behind content) rather
-   than a fixed overlay on top: a full-viewport overlay forces the compositor
-   to re-blend every frame any animation produces, which multiplies idle GPU
-   cost. The overlay's 0.035 opacity lives in the SVG rect instead. */
-:root {
-  --surface-grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
-}
-
-body {
-  background-image: var(--surface-grain);
-  background-repeat: repeat;
-  background-size: 256px 256px;
-}
-
-/* Grain texture for chrome surfaces that float above the body. Layered over
-   the element's background-color, so it composes with bg-* utilities. */
-@utility surface-grain {
-  background-image: var(--surface-grain);
-  background-repeat: repeat;
-  background-size: 256px 256px;
 }
 
 /* Scrollbar styling */

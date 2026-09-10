@@ -1,7 +1,6 @@
 import { Timeline } from '../components/chat/Timeline'
 import { Composer } from '../components/chat/Composer'
 import { WorkspaceBar } from '../components/chat/WorkspaceBar'
-import { SessionHeader } from '../components/chat/SessionHeader'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
@@ -254,9 +253,6 @@ export function SessionRoute() {
   }
   return (
     <div className="session-view relative flex h-full min-h-0 flex-col">
-      {!loading && !loadError && (
-        <SessionHeader className="md:hidden" sessionId={sessionId} />
-      )}
       {!loading && !loadError && <PathSwitcher sessionId={sessionId} />}
       <ChatLifecycle
         loading={loading}
@@ -280,7 +276,7 @@ export function SessionRoute() {
       {!loading && !loadError && (
         <div
           ref={setComposerOverlay}
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 max-h-full overflow-y-auto overscroll-contain pt-1.5 sm:pt-2"
         >
           <div
             aria-hidden="true"
