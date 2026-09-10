@@ -11,7 +11,9 @@ authority. The pinned Comet source is `/var/tmp/forge-comet-reference` at
 - `apps/server/src/sessions`: prompts, lifecycle, recovery, forks, workspaces.
 - `apps/server/src/accounts`: account homes, login, discovery, usage, limits.
 - `apps/server/src/db` and `apps/server/drizzle`: SQLite and migrations.
-- `apps/server/src/{workspace,git,terminals,previews}`: workspace services.
+- `apps/server/src/git`: git/diff services (exists). `apps/server/src/
+  {workspace,terminals,previews}` are target locations for workspace,
+  terminal (currently `pty`), and preview services; they do not exist yet.
 - `apps/server/src/epics`: Beads workers, effects, worktrees, gates.
 - `packages/protocol`: shared Zod wire schemas.
 - `apps/web/src/{components,stores,lib}`: UI, state, and replay.
@@ -32,7 +34,9 @@ bytes stay on HTTP. Do not auto-grant native requests.
 
 Use shadcn/ui controls built on Base UI. Use `render`, not `asChild`. Put
 dialog bodies in `DialogPanel` or `AlertDialogPanel`. Preserve drafts after a
-failed send. Keep conversation `path` separate from Git `branch`.
+failed send. Keep conversation `path` separate from Git `branch`. Dark theme
+is selected by `html[data-theme='dark']`, not a `prefers-color-scheme` media
+query; scope dark-only CSS to that attribute selector.
 
 ## Checks
 
