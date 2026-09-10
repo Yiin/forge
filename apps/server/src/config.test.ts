@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
@@ -6,6 +7,7 @@ import {
   defaultConfig,
   convertConfig,
   convertConfigFileSync,
+  loadConfigSync,
   reconcileConfig,
   resolveRunConfig,
   saveConfigSync,
@@ -82,6 +84,54 @@ describe('default harness configuration', () => {
     await writeFile(bad, 'not = [valid')
     await expect(() => convertConfigFileSync(bad)).toThrow()
     expect(await readFile(bad, 'utf8')).toBe('not = [valid')
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('preserves the file-relative data directory during conversion', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-config-relative-'))
+    const file = join(root, 'forge.toml')
+    const source = defaultConfig(false)
+    delete (source as { dataDir?: string }).dataDir
+    saveConfigSync(file, source)
+    const before = loadConfigSync(file)
+
+    convertConfigFileSync(file)
+
+    expect(loadConfigSync(file)).toMatchObject({ dataDir: before.dataDir })
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('keeps exact source bytes when temporary conversion fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-config-atomic-'))
+    const file = join(root, 'forge.toml')
+    const source = defaultConfig(false)
+    saveConfigSync(file, source)
+    const original = await readFile(file)
+
+    const ops = {
+      readFileSync: (path: string, encoding: 'utf8') =>
+        readFileSync(path, encoding),
+      existsSync: () => false,
+      copyFileSync: () => {},
+      writeFileSync: () => {
+        throw new Error('disk full')
+      },
+      renameSync: () => {},
+      unlinkSync: () => {},
+    }
+    expect(() => convertConfigFileSync(file, ops)).toThrow('disk full')
+    expect(await readFile(file)).toEqual(original)
+
+    expect(() =>
+      convertConfigFileSync(file, {
+        ...ops,
+        writeFileSync: () => {},
+        renameSync: () => {
+          throw new Error('rename failed')
+        },
+      }),
+    ).toThrow('rename failed')
+    expect(await readFile(file)).toEqual(original)
     await rm(root, { recursive: true, force: true })
   })
 
