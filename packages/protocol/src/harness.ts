@@ -213,6 +213,120 @@ const envelope = {
 }
 // Child-owned items retain their spawning root run and turn. The child is the owner.
 const turnItem = { ...envelope, turnId: id, itemId: id, childId: id.optional() }
+const utf8Encoder = new TextEncoder()
+// Limit UTF-16 length before encoding to bound the temporary allocation.
+const boundedUtf8Length = (value: string, limit: number): number =>
+  value.length > limit ? limit + 1 : utf8Encoder.encode(value).byteLength
+const utf8String = (limit: number) =>
+  z.string().refine((value) => boundedUtf8Length(value, limit) <= limit, {
+    message: `Text must contain at most ${limit} UTF-8 bytes`,
+  })
+// Public wire ceilings. Providers can impose smaller retained-state limits.
+const contentSnapshotFields = {
+  ...turnItem,
+  type: z.literal('content_snapshot'),
+  text: utf8String(4 * 1024 * 1024),
+}
+const textMetadataBytes = 1024 * 1024
+const inlineQuestionsSchema = z.preprocess(
+  (value, ctx) => {
+    if (!Array.isArray(value)) return value
+    const fail = (message: string) => {
+      ctx.addIssue({ code: 'custom', message })
+      return z.NEVER
+    }
+    if (value.length > 64)
+      return fail('Text metadata accepts at most 64 questions')
+    for (const question of value) {
+      if (
+        question &&
+        typeof question === 'object' &&
+        Array.isArray(question.options) &&
+        question.options.length > 128
+      )
+        return fail('Text metadata accepts at most 128 options per question')
+    }
+    let bytes = 0
+    const add = (text: unknown) => {
+      if (typeof text !== 'string') return true
+      const limit = Math.min(64 * 1024, textMetadataBytes - bytes)
+      const size = boundedUtf8Length(text, limit)
+      bytes += size
+      return size <= limit
+    }
+    for (const question of value) {
+      if (!question || typeof question !== 'object') continue
+      if (!add(question.title)) return fail('Text metadata byte limit exceeded')
+      if (Array.isArray(question.options))
+        for (const option of question.options)
+          if (!add(option)) return fail('Text metadata byte limit exceeded')
+    }
+    return value
+  },
+  z
+    .array(
+      z.strictObject({
+        title: utf8String(64 * 1024),
+        options: z
+          .array(utf8String(64 * 1024))
+          .max(128)
+          .nullish(),
+      }),
+    )
+    .max(64)
+    .nullish(),
+)
+// Snapshots replace the same scoped item and content type, including empty text.
+// Omitted metadata preserves prior values; explicit null clears them.
+// Adapters and the display projection must keep item roles and child owners stable.
+// Snapshots do not settle turns or children. Completion needs a terminal event.
+const contentSnapshotSchema = z.discriminatedUnion('contentType', [
+  z
+    .strictObject({
+      ...contentSnapshotFields,
+      contentType: z.literal('text'),
+      // Omitted means assistant, without adding a serialized default.
+      role: z.enum(['user', 'assistant']).optional(),
+      phase: z.enum(['commentary', 'final_answer']).nullish(),
+      delivery: z.literal('async').nullish(),
+      // Inline metadata has no request identity, blocking state, or reply callback.
+      questions: inlineQuestionsSchema,
+    })
+    .superRefine((snapshot, ctx) => {
+      let bytes = 0
+      const add = (value: string | null | undefined) => {
+        if (value != null && bytes <= textMetadataBytes)
+          bytes += boundedUtf8Length(value, textMetadataBytes - bytes)
+      }
+      add(snapshot.role)
+      add(snapshot.phase)
+      add(snapshot.delivery)
+      for (const question of snapshot.questions ?? []) {
+        add(question.title)
+        for (const option of question.options ?? []) add(option)
+        if (bytes > textMetadataBytes) break
+      }
+      if (bytes > textMetadataBytes)
+        ctx.addIssue({
+          code: 'custom',
+          message: `Text metadata must contain at most ${textMetadataBytes} UTF-8 bytes`,
+        })
+    }),
+  z.strictObject({
+    ...contentSnapshotFields,
+    contentType: z.enum(['thought', 'plan']),
+  }),
+])
+// Zod integers are safe integers. Missing counters must remain absent.
+const tokenCount = z.number().int().nonnegative()
+const usageCounts = {
+  inputTokens: tokenCount,
+  outputTokens: tokenCount,
+  totalTokens: tokenCount,
+  cachedInputTokens: tokenCount.optional(),
+  cacheWriteInputTokens: tokenCount.optional(),
+  reasoningOutputTokens: tokenCount.optional(),
+}
 const childIdentity = {
   // The Forge tool call that spawned this child, possibly owned by parentChildId.
   parentToolCallId: id.optional(),
@@ -231,6 +345,22 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
     role: z.enum(['user', 'assistant']).optional(),
   }),
   z.object({ ...turnItem, type: z.literal('thought_delta'), text: z.string() }),
+  contentSnapshotSchema,
+  // Diagnostics never settle turns or children, regardless of severity or retryability.
+  // Producers must redact known secrets before bounding and emitting plain text.
+  // Keep startup diagnostics outside the timeline until a real root turn exists.
+  z.strictObject({
+    ...turnItem,
+    type: z.literal('diagnostic'),
+    code: utf8String(256).min(1),
+    message: utf8String(4096),
+    severity: z.enum(['info', 'warning', 'error']),
+    retryable: z.boolean().optional(),
+    // Retain native uint16 values. Zero does not imply an HTTP meaning.
+    httpStatus: tokenCount.max(65535).nullish(),
+    // Continuation instructions stay inert text unless the user selects continuation.
+    details: utf8String(16 * 1024).nullish(),
+  }),
   z.object({
     ...turnItem,
     type: z.literal('tool_started'),
@@ -265,11 +395,13 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
     childId: id,
     outcome: terminalOutcomeSchema,
   }),
-  z.object({
+  z.strictObject({
     ...turnItem,
     type: z.literal('plan'),
+    // Progress steps stay separate from plan prose. Omission preserves explanation; null clears it.
+    explanation: utf8String(1024 * 1024).nullish(),
     steps: z.array(
-      z.object({
+      z.strictObject({
         id,
         title: z.string(),
         status: z.enum(['pending', 'running', 'completed', 'failed']),
@@ -282,12 +414,14 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
     path: z.string(),
     kind: z.enum(['created', 'modified', 'deleted']),
   }),
-  z.object({
+  z.strictObject({
     ...turnItem,
     type: z.literal('usage'),
-    inputTokens: z.number().int().nonnegative(),
-    outputTokens: z.number().int().nonnegative(),
-    totalTokens: z.number().int().nonnegative(),
+    // Primary counts describe the latest call. Child usage keeps its own owner.
+    ...usageCounts,
+    // Cumulative snapshots replace prior totals. Never sum these snapshots.
+    cumulative: z.strictObject(usageCounts).optional(),
+    modelContextWindow: tokenCount.nullish(),
   }),
   z.object({
     ...turnItem,
