@@ -1,0 +1,10 @@
+{
+  "repository": "openai/codex",
+  "commit": "3d2ee51ca2d5db578f328aa75e20aa22c0197c9a",
+  "path": "codex-rs/protocol/src/config_types.rs",
+  "sha256": "96b4050a2498275ba5a11da0021bc75d5fb2fd2c50802f0930629aa7716a282a",
+  "type": "ModelProviderAuthInfo",
+  "lines": [569, 589],
+  "fields": ["command", "args", "timeout_ms", "refresh_interval_ms", "cwd"],
+  "notes": "The source defines optional defaults for args, timeout_ms, refresh_interval_ms, and cwd. A zero refresh interval disables proactive refresh. The adapter validates and preserves configuration. It does not execute authentication commands."
+}
