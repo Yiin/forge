@@ -1,0 +1,12 @@
+{
+  "source": "crates/harness/tests/fixtures/codex/live-0.146.1-multi-agent.jsonl",
+  "commit": "a1adfde23448a0e04256931d64a7c72a95b11db7",
+  "sha256": "e22f1acfcfd216e6201c63c8c0f45e787f72caad2e2cc2fcdd4dbc5ec061b7e1",
+  "profile": "0.146.1",
+  "frames": 144,
+  "sanitization": [
+    "home and workspace paths replaced with fixture paths",
+    "installation ID replaced"
+  ],
+  "replay": "Tests supply current required projectId and explicit synthetic thread/read metadata. Recorded frame ordering remains unchanged."
+}
