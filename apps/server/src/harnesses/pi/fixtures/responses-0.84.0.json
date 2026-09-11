@@ -1,0 +1,76 @@
+[
+  {
+    "id": "commands",
+    "type": "response",
+    "command": "get_commands",
+    "success": true,
+    "data": {
+      "commands": [
+        {
+          "name": "llama",
+          "description": "Manage llama.cpp router models",
+          "source": "extension",
+          "sourceInfo": {
+            "path": "<inline:llama.cpp>",
+            "source": "inline",
+            "scope": "temporary",
+            "origin": "top-level"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "models",
+    "type": "response",
+    "command": "get_available_models",
+    "success": true,
+    "data": {
+      "models": []
+    }
+  },
+  {
+    "id": "thinking",
+    "type": "response",
+    "command": "get_available_thinking_levels",
+    "success": true,
+    "data": {
+      "levels": ["off"]
+    }
+  },
+  {
+    "id": "state-after",
+    "type": "response",
+    "command": "get_state",
+    "success": true,
+    "data": {
+      "model": {
+        "id": "unknown",
+        "name": "unknown",
+        "api": "unknown",
+        "provider": "unknown",
+        "baseUrl": "",
+        "reasoning": false,
+        "input": [],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "contextWindow": 0,
+        "maxTokens": 0
+      },
+      "thinkingLevel": "off",
+      "isStreaming": false,
+      "isCompacting": false,
+      "steeringMode": "one-at-a-time",
+      "followUpMode": "one-at-a-time",
+      "sessionFile": "/var/tmp/forge-comet-pi-reference/probe-state/does-not-exist.jsonl",
+      "sessionId": "01a08b20-627c-75bb-9646-57f4b4c3706b",
+      "autoCompactionEnabled": true,
+      "messageCount": 0,
+      "pendingMessageCount": 0
+    }
+  }
+]
