@@ -1,0 +1,71 @@
+{
+  "source": {
+    "version": "1.18.26",
+    "schemaSha256": "63c0b717749d049b51e5be3f89e38a8923996a5a466a02229717980b71299b50",
+    "schema": "https://raw.githubusercontent.com/anomalyco/opencode/v1.18.26/packages/sdk/openapi.json",
+    "notes": "Small shapes from the captured installed v1 schema. Values are fake. No provider execution is claimed."
+  },
+  "provider": {
+    "all": [
+      {
+        "id": "fake",
+        "name": "Fixture provider",
+        "models": {
+          "model/a": {
+            "id": "model/a",
+            "providerID": "fake",
+            "name": "Fixture A",
+            "variants": { "deep": {}, "native-extra": {} },
+            "capabilities": {
+              "input": { "text": true, "image": true, "pdf": true }
+            },
+            "limit": { "context": 100000 }
+          },
+          "b": {
+            "id": "b",
+            "providerID": "fake",
+            "name": "Fixture B",
+            "variants": { "brief": {} },
+            "capabilities": {
+              "input": { "text": true, "image": false, "pdf": false }
+            },
+            "limit": { "context": 200000 }
+          }
+        }
+      }
+    ],
+    "connected": ["fake"],
+    "default": { "fake": "model/a" }
+  },
+  "agents": [{ "name": "build", "mode": "primary", "hidden": false }],
+  "commands": [{ "name": "known", "hints": ["argument"], "source": "command" }],
+  "question": {
+    "id": "que_fixture",
+    "sessionID": "ses_fixture",
+    "questions": [
+      {
+        "header": "Choice",
+        "question": "Which option?",
+        "options": [
+          { "label": "First", "description": "The first option" },
+          { "label": "Second", "description": "The second option" }
+        ]
+      },
+      {
+        "header": "More",
+        "question": "Which other options?",
+        "multiple": true,
+        "custom": true,
+        "options": [{ "label": "Third", "description": "One other option" }]
+      }
+    ]
+  },
+  "permission": {
+    "id": "per_fixture",
+    "sessionID": "ses_fixture",
+    "permission": "bash",
+    "patterns": ["echo *"],
+    "always": ["echo *"],
+    "metadata": {}
+  }
+}
