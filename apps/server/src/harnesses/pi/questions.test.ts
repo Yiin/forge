@@ -1,12 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { QuestionAnswer } from '../types.js'
+import { JsonlTransport } from '../jsonl.js'
 import {
   fixture,
   latch,
   pending,
   waitPhysicalIdle,
+  type PeerConfig,
 } from './fixtures/test-support.js'
 import { check, physicalState } from './wire.js'
 import type { PiAdapterOptions } from './index.js'
@@ -20,8 +22,9 @@ async function question(
   method: string,
   fields: Record<string, unknown> = {},
   overrides: Partial<PiAdapterOptions> = {},
+  config: PeerConfig = {},
 ) {
-  const f = await fixture({ behavior: 'manual' })
+  const f = await fixture({ ...config, behavior: 'manual' })
   owned.push(f)
   const { handle } = await f.start(overrides)
   const receipt = handle.prompt('question')
@@ -402,29 +405,134 @@ describe('Pi original question handles', () => {
       true,
     )
   })
-  it('35: persistence failure after submission closes ownership without a second native write', async () => {
-    const q = await question(
-      'input',
-      {},
-      {
-        persistRecord: async (_owner, _binding, record) => {
-          if (record.body.type === 'ui_reply') throw new Error('commit failed')
+  it.each(['before', 'after'] as const)(
+    '35: persistence failure %s peer consumption closes ownership without a second native write',
+    async (order) => {
+      const held = latch(),
+        entered = latch()
+      const records: unknown[] = []
+      let persistenceSettled = false
+      const q = await question(
+        'input',
+        {},
+        {
+          persistRecord: async (_owner, _binding, record) => {
+            if (record.body.type !== 'ui_reply') return
+            records.push(record.body)
+            entered.resolve()
+            try {
+              if (order === 'after') await held.promise
+              throw new Error('commit failed')
+            } finally {
+              persistenceSettled = true
+            }
+          },
         },
-      },
-    )
-    await expect(
-      q.answer({ type: 'free_text', text: 'once' }),
-    ).rejects.toThrow()
-    await expect(
-      q.answer({ type: 'free_text', text: 'twice' }),
-    ).rejects.toThrow('PI_REQUEST_UNAVAILABLE')
-    expect(
-      (await q.f.wire()).filter(
-        (command) => command.type === 'extension_ui_response',
-      ),
-    ).toHaveLength(1)
-    expect(await q.receipt.completion).toMatchObject({ status: 'failed' })
-  })
+        { pauseInput: order === 'before' },
+      )
+      const native = {
+        type: 'extension_ui_response',
+        id: 'original-native-id',
+        value: 'once',
+      }
+      // The spy calls the real transport. Its promise observes sender completion only.
+      const send = vi.spyOn(JsonlTransport.prototype, 'send')
+      const replyWrites = () =>
+        send.mock.calls.flatMap(([frame], index) =>
+          (frame as { type?: string })?.type === 'extension_ui_response'
+            ? [{ frame, written: send.mock.results[index]!.value }]
+            : [],
+        )
+      let reply: Promise<void> | undefined
+      try {
+        if (order === 'before')
+          expect(
+            await readFile(join(q.f.directory, 'stdin-paused'), 'utf8'),
+          ).toBe('')
+        reply = Promise.resolve(q.answer({ type: 'free_text', text: 'once' }))
+        void reply.catch(() => {})
+        await entered.promise
+        const writes = replyWrites()
+        expect(writes.map(({ frame }) => frame)).toEqual([native])
+        await expect(writes[0]!.written).resolves.toBeUndefined()
+        expect(records).toEqual([
+          {
+            type: 'ui_reply',
+            requestId: q.request.requestId,
+            native,
+            status: 'submitted',
+          },
+        ])
+        if (order === 'after') {
+          expect(await pending(reply)).toBe(true)
+          expect(await pending(q.receipt.completion)).toBe(true)
+          expect(physicalState().classes.sink).toBe(1)
+          await expect(
+            q.answer({ type: 'free_text', text: 'duplicate while persisting' }),
+          ).rejects.toThrow('PI_REQUEST_UNAVAILABLE')
+          // This fixture observation is not a native RPC acknowledgement.
+          const handled = await q.f.wait(async () => {
+            try {
+              return JSON.parse(
+                await readFile(
+                  join(q.f.directory, 'last-native-reply.json'),
+                  'utf8',
+                ),
+              ) as object
+            } catch (error) {
+              if ((error as { code?: string }).code === 'ENOENT') return false
+              throw error
+            }
+          })
+          expect(handled).toEqual({ id: 'original-native-id', handled: true })
+          expect(
+            (await q.f.wire()).filter(
+              (command) => command.type === 'extension_ui_response',
+            ),
+          ).toEqual([native])
+          held.resolve()
+        }
+        await expect(reply).rejects.toThrow()
+        expect(persistenceSettled).toBe(true)
+        await expect(
+          q.answer({ type: 'free_text', text: 'twice' }),
+        ).rejects.toThrow('PI_REQUEST_UNAVAILABLE')
+        const outcome = await q.receipt.completion
+        expect(outcome).toMatchObject({ status: 'failed' })
+        expect(
+          q.f.events
+            .filter((event) => event.type === 'turn_completed')
+            .map((event) => ({
+              ...event.outcome,
+              runId: event.runId,
+              turnId: event.turnId,
+            })),
+        ).toEqual([outcome])
+        await q.handle.kill()
+        await waitPhysicalIdle()
+        expect(physicalState()).toMatchObject({ count: 0, bytes: 0 })
+        expect(replyWrites().map(({ frame }) => frame)).toEqual([native])
+        expect(
+          (await q.f.wire()).filter(
+            (command) => command.type === 'extension_ui_response',
+          ),
+        ).toEqual(order === 'after' ? [native] : [])
+        if (order === 'before')
+          await expect(
+            readFile(join(q.f.directory, 'last-native-reply.json')),
+          ).rejects.toMatchObject({ code: 'ENOENT' })
+      } finally {
+        held.resolve()
+        await Promise.allSettled(reply ? [reply] : [])
+        try {
+          await q.handle.kill()
+          await waitPhysicalIdle()
+        } finally {
+          send.mockRestore()
+        }
+      }
+    },
+  )
   it('36: fire-and-forget UI metadata creates no reply resolver', async () => {
     const f = await fixture({ behavior: 'manual' })
     owned.push(f)
