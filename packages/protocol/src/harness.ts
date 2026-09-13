@@ -203,6 +203,625 @@ export const completionResultSchema = terminalOutcomeSchema.and(
   z.object({ runId: id, turnId: id }),
 )
 export type CompletionResult = z.infer<typeof completionResultSchema>
+
+// Completion persistence has a separate failure channel. Ordinary terminal results stay unchanged.
+export function completionProjectionPreflight(
+  value: unknown,
+  maximum = 16384,
+  nodeLimit = 256,
+  depthLimit = 12,
+) {
+  let bytes = 0,
+    nodes = 0
+  const ancestors = new Set<object>()
+  const string = (text: string) => {
+    bytes += 2
+    for (const character of text) {
+      const code = character.codePointAt(0)!
+      if (code >= 0xd800 && code <= 0xdfff)
+        throw new Error('Invalid completion text')
+      bytes +=
+        code < 32
+          ? [8, 9, 10, 12, 13].includes(code)
+            ? 2
+            : 6
+          : character === '"' || character === '\\'
+            ? 2
+            : code < 128
+              ? 1
+              : code < 2048
+                ? 2
+                : code < 65536
+                  ? 3
+                  : 4
+      if (bytes > maximum) throw new Error('Completion projection byte limit')
+    }
+  }
+  const visit = (entry: unknown, depth: number) => {
+    if (++nodes > nodeLimit || depth > depthLimit)
+      throw new Error('Completion projection tree limit')
+    if (typeof entry === 'string') string(entry)
+    else if (typeof entry === 'boolean') bytes += entry ? 4 : 5
+    else if (
+      typeof entry === 'number' &&
+      Number.isSafeInteger(entry) &&
+      entry >= 0
+    )
+      bytes += String(entry).length
+    else if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      const prototype = Object.getPrototypeOf(entry)
+      if (
+        (prototype !== Object.prototype && prototype !== null) ||
+        ancestors.has(entry)
+      )
+        throw new Error('Invalid completion projection record')
+      ancestors.add(entry)
+      const keys = Reflect.ownKeys(entry)
+      if (keys.length > nodeLimit - nodes)
+        throw new Error('Completion projection node limit')
+      bytes += 2
+      for (const [index, key] of keys.entries()) {
+        if (typeof key !== 'string')
+          throw new Error('Completion projection symbol')
+        const descriptor = Object.getOwnPropertyDescriptor(entry, key)!
+        if (!('value' in descriptor) || !descriptor.enumerable)
+          throw new Error('Completion projection accessor')
+        if (++nodes > nodeLimit)
+          throw new Error('Completion projection node limit')
+        if (index) bytes++
+        string(key)
+        bytes++
+        visit(descriptor.value, depth + 1)
+      }
+      ancestors.delete(entry)
+    } else throw new Error('Invalid completion projection value')
+    if (bytes > maximum) throw new Error('Completion projection byte limit')
+  }
+  visit(value, 0)
+  return bytes
+}
+export const completionIdentityIdSchema = z.string().refine((value) => {
+  let bytes = 0
+  for (const character of value) {
+    const code = character.codePointAt(0)!
+    if (
+      code < 32 ||
+      (code >= 127 && code <= 159) ||
+      (code >= 0xd800 && code <= 0xdfff)
+    )
+      return false
+    bytes += code < 128 ? 1 : code < 2048 ? 2 : code < 65536 ? 3 : 4
+    if (bytes > 512) return false
+  }
+  return bytes > 0
+}, 'Invalid completion identity')
+const persistenceHash = z.string().regex(/^[0-9a-f]{64}$/)
+const persistenceCount = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER)
+const persistenceOrdinal = persistenceCount.refine((value) => value > 0)
+const completionIdentityFields = {
+  sessionId: completionIdentityIdSchema,
+  receiptId: completionIdentityIdSchema,
+  completionId: completionIdentityIdSchema,
+  runId: completionIdentityIdSchema,
+  turnId: completionIdentityIdSchema,
+}
+export const completionFailureIdentitySchema = z
+  .strictObject(completionIdentityFields)
+  .readonly()
+export type CompletionFailureIdentity = z.infer<
+  typeof completionFailureIdentitySchema
+>
+export const completionFailureCodeSchema = z.enum([
+  'persistence_unknown',
+  'completion_not_committed',
+  'completion_publication_failed',
+])
+export type CompletionFailureCode = z.infer<typeof completionFailureCodeSchema>
+export const completionFailureClassificationSchema = z.enum([
+  'admission_failed',
+  'writer_closed',
+  'logical_deadline',
+  'ack_unknown',
+  'commit_failed',
+  'invalid_ack',
+  'batch_conflict',
+  'prefix_conflict',
+  'publication_deadline',
+  'publication_failed',
+])
+export type CompletionFailureClassification = z.infer<
+  typeof completionFailureClassificationSchema
+>
+export const persistenceCauseOwnerSchema = z.union([
+  z
+    .strictObject({
+      kind: z.literal('operation'),
+      sessionId: completionIdentityIdSchema,
+      runtimeGeneration: completionIdentityIdSchema,
+      runId: completionIdentityIdSchema,
+      turnId: completionIdentityIdSchema,
+      operationId: completionIdentityIdSchema.optional(),
+      childId: completionIdentityIdSchema.optional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal('session'),
+      sessionId: completionIdentityIdSchema,
+      runtimeGeneration: completionIdentityIdSchema,
+    })
+    .readonly(),
+])
+export type PersistenceCauseOwner = z.infer<typeof persistenceCauseOwnerSchema>
+const persistenceCauseSchema = z
+  .strictObject({
+    relation: z.enum(['own_required_write', 'session_fence']),
+    owner: persistenceCauseOwnerSchema,
+  })
+  .readonly()
+export const batchPositionSchema = z
+  .strictObject({ kind: z.literal('batch_ordinal'), ordinal: persistenceCount })
+  .readonly()
+export type BatchPosition = z.infer<typeof batchPositionSchema>
+export const journalPositionSchema = z
+  .strictObject({
+    kind: z.literal('journal_prefix'),
+    throughOrdinal: persistenceCount,
+    prefixHash: persistenceHash,
+  })
+  .readonly()
+export type JournalPosition = z.infer<typeof journalPositionSchema>
+const batchKeySchema = z
+  .strictObject({ batchId: persistenceHash, contentHash: persistenceHash })
+  .readonly()
+const batchInputSchema = z
+  .strictObject({ expectedOrdinal: persistenceCount, replayOnly: z.boolean() })
+  .readonly()
+export const publicationFactsSchema = z
+  .strictObject({
+    state: z.enum(['not_started', 'stopped', 'complete', 'not_republished']),
+    totalEvents: persistenceCount.max(65536),
+    attemptedEvents: persistenceCount.max(65536),
+    returnedEvents: persistenceCount.max(65536),
+  })
+  .refine(
+    (value) =>
+      value.returnedEvents <= value.attemptedEvents &&
+      value.attemptedEvents <= value.totalEvents &&
+      value.attemptedEvents - value.returnedEvents <= 1 &&
+      (!(value.state === 'not_started' || value.state === 'not_republished') ||
+        value.attemptedEvents === 0) &&
+      (value.state !== 'complete' ||
+        value.returnedEvents === value.totalEvents),
+  )
+  .readonly()
+export type PublicationFacts = z.infer<typeof publicationFactsSchema>
+const batchBase = {
+  kind: z.literal('batch_ordinal'),
+  lastAcknowledged: batchPositionSchema,
+}
+const journalBase = {
+  kind: z.literal('journal_prefix'),
+  journalId: completionIdentityIdSchema,
+  lastAcknowledged: journalPositionSchema,
+}
+const physicalResult = z.enum(['pending', 'rejected', 'invalid_ack'])
+const journalTransactionSchema = z
+  .strictObject({
+    transactionId: persistenceHash,
+    contentHash: persistenceHash,
+    fromOrdinal: persistenceOrdinal,
+    throughOrdinal: persistenceOrdinal,
+  })
+  .readonly()
+const invocationSchema = z.union([z.literal(1), z.literal(2)])
+const batchPendingSchema = z.union([
+  z
+    .strictObject({ ...batchBase, phase: z.literal('pre_admission') })
+    .readonly(),
+  z
+    .strictObject({
+      ...batchBase,
+      phase: z.literal('constructed'),
+      batch: batchKeySchema,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...batchBase,
+      phase: z.literal('prepared'),
+      batch: batchKeySchema,
+      input: batchInputSchema,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...batchBase,
+      phase: z.literal('scheduled'),
+      batch: batchKeySchema,
+      input: batchInputSchema,
+      physical: z.literal('pending'),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...batchBase,
+      phase: z.literal('entered'),
+      batch: batchKeySchema,
+      input: batchInputSchema,
+      physical: physicalResult,
+    })
+    .readonly(),
+])
+const batchAcknowledgedSchema = z.union([
+  z
+    .strictObject({
+      ...batchBase,
+      phase: z.literal('acknowledged'),
+      batch: batchKeySchema,
+      input: batchInputSchema,
+      acknowledgement: z
+        .strictObject({
+          via: z.literal('sink'),
+          disposition: z.enum(['committed', 'replayed']),
+          ordinal: persistenceOrdinal,
+        })
+        .readonly(),
+      publication: publicationFactsSchema,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...batchBase,
+      phase: z.literal('acknowledged'),
+      batch: batchKeySchema,
+      acknowledgement: z
+        .strictObject({
+          via: z.literal('local_cache'),
+          ordinal: persistenceOrdinal,
+        })
+        .readonly(),
+      publication: publicationFactsSchema,
+    })
+    .readonly(),
+])
+const journalPendingSchema = z.union([
+  z
+    .strictObject({ ...journalBase, phase: z.literal('pre_admission') })
+    .readonly(),
+  z
+    .strictObject({
+      ...journalBase,
+      phase: z.literal('constructed'),
+      transaction: journalTransactionSchema,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...journalBase,
+      phase: z.literal('prepared'),
+      transaction: journalTransactionSchema,
+      invocation: invocationSchema,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...journalBase,
+      phase: z.literal('scheduled'),
+      transaction: journalTransactionSchema,
+      invocation: invocationSchema,
+      physical: z.literal('pending'),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...journalBase,
+      phase: z.literal('entered'),
+      transaction: journalTransactionSchema,
+      invocation: invocationSchema,
+      physical: physicalResult,
+    })
+    .readonly(),
+])
+const journalAcknowledgedSchema = z
+  .strictObject({
+    ...journalBase,
+    phase: z.literal('acknowledged'),
+    transaction: journalTransactionSchema,
+    invocation: invocationSchema,
+    acknowledgement: z
+      .strictObject({
+        transactionId: persistenceHash,
+        throughOrdinal: persistenceOrdinal,
+        prefixHash: persistenceHash,
+      })
+      .readonly(),
+    publication: publicationFactsSchema,
+  })
+  .readonly()
+const evidenceSchema = z
+  .union([
+    batchPendingSchema,
+    batchAcknowledgedSchema,
+    journalPendingSchema,
+    journalAcknowledgedSchema,
+  ])
+  .refine((value) => {
+    if (value.kind === 'batch_ordinal') {
+      if (
+        'input' in value &&
+        value.input.expectedOrdinal !== value.lastAcknowledged.ordinal
+      )
+        return false
+      if (value.phase !== 'acknowledged') return true
+      const ack = value.acknowledgement
+      if (ack.via === 'local_cache')
+        return (
+          ack.ordinal <= value.lastAcknowledged.ordinal &&
+          value.publication.state === 'not_republished'
+        )
+      if (!('input' in value)) return false
+      if (ack.disposition === 'replayed')
+        return (
+          ack.ordinal <= value.input.expectedOrdinal &&
+          value.publication.state === 'not_republished'
+        )
+      return (
+        !value.input.replayOnly &&
+        value.input.expectedOrdinal < Number.MAX_SAFE_INTEGER &&
+        ack.ordinal === value.input.expectedOrdinal + 1
+      )
+    }
+    if (
+      'transaction' in value &&
+      (value.lastAcknowledged.throughOrdinal === Number.MAX_SAFE_INTEGER ||
+        value.transaction.fromOrdinal !==
+          value.lastAcknowledged.throughOrdinal + 1 ||
+        value.transaction.throughOrdinal < value.transaction.fromOrdinal)
+    )
+      return false
+    return (
+      value.phase !== 'acknowledged' ||
+      (value.acknowledgement.transactionId ===
+        value.transaction.transactionId &&
+        value.acknowledgement.throughOrdinal ===
+          value.transaction.throughOrdinal)
+    )
+  })
+export type CommitEvidence = z.infer<typeof evidenceSchema>
+export type BatchPendingEvidence = z.infer<typeof batchPendingSchema>
+export type BatchAcknowledgedEvidence = z.infer<typeof batchAcknowledgedSchema>
+export type JournalPendingEvidence = z.infer<typeof journalPendingSchema>
+export type JournalAcknowledgedEvidence = z.infer<
+  typeof journalAcknowledgedSchema
+>
+export type AcknowledgedEvidence =
+  BatchAcknowledgedEvidence | JournalAcknowledgedEvidence
+const requiredTerminalSchema = z.union([
+  z
+    .strictObject({
+      state: z.enum(['not_committed', 'unproved']),
+      terminal: evidenceSchema,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      state: z.literal('committed'),
+      terminal: evidenceSchema.refine(
+        (value) => value.phase === 'acknowledged',
+      ),
+      sealedThrough: z.union([batchPositionSchema, journalPositionSchema]),
+    })
+    .readonly(),
+])
+export type RequiredTerminalEvidence = z.infer<typeof requiredTerminalSchema>
+const completionEvidenceFields = {
+  ...completionIdentityFields,
+  version: z.literal(1),
+  cause: persistenceCauseSchema,
+  failure: evidenceSchema,
+  required: requiredTerminalSchema,
+}
+function validCompletionEvidence(value: {
+  sessionId: string
+  runId: string
+  turnId: string
+  cause: z.infer<typeof persistenceCauseSchema>
+  failure: CommitEvidence
+  required: RequiredTerminalEvidence
+}) {
+  const { failure, required, cause } = value,
+    terminal = required.terminal
+  if (
+    cause.owner.sessionId !== value.sessionId ||
+    (cause.relation === 'own_required_write' &&
+      cause.owner.kind === 'operation' &&
+      (cause.owner.runId !== value.runId ||
+        cause.owner.turnId !== value.turnId))
+  )
+    return false
+  if (failure.kind !== terminal.kind) return false
+  if (
+    failure.kind === 'batch_ordinal' &&
+    terminal.kind === 'batch_ordinal' &&
+    'batch' in failure &&
+    'batch' in terminal &&
+    failure.batch.batchId === terminal.batch.batchId &&
+    failure.batch.contentHash !== terminal.batch.contentHash
+  )
+    return false
+  if (failure.kind === 'journal_prefix' && terminal.kind === 'journal_prefix') {
+    if (failure.journalId !== terminal.journalId) return false
+    if (
+      'transaction' in failure &&
+      'transaction' in terminal &&
+      failure.transaction.transactionId ===
+        terminal.transaction.transactionId &&
+      (failure.transaction.contentHash !== terminal.transaction.contentHash ||
+        failure.transaction.fromOrdinal !== terminal.transaction.fromOrdinal ||
+        failure.transaction.throughOrdinal !==
+          terminal.transaction.throughOrdinal)
+    )
+      return false
+  }
+  const pending = [failure, terminal].some(
+    (entry) => entry.phase === 'scheduled' || entry.phase === 'entered',
+  )
+  if (required.state === 'unproved') return pending
+  if (pending) return false
+  // The causal write and terminal can both be acknowledged while a separately
+  // retained admitted prerequisite did not commit. These slots are not a log
+  // of every required write. The private owner validates aggregate coverage.
+  if (required.state === 'not_committed') return true
+  if (required.state !== 'committed') return false
+  if (
+    terminal.phase !== 'acknowledged' ||
+    terminal.kind !== required.sealedThrough.kind
+  )
+    return false
+  if (
+    terminal.kind === 'batch_ordinal' &&
+    required.sealedThrough.kind === 'batch_ordinal'
+  )
+    return required.sealedThrough.ordinal >= terminal.acknowledgement.ordinal
+  if (
+    terminal.kind === 'journal_prefix' &&
+    required.sealedThrough.kind === 'journal_prefix'
+  )
+    return (
+      required.sealedThrough.throughOrdinal >=
+        terminal.acknowledgement.throughOrdinal &&
+      (required.sealedThrough.throughOrdinal !==
+        terminal.acknowledgement.throughOrdinal ||
+        required.sealedThrough.prefixHash ===
+          terminal.acknowledgement.prefixHash)
+    )
+  return false
+}
+function boundedCompletion<T extends z.ZodType>(schema: T, maximum = 16384) {
+  return z.preprocess((value, context) => {
+    try {
+      completionProjectionPreflight(
+        value,
+        maximum,
+        maximum > 16384 ? 512 : 256,
+        maximum > 16384 ? 13 : 12,
+      )
+      return value
+    } catch {
+      context.addIssue({
+        code: 'custom',
+        message: 'Invalid bounded completion projection',
+      })
+      return z.NEVER
+    }
+  }, schema)
+}
+export const completionFailureProjectionSchema = boundedCompletion(
+  z
+    .strictObject({
+      ...completionEvidenceFields,
+      code: completionFailureCodeSchema,
+      classification: completionFailureClassificationSchema,
+      requestId: completionIdentityIdSchema.optional(),
+    })
+    .refine((value) => {
+      if (!validCompletionEvidence(value)) return false
+      if (
+        value.code !==
+        (
+          {
+            unproved: 'persistence_unknown',
+            not_committed: 'completion_not_committed',
+            committed: 'completion_publication_failed',
+          } as const
+        )[value.required.state]
+      )
+        return false
+      const evidence = value.failure,
+        phase = evidence.phase
+      if (
+        value.code === 'completion_publication_failed' &&
+        !['publication_deadline', 'publication_failed'].includes(
+          value.classification,
+        )
+      )
+        return false
+      switch (value.classification) {
+        case 'admission_failed':
+        case 'writer_closed':
+          return ['pre_admission', 'constructed', 'prepared'].includes(phase)
+        case 'logical_deadline':
+          return phase !== 'acknowledged'
+        case 'ack_unknown':
+          return (
+            (phase === 'scheduled' || phase === 'entered') &&
+            evidence.physical === 'pending'
+          )
+        case 'commit_failed':
+          return phase === 'entered' && evidence.physical === 'rejected'
+        case 'invalid_ack':
+          return phase === 'entered' && evidence.physical === 'invalid_ack'
+        case 'batch_conflict':
+        case 'prefix_conflict':
+          return (
+            evidence.kind ===
+              (value.classification === 'batch_conflict'
+                ? 'batch_ordinal'
+                : 'journal_prefix') &&
+            (phase === 'constructed' ||
+              phase === 'prepared' ||
+              (phase === 'entered' && evidence.physical !== 'pending'))
+          )
+        case 'publication_deadline':
+        case 'publication_failed':
+          return (
+            phase === 'acknowledged' && evidence.publication.state === 'stopped'
+          )
+      }
+    })
+    .readonly(),
+)
+export type CompletionFailureProjection = z.infer<
+  typeof completionFailureProjectionSchema
+>
+export const completionRecoveryProjectionSchema = boundedCompletion(
+  z
+    .strictObject({
+      ...completionEvidenceFields,
+      state: z.enum(['unresolved', 'evidence_verified', 'reconciled']),
+    })
+    .refine(
+      (value) =>
+        validCompletionEvidence(value) &&
+        (value.state === 'unresolved' || value.required.state === 'committed'),
+    )
+    .readonly(),
+)
+export type CompletionRecoveryProjection = z.infer<
+  typeof completionRecoveryProjectionSchema
+>
+export const completionFailureEnvelopeSchema = boundedCompletion(
+  z
+    .strictObject({
+      error: completionFailureProjectionSchema,
+      recovery: completionRecoveryProjectionSchema.optional(),
+    })
+    .refine(
+      ({ error, recovery }) =>
+        !recovery ||
+        ((
+          ['sessionId', 'receiptId', 'completionId', 'runId', 'turnId'] as const
+        ).every((field) => error[field] === recovery[field]) &&
+          error.failure.kind === recovery.failure.kind),
+    )
+    .readonly(),
+  33792,
+)
 const envelope = {
   runId: id,
   runtimeGeneration: id,

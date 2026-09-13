@@ -38,6 +38,7 @@ jobs:
         run: |
           mkdir -p dist
           bun build --target=node apps/server/src/index.ts --outfile dist/forge-server.js
+          bun run build:kimi-guardian
       - name: Pack release
         id: pack
         env:
@@ -50,6 +51,7 @@ jobs:
           rm -rf "$staging"
           mkdir -p "$staging/apps/server/src" "$staging/apps/drizzle" "$staging/web"
           cp dist/forge-server.js "$staging/apps/server/src/index.js"
+          cp dist/kimi-guardian.js "$staging/apps/server/src/kimi-guardian.js"
           cp -R apps/server/drizzle/. "$staging/apps/drizzle/"
           cp -R apps/web/dist/. "$staging/web/"
           cp apps/server/package.json "$staging/apps/server/package.json"

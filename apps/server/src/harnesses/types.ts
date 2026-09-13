@@ -1,4 +1,9 @@
-import { completionResultSchema } from '@forge/protocol/harness'
+import {
+  completionResultSchema,
+  completionIdentityIdSchema,
+  completionFailureProjectionSchema,
+  completionProjectionPreflight,
+} from '@forge/protocol/harness'
 import type {
   AdapterKind,
   HarnessCapabilities,
@@ -11,6 +16,8 @@ import type {
   QuestionAnswer,
   PermissionReply,
   CompletionResult,
+  CompletionFailureCode,
+  CompletionFailureProjection,
 } from '@forge/protocol/harness'
 
 export type {
@@ -60,24 +67,116 @@ export type CompletionHandle = Promise<CompletionResult> & {
   runId: string
   turnId: string
 }
-export function createCompletionHandle(ids: {
+export interface CompletionPersistenceFailure extends Error {
+  readonly code: CompletionFailureCode
+  readonly completionId: string
+  readonly runId: string
+  readonly turnId: string
+  readonly persistence: CompletionFailureProjection
+}
+export type CompletionProducer = {
+  handle: CompletionHandle
+  settle(result: CompletionResult): void
+}
+export type RejectingCompletionProducer = CompletionProducer & {
+  reject(error: CompletionPersistenceFailure): void
+}
+type CompletionIds = {
   completionId: string
   runId: string
   turnId: string
-}) {
+}
+function ownValue(value: object, key: string, immutable = false) {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key)
+  if (
+    !descriptor ||
+    !('value' in descriptor) ||
+    (immutable && (descriptor.writable || descriptor.configurable))
+  )
+    throw new Error('Invalid completion data property')
+  return descriptor.value as unknown
+}
+function deeplyFrozen(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return true
+  if (!Object.isFrozen(value)) return false
+  return Reflect.ownKeys(value).every((key) =>
+    deeplyFrozen(Object.getOwnPropertyDescriptor(value, key)!.value),
+  )
+}
+export function isCompletionPersistenceFailure(
+  value: unknown,
+): value is CompletionPersistenceFailure {
+  try {
+    if (!(value instanceof Error)) return false
+    const code = ownValue(value, 'code', true),
+      completionId = ownValue(value, 'completionId', true),
+      runId = ownValue(value, 'runId', true),
+      turnId = ownValue(value, 'turnId', true),
+      persistence = ownValue(value, 'persistence', true)
+    completionProjectionPreflight(persistence)
+    if (!deeplyFrozen(persistence)) return false
+    const parsed = completionFailureProjectionSchema.parse(persistence)
+    return (
+      parsed.code === code &&
+      parsed.completionId === completionId &&
+      parsed.runId === runId &&
+      parsed.turnId === turnId
+    )
+  } catch {
+    return false
+  }
+}
+export function createCompletionHandle(
+  ids: CompletionIds,
+  options: { persistenceRejection: true },
+): RejectingCompletionProducer
+export function createCompletionHandle(ids: CompletionIds): CompletionProducer
+export function createCompletionHandle(
+  ids: CompletionIds,
+  options?: { persistenceRejection: true },
+): CompletionProducer | RejectingCompletionProducer {
+  if (!ids || typeof ids !== 'object')
+    throw new Error('Invalid completion identity')
+  const completionId = completionIdentityIdSchema.parse(
+      ownValue(ids, 'completionId'),
+    ),
+    runId = completionIdentityIdSchema.parse(ownValue(ids, 'runId')),
+    turnId = completionIdentityIdSchema.parse(ownValue(ids, 'turnId'))
   let resolve!: (result: CompletionResult) => void
-  const promise = new Promise<CompletionResult>((complete) => {
+  let reject!: (error: CompletionPersistenceFailure) => void
+  let settled = false
+  const promise = new Promise<CompletionResult>((complete, fail) => {
     resolve = complete
+    reject = fail
   }) as CompletionHandle
-  Object.assign(promise, ids)
-  return {
+  Object.assign(promise, { completionId, runId, turnId })
+  const producer: CompletionProducer = {
     handle: promise,
     settle(result: CompletionResult) {
       const parsed = completionResultSchema.parse(result)
-      if (parsed.runId !== promise.runId || parsed.turnId !== promise.turnId) {
+      if (parsed.runId !== runId || parsed.turnId !== turnId) {
         throw new Error('Completion result does not match the handle identity')
       }
+      if (settled) return
+      settled = true
       resolve(parsed)
+    },
+  }
+  if (!options?.persistenceRejection) return producer
+  void promise.catch(() => {})
+  return {
+    ...producer,
+    reject(error: CompletionPersistenceFailure) {
+      if (
+        !isCompletionPersistenceFailure(error) ||
+        error.completionId !== completionId ||
+        error.runId !== runId ||
+        error.turnId !== turnId
+      )
+        throw new Error('Completion failure does not match the handle identity')
+      if (settled) return
+      settled = true
+      reject(error)
     },
   }
 }

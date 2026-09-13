@@ -1,0 +1,10 @@
+{
+  "version": "0.34.0",
+  "sourceCommit": "f0614c53e59f7e1e257412063b059b9eb82764cf",
+  "binarySha256": "1e05b9b78c4fc69abb7f9c3ade7e6e774daa87cc4a31773cdbd72f047d2e732e",
+  "captureTimeUtc": "2026-09-10T03:35:16Z",
+  "provenance": "Preserved no-model capture in an isolated temporary native home. No provider credentials were supplied.",
+  "openapi.json": "e09ce513e9be1bacfb33298aa60d2da701e57e20eb7837042cb55a48a88b7e73",
+  "asyncapi.json": "e841206eee6e5b9aff8f8df5de242224296a1650f0e11f884b7ef3f0789eb09c",
+  "syntheticPeer": "peer.mjs uses owned temporary homes and the captured schemas. It never calls a model."
+}

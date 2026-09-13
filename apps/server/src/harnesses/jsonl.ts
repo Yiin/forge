@@ -10,9 +10,22 @@ export type JsonlOptions = {
   secrets?: readonly string[]
   /** Validate the serialized value, before allocating or queuing its frame. */
   validateOutgoing?: (value: unknown) => void
+  /** Optional physical allocation accounting. Parsed values use their encoded byte size. */
+  resources?: {
+    measureOutgoing(value: unknown): number
+    reserve(
+      kind: 'receive' | 'decode' | 'parse' | 'serialize' | 'write',
+      bytes: number,
+    ): () => void
+  }
   /** Called in wire order. Async protocol work belongs outside the frame reader. */
-  onValue: (value: unknown, bytes: number) => void
+  onValue: (
+    value: unknown,
+    bytes: number,
+    ownership?: JsonlValueOwnership,
+  ) => void
 }
+export type JsonlValueOwnership = { retain(): () => void }
 
 type Write = {
   bytes: Buffer
@@ -21,6 +34,7 @@ type Write = {
   reject: (error: Error) => void
   cleanup: () => void
   settled: boolean
+  release: () => void
 }
 
 /** Owns Node streams. Accepts CRLF, blank lines, and a valid final line at EOF. */
@@ -28,15 +42,17 @@ export class JsonlTransport {
   readonly done: Promise<Error>
   private finish!: (reason: Error) => void
   private reason?: Error
-  private readonly maxLineBytes: number
-  private readonly maxQueuedBytes: number
-  private readonly maxQueuedFrames: number
+  private maxLineBytes: number
+  private maxQueuedBytes: number
+  private maxQueuedFrames: number
   private readonly decoder = new TextDecoder('utf8', {
     fatal: true,
     ignoreBOM: true,
   })
-  private line = Buffer.alloc(0)
+  private line: Buffer = Buffer.alloc(0)
   private lineBytes = 0
+  private releaseLine: () => void = () => {}
+  private readonly physicalWrites = new Set<Write>()
   private readonly queue: Write[] = []
   private active?: Write
   private queuedBytes = 0
@@ -87,6 +103,58 @@ export class JsonlTransport {
       queuedFrames: this.queue.length + (this.active ? 1 : 0),
     }
   }
+  /** Apply an owned protocol's negotiated lowering limits to existing storage too. */
+  setLimits(limits: {
+    maxLineBytes: number
+    maxQueuedBytes: number
+    maxQueuedFrames: number
+  }) {
+    const line = positiveLimit(limits.maxLineBytes, 'line bytes')
+    const bytes = positiveLimit(limits.maxQueuedBytes, 'queued bytes')
+    const frames = positiveLimit(limits.maxQueuedFrames, 'queued frames')
+    if (
+      line > this.maxLineBytes ||
+      bytes > this.maxQueuedBytes ||
+      frames > this.maxQueuedFrames
+    )
+      throw new Error('JSONL limits may only decrease')
+    if (
+      this.lineBytes > line ||
+      this.queuedBytes > bytes ||
+      this.state.queuedFrames > frames
+    )
+      throw new Error('JSONL retained work exceeds negotiated limits')
+    if (this.line.length > line) {
+      const release = this.reserve('receive', line)
+      let smaller: Buffer
+      try {
+        smaller = Buffer.allocUnsafe(line)
+      } catch (error) {
+        release()
+        throw error
+      }
+      this.line.copy(smaller, 0, 0, this.lineBytes)
+      this.line = smaller
+      this.releaseLine()
+      this.releaseLine = release
+    }
+    this.maxLineBytes = line
+    this.maxQueuedBytes = bytes
+    this.maxQueuedFrames = frames
+  }
+  private reserve(
+    kind: 'receive' | 'decode' | 'parse' | 'serialize' | 'write',
+    bytes: number,
+  ) {
+    const release = this.options.resources?.reserve(kind, bytes) ?? (() => {})
+    let held = true
+    return () => {
+      if (held) {
+        held = false
+        release()
+      }
+    }
+  }
 
   send(
     value: unknown,
@@ -110,62 +178,100 @@ export class JsonlTransport {
     const initialError = unavailable()
     if (initialError) return Promise.reject(initialError)
     let text: string | undefined
+    let releaseText = () => {}
     try {
+      if (this.options.resources) {
+        const measured = this.options.resources.measureOutgoing(value)
+        if (
+          !Number.isSafeInteger(measured) ||
+          measured < 0 ||
+          measured > this.maxLineBytes
+        )
+          return Promise.reject(new Error('JSONL frame exceeds limit'))
+        releaseText = this.reserve('serialize', measured * 2)
+      }
       text = JSON.stringify(value)
     } catch {
       /* Never include the value in errors. */
     }
-    // Getters and toJSON can close, cancel, or reenter this transport.
-    const serializedError = unavailable()
-    if (serializedError) return Promise.reject(serializedError)
-    if (text === undefined)
-      return Promise.reject(new Error('Cannot encode JSONL value'))
-    const length = Buffer.byteLength(text)
-    if (length > this.maxLineBytes)
-      return Promise.reject(new Error('JSONL frame exceeds limit'))
-    if (this.queuedBytes + length + 1 > this.maxQueuedBytes)
-      return Promise.reject(new Error('JSONL write queue is full'))
-    if (this.options.validateOutgoing) {
+    try {
+      // Getters and toJSON can close, cancel, or reenter this transport.
+      const serializedError = unavailable()
+      if (serializedError) return Promise.reject(serializedError)
+      if (text === undefined)
+        return Promise.reject(new Error('Cannot encode JSONL value'))
+      const length = Buffer.byteLength(text)
+      if (length > this.maxLineBytes)
+        return Promise.reject(new Error('JSONL frame exceeds limit'))
+      if (this.queuedBytes + length + 1 > this.maxQueuedBytes)
+        return Promise.reject(new Error('JSONL write queue is full'))
+      if (this.options.validateOutgoing) {
+        let releaseValidation = () => {}
+        try {
+          releaseValidation = this.reserve('parse', length)
+          this.options.validateOutgoing(JSON.parse(text))
+        } catch (error) {
+          return Promise.reject(diagnosticError(error, this.options.secrets))
+        } finally {
+          releaseValidation()
+        }
+        const validationError = unavailable()
+        if (validationError) return Promise.reject(validationError)
+        if (this.queuedBytes + length + 1 > this.maxQueuedBytes)
+          return Promise.reject(new Error('JSONL write queue is full'))
+      }
+      let release: () => void
       try {
-        this.options.validateOutgoing(JSON.parse(text))
+        release = this.reserve('write', length + 1)
       } catch (error) {
         return Promise.reject(diagnosticError(error, this.options.secrets))
       }
-      const validationError = unavailable()
-      if (validationError) return Promise.reject(validationError)
-      if (this.queuedBytes + length + 1 > this.maxQueuedBytes)
-        return Promise.reject(new Error('JSONL write queue is full'))
-    }
-    const bytes = Buffer.from(`${text}\n`)
-    return new Promise<void>((resolve, reject) => {
-      const write: Write = {
-        bytes,
-        deadline: options.deadline,
-        resolve,
-        reject,
-        cleanup: () => {},
-        settled: false,
+      let bytes: Buffer
+      try {
+        bytes = Buffer.allocUnsafe(length + 1)
+        bytes.write(text)
+        bytes[length] = 10
+      } catch (error) {
+        release()
+        return Promise.reject(diagnosticError(error, this.options.secrets))
       }
-      const cancel = () => {
-        const index = this.queue.indexOf(write)
-        if (index >= 0) {
-          this.queue.splice(index, 1)
-          this.queuedBytes -= write.bytes.length
+      return new Promise<void>((resolve, reject) => {
+        const write: Write = {
+          bytes,
+          deadline: options.deadline,
+          resolve,
+          reject,
+          cleanup: () => {},
+          settled: false,
+          release,
         }
-        this.settle(write, new Error('JSONL write cancelled'))
-      }
-      options.signal?.addEventListener('abort', cancel, { once: true })
-      write.cleanup = () => options.signal?.removeEventListener('abort', cancel)
-      this.queue.push(write)
-      this.queuedBytes += bytes.length
-      this.pump()
-    })
+        const cancel = () => {
+          const index = this.queue.indexOf(write)
+          if (index >= 0) {
+            this.queue.splice(index, 1)
+            this.queuedBytes -= write.bytes.length
+            write.release()
+          }
+          this.settle(write, new Error('JSONL write cancelled'))
+        }
+        options.signal?.addEventListener('abort', cancel, { once: true })
+        write.cleanup = () =>
+          options.signal?.removeEventListener('abort', cancel)
+        this.queue.push(write)
+        this.queuedBytes += bytes.length
+        this.pump()
+      })
+    } finally {
+      releaseText()
+    }
   }
 
   close(reason = new Error('JSONL transport closed')): Promise<Error> {
     if (this.reason) return this.done
     this.reason = diagnosticError(reason, this.options.secrets)
     this.line = Buffer.alloc(0)
+    this.releaseLine()
+    this.releaseLine = () => {}
     this.lineBytes = 0
     this.options.stdout.off('data', this.onData)
     this.options.stdout.off('end', this.onEnd)
@@ -173,7 +279,10 @@ export class JsonlTransport {
     this.onDrain = undefined
     if (this.active) this.settle(this.active, this.reason)
     this.active = undefined
-    for (const write of this.queue) this.settle(write, this.reason)
+    for (const write of this.queue) {
+      write.release()
+      this.settle(write, this.reason)
+    }
     this.queue.length = 0
     this.queuedBytes = 0
     // Keep error listeners until close. A pending write can still report EPIPE.
@@ -199,17 +308,21 @@ export class JsonlTransport {
     ) {
       const expired = this.queue.shift()!
       this.queuedBytes -= expired.bytes.length
+      expired.release()
       this.settle(expired, new Error('JSONL write timed out'))
     }
     const write = this.queue.shift()
     if (!write) return
     this.active = write
+    this.physicalWrites.add(write)
     let callbackDone = false
     let drained = false
     let returned = false
     const complete = () => {
       if (!returned || !callbackDone || !drained || this.active !== write)
         return
+      write.release()
+      this.physicalWrites.delete(write)
       if (this.onDrain) this.options.stdin.off('drain', this.onDrain)
       this.onDrain = undefined
       this.active = undefined
@@ -246,6 +359,8 @@ export class JsonlTransport {
     void this.close(new Error('JSONL stdout read failed'))
   }
   private onWriteClose = () => {
+    for (const write of this.physicalWrites) write.release()
+    this.physicalWrites.clear()
     this.options.stdin.off('error', this.onWriteError)
     // A child can close stdin before its final stdout bytes arrive.
     if (this.active || this.queue.length)
@@ -277,14 +392,29 @@ export class JsonlTransport {
         return
       }
       if (required > this.line.length) {
-        const grown = Buffer.allocUnsafe(
-          Math.min(
-            this.maxLineBytes,
-            Math.max(required, this.line.length * 2, 4096),
-          ),
+        const capacity = Math.min(
+          this.maxLineBytes,
+          Math.max(required, this.line.length * 2, 4096),
         )
+        let release: () => void
+        try {
+          release = this.reserve('receive', capacity)
+        } catch {
+          void this.close(new Error('JSONL receive allocation refused'))
+          return
+        }
+        let grown: Buffer
+        try {
+          grown = Buffer.allocUnsafe(capacity)
+        } catch {
+          release()
+          void this.close(new Error('JSONL receive allocation failed'))
+          return
+        }
         this.line.copy(grown, 0, 0, this.lineBytes)
         this.line = grown
+        this.releaseLine()
+        this.releaseLine = release
       }
       part.copy(this.line, this.lineBytes)
       this.lineBytes = required
@@ -295,29 +425,61 @@ export class JsonlTransport {
     }
   }
   private frame(bytes: Buffer) {
-    let line: string
-    try {
-      line = this.decoder.decode(bytes)
-    } catch {
-      void this.close(new Error('Invalid JSONL UTF-8'))
-      return
-    }
-    if (!line.trim()) return
-    let value: unknown
-    try {
-      value = JSON.parse(line)
-    } catch {
-      void this.close(new Error('Malformed JSONL frame'))
-      return
-    }
-    try {
-      const work: unknown = this.options.onValue(value, bytes.length)
-      if (work && typeof (work as Promise<unknown>).then === 'function') {
-        void Promise.resolve(work).catch(() => {})
-        void this.close(new Error('JSONL frame handler must be synchronous'))
+    let releaseDecoded = () => {},
+      releaseParsed = () => {}
+    let references = 1
+    const release = () => {
+      if (--references === 0) {
+        releaseDecoded()
+        releaseParsed()
       }
-    } catch {
-      void this.close(new Error('JSONL handler failed'))
+    }
+    const ownership: JsonlValueOwnership = {
+      retain: () => {
+        if (!references) throw new Error('JSONL value already released')
+        references++
+        let held = true
+        return () => {
+          if (held) {
+            held = false
+            release()
+          }
+        }
+      },
+    }
+    try {
+      let line: string
+      try {
+        releaseDecoded = this.reserve('decode', bytes.length * 2)
+        line = this.decoder.decode(bytes)
+      } catch {
+        void this.close(new Error('Invalid JSONL UTF-8'))
+        return
+      }
+      if (!line.trim()) return
+      let value: unknown
+      try {
+        releaseParsed = this.reserve('parse', bytes.length)
+        value = JSON.parse(line)
+      } catch {
+        void this.close(new Error('Malformed JSONL frame'))
+        return
+      }
+      try {
+        const work: unknown = this.options.onValue(
+          value,
+          bytes.length,
+          ownership,
+        )
+        if (work && typeof (work as Promise<unknown>).then === 'function') {
+          void Promise.resolve(work).catch(() => {})
+          void this.close(new Error('JSONL frame handler must be synchronous'))
+        }
+      } catch {
+        void this.close(new Error('JSONL handler failed'))
+      }
+    } finally {
+      release()
     }
   }
 }

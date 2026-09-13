@@ -10,3 +10,6 @@ docs/
 .claude/
 .lavish/
 graphify-out/
+# Preserve the exact bytes and hashes of Kimi's captured native schemas.
+apps/server/src/harnesses/kimi/__fixtures__/openapi.json
+apps/server/src/harnesses/kimi/__fixtures__/asyncapi.json
