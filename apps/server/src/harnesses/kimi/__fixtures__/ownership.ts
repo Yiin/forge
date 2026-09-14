@@ -1,5 +1,6 @@
 import { appendFile, readFile, opendir, open } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import { expect } from 'vitest'
 import { processStartTicks } from '../lock.js'
 import {
@@ -19,6 +20,7 @@ export async function fixtureEnvironment(home: string) {
   const testId = expect.getState().currentTestName ?? 'fixture startup'
   await fixtureEvidence('runner.owns_home', {
     home,
+    checkout: fileURLToPath(new URL('../../../../../../', import.meta.url)),
     testId,
     pid: process.pid,
     startTicks: await processStartTicks(process.pid),

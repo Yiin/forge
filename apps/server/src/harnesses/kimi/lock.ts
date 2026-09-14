@@ -178,20 +178,56 @@ export class KimiHomeLock {
       const registryLockPath = join(anchored, 'registry.lock')
       let createdRegistryLock = false
       try {
-        registryLock = await open(
-          registryLockPath,
-          constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | nofollow,
-          0o600,
-        )
-        createdRegistryLock = true
-        await registryLock.sync()
-        await directory.sync()
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
         registryLock = await open(registryLockPath, constants.O_RDWR | nofollow)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        // Publish only an already-locked inode. A contender must never own an
+        // uninitialized permanent registry while its creator waits for flock.
+        // One persistent slot also bounds candidates across failed startups.
+        // Never open, adopt, or remove a candidate left by another owner.
+        const candidatePath = join(anchored, 'registry.candidate')
+        let candidate: FileHandle
+        try {
+          candidate = await open(
+            candidatePath,
+            constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | nofollow,
+            0o600,
+          )
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'EEXIST')
+            throw new KimiError('kimi_registry_candidate_unresolved')
+          throw error
+        }
+        try {
+          await privateFile(candidate)
+          await flock(candidate, limits.guardianControlMs)
+          await candidate.sync()
+          await samePath(candidate, candidatePath)
+          try {
+            await link(candidatePath, registryLockPath)
+            registryLock = candidate
+            createdRegistryLock = true
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+          }
+          if (createdRegistryLock) await directory.sync()
+        } finally {
+          try {
+            await samePath(candidate, candidatePath)
+            await unlink(candidatePath)
+            await directory.sync()
+          } finally {
+            if (registryLock !== candidate) await candidate.close()
+          }
+        }
+        registryLock ??= await open(
+          registryLockPath,
+          constants.O_RDWR | nofollow,
+        )
       }
       const registryLockInfo = await privateFile(registryLock)
-      await flock(registryLock, limits.guardianControlMs)
+      if (!createdRegistryLock)
+        await flock(registryLock, limits.guardianControlMs)
       await samePath(registryLock, registryLockPath)
       let registry: Registry
       try {
