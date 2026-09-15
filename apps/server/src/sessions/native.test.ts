@@ -43,7 +43,7 @@ describe('native session bridge', () => {
           kill() {},
         }
       },
-    } as HarnessAdapter
+    } as unknown as HarnessAdapter
     const received: any[] = []
     const bridged = nativeHarness(adapter)
     const handle = await bridged.spawn(
