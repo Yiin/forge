@@ -299,14 +299,16 @@ export class ClaudeNormalizer {
     block.bytes += bytes
     message.bytes += bytes
     this.textBytes += bytes
-    if (block.kind === 'text' || block.kind === 'thinking')
-      this.emit(message.owner, {
-        type: block.kind === 'text' ? 'text_delta' : 'thought_delta',
-        itemId: block.itemId,
-        providerItemId: message.id,
-        text,
-        ...(role ? { role } : {}),
-      })
+    const body = {
+      itemId: block.itemId,
+      providerItemId: message.id,
+      text,
+      ...(role ? { role } : {}),
+    }
+    if (block.kind === 'text')
+      this.emit(message.owner, { type: 'text_delta', ...body })
+    else if (block.kind === 'thinking')
+      this.emit(message.owner, { type: 'thought_delta', ...body })
   }
   private retainInput(message: Message, block: Block, input: unknown) {
     const bytes = Buffer.byteLength(JSON.stringify(input) ?? '')
