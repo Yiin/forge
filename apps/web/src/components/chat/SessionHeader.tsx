@@ -229,6 +229,7 @@ export function SessionHeader({
         )}
       >
         <span
+          role="img"
           className={cn(
             'size-2 shrink-0 rounded-full',
             current.status === 'running'

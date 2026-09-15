@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useId } from 'react'
 import { Plus, RefreshCw, X } from 'lucide-react'
 import {
   terminalDescriptorSchema,
@@ -20,6 +20,7 @@ export function TerminalSurface({
   sessionId: string
   target: Target
 }) {
+  const tabPrefix = useId()
   const [terminals, setTerminals] = useState<TerminalDescriptor[]>([])
   const [activeId, setActiveId] = useState<string>()
   const [error, setError] = useState<string>()
@@ -168,11 +169,18 @@ export function TerminalSurface({
       className="flex h-full min-h-0 min-w-0 flex-col bg-black"
       aria-label="Terminal surface"
     >
-      <div
-        className="flex min-h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-background px-2 text-foreground"
-        role="tablist"
-        aria-label="Terminal tabs"
-      >
+      <div className="flex min-h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-background px-2 text-foreground">
+        {terminals.some((terminal) => terminal.id !== renaming) && (
+          <div
+            role="tablist"
+            className="contents"
+            aria-label="Terminal tabs"
+            aria-owns={terminals
+              .filter((terminal) => terminal.id !== renaming)
+              .map((terminal) => `${tabPrefix}-${terminal.id}`)
+              .join(' ')}
+          />
+        )}
         {terminals.map((terminal, index) => (
           <div key={terminal.id} className="flex shrink-0 items-center">
             {renaming === terminal.id ? (
@@ -196,6 +204,8 @@ export function TerminalSurface({
             ) : (
               <button
                 role="tab"
+                id={`${tabPrefix}-${terminal.id}`}
+                tabIndex={terminal.id === activeId ? 0 : -1}
                 aria-selected={terminal.id === activeId}
                 className="pointer-coarse:min-h-11 px-3 text-xs"
                 title="Double-click or press F2 to rename. Alt+Left/Right reorders."
@@ -205,6 +215,27 @@ export function TerminalSurface({
                   setTitle(terminal.title)
                 }}
                 onKeyDown={(event) => {
+                  if (
+                    !event.altKey &&
+                    ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(
+                      event.key,
+                    )
+                  ) {
+                    event.preventDefault()
+                    const next =
+                      event.key === 'Home'
+                        ? 0
+                        : event.key === 'End'
+                          ? terminals.length - 1
+                          : (index +
+                              (event.key === 'ArrowLeft' ? -1 : 1) +
+                              terminals.length) %
+                            terminals.length
+                    setActiveId(terminals[next].id)
+                    document
+                      .getElementById(`${tabPrefix}-${terminals[next].id}`)
+                      ?.focus()
+                  }
                   if (event.key === 'F2') {
                     event.preventDefault()
                     setRenaming(terminal.id)

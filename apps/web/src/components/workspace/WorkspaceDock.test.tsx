@@ -34,3 +34,46 @@ it('opens a selected surface from the closed dock without a flex-width sibling',
   expect(screen.getByText('Files ready')).toBeTruthy()
   expect(useShellStore.getState().dock(sessionId).open).toBe(true)
 })
+
+it('owns only tabs while keeping close actions and arrow navigation accessible', () => {
+  const sessionId = 'semantic-dock'
+  useShellStore
+    .getState()
+    .openDockTab(sessionId, { id: 'files', kind: 'files', title: 'Files' })
+  useShellStore
+    .getState()
+    .openDockTab(sessionId, {
+      id: 'terminal',
+      kind: 'terminal',
+      title: 'Terminal',
+    })
+  render(
+    <WorkspaceDock
+      sessionId={sessionId}
+      projectId="p"
+      target={{ cwd: '/work' }}
+    />,
+  )
+  const list = screen.getByRole('tablist', { name: 'Workspace tabs' })
+  const owned = list
+    .getAttribute('aria-owns')!
+    .split(' ')
+    .map((id) => document.getElementById(id)!)
+  expect(owned.map((node) => node.getAttribute('role'))).toEqual(['tab', 'tab'])
+  expect(
+    list.contains(screen.getByRole('button', { name: 'Close Files' })),
+  ).toBe(false)
+  const terminal = screen.getByRole('tab', { name: 'Terminal' })
+  fireEvent.keyDown(terminal, { key: 'ArrowLeft' })
+  expect(
+    screen.getByRole('tab', { name: 'Files' }).getAttribute('aria-selected'),
+  ).toBe('true')
+  expect(document.activeElement).toBe(
+    screen.getByRole('tab', { name: 'Files' }),
+  )
+  expect(
+    screen
+      .getByRole('separator', { name: 'Resize workspace dock' })
+      .getAttribute('aria-valuenow'),
+  ).toBeTruthy()
+})

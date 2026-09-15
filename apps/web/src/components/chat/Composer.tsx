@@ -63,7 +63,7 @@ import {
 
 /** Ghost pill trigger: the composer footer's shared look for its selects. */
 const PILL_TRIGGER_CLASS =
-  'h-9 w-auto min-w-0 max-w-40 shrink-0 gap-1 border-transparent bg-transparent px-2 text-xs text-muted-foreground/70 shadow-none before:hidden hover:bg-accent/50 hover:text-foreground/80 sm:h-8 sm:max-w-48'
+  'h-9 w-auto min-w-0 max-w-40 shrink-0 gap-1 border-transparent bg-transparent px-2 text-xs text-muted-foreground shadow-none before:hidden hover:bg-accent/50 hover:text-foreground/80 sm:h-8 sm:max-w-48'
 
 const commandDefaults: ComposerCommand[] = [
   { id: 'btw', label: '/btw', group: 'Built-in', value: '/btw ' },
@@ -664,7 +664,7 @@ export function Composer({
                 value={text}
                 rows={1}
                 className={cn(
-                  'block w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-[22.75px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none sm:text-[14px]',
+                  'block w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-[22.75px] text-foreground placeholder:text-muted-foreground focus:outline-none sm:text-[14px]',
                   expanded
                     ? 'min-h-[76px] max-h-[260px] pt-4 pb-1'
                     : 'h-[47px] py-3',
@@ -734,7 +734,7 @@ export function Composer({
                               variant: 'ghost',
                               size: 'icon-sm',
                             }),
-                            'shrink-0 cursor-pointer text-muted-foreground/70 hover:text-foreground/80',
+                            'shrink-0 cursor-pointer text-muted-foreground hover:text-foreground/80',
                           )}
                         />
                       }

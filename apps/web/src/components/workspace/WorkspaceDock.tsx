@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useId } from 'react'
 import {
   ChevronLeft,
   GripVertical,
@@ -22,6 +22,8 @@ import { useMessagesStore } from '../../stores/messages'
 import { useSessionsStore } from '../../stores/sessions'
 import {
   DOCK_CHAT_MIN_WIDTH,
+  DOCK_WIDTH_MIN,
+  DOCK_WIDTH_MAX,
   type DockSurfaceKind,
   type DockTab,
   useShellStore,
@@ -58,6 +60,7 @@ export function WorkspaceDock({
   onReviewComment?: (comment: ReviewComment) => void
   mobile?: boolean
 }) {
+  const tabPrefix = useId()
   const dock = useShellStore((state) => state.dock(sessionId))
   const width = useShellStore((state) => state.dockWidth)
   const closeDock = useShellStore((state) => state.closeDock)
@@ -163,6 +166,9 @@ export function WorkspaceDock({
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize workspace dock"
+          aria-valuemin={DOCK_WIDTH_MIN}
+          aria-valuemax={DOCK_WIDTH_MAX}
+          aria-valuenow={width}
           tabIndex={0}
           onKeyDown={(event) => {
             if (event.key === 'ArrowLeft') setWidth(width + 16)
@@ -187,11 +193,15 @@ export function WorkspaceDock({
             <ChevronLeft size={16} />
           </Button>
         )}
-        <div
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
-          role="tablist"
-          aria-label="Workspace tabs"
-        >
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          <div
+            role="tablist"
+            className="contents"
+            aria-label="Workspace tabs"
+            aria-owns={dock.tabs
+              .map((tab) => `${tabPrefix}-${tab.id}`)
+              .join(' ')}
+          />
           {dock.tabs.map((tab, index) => (
             <div
               key={tab.id}
@@ -200,9 +210,33 @@ export function WorkspaceDock({
             >
               <button
                 role="tab"
+                id={`${tabPrefix}-${tab.id}`}
+                tabIndex={tab.id === dock.activeTabId ? 0 : -1}
                 aria-selected={tab.id === dock.activeTabId}
                 className="pointer-coarse:min-h-11 px-2 text-xs"
                 onKeyDown={(event) => {
+                  if (
+                    ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(
+                      event.key,
+                    )
+                  ) {
+                    event.preventDefault()
+                    const next =
+                      event.key === 'Home'
+                        ? 0
+                        : event.key === 'End'
+                          ? dock.tabs.length - 1
+                          : (index +
+                              (event.key === 'ArrowLeft' ? -1 : 1) +
+                              dock.tabs.length) %
+                            dock.tabs.length
+                    transition(() => {
+                      selectTab(sessionId, dock.tabs[next].id)
+                      document
+                        .getElementById(`${tabPrefix}-${dock.tabs[next].id}`)
+                        ?.focus()
+                    })
+                  }
                   if (event.key === 'Delete')
                     transition(() => closeTab(sessionId, tab.id))
                   if (event.key === 'Tab' && event.ctrlKey) {
