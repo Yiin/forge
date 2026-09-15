@@ -238,6 +238,7 @@ export function WorkEntryRow({
   children: React.ReactNode
 }) {
   const toggle = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return
     if (event.key !== 'Enter' && event.key !== ' ') return
     event.preventDefault()
     onToggle()
