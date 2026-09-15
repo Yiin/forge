@@ -41,6 +41,41 @@ function rpc() {
 }
 
 describe('physical submission ownership', () => {
+  it('retains error reply evidence through validation and the original held write', async () => {
+    const io = rpc()
+    io.incoming({ id: 0, method: 'fs/read_text_file', params: {} })
+    const request = io.received[0]!
+    const invalid = io.transport.respondErrorWithSubmission(
+      request,
+      NaN,
+      'Invalid',
+    )
+    await expect(invalid.logical).rejects.toThrow('Invalid JSON-RPC error code')
+    expect(await invalid.submission).toMatchObject({ status: 'not_written' })
+    expect(io.frames).toEqual([])
+    const reply = io.transport.respondErrorWithSubmission(
+      request,
+      -32603,
+      'Read failed',
+    )
+    let settled = false
+    void reply.submission.then(() => {
+      settled = true
+    })
+    expect(io.frames).toEqual([
+      {
+        jsonrpc: '2.0',
+        id: 0,
+        error: { code: -32603, message: 'Read failed' },
+      },
+    ])
+    io.callbacks.shift()!()
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    io.stdin.emit('drain')
+    expect(await reply.submission).toMatchObject({ status: 'written' })
+    await reply.logical
+  })
   it.each(['result', 'error'] as const)(
     'keeps callback and drain proof after an early RPC %s',
     async (kind) => {
