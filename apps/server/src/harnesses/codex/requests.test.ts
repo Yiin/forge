@@ -246,9 +246,9 @@ describe('Codex native callbacks', () => {
       (await p.trace()).some((frame) => frame.event === 'pauseInput'),
     )
     let wireState: (() => JsonlTransport['state']) | undefined
-    const send = JsonlTransport.prototype.send
+    const send = JsonlTransport.prototype.sendWithSubmission
     const spy = vi
-      .spyOn(JsonlTransport.prototype, 'send')
+      .spyOn(JsonlTransport.prototype, 'sendWithSubmission')
       .mockImplementation(function (this: JsonlTransport, ...args) {
         wireState = () => this.state
         return send.apply(this, args)

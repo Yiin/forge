@@ -147,10 +147,13 @@ it.each(['callback-first', 'drain-first'] as const)(
     await transport.close()
   },
 )
-it('keeps a cancelled physical write until actual stream close', async () => {
+it('keeps a cancelled physical write through stream close until its callback settles', async () => {
   let destroyed!: () => void
+  let callback!: (error?: Error | null) => void
   const stdin = new Writable({
-    write: () => {},
+    write: (_bytes, _encoding, done) => {
+      callback = done
+    },
     destroy: (_error, done) => {
       destroyed = () => done()
     },
@@ -167,6 +170,10 @@ it('keeps a cancelled physical write until actual stream close', async () => {
   await expect(result).rejects.toThrow('closed')
   expect(owner.held.get('write')).toBe(8)
   destroyed()
+  await new Promise((resolve) => setImmediate(resolve))
+  expect(stdin.closed).toBe(true)
+  expect(owner.held.get('write')).toBe(8)
+  callback()
   await new Promise((resolve) => setImmediate(resolve))
   expect(owner.held.get('write')).toBe(0)
 })
