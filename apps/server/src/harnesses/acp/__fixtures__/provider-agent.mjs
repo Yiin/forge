@@ -112,7 +112,15 @@ input.on('line', (line) => {
           })
         }
       }
-      reply(frame.id, { stopReason: 'end_turn' })
+      if (process.env.FORGE_ACP_TEST_STOP === 'rpc-error')
+        send({
+          id: frame.id,
+          error: { code: -32000, message: 'Synthetic native failure' },
+        })
+      else
+        reply(frame.id, {
+          stopReason: process.env.FORGE_ACP_TEST_STOP ?? 'end_turn',
+        })
       break
     case 'session/set_mode':
       if (

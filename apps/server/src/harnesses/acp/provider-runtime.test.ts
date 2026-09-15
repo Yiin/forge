@@ -8,12 +8,15 @@ import {
   createDevinAdapter,
   createGrokAdapter,
   createGeminiAdapter,
+  createCustomAcpAdapter,
 } from './providers.js'
 import { nativeModeSelectorId } from './config.js'
 import { sdkFixture } from './sdk-test-helpers.js'
 import { acpProviderDescriptors } from './profiles.js'
 
-async function providerFixture(profile: 'grok' | 'devin' | 'gemini') {
+async function providerFixture(
+  profile: 'grok' | 'devin' | 'gemini' | 'custom-acp',
+) {
   const f = await sdkFixture(
     profile === 'devin'
       ? 'devin-advertisement'
@@ -339,4 +342,59 @@ describe('provider policy and model selection through native ACP frames', () => 
       await f.cleanup(handle)
     }
   }, 15000)
+  test.each([
+    ['end_turn', 'completed'],
+    ['cancelled', 'interrupted'],
+    ['refusal', 'failed'],
+    ['max_tokens', 'failed'],
+    ['max_turn_requests', 'failed'],
+    ['unrecognized', 'failed'],
+    ['rpc-error', 'failed'],
+  ] as const)(
+    'maps native %s to an authoritative %s result',
+    async (stopReason, status) => {
+      const f = await providerFixture('custom-acp')
+      f.deps.launch = {
+        ...f.deps.launch,
+        env: { ...f.deps.launch.env, FORGE_ACP_TEST_STOP: stopReason },
+      }
+      let handle: HarnessHandle | undefined
+      try {
+        handle = await createCustomAcpAdapter(f.deps).spawn(
+          f.session,
+          (event) => f.events.push(event),
+        )
+        const receipt = await handle.prompt('Native terminal result')
+        const result = await receipt.completion
+        expect(result.status).toBe(status)
+        const terminal = f.transactions
+          .flatMap((transaction) => transaction.records)
+          .filter(
+            (record) =>
+              record.value.kind === 'event' &&
+              record.value.event.type === 'turn_completed',
+          )
+        expect(terminal).toHaveLength(1)
+        expect(terminal[0]!.value).toMatchObject({
+          kind: 'event',
+          event: { outcome: { status } },
+        })
+        expect(
+          f.events.filter((event) => event.type === 'turn_completed'),
+        ).toMatchObject([{ outcome: { status } }])
+        if (
+          ['refusal', 'max_tokens', 'max_turn_requests'].includes(stopReason)
+        ) {
+          expect(result).toMatchObject({ code: `acp_${stopReason}` })
+          expect(terminal[0]!.value).toMatchObject({
+            kind: 'event',
+            event: { outcome: { code: `acp_${stopReason}` } },
+          })
+        }
+      } finally {
+        await f.cleanup(handle)
+      }
+    },
+    15000,
+  )
 })
