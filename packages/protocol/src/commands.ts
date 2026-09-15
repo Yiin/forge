@@ -26,7 +26,7 @@ export const createSession = z.object({
 })
 export const prompt = z.object({
   sessionId: id,
-  text: z.string().min(1),
+  text: z.string(),
   attachmentIds: z.array(id).optional(),
   harness: z.string().min(1).optional(),
   accountId: id.nullable().optional(),
@@ -39,6 +39,9 @@ export const prompt = z.object({
     .record(z.string().min(1), z.union([z.string(), z.boolean()]))
     .optional(),
   delivery: z.enum(['immediate', 'turn-boundary']).optional(),
+  reviewReferences: z.array(z.unknown()).optional(),
+  promptParts: z.array(z.unknown()).optional(),
+  revision: z.number().int().nonnegative().optional(),
 })
 export const promoteDraft = z.object({
   draftId: id,

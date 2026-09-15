@@ -441,19 +441,26 @@ describe('session harness selection', () => {
     expect(
       db
         .prepare(
-          'SELECT text FROM queued_prompts WHERE session_id = ? ORDER BY created_at, id',
+          `SELECT text, order_index FROM queued_prompts
+           WHERE session_id = ? ORDER BY order_index, created_at, id`,
         )
         .all(session.id),
-    ).toEqual([{ text: 'two' }, { text: 'three' }])
+    ).toEqual([
+      { text: 'two', order_index: 0 },
+      { text: 'three', order_index: 1 },
+    ])
     release()
     await new Promise<void>((resolve) => setImmediate(resolve))
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(prompts).toEqual(['one', 'two'])
     expect(
       db
-        .prepare('SELECT text FROM queued_prompts WHERE session_id = ?')
+        .prepare(
+          `SELECT text, order_index FROM queued_prompts
+           WHERE session_id = ? ORDER BY order_index, created_at, id`,
+        )
         .all(session.id),
-    ).toEqual([{ text: 'three' }])
+    ).toEqual([{ text: 'three', order_index: 1 }])
   })
 
   it('drains a queued prompt after the active prompt fails', async () => {
