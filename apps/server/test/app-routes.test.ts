@@ -3,7 +3,8 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApp } from '../src/index.js'
+import { createTestApp as createApp } from './app-fixture.js'
+import { createApp as createUnboundApp } from '../src/index.js'
 import { migrate } from '../src/db/migrate.js'
 import { EventBus } from '../src/events/bus.js'
 import { UploadStore } from '../src/uploads/store.js'
@@ -34,6 +35,13 @@ async function fixture() {
 }
 
 describe('createApp route composition', () => {
+  it('refuses requests without a bound listener or explicit test authority', async () => {
+    const response = await createUnboundApp().request('/api/health')
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({
+      error: 'Request listener is not ready',
+    })
+  })
   it('serves status, upload, attachment and project file routes together', async () => {
     const { db, store } = await fixture()
     const app = createApp(store, {

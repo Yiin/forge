@@ -15,6 +15,7 @@ import { LinuxPty } from '../src/terminals/linux-pty.js'
 import { TerminalAuthority } from '../src/terminals/origin.js'
 import { terminalRoutes, TerminalRequests } from '../src/http/terminals.js'
 import { WebSocketUpgrades } from '../src/ws-upgrade.js'
+import { RequestGuard } from '../src/request-guard.js'
 import { ServerShutdown } from '../src/shutdown.js'
 import {
   terminalDescriptorSchema,
@@ -124,14 +125,18 @@ const manager = new TerminalManager(db, targets, {
   },
   environment: () => ({ SHELL: shell, HOME: home, PATH: '/usr/bin:/bin' }),
 })
+const requestGuard = new RequestGuard()
 const app = new Hono(),
-  upgrades = new WebSocketUpgrades(app),
+  upgrades = new WebSocketUpgrades(app, 32, 6000, requestGuard),
   authority = new TerminalAuthority({ mode: 'loopback' }),
   requests = new TerminalRequests(32, 6000)
 app.route('/', terminalRoutes(manager, authority, upgrades, requests))
 const server = serve(
   { fetch: app.fetch, hostname: '127.0.0.1', port: 0 },
-  (info) => authority.bind(info.port),
+  (info) => {
+    authority.bind(info.port)
+    requestGuard.bind(info.port)
+  },
 ) as Server
 upgrades.install(server)
 const shutdown = new ServerShutdown(

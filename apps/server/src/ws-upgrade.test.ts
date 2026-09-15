@@ -6,6 +6,7 @@ import { connect, type Socket } from 'node:net'
 import type { IncomingMessage, Server } from 'node:http'
 import { WebSocket } from 'ws'
 import { WebSocketUpgrades } from './ws-upgrade.js'
+import { RequestGuard } from './request-guard.js'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -19,8 +20,9 @@ function deferred() {
   return { promise, resolve }
 }
 async function fixture(maxOpening = 2, deadlineMs = 100) {
+  const guard = new RequestGuard()
   const app = new Hono(),
-    upgrades = new WebSocketUpgrades(app, maxOpening, deadlineMs)
+    upgrades = new WebSocketUpgrades(app, maxOpening, deadlineMs, guard)
   app.onError((_error, c) => c.text('Rejected', 500))
   const server = serve({
     fetch: app.fetch,
@@ -30,6 +32,7 @@ async function fixture(maxOpening = 2, deadlineMs = 100) {
   upgrades.install(server)
   await once(server, 'listening')
   const port = (server.address() as { port: number }).port
+  guard.bind(port)
   const clients = new Set<Socket | WebSocket>()
   const releases: Array<() => void> = []
   cleanup.push(async () => {
@@ -112,7 +115,7 @@ describe('one Node WebSocket upgrade dispatcher', () => {
     await vi.waitFor(() => expect(upgrades.resourceState().openings).toBe(0))
   })
 
-  it('releases malformed handshakes and preserves original duplicate raw headers', async () => {
+  it('rejects malformed handshakes before route registration', async () => {
     const { app, upgrades, raw } = await fixture()
     const released = vi.fn(),
       observed: string[][] = []
@@ -128,9 +131,9 @@ describe('one Node WebSocket upgrade dispatcher', () => {
     )
     await once(client.socket, 'close')
     await vi.waitFor(() => expect(upgrades.resourceState().openings).toBe(0))
-    expect(released).toHaveBeenCalledTimes(1)
-    expect(observed[0]!.filter((value) => value === 'Origin')).toHaveLength(2)
-    expect(client.text()).toContain('400')
+    expect(released).not.toHaveBeenCalled()
+    expect(observed).toHaveLength(0)
+    expect(client.text()).toContain('403')
   })
 
   it('dispatches the existing session socket and bounded terminal socket through one listener', async () => {

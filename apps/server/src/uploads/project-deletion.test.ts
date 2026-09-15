@@ -14,7 +14,7 @@ import { projectRoutes } from '../http/projects.js'
 import { workspaceRoutes } from '../http/workspace.js'
 import { skillRoutes } from '../http/skills.js'
 import { UploadStore } from './store.js'
-import { createApp } from '../index.js'
+import { createTestApp as createApp } from '../../test/app-fixture.js'
 
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>()

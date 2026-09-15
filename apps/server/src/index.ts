@@ -76,6 +76,7 @@ import { codexUsageProbe } from './accounts/probes/codex.js'
 import { claudeUsageProbe } from './accounts/probes/claude.js'
 import { refreshAccountModels } from './accounts/models.js'
 import { pruneWorktreesForRepositories } from './git/worktrees.js'
+import { RequestGuard } from './request-guard.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -147,8 +148,37 @@ export function createApp(
   usagePoller?: UsagePoller,
   refreshModels?: (accountId: string) => void,
   workspaceFiles?: WorkspaceFiles,
+  requestGuard = new RequestGuard(configState?.current.terminalAccess),
 ) {
   const app = new Hono()
+  app.use('*', async (c, next) => {
+    const method = c.req.method.toUpperCase()
+    const failure = requestGuard.check(c.req.raw, {
+      mutation: method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS',
+      incoming: (
+        c.env as { incoming?: import('node:http').IncomingMessage } | undefined
+      )?.incoming,
+    })
+    if (failure) return c.json({ error: failure }, 403)
+    if (method === 'OPTIONS') {
+      const origin = c.req.header('origin')
+      return new Response(null, {
+        status: 204,
+        headers: origin
+          ? {
+              'access-control-allow-origin': origin,
+              'access-control-allow-methods':
+                'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS',
+              'access-control-allow-headers':
+                c.req.header('access-control-request-headers') ??
+                'content-type',
+              vary: 'Origin',
+            }
+          : undefined,
+      })
+    }
+    await next()
+  })
 
   if (status) app.route('/', statusRoutes(status))
   else app.get('/api/health', (c) => c.json({ ok: true, version }))
@@ -362,6 +392,7 @@ export function startServer(port?: number): ServerType {
   uploadStore.setTerminalManager(terminals)
   manager.setTerminalManager(terminals)
   const terminalAuthority = new TerminalAuthority(config.terminalAccess)
+  const requestGuard = new RequestGuard(config.terminalAccess)
   const terminalRequests = new TerminalRequests(
     terminals.limits.http,
     terminals.limits.requestDeadlineMs,
@@ -444,12 +475,14 @@ export function startServer(port?: number): ServerType {
     usagePoller,
     refreshModels,
     workspaceFiles,
+    requestGuard,
   )
   usagePoller.start()
   const upgrades = new WebSocketUpgrades(
     app,
     terminals.limits.http,
     terminals.limits.requestDeadlineMs,
+    requestGuard,
   )
   app.get('/ws', websocketRoute(upgrades.upgradeWebSocket, db, bus))
   app.route(
@@ -461,7 +494,10 @@ export function startServer(port?: number): ServerType {
       fetch: app.fetch,
       port: listenPort,
     },
-    (address) => terminalAuthority.bind(address.port),
+    (address) => {
+      requestGuard.bind(address.port)
+      terminalAuthority.bind(address.port)
+    },
   )
   upgrades.install(server as Server)
   const shutdown = new ServerShutdown(

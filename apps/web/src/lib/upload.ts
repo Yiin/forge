@@ -9,6 +9,7 @@ export function putUpload(
   return new Promise<void>((resolve, reject) => {
     const request = new XMLHttpRequest()
     request.open('PUT', `${baseUrl}${init.putUrl}`)
+    request.setRequestHeader('Content-Type', 'application/octet-stream')
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress?.(event.loaded / event.total)
     }
