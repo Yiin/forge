@@ -298,7 +298,7 @@ export function SessionRoute() {
         {!loading && !loadError && (
           <div
             ref={setComposerOverlay}
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-20 max-h-full overflow-y-auto overscroll-contain pt-1.5 sm:pt-2"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-40 max-h-full overflow-y-auto overscroll-contain pt-1.5 sm:pt-2"
           >
             <div
               aria-hidden="true"
