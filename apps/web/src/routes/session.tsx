@@ -114,6 +114,40 @@ export function SessionRoute() {
         socket = connectForgeSocket({
           sessions: [sessionId],
           onConnectionChange: (state) => active && setConnection(state),
+          onReconnect: () => {
+            if (!active) return
+            void fetch(
+              `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+            )
+              .then((response) => (response.ok ? response.json() : null))
+              .then((snapshot: unknown) => {
+                const value = SessionSnapshot.safeParse(snapshot)
+                if (value.success)
+                  useMessagesStore.getState().loadSnapshot(value.data)
+              })
+              .catch(() => undefined)
+            void api
+              .getSession(sessionId)
+              .then((value) => {
+                if (!active) return
+                useSessionsStore
+                  .getState()
+                  .upsertSession(value as SessionSummary)
+              })
+              .catch(() => undefined)
+            void api
+              .listQueued(sessionId)
+              .then((value) => {
+                const prompts = Array.isArray(value)
+                  ? value
+                  : ((value as { prompts?: unknown[] }).prompts ?? [])
+                if (active)
+                  useMessagesStore
+                    .getState()
+                    .setQueued(sessionId, prompts as QueuedPrompt[])
+              })
+              .catch(() => undefined)
+          },
         })
         void fetch('/api/status')
           .then((statusResponse) =>

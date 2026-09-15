@@ -19,6 +19,7 @@ type SocketOptions = {
   backoff?: { initialMs?: number; maxMs?: number }
   createWebSocket?: (url: string) => ForgeWebSocket
   onConnectionChange?: (state: ConnectionState) => void
+  onReconnect?: () => void
 }
 export type ConnectionState =
   'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error'
@@ -39,7 +40,7 @@ export class ForgeSocket {
     Pick<SocketOptions, 'url' | 'sessions' | 'reconnect'>
   > &
     Pick<SocketOptions, 'backoff' | 'createWebSocket'> &
-    Pick<SocketOptions, 'onConnectionChange'>
+    Pick<SocketOptions, 'onConnectionChange' | 'onReconnect'>
   constructor(options: SocketOptions = {}) {
     this.options = {
       url: options.url ?? defaultUrl(),
@@ -50,6 +51,7 @@ export class ForgeSocket {
         options.createWebSocket ??
         ((url) => new WebSocket(url) as ForgeWebSocket),
       onConnectionChange: options.onConnectionChange,
+      onReconnect: options.onReconnect,
     }
   }
   start() {
@@ -77,9 +79,11 @@ export class ForgeSocket {
     const socket = this.options.createWebSocket!(this.options.url)
     this.socket = socket
     socket.onopen = () => {
+      const reconnecting = this.attempt > 0
       this.attempt = 0
       this.options.onConnectionChange?.('connected')
       socket.send(JSON.stringify(this.subscribeFrame()))
+      if (reconnecting) this.options.onReconnect?.()
     }
     socket.onmessage = ({ data }) => this.receive(data)
     socket.onerror = () => {
