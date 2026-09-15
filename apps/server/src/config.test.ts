@@ -91,7 +91,7 @@ describe('default harness configuration', () => {
       command: 'kimi',
       args: [],
     })
-    expect(converted.harness.grok.adapterKind).toBe('custom')
+    expect(converted.harness.grok.adapterKind).toBe('acp')
   })
 
   test('keeps a recovery copy and leaves the original on parse failure', async () => {
@@ -273,4 +273,36 @@ describe('default harness configuration', () => {
       ).harness.mock,
     ).toMatchObject({ name: 'My mock' })
   })
+})
+
+test('infers dedicated ACP providers and changes only the exact shipped Grok arguments', () => {
+  const defaults = defaultConfig(false)
+  for (const key of ['gemini', 'grok', 'devin', 'hermes']) {
+    expect(defaults.harness[key].adapterKind).toBe('acp')
+    const inferred = { ...defaults.harness[key] }
+    delete inferred.adapterKind
+    expect(
+      convertConfig({ ...defaults, harness: { [key]: inferred } }).harness[key]
+        .adapterKind,
+    ).toBe('acp')
+    expect(
+      convertConfig({
+        ...defaults,
+        harness: { [key]: { ...inferred, adapterKind: 'custom' } },
+      }).harness[key].adapterKind,
+    ).toBe('custom')
+  }
+  const grok = { ...defaults.harness.grok, args: ['agent', 'stdio'] }
+  expect(
+    convertConfig({ ...defaults, harness: { grok } }).harness.grok.args,
+  ).toEqual(defaults.harness.grok.args)
+  for (const entry of [
+    { ...grok, command: '/owned/grok' },
+    { ...grok, args: ['agent', 'stdio', '--custom'] },
+    { ...grok, adapterKind: 'custom' as const },
+  ])
+    expect(
+      convertConfig({ ...defaults, harness: { grok: entry } }).harness.grok
+        .args,
+    ).toEqual(entry.args)
 })

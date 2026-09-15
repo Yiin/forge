@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { appendFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { appendFileSync, existsSync, watch } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import {
   AgentSideConnection,
@@ -18,6 +18,8 @@ if (
     'resume-replay',
     'filesystem',
     'terminal',
+    'media',
+    'plan-updates',
   ].includes(scenario)
 )
   throw Error(`Unknown SDK fixture scenario: ${scenario}`)
@@ -152,6 +154,61 @@ const connection = new AgentSideConnection(
             return { stopReason: 'refusal' }
         }
         if (active.cancelled) return { stopReason: 'cancelled' }
+        if (scenario === 'plan-updates') {
+          if (!reportPath) throw Error('Plan fixture requires report path')
+          const gate = join(dirname(reportPath), 'finish-plan')
+          const ready = Promise.withResolvers()
+          const watcher = watch(dirname(reportPath), () => {
+            if (existsSync(gate)) ready.resolve()
+          })
+          watcher.on('error', ready.reject)
+          try {
+            await client.sessionUpdate({
+              sessionId,
+              update: {
+                sessionUpdate: 'plan',
+                entries: [
+                  {
+                    content: 'Verify fixture plan',
+                    priority: 'medium',
+                    status: 'in_progress',
+                  },
+                ],
+              },
+            })
+            report('plan_waiting')
+            if (existsSync(gate)) ready.resolve()
+            await Promise.race([ready.promise, completion.promise])
+            if (active.cancelled) return { stopReason: 'cancelled' }
+            await client.sessionUpdate({
+              sessionId,
+              update: {
+                sessionUpdate: 'plan',
+                entries: [
+                  {
+                    content: 'Verify fixture plan',
+                    priority: 'medium',
+                    status: 'completed',
+                  },
+                ],
+              },
+            })
+          } finally {
+            watcher.close()
+          }
+        }
+        if (scenario === 'media')
+          await client.sessionUpdate({
+            sessionId,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: {
+                type: 'image',
+                mimeType: 'image/png',
+                data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5JcAAAAASUVORK5CYII=',
+              },
+            },
+          })
         let text = 'Hello from SDK.'
         if (scenario === 'filesystem') {
           const path = join(owner.cwd, 'sdk-file.txt')
@@ -203,6 +260,12 @@ const connection = new AgentSideConnection(
   }),
   stream,
 )
-report('spawned')
+report('spawned', {
+  args: process.argv.slice(2),
+  accountHome:
+    process.env.GROK_HOME ??
+    process.env.GEMINI_CLI_HOME ??
+    process.env.HERMES_HOME,
+})
 await connection.closed
 report('eof')

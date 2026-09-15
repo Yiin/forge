@@ -35,6 +35,7 @@ import { AcpCatalog } from './config.js'
 import type { AcpResourceHost } from './limits.js'
 import { immutableData } from './data.js'
 import { positiveLimit } from '../diagnostics.js'
+import { NativeCleanupError } from '../native-cleanup.js'
 import type { AcpChildAdmission } from './children.js'
 
 export type AcpFrame = {
@@ -500,6 +501,7 @@ export class AcpConnection {
     if (
       !['manual', 'yolo'].includes(initialPolicy) ||
       this.closing ||
+      this.controller.signal.aborted ||
       !this.confirmed
     )
       return Promise.reject(Error('ACP connection cannot be replaced'))
@@ -527,11 +529,17 @@ export class AcpConnection {
     return promise
   }
   close(): Promise<void> {
-    this.closing ??= Promise.resolve().then(async () => {
-      await this.replacing?.promise.catch(() => {})
-      await this.retireProcess()
-      await this.journal.close()
-    })
+    if (!this.closing) {
+      const closing = Promise.resolve().then(async () => {
+        await this.replacing?.promise.catch(() => {})
+        await this.retireProcess()
+        await this.journal.close()
+      })
+      this.closing = closing
+      void closing.catch(() => {
+        if (this.closing === closing) this.closing = undefined
+      })
+    }
     this.controller.abort()
     return this.closing
   }
@@ -801,14 +809,21 @@ export class AcpConnection {
       )
       return started.value
     } catch (error) {
-      if (connection) {
-        if (existing) await connection.retireProcess()
-        else await connection.close()
-      } else {
-        if (created) await created.close()
-        releaseProcess()
-        if (existing) existing.candidate = undefined
-        else await journal.close()
+      const cleanup = async () => {
+        if (connection) {
+          if (existing) await connection.retireProcess()
+          else await connection.close()
+        } else {
+          if (created) await created.close()
+          releaseProcess()
+          if (existing) existing.candidate = undefined
+          else await journal.close()
+        }
+      }
+      try {
+        await cleanup()
+      } catch {
+        throw new NativeCleanupError(cleanup)
       }
       throw error
     }
