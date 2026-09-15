@@ -24,6 +24,8 @@ import {
 import { useSettingsStore } from '../stores/settings'
 import { useNavigate } from '@tanstack/react-router'
 import { useSessionsStore } from '../stores/sessions'
+import { navigationSessions } from './sidebar/sidebar-logic'
+import { readSidebarView } from '../lib/shell-storage'
 import { ProjectCreationDialog } from './ProjectCreationDialog'
 import { openNewDraft } from '../lib/draft-entry'
 import { Button } from './ui/button'
@@ -107,7 +109,10 @@ export function AppShell() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => handleShortcut(event)
     window.addEventListener('keydown', onKeyDown)
-    const sessions = () => useSessionsStore.getState().sessions
+    const sessions = () => {
+      const view = readSidebarView()
+      return navigationSessions(useSessionsStore.getState().sessions, view)
+    }
     const go = (to: string) => void navigate({ to: to as never })
     const newDraft = () => void openNewDraft(navigate).catch(() => undefined)
     const unregister = registerShortcuts({

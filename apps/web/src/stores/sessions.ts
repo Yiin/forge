@@ -14,7 +14,7 @@ export type SessionSummary = {
   branch?: string | null
   cwd?: string
   worktreePath?: string | null
-  createdAt?: string
+  createdAt?: number | string
   created_at?: number
   project_id?: string | null
   lastActivityAt?: number | string
