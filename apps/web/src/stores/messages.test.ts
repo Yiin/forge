@@ -410,3 +410,47 @@ describe('message folding', () => {
     expect(useMessagesStore.getState().lastSeq).toBe(8)
   })
 })
+
+it('replays authoritative snapshots without merging sibling turns or child channels', () => {
+  const rows = [
+    message({ seq: 1, content: { type: 'text_delta', text: 'wrong' } }),
+    message({
+      seq: 2,
+      type: 'thought_delta',
+      content: { type: 'thought_delta', text: 'thought' },
+    }),
+    message({
+      seq: 3,
+      content: { type: 'text_delta', text: 'child', childId: 'child' },
+    }),
+    message({
+      seq: 4,
+      type: 'content_snapshot',
+      content: {
+        type: 'content_snapshot',
+        contentType: 'text',
+        text: 'correct',
+      },
+    }),
+    message({ seq: 5, content: { type: 'text_delta', text: ' suffix' } }),
+    message({
+      seq: 6,
+      turnId: 'other',
+      content: { type: 'text_delta', text: 'other' },
+    }),
+  ]
+  const store = useMessagesStore
+  store.getState().reset()
+  for (const row of rows) store.getState().applyEvent(event(row.seq, row))
+  const live = store.getState().bySession['ses-1']
+  expect(live).toHaveLength(4)
+  expect(
+    live.find((row) => row.content.type === 'content_snapshot')?.content,
+  ).toMatchObject({ text: 'correct suffix' })
+  store.getState().reset()
+  store.getState().loadMessages('ses-1', rows)
+  expect(store.getState().bySession['ses-1']).toEqual(
+    [...live].sort((a, b) => a.seq - b.seq),
+  )
+  store.getState().reset()
+})
