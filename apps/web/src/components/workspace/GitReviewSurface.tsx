@@ -1,21 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ChevronDown,
   ChevronRight,
   MessageSquare,
   RefreshCw,
 } from 'lucide-react'
-import type { GitDiff, GitDiffFile } from '@forge/protocol/git'
+import type { GitDiff, GitDiffFile, GitRefsPage } from '@forge/protocol/git'
 import { api } from '../../lib/api'
 import { Button } from '../ui/button'
+import { Input } from '../ui/input'
 import { cn } from '../../lib/utils'
-
-export type ReviewComment = {
-  path: string
-  side: 'old' | 'new'
-  line: number
-  text: string
-}
+import { splitDiffLines } from './diff-lines'
+import type { ReviewNote } from '@forge/protocol/review'
+import {
+  captureGitReviewNote,
+  type ReviewWorkspace,
+  type ReviewRevisionListener,
+} from '../../lib/review-notes'
 
 export function GitReviewSurface({
   projectId,
@@ -23,37 +24,74 @@ export function GitReviewSurface({
   cwd,
   commit,
   onComment,
+  workspace,
+  onRevision,
+  reanchorNote,
 }: {
   projectId: string
   sessionId: string
   cwd: string
   commit?: string
-  onComment: (comment: ReviewComment) => void
+  onComment: (comment: ReviewNote) => void
+  workspace: ReviewWorkspace
+  onRevision?: ReviewRevisionListener
+  reanchorNote?: ReviewNote
 }) {
   const [scope, setScope] = useState<
     'working' | 'branch' | 'latest-turn' | 'commit'
   >('working')
   const [baseRef, setBaseRef] = useState<string>()
+  const [refs, setRefs] = useState<GitRefsPage['refs']>([])
+  const [split, setSplit] = useState(false),
+    [wrap, setWrap] = useState(false)
+  const requestEpoch = useRef(0)
+  const baseEdited = useRef(false)
+  const effectiveScope = commit ? 'commit' : scope
+
   const [diff, setDiff] = useState<GitDiff>()
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(false)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const revisionListener = useRef(onRevision)
+  revisionListener.current = onRevision
   const load = () => {
+    const epoch = ++requestEpoch.current
     setLoading(true)
+    setError(undefined)
     void api
-      .gitDiff(projectId, { cwd, sessionId, scope, baseRef, commit })
+      .gitDiff(projectId, {
+        cwd,
+        sessionId,
+        scope: effectiveScope,
+        baseRef,
+        commit,
+      })
       .then((value) => {
-        setDiff(value as GitDiff)
+        if (epoch !== requestEpoch.current) return
+        const next = value as GitDiff
+        setDiff(next)
+        revisionListener.current?.(workspace, {
+          kind: 'git',
+          scope: next.scope,
+          revision: next.revision,
+        })
         setError(undefined)
       })
-      .catch((cause) =>
-        setError(
-          cause instanceof Error ? cause.message : 'Could not load diff',
-        ),
+      .catch(
+        (cause) =>
+          epoch === requestEpoch.current &&
+          setError(
+            cause instanceof Error ? cause.message : 'Could not load diff',
+          ),
       )
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (epoch === requestEpoch.current) setLoading(false)
+      })
   }
   useEffect(() => {
+    let active = true
+    setBaseRef(undefined)
+    baseEdited.current = false
     void api
       .gitStatus(projectId, cwd)
       .then((value) => {
@@ -61,32 +99,94 @@ export function GitReviewSurface({
           defaultBranch?: string | null
           branch?: string | null
         }
-        setBaseRef(status.defaultBranch ?? status.branch ?? undefined)
+        if (active && !baseEdited.current)
+          setBaseRef(status.defaultBranch ?? status.branch ?? undefined)
       })
       .catch(() => undefined)
+    return () => {
+      active = false
+    }
   }, [projectId, cwd])
   useEffect(() => {
     if (commit) setScope('commit')
   }, [commit])
-  useEffect(load, [projectId, sessionId, cwd, scope, baseRef, commit])
+  useEffect(() => {
+    load()
+    return () => {
+      requestEpoch.current++
+    }
+  }, [projectId, sessionId, cwd, scope, baseRef, commit])
+  useEffect(() => {
+    let active = true
+    void api
+      .gitBranches(projectId, { cwd, limit: 100 })
+      .then((value) => {
+        if (active) setRefs((value as GitRefsPage).refs)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [projectId, cwd])
   return (
     <section className="flex h-full min-h-0 flex-col" aria-label="Git changes">
       <div className="flex min-h-[38px] flex-wrap items-center gap-1 border-b border-border px-2 py-1 pointer-coarse:min-h-11">
-        {(['working', 'branch', 'latest-turn'] as const).map((value) => (
-          <Button
-            key={value}
-            size="sm"
-            variant={scope === value ? 'secondary' : 'ghost'}
-            className="pointer-coarse:min-h-11"
-            onClick={() => setScope(value)}
-          >
-            {value === 'latest-turn'
-              ? 'Latest turn'
-              : value === 'branch'
-                ? 'Branch'
-                : 'Working tree'}
-          </Button>
-        ))}
+        {(!commit ? (['working', 'branch', 'latest-turn'] as const) : []).map(
+          (value) => (
+            <Button
+              key={value}
+              size="sm"
+              variant={scope === value ? 'secondary' : 'ghost'}
+              className="pointer-coarse:min-h-11"
+              onClick={() => setScope(value)}
+            >
+              {value === 'latest-turn'
+                ? 'Latest turn'
+                : value === 'branch'
+                  ? 'Branch'
+                  : 'Working tree'}
+            </Button>
+          ),
+        )}
+        {effectiveScope === 'branch' && (
+          <>
+            <label className="text-xs">
+              Base{' '}
+              <Input
+                aria-label="Diff base branch"
+                list={`diff-refs-${sessionId}`}
+                value={baseRef ?? ''}
+                onChange={(event) => {
+                  baseEdited.current = true
+                  setBaseRef(event.target.value)
+                }}
+                className="max-w-36 rounded border border-input bg-background px-1 py-1"
+              />
+            </label>
+            <datalist id={`diff-refs-${sessionId}`}>
+              {refs.map((ref) => (
+                <option key={ref.name} value={ref.name} />
+              ))}
+            </datalist>
+          </>
+        )}
+        {commit && <span className="text-xs">Commit {commit.slice(0, 7)}</span>}
+        <Button
+          size="sm"
+          variant={split ? 'secondary' : 'ghost'}
+          aria-pressed={split}
+          onClick={() => setSplit((value) => !value)}
+        >
+          Split
+        </Button>
+        <Button
+          size="sm"
+          variant={wrap ? 'secondary' : 'ghost'}
+          aria-pressed={wrap}
+          onClick={() => setWrap((value) => !value)}
+        >
+          Wrap
+        </Button>
         <Button
           className="ml-auto pointer-coarse:size-11"
           size="icon-sm"
@@ -121,17 +221,24 @@ export function GitReviewSurface({
             Working tree is clean.
           </div>
         )}
-      {diff && !diff.unavailable && (
+      {!loading && !error && diff && !diff.unavailable && (
         <div className="min-h-0 flex-1 overflow-auto p-2">
           <div className="mb-2 text-xs text-muted-foreground">
             {diff.files.length} files ·{' '}
             <span className="text-success-foreground">+{diff.additions}</span>{' '}
             <span className="text-destructive">−{diff.deletions}</span>
           </div>
+          {diff.truncated && (
+            <p role="status" className="mb-2 text-xs text-muted-foreground">
+              Diff truncated. Some files or lines are omitted.
+            </p>
+          )}
           {diff.files.map((file) => (
             <DiffFileView
               key={`${file.oldPath}:${file.newPath}`}
               file={file}
+              split={split}
+              wrap={wrap}
               collapsed={collapsed[file.newPath ?? file.oldPath ?? '']}
               onToggle={() =>
                 setCollapsed((items) => ({
@@ -140,7 +247,12 @@ export function GitReviewSurface({
                     !items[file.newPath ?? file.oldPath ?? ''],
                 }))
               }
-              onComment={onComment}
+              onComment={(side, line, body) =>
+                onComment(
+                  captureGitReviewNote(workspace, diff, file, side, line, body),
+                )
+              }
+              reanchorNote={reanchorNote}
             />
           ))}
         </div>
@@ -154,13 +266,83 @@ function DiffFileView({
   collapsed,
   onToggle,
   onComment,
+  split,
+  wrap,
+  reanchorNote,
 }: {
   file: GitDiffFile
   collapsed: boolean
   onToggle: () => void
-  onComment: (comment: ReviewComment) => void
+  onComment: (side: 'old' | 'new', line: number, body: string) => void
+  reanchorNote?: ReviewNote
+  split: boolean
+  wrap: boolean
 }) {
   const path = file.newPath ?? file.oldPath ?? 'unknown'
+  const lineView = (
+    line: GitDiffFile['hunks'][number]['lines'][number] | undefined,
+    side?: 'old' | 'new',
+  ) => {
+    if (!line)
+      return (
+        <div className="min-h-[21px] min-w-0 bg-muted/20" aria-hidden="true" />
+      )
+    const number =
+      side === 'old'
+        ? line.oldLine
+        : side === 'new'
+          ? line.newLine
+          : (line.newLine ?? line.oldLine)
+    const anchorSide = side ?? (line.newLine === null ? 'old' : 'new')
+    return (
+      <div
+        className={cn(
+          'group flex min-w-0 border-l-[3px] border-transparent',
+          !wrap && 'min-w-max',
+          line.type === 'addition' && 'border-l-success bg-success/10',
+          line.type === 'deletion' && 'border-l-destructive bg-destructive/10',
+        )}
+      >
+        {!side && (
+          <span className="w-9 shrink-0 select-none px-1 text-right text-muted-foreground">
+            {line.oldLine ?? ''}
+          </span>
+        )}
+        <span className="w-9 shrink-0 select-none px-1 text-right text-muted-foreground">
+          {side ? number : (line.newLine ?? '')}
+        </span>
+        <span className="w-5 shrink-0 select-none text-center">
+          {line.type === 'addition'
+            ? '+'
+            : line.type === 'deletion'
+              ? '−'
+              : ' '}
+        </span>
+        <span
+          className={cn(
+            'min-w-0 flex-1 px-1',
+            wrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre',
+          )}
+        >
+          {line.text || ' '}
+        </span>
+        {number && line.type !== 'context' && line.type !== 'meta' && (
+          <button
+            className="ml-1 inline-flex h-6 shrink-0 items-center rounded px-1 text-muted-foreground opacity-0 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100 pointer-coarse:size-11 pointer-coarse:opacity-100"
+            aria-label={`Comment on ${anchorSide} line ${number}`}
+            onClick={() => {
+              const text =
+                reanchorNote?.body ??
+                window.prompt(`Comment on ${path}:${number}`)
+              if (text?.trim()) onComment(anchorSide, number, text.trim())
+            }}
+          >
+            <MessageSquare size={12} />
+          </button>
+        )}
+      </div>
+    )
+  }
   return (
     <article className="mb-3 overflow-hidden rounded-md border border-border">
       <button
@@ -178,9 +360,56 @@ function DiffFileView({
         <span className="text-destructive">−{file.deletions}</span>
       </button>
       {!collapsed && (
-        <div className="overflow-x-auto font-mono text-xs leading-[21px]">
+        <div
+          className="overflow-x-auto font-mono text-xs leading-[21px]"
+          data-layout={split ? 'split' : 'unified'}
+          data-wrap={wrap}
+        >
+          {file.contentTruncated && (
+            <p role="status" className="p-2 text-muted-foreground">
+              File diff truncated. Some lines are omitted.
+            </p>
+          )}
           {file.status === 'binary' ? (
             <p className="p-3 text-muted-foreground">Binary file changed.</p>
+          ) : file.status === 'submodule' ? (
+            <p className="p-3 text-muted-foreground">Submodule changed.</p>
+          ) : split ? (
+            <table
+              className={cn(
+                'w-full border-collapse',
+                wrap ? 'table-fixed' : 'min-w-max',
+              )}
+              aria-label="Split diff"
+            >
+              <colgroup>
+                <col className="w-1/2" />
+                <col className="w-1/2" />
+              </colgroup>
+              {file.hunks.map((hunk, index) => (
+                <tbody key={index}>
+                  <tr>
+                    <td
+                      colSpan={2}
+                      className="h-7 bg-muted/40 px-2 text-muted-foreground"
+                    >
+                      @@ −{hunk.oldStart},{hunk.oldCount} +{hunk.newStart},
+                      {hunk.newCount} @@
+                    </td>
+                  </tr>
+                  {splitDiffLines(hunk.lines).map((pair, i) => (
+                    <tr key={i}>
+                      <td className="border-r border-border p-0 align-top">
+                        {lineView(pair[0], 'old')}
+                      </td>
+                      <td className="p-0 align-top">
+                        {lineView(pair[1], 'new')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              ))}
+            </table>
           ) : (
             file.hunks.map((hunk, index) => (
               <div key={index}>
@@ -188,59 +417,9 @@ function DiffFileView({
                   @@ −{hunk.oldStart},{hunk.oldCount} +{hunk.newStart},
                   {hunk.newCount} @@
                 </div>
-                {hunk.lines.map((line, lineIndex) => {
-                  const number = line.newLine ?? line.oldLine
-                  const side = line.newLine === null ? 'old' : 'new'
-                  return (
-                    <div
-                      key={lineIndex}
-                      className={cn(
-                        'group flex min-w-max border-l-[3px] border-transparent',
-                        line.type === 'addition' &&
-                          'border-l-success bg-success/10',
-                        line.type === 'deletion' &&
-                          'border-l-destructive bg-destructive/10',
-                      )}
-                    >
-                      <span className="w-9 shrink-0 select-none px-2 text-right text-muted-foreground">
-                        {number ?? ''}
-                      </span>
-                      <span className="w-7 shrink-0 select-none text-center">
-                        {line.type === 'addition'
-                          ? '+'
-                          : line.type === 'deletion'
-                            ? '−'
-                            : ' '}
-                      </span>
-                      <span className="whitespace-pre px-1">
-                        {line.text || ' '}
-                      </span>
-                      {number && line.type !== 'context' && (
-                        <button
-                          className="ml-2 inline-flex h-6 shrink-0 items-center rounded px-1 text-muted-foreground opacity-0 hover:bg-accent focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100 pointer-coarse:size-11 pointer-coarse:justify-center pointer-coarse:opacity-100"
-                          onClick={() => {
-                            const text = window.prompt(
-                              `Comment on ${path}:${number}`,
-                            )
-                            if (text?.trim())
-                              onComment({
-                                path:
-                                  line.type === 'deletion'
-                                    ? (file.oldPath ?? path)
-                                    : (file.newPath ?? path),
-                                side,
-                                line: number,
-                                text: text.trim(),
-                              })
-                          }}
-                          aria-label={`Comment on line ${number}`}
-                        >
-                          <MessageSquare size={12} />
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
+                {hunk.lines.map((line, i) => (
+                  <div key={i}>{lineView(line)}</div>
+                ))}
               </div>
             ))
           )}

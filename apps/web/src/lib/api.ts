@@ -140,6 +140,8 @@ export class ForgeApi {
       sessionId?: string
       cursor?: string
       limit?: number
+      ref?: string
+      query?: string
     } = {},
   ) {
     const query = new URLSearchParams()
