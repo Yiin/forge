@@ -4,6 +4,7 @@ import { WorkspaceBar } from '../components/chat/WorkspaceBar'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
+import { useWorkspaceTarget } from '../lib/useWorkspaceTarget'
 import { connectForgeSocket } from '../lib/socket'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore, type SessionSummary } from '../stores/sessions'
@@ -38,11 +39,15 @@ export function SessionRoute() {
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [skills, setSkills] = useState<string[]>([])
   const [reviewComments, setReviewComments] = useState<ReviewComment[]>([])
-  const [workspaceTarget, setWorkspaceTarget] = useState<{
-    cwd: string | null
-    workspaceId?: string | null
-    workspaceRevision?: number | null
-  }>({ cwd: null })
+  const workspaceKey = useSessionsStore((state) => {
+    const session = state.sessions.find((item) => item.id === sessionId)
+    return JSON.stringify([session?.cwd ?? null, session?.worktreePath ?? null])
+  })
+  const {
+    target: workspaceTarget,
+    error: workspaceError,
+    retry: retryWorkspace,
+  } = useWorkspaceTarget(sessionId, workspaceKey)
   const sessionStatus = useSessionsStore(
     (state) =>
       state.sessions.find((session) => session.id === sessionId)?.status,
@@ -93,15 +98,6 @@ export function SessionRoute() {
         setAccountId(session.accountId ?? undefined)
         setModel(session.model ?? undefined)
         setProtocol(session.protocol)
-        setWorkspaceTarget({
-          cwd: session.cwd ?? session.worktreePath ?? null,
-          workspaceId: (
-            session as SessionSummary & { workspaceId?: string | null }
-          ).workspaceId,
-          workspaceRevision: (
-            session as SessionSummary & { workspaceRevision?: number | null }
-          ).workspaceRevision,
-        })
         setLoadedStatus(session.status)
         setLoading(false)
         setLoadError(undefined)
@@ -310,6 +306,21 @@ export function SessionRoute() {
     <div className="session-view flex h-full min-h-0 min-w-0">
       <div className="relative flex min-w-0 flex-1 flex-col">
         {!loading && !loadError && <PathSwitcher sessionId={sessionId} />}
+        {workspaceError && (
+          <div
+            role="alert"
+            className="flex items-center gap-2 px-3 py-2 text-sm"
+          >
+            <span>{workspaceError}</span>
+            <button
+              type="button"
+              onClick={retryWorkspace}
+              className="underline"
+            >
+              Retry workspace
+            </button>
+          </div>
+        )}
         <ChatLifecycle
           loading={loading}
           error={loadError}
