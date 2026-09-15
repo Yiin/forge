@@ -16,18 +16,7 @@ Run it from the repository root. Set `stage` to a temporary directory first.
 
 ```bash
 stage="$(mktemp -d)/forge"
-mkdir -p "$stage/apps/server/src" "$stage/apps/drizzle" "$stage/web"
-(cd apps/web && bunx vite build)
-bun build --target=node apps/server/src/index.ts --outfile dist/forge-server.js
-cp dist/forge-server.js "$stage/apps/server/src/index.js"
-cp apps/server/package.json "$stage/apps/server/package.json"
-cp -R apps/server/drizzle/. "$stage/apps/drizzle/"
-cp -R apps/web/dist/. "$stage/web/"
-mkdir -p "$stage/apps/server/src/build/Release"
-cp apps/server/node_modules/node-pty/build/Release/pty.node "$stage/apps/server/src/build/Release/"
-if [ -f apps/server/node_modules/node-pty/build/Release/spawn-helper ]; then
-  cp apps/server/node_modules/node-pty/build/Release/spawn-helper "$stage/apps/server/src/build/Release/"
-fi
+bun run package:release "$stage"
 rm -rf "$HOME/.local/lib/forge.new"
 rm -rf "$HOME/.local/lib/forge.prev"
 mv "$stage" "$HOME/.local/lib/forge.new"

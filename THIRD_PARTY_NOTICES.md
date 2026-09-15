@@ -7,6 +7,11 @@ Workspace path validation, text rules, search ranking, and limits in
 `apps/server/src/workspace/` also follow that commit.
 This notice records the upstream MIT terms for those assets and the source-derived work.
 
+Forge also ships provider-native adapters and the pinned Cursor SDK sidecar.
+The release packager includes the corresponding notices beside the packaged
+server and sidecar. The native adapters only use their provider wire formats.
+They do not include provider executables or credentials.
+
 ## Comet/Zeron
 
 MIT License
