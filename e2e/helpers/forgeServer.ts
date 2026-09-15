@@ -58,17 +58,27 @@ export async function launchForge(
     throw new Error('e2e data directory must be under tmpdir')
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
   const fakeAgent = resolve(root, 'apps/server/test/fixtures/acp-mock-agent.ts')
-  const tomlEnv = Object.entries(options.fakeAgentEnv ?? {})
+  const fakeAgentEnv = { ...options.fakeAgentEnv }
+  const repeat = options.env?.FORGE_E2E_REPLY_REPEAT
+  if (repeat) {
+    fakeAgentEnv.FORGE_MOCK_REPLY_REPEAT = repeat
+    fakeAgentEnv.FORGE_MOCK_PROMPT_RESPONSE_TEXT = 'first second third'
+  }
+  const tomlEnv = Object.entries(fakeAgentEnv)
     .map(([key, value]) => `${key} = ${JSON.stringify(value)}`)
     .join('\n')
   await writeFile(
     resolve(dataDir, 'forge.toml'),
     [
-      '[harness.fake-acp-agent]',
+      `dataDir = ${JSON.stringify(dataDir)}`,
+      '[harness.mock]',
+      'name = "E2E native protocol fixture"',
       'protocol = "acp"',
       'command = "bun"',
       `args = [${JSON.stringify(fakeAgent)}]`,
-      ...(tomlEnv ? ['[harness.fake-acp-agent.env]', tomlEnv] : []),
+      'adapterKind = "acp"',
+      'enabled = true',
+      ...(tomlEnv ? ['[harness.mock.env]', tomlEnv] : []),
       '',
     ].join('\n'),
   )
@@ -76,18 +86,26 @@ export async function launchForge(
     resolve(dataDir, 'forge.db'),
     'CREATE TABLE IF NOT EXISTS e2e_marker (id INTEGER);',
   ])
-  const child = spawn('bun', ['run', 'apps/server/src/index.ts'], {
-    cwd: root,
-    env: {
-      ...process.env,
-      FORGE_DATA_DIR: dataDir,
-      FORGE_PORT: '0',
-      FORGE_E2E: '1',
-      ...options.env,
+  const child = spawn(
+    'node',
+    [
+      '--import',
+      resolve(root, 'e2e/helpers/production-request-loader.mjs'),
+      'apps/server/src/index.ts',
+    ],
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        FORGE_DATA_DIR: dataDir,
+        FORGE_CONFIG: resolve(dataDir, 'forge.toml'),
+        FORGE_PORT: '0',
+        ...options.env,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: true,
-  })
+  )
   const serverLog = resolve(tmpdir(), `forge-e2e-server-${child.pid}.log`)
   const logStream = (await import('node:fs')).createWriteStream(serverLog)
   child.stdout?.pipe(logStream)

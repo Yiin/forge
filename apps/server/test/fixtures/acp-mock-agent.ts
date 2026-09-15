@@ -237,63 +237,83 @@ class MockAgent implements acp.Agent {
     }
     if (flag('REQUEST_PERMISSION') || flag('ASK_QUESTION')) {
       const question = flag('ASK_QUESTION')
-      const outcome = await this.connection.requestPermission({
-        sessionId: params.sessionId,
-        toolCall: {
-          toolCallId: 'permission-1',
-          title: question ? 'AskUserQuestion' : 'Run command',
-          kind: 'other',
-          status: 'pending',
-          rawInput: question
-            ? {
-                questions: [
-                  {
-                    header: 'Choice',
-                    question: 'Pick one',
-                    options: [
-                      { label: 'First', value: 'first' },
-                      { label: 'Second', value: 'second' },
-                    ],
-                  },
-                ],
-              }
-            : { command: 'echo mock' },
-        },
-        options: [
-          { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
-          {
-            kind: 'allow_always',
-            name: 'Allow always',
-            optionId: 'allow-always',
+      const ask = async (index: number) => {
+        const mode = env.FORGE_MOCK_ASK_QUESTION_MODE ?? 'single'
+        const multiSelect = mode === 'multi'
+        const outcome = await this.connection.requestPermission({
+          sessionId: params.sessionId,
+          toolCall: {
+            toolCallId: question ? `question-${index}` : 'permission-1',
+            title: question ? 'AskUserQuestion' : 'Run command',
+            kind: 'other',
+            status: 'pending',
+            rawInput: question
+              ? {
+                  questions: [
+                    {
+                      header: index === 0 ? 'Choice' : 'Second choice',
+                      question: index === 0 ? 'Pick one' : 'Pick another one',
+                      options:
+                        index === 0
+                          ? [
+                              { label: 'First', value: 'first' },
+                              { label: 'Second', value: 'second' },
+                            ]
+                          : [
+                              { label: 'Third', value: 'third' },
+                              { label: 'Fourth', value: 'fourth' },
+                            ],
+                      ...(multiSelect ? { multiSelect: true } : {}),
+                    },
+                  ],
+                }
+              : { command: 'echo mock' },
           },
-          { kind: 'reject_once', name: 'Reject once', optionId: 'reject-once' },
-        ],
-      })
-      const selected =
-        outcome.outcome.outcome === 'selected'
-          ? outcome.outcome.optionId
-          : outcome.outcome.outcome
-      if (requestLogPath)
-        appendFileSync(
-          requestLogPath,
-          `${JSON.stringify({ permissionOutcome: selected })}\n`,
-        )
-      await this.update(params.sessionId, {
-        sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: `selected: ${selected}` },
-      })
+          options: [
+            { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
+            {
+              kind: 'allow_always',
+              name: 'Allow always',
+              optionId: 'allow-always',
+            },
+            {
+              kind: 'reject_once',
+              name: 'Reject once',
+              optionId: 'reject-once',
+            },
+          ],
+        })
+        const selected =
+          outcome.outcome.outcome === 'selected'
+            ? outcome.outcome.optionId
+            : outcome.outcome.outcome
+        if (requestLogPath)
+          appendFileSync(
+            requestLogPath,
+            `${JSON.stringify({ permissionOutcome: selected })}\n`,
+          )
+        await this.update(params.sessionId, {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: `selected: ${selected}` },
+        })
+      }
+      await ask(0)
+      if (question && env.FORGE_MOCK_ASK_QUESTION_MODE === 'queued')
+        await ask(1)
     }
     await delay(numberFlag('PROMPT_DELAY_MS'), signal)
     if (flag('EXIT_MID_TURN')) process.exit(0)
     const text = env.FORGE_MOCK_PROMPT_RESPONSE_TEXT ?? input
-    const chunks = text.length
+    const repeat = Math.max(1, Number(env.FORGE_MOCK_REPLY_REPEAT ?? 1))
+    const repeatedText = Array.from({ length: repeat }, () => text).join(' ')
+    const chunks = repeatedText.length
       ? [
-          text.slice(0, Math.ceil(text.length / 3)),
-          text.slice(
-            Math.ceil(text.length / 3),
-            Math.ceil((text.length * 2) / 3),
+          repeatedText.slice(0, Math.ceil(repeatedText.length / 3)),
+          repeatedText.slice(
+            Math.ceil(repeatedText.length / 3),
+            Math.ceil((repeatedText.length * 2) / 3),
           ),
-          text.slice(Math.ceil((text.length * 2) / 3)),
+          repeatedText.slice(Math.ceil((repeatedText.length * 2) / 3)),
         ]
       : ['']
     for (const chunk of chunks) {
