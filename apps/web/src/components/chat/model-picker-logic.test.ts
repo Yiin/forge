@@ -12,6 +12,30 @@ describe('model picker logic', () => {
     ).toEqual([{ id: 'fast', label: 'Fast model' }])
   })
 
+  it('keeps catalog descriptions, traits, and default favorites', () => {
+    expect(
+      modelResponse({
+        models: [
+          {
+            id: 'smart',
+            displayName: 'Smart',
+            description: 'Deep reasoning',
+            isDefault: true,
+            options: { traits: ['vision', 'tools'] },
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        id: 'smart',
+        label: 'Smart',
+        description: 'Deep reasoning',
+        favorite: true,
+        traits: ['vision', 'tools'],
+      },
+    ])
+  })
+
   it('rejects malformed model responses', () => {
     expect(modelResponse({ models: [{ id: 'fast' }, null] })).toEqual([])
     expect(
