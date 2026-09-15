@@ -77,8 +77,14 @@ function activityTime(session: SessionSummary) {
   return value ? Date.parse(value) || 0 : 0
 }
 
+// The home route opens a draft on its own, so it must still be able to land on
+// the "add a project" screen. Only an explicit new-session action falls back to
+// a projectless filesystem target.
+export type NewDraftOptions = { allowFilesystemTarget?: boolean }
+
 export async function openNewDraft(
   navigate: NavigateFn,
+  options: NewDraftOptions = {},
 ): Promise<DraftEntryResult> {
   const [projectData, sessionData] = await Promise.all([
     api.listProjects(),
@@ -105,6 +111,7 @@ export async function openNewDraft(
     (view.scope !== 'all' && projects.find((item) => item.id === view.scope)) ||
     selectDraftProject(projects, sessions)
   if (!project) {
+    if (!options.allowFilesystemTarget) return { kind: 'empty' }
     const listing = (await api.listDirectories().catch(() => null)) as {
       path?: string
     } | null

@@ -137,6 +137,31 @@ export function migrate(sqlite: SqliteLike) {
     .filter((name) => name.endsWith('.sql'))
     .sort()
 
+  // A migration that rebuilds a table has to drop the old one, and SQLite runs
+  // an implicit DELETE FROM for that drop while foreign keys are on. That
+  // delete cascades into child rows and trips immediate constraints, so the
+  // documented rebuild procedure turns foreign keys off around the whole
+  // transaction and checks the result before committing. The pragma is ignored
+  // inside a transaction, so it has to happen here.
+  const enforced =
+    (
+      sqlite.prepare('PRAGMA foreign_keys').get() as
+        { foreign_keys: number } | undefined
+    )?.foreign_keys === 1
+  if (enforced) sqlite.exec('PRAGMA foreign_keys = OFF')
+  try {
+    migrateWithin(sqlite, dir, files, enforced)
+  } finally {
+    if (enforced) sqlite.exec('PRAGMA foreign_keys = ON')
+  }
+}
+
+function migrateWithin(
+  sqlite: SqliteLike,
+  dir: string,
+  files: string[],
+  check: boolean,
+) {
   sqlite.exec('BEGIN IMMEDIATE')
   try {
     sqlite.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -162,6 +187,13 @@ export function migrate(sqlite: SqliteLike) {
       if (legacy) replayLegacyMigration(sqlite, file, sql)
       else sqlite.exec(sql)
       insert.run(file, Date.now())
+    }
+    if (check) {
+      const broken = sqlite.prepare('PRAGMA foreign_key_check').all()
+      if (broken.length)
+        throw new Error(
+          `Migration left ${broken.length} broken foreign key reference(s)`,
+        )
     }
     sqlite.exec('COMMIT')
   } catch (error) {

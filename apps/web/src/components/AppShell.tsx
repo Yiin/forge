@@ -114,7 +114,10 @@ export function AppShell() {
       return navigationSessions(useSessionsStore.getState().sessions, view)
     }
     const go = (to: string) => void navigate({ to: to as never })
-    const newDraft = () => void openNewDraft(navigate).catch(() => undefined)
+    const newDraft = () =>
+      void openNewDraft(navigate, { allowFilesystemTarget: true }).catch(
+        () => undefined,
+      )
     const unregister = registerShortcuts({
       'sidebar.toggle': store.toggleSidebar,
       'navigate.chat': () => go('/'),
@@ -248,7 +251,9 @@ export function AppShell() {
             variant="ghost"
             size="icon-xs"
             aria-label="New session"
-            onClick={() => void openNewDraft(navigate)}
+            onClick={() =>
+              void openNewDraft(navigate, { allowFilesystemTarget: true })
+            }
           >
             <Plus />
           </Button>

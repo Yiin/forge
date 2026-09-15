@@ -148,7 +148,9 @@ export function SessionSidebar() {
   }
   function newDraft() {
     setDrawerOpen(false)
-    void openNewDraft(navigate).catch(() => undefined)
+    void openNewDraft(navigate, { allowFilesystemTarget: true }).catch(
+      () => undefined,
+    )
   }
   async function rename(session: SessionSummary, title: string) {
     const clean = title.trim()
