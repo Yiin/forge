@@ -14,6 +14,7 @@ import { ChatLifecycle } from '../components/chat/ChatLifecycle'
 import type { ConnectionState } from '../lib/socket'
 import type { HarnessSelection } from '../components/chat/harness-picker-logic'
 import type { QueuedPrompt } from '@forge/protocol/session'
+import { WorkspaceDock } from '../components/workspace/WorkspaceDock'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
@@ -34,6 +35,11 @@ export function SessionRoute() {
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [skills, setSkills] = useState<string[]>([])
+  const [workspaceTarget, setWorkspaceTarget] = useState<{
+    cwd: string | null
+    workspaceId?: string | null
+    workspaceRevision?: number | null
+  }>({ cwd: null })
   const sessionStatus = useSessionsStore(
     (state) =>
       state.sessions.find((session) => session.id === sessionId)?.status,
@@ -84,6 +90,15 @@ export function SessionRoute() {
         setAccountId(session.accountId ?? undefined)
         setModel(session.model ?? undefined)
         setProtocol(session.protocol)
+        setWorkspaceTarget({
+          cwd: session.cwd ?? session.worktreePath ?? null,
+          workspaceId: (
+            session as SessionSummary & { workspaceId?: string | null }
+          ).workspaceId,
+          workspaceRevision: (
+            session as SessionSummary & { workspaceRevision?: number | null }
+          ).workspaceRevision,
+        })
         setLoadedStatus(session.status)
         setLoading(false)
         setLoadError(undefined)
@@ -252,67 +267,72 @@ export function SessionRoute() {
     })
   }
   return (
-    <div className="session-view relative flex h-full min-h-0 flex-col">
-      {!loading && !loadError && <PathSwitcher sessionId={sessionId} />}
-      <ChatLifecycle
-        loading={loading}
-        error={loadError}
-        onRetry={() => {
-          setLoading(true)
-          setLoadError(undefined)
-          setConnection('connecting')
-          setRetryAttempt((attempt) => attempt + 1)
-        }}
-        connection={connection}
-      />
-      {!loading && !loadError && (
-        <Timeline
-          targetSeq={Number.isFinite(targetSeq) ? targetSeq : undefined}
-          bottomInset={composerHeight}
-          skills={skills}
-          running={(sessionStatus ?? loadedStatus) === 'running'}
+    <div className="session-view flex h-full min-h-0 min-w-0">
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        {!loading && !loadError && <PathSwitcher sessionId={sessionId} />}
+        <ChatLifecycle
+          loading={loading}
+          error={loadError}
+          onRetry={() => {
+            setLoading(true)
+            setLoadError(undefined)
+            setConnection('connecting')
+            setRetryAttempt((attempt) => attempt + 1)
+          }}
+          connection={connection}
         />
-      )}
-      {!loading && !loadError && (
-        <div
-          ref={setComposerOverlay}
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 max-h-full overflow-y-auto overscroll-contain pt-1.5 sm:pt-2"
-        >
+        {!loading && !loadError && (
+          <Timeline
+            targetSeq={Number.isFinite(targetSeq) ? targetSeq : undefined}
+            bottomInset={composerHeight}
+            skills={skills}
+            running={(sessionStatus ?? loadedStatus) === 'running'}
+          />
+        )}
+        {!loading && !loadError && (
           <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-1.5 bottom-0 z-0 px-3 sm:top-2 sm:px-5"
+            ref={setComposerOverlay}
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-20 max-h-full overflow-y-auto overscroll-contain pt-1.5 sm:pt-2"
           >
-            <div className="relative mx-auto h-full w-full max-w-3xl overflow-clip rounded-t-[20px]">
-              <div className="chat-composer-shared-blur absolute -inset-8" />
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-1.5 bottom-0 z-0 px-3 sm:top-2 sm:px-5"
+            >
+              <div className="relative mx-auto h-full w-full max-w-3xl overflow-clip rounded-t-[20px]">
+                <div className="chat-composer-shared-blur absolute -inset-8" />
+              </div>
+            </div>
+            <div className="chat-composer-lower-chrome pointer-events-auto relative z-10 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:px-5 sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+              <WorkspaceBar
+                projectId={
+                  useSessionsStore
+                    .getState()
+                    .sessions.find((item) => item.id === sessionId)
+                    ?.projectId ?? ''
+                }
+                sessionId={sessionId}
+                disabled={(sessionStatus ?? loadedStatus) === 'running'}
+              />
+              <Composer
+                sessionId={sessionId}
+                harness={harness}
+                accountId={accountId}
+                model={model}
+                protocol={protocol}
+                running={(sessionStatus ?? loadedStatus) === 'running'}
+                onInterrupt={async () => {
+                  await api.interrupt({ sessionId })
+                }}
+                onSend={send}
+                onQueue={queue}
+                sending={sending}
+              />
             </div>
           </div>
-          <div className="chat-composer-lower-chrome pointer-events-auto relative z-10 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:px-5 sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]">
-            <WorkspaceBar
-              projectId={
-                useSessionsStore
-                  .getState()
-                  .sessions.find((item) => item.id === sessionId)?.projectId ??
-                ''
-              }
-              sessionId={sessionId}
-              disabled={(sessionStatus ?? loadedStatus) === 'running'}
-            />
-            <Composer
-              sessionId={sessionId}
-              harness={harness}
-              accountId={accountId}
-              model={model}
-              protocol={protocol}
-              running={(sessionStatus ?? loadedStatus) === 'running'}
-              onInterrupt={async () => {
-                await api.interrupt({ sessionId })
-              }}
-              onSend={send}
-              onQueue={queue}
-              sending={sending}
-            />
-          </div>
-        </div>
+        )}
+      </div>
+      {!loading && !loadError && (
+        <WorkspaceDock sessionId={sessionId} target={workspaceTarget} />
       )}
     </div>
   )
