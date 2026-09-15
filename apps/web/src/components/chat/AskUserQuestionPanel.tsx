@@ -42,7 +42,10 @@ export function AskUserQuestionPanel({ sessionId }: { sessionId: string }) {
       key={request.requestId}
       sessionId={sessionId}
       request={request}
-      queued={answerable.length}
+      queued={answerable.reduce(
+        (total, item) => total + item.questions.length,
+        0,
+      )}
     />
   )
 }
@@ -67,6 +70,7 @@ function QuestionCard({
   )
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const question = request.questions[page]!
   const isPermission = request.source === 'permission'
   const settled = request.requestStatus && request.requestStatus !== 'pending'
@@ -107,6 +111,8 @@ function QuestionCard({
   const complete = isComplete(answers)
   const submit = async (payload: Answers = answers) => {
     if (!isComplete(payload)) return
+    if (advanceTimer.current) clearTimeout(advanceTimer.current)
+    advanceTimer.current = null
     setSending(true)
     setError(null)
     try {
@@ -138,7 +144,6 @@ function QuestionCard({
       setSending(false)
     }
   }
-  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(
     () => () => {
       if (advanceTimer.current) clearTimeout(advanceTimer.current)
@@ -193,7 +198,10 @@ function QuestionCard({
                   ? values.filter((value) => value !== option.id)
                   : [...values, option.id!],
             )
-          } else advanceAfterSelect(setAnswer(option.id!))
+          } else {
+            const next = setAnswer(option.id!)
+            if (!isPermission) advanceAfterSelect(next)
+          }
         }
       } else if (event.key === 'Escape') {
         event.preventDefault()

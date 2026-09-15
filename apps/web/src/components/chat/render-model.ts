@@ -2,7 +2,7 @@ import type { Message } from '@forge/protocol/message'
 import type { SubagentSession } from './subagent'
 import type { PendingUserMessage } from '../../stores/messages'
 import { interruptReasonText } from './interrupt-copy'
-import { answerWithLabels, optionLabels } from './question-logic'
+import { answerWithLabels, requestQuestions } from './question-logic'
 
 export type ToolState = 'running' | 'done' | 'error'
 export type ActivityState = ToolState | 'unknown'
@@ -146,7 +146,7 @@ export function toRenderModel(
     ? [{ kind: 'system', id: 'resumed-recap', text: 'Resumed with recap' }]
     : []
   const questions = new Map<string, string>()
-  const questionOptions = new Map<string, Map<string, string>>()
+  const questionOptions = new Map<string, ReturnType<typeof requestQuestions>>()
   const anchors = new Map<string, number>()
   const turnIds = new Map<string, string>()
   const childTurnIds = new Map<string, string>()
@@ -162,7 +162,7 @@ export function toRenderModel(
       )
       questionOptions.set(
         message.content.questionId,
-        optionLabels(message.content),
+        requestQuestions(message.content),
       )
     }
     const content = message.content

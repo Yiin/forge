@@ -45,6 +45,41 @@ describe('chat render model', () => {
     })
   })
 
+  it('resolves a reused option ID against its own question', () => {
+    const items = toRenderModel([
+      message(
+        {
+          type: 'ask_user_question',
+          questionId: 'q3',
+          questions: [
+            {
+              id: 'keep',
+              question: 'Keep it?',
+              options: [{ id: 'yes', label: 'Yes' }],
+            },
+            {
+              id: 'ship',
+              question: 'Ship it?',
+              options: [{ id: 'yes', label: 'Yes, ship now' }],
+            },
+          ],
+        },
+        { itemId: 'ask' },
+      ),
+      message(
+        {
+          type: 'user_answer',
+          questionId: 'q3',
+          answers: { keep: 'yes', ship: 'yes' },
+        },
+        { itemId: 'answer', seq: 2, role: 'user' },
+      ),
+    ])
+    expect(items.at(-1)).toMatchObject({
+      answer: { keep: 'Yes', ship: 'Yes, ship now' },
+    })
+  })
+
   it('keeps free text beside the selected option labels', () => {
     const items = toRenderModel([
       message(

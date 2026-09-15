@@ -46,14 +46,6 @@ export function requestQuestions(content: AskContent): Question[] {
   }))
 }
 
-export function optionLabels(content: AskContent): Map<string, string> {
-  return new Map(
-    requestQuestions(content).flatMap((question) =>
-      question.options.map((option) => [option.id!, option.label] as const),
-    ),
-  )
-}
-
 export function pendingQuestionRequests(
   messages: Message[],
 ): PendingQuestionRequest[] {
@@ -96,37 +88,64 @@ export function pendingQuestions(messages: Message[]): PendingQuestion[] {
   )
 }
 
-// A stored reply holds option IDs. History has to read as the labels the user
-// clicked, so swap every known ID back before the answer is rendered.
-export function answerWithLabels(
-  labels: Map<string, string> | undefined,
-  answer: unknown,
-): unknown {
-  if (typeof answer === 'string') return labels?.get(answer) ?? answer
+const labelsOf = (questions: Question[]): Map<string, string> =>
+  new Map(
+    questions.flatMap((question) =>
+      question.options.map((option) => [option.id!, option.label] as const),
+    ),
+  )
+
+const isSelectedWithText = (answer: unknown) =>
+  !!answer &&
+  typeof answer === 'object' &&
+  !Array.isArray(answer) &&
+  (answer as Record<string, unknown>).type === 'selected_with_text'
+
+function withLabels(labels: Map<string, string>, answer: unknown): unknown {
+  if (typeof answer === 'string') return labels.get(answer) ?? answer
   if (Array.isArray(answer))
-    return answer.map((item) => answerWithLabels(labels, item))
-  if (answer && typeof answer === 'object') {
+    return answer.map((item) => withLabels(labels, item))
+  if (isSelectedWithText(answer)) {
     const record = answer as Record<string, unknown>
-    if (record.type === 'selected_with_text')
-      return [
-        ...(Array.isArray(record.optionIds)
-          ? record.optionIds.map((id) => answerWithLabels(labels, id))
-          : []),
-        record.text,
-      ].filter((item) => typeof item === 'string' && item.trim().length > 0)
-    return Object.fromEntries(
-      Object.entries(record).map(([key, value]) => [
-        key,
-        answerWithLabels(labels, value),
-      ]),
-    )
+    return [
+      ...(Array.isArray(record.optionIds)
+        ? record.optionIds.map((id) => withLabels(labels, id))
+        : []),
+      record.text,
+    ].filter((item) => typeof item === 'string' && item.trim().length > 0)
   }
   return answer
 }
 
+// A stored reply holds option IDs. History has to read as the labels the user
+// clicked, so swap every known ID back before the answer is rendered. Two
+// questions in one request may reuse an option ID for different labels, so a
+// per-question reply resolves against its own question.
+export function answerWithLabels(
+  questions: Question[] | undefined,
+  answer: unknown,
+): unknown {
+  const all = questions ?? []
+  if (
+    !answer ||
+    typeof answer !== 'object' ||
+    Array.isArray(answer) ||
+    isSelectedWithText(answer)
+  )
+    return withLabels(labelsOf(all), answer)
+  return Object.fromEntries(
+    Object.entries(answer as Record<string, unknown>).map(([key, value]) => {
+      const question = all.find((item) => item.id === key)
+      return [key, withLabels(labelsOf(question ? [question] : all), value)]
+    }),
+  )
+}
+
 export function answerText(answer: unknown): string {
-  if (Array.isArray(answer)) return answer.join(', ')
+  // One reply per question, and a multi-select reply is itself a list, so
+  // flatten before joining or the inner list loses its separators.
+  if (Array.isArray(answer)) return answer.flat(Infinity).join(', ')
   if (answer && typeof answer === 'object')
-    return Object.values(answer).join(', ')
+    return Object.values(answer).flat(Infinity).join(', ')
   return answer == null ? 'Cancelled' : String(answer)
 }
