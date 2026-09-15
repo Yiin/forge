@@ -287,10 +287,30 @@ export class JsonlRpcTransport {
   }
 
   respondError(request: JsonRpcRequest, code: number, message: string) {
-    if (this.isLiveRequest(request) && !Number.isSafeInteger(code))
-      return Promise.reject(new Error('Invalid JSON-RPC error code'))
+    return this.respondErrorWithSubmission(request, code, message).logical
+  }
+
+  respondErrorWithSubmission(
+    request: JsonRpcRequest,
+    code: number,
+    message: string,
+  ): Submission {
+    if (this.isLiveRequest(request) && !Number.isSafeInteger(code)) {
+      const logical = Promise.reject(new Error('Invalid JSON-RPC error code'))
+      void logical.catch(() => {})
+      return {
+        logical,
+        submission: Promise.resolve(
+          Object.freeze({
+            operationId: randomUUID(),
+            transportId: this.wire.transportId,
+            status: 'not_written',
+            cancellation: 'none',
+          }),
+        ),
+      }
+    }
     return this.replyWithSubmission(request, { error: { code, message } })
-      .logical
   }
 
   /**
