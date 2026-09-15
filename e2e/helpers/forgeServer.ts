@@ -200,7 +200,7 @@ export async function launchForge(
         XDG_CONFIG_HOME: configHome,
         XDG_DATA_HOME: dataHome,
         XDG_RUNTIME_DIR: runtimeHome,
-        NODE_ENV: process.env.NODE_ENV ?? 'test',
+        NODE_ENV: 'production',
         FORGE_DATA_DIR: dataDir,
         FORGE_CONFIG: resolve(dataDir, 'forge.toml'),
         FORGE_PORT: String(port),
@@ -213,6 +213,22 @@ export async function launchForge(
   const serverLog = resolve(tmpdir(), `forge-e2e-server-${child.pid}.log`)
   const logStream = (await import('node:fs')).createWriteStream(serverLog)
   let logClosed = false
+  let output = ''
+  const startup = new Promise<void>((ready, reject) => {
+    const onData = (chunk: Buffer) => {
+      output += chunk.toString()
+      const match = output.match(/FORGE_LISTENING\s+(\d+)/)
+      if (!match) return
+      if (Number(match[1]) !== port)
+        reject(new Error(`forge took port ${match[1]}, not ${port}`))
+      else ready()
+    }
+    child.stdout?.on('data', onData)
+    child.stderr?.on('data', onData)
+    child.once('error', reject)
+  })
+  // Attach the startup listeners before piping. A fast server can emit its
+  // listening line before a later data listener is registered.
   child.stdout?.pipe(logStream, { end: false })
   child.stderr?.pipe(logStream, { end: false })
   child.once('exit', (code, signal) => {
@@ -222,25 +238,7 @@ export async function launchForge(
     }
   })
   try {
-    await new Promise<void>((ready, reject) => {
-      let output = ''
-      const timer = setTimeout(
-        () => reject(new Error(`forge did not start: ${output}`)),
-        10_000,
-      )
-      const onData = (chunk: Buffer) => {
-        output += chunk.toString()
-        const match = output.match(/FORGE_LISTENING\s+(\d+)/)
-        if (!match) return
-        clearTimeout(timer)
-        if (Number(match[1]) !== port)
-          reject(new Error(`forge took port ${match[1]}, not ${port}`))
-        else ready()
-      }
-      child.stdout?.on('data', onData)
-      child.stderr?.on('data', onData)
-      child.once('error', reject)
-    })
+    await bounded(startup, `forge did not start: ${output}`, 10_000)
   } catch (error) {
     await stopForge(child, dataDir, !options.dataDir, port)
     throw error
