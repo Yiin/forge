@@ -15,12 +15,19 @@ import { TerminalSurface } from './TerminalSurface'
 import { GitReviewSurface, type ReviewComment } from './GitReviewSurface'
 import { GitHistorySurface } from './GitHistorySurface'
 import { WorkspaceFilesSurface } from './WorkspaceFilesSurface'
+import { SubagentTranscript } from '../chat/SubagentTranscript'
+import { connectForgeSocket } from '../../lib/socket'
+import { SessionSnapshot } from '@forge/protocol/ws'
+import { useMessagesStore } from '../../stores/messages'
+import { useSessionsStore } from '../../stores/sessions'
 import {
   DOCK_CHAT_MIN_WIDTH,
   type DockSurfaceKind,
   type DockTab,
   useShellStore,
 } from '@/stores/shell'
+
+const EMPTY_MESSAGES: never[] = []
 
 type WorkspaceTarget = {
   cwd: string | null
@@ -110,6 +117,8 @@ export function WorkspaceDock({
       projectId={projectId}
       onReviewComment={onReviewComment}
       commit={active.commit}
+      path={active.path}
+      childSessionId={active.childSessionId}
       onCommit={(sha) => {
         openTab(sessionId, {
           id: `commit-${sha}`,
@@ -277,6 +286,8 @@ function SurfaceContent({
   projectId,
   onReviewComment = () => undefined,
   commit,
+  path,
+  childSessionId,
   onCommit = () => undefined,
 }: {
   kind: DockSurfaceKind
@@ -285,19 +296,23 @@ function SurfaceContent({
   projectId: string
   onReviewComment?: (comment: ReviewComment) => void
   commit?: string
+  path?: string
+  childSessionId?: string
   onCommit?: (sha: string) => void
 }) {
   if (kind === 'subagent')
-    return (
-      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
-        Child transcript is available when a child session is selected.
-      </div>
-    )
+    return <ChildTranscriptSurface sessionId={childSessionId} />
   if (kind === 'browser') return <BrowserPreview sessionId={sessionId} />
   if (kind === 'terminal')
     return <TerminalSurface sessionId={sessionId} target={target} />
   if (kind === 'files' || kind === 'file')
-    return <WorkspaceFilesSurface sessionId={sessionId} target={target} />
+    return (
+      <WorkspaceFilesSurface
+        sessionId={sessionId}
+        target={target}
+        initialPath={kind === 'file' ? path : undefined}
+      />
+    )
   if (!target.cwd)
     return (
       <div className="p-6 text-sm" role="status">
@@ -338,6 +353,63 @@ function SurfaceContent({
       >
         {target.cwd}
       </code>
+    </div>
+  )
+}
+
+function ChildTranscriptSurface({ sessionId }: { sessionId?: string }) {
+  const child = useSessionsStore((state) =>
+    sessionId
+      ? state.sessions.find((session) => session.id === sessionId)
+      : null,
+  )
+  const messages = useMessagesStore(
+    (state) =>
+      (sessionId ? state.bySession[sessionId] : undefined) ?? EMPTY_MESSAGES,
+  )
+  const messagesVersion = useMessagesStore((state) => state.lastSeq)
+
+  useEffect(() => {
+    if (!sessionId) return
+    let active = true
+    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`)
+      .then((response) => {
+        if (!response.ok) throw new Error('Could not load transcript')
+        return response.json()
+      })
+      .then((rows: unknown) => {
+        const snapshot = SessionSnapshot.safeParse({
+          ...(rows as object),
+          type: 'sessionSnapshot',
+          sessionId,
+        })
+        if (active && snapshot.success)
+          useMessagesStore.getState().loadSnapshot(snapshot.data)
+      })
+      .catch(() => undefined)
+    const socket = connectForgeSocket({ sessions: [sessionId] })
+    return () => {
+      active = false
+      socket.stop()
+    }
+  }, [sessionId])
+
+  if (!child)
+    return (
+      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
+        Child session is unavailable.
+      </div>
+    )
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 border-b border-border px-3 py-2 text-sm font-medium">
+        {child.title || 'Child transcript'}
+      </div>
+      <SubagentTranscript
+        messages={messages}
+        messagesVersion={messagesVersion}
+        skills={[]}
+      />
     </div>
   )
 }
