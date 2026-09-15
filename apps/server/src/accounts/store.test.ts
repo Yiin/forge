@@ -404,6 +404,7 @@ describe('accountKindForHarness', () => {
         args: ['@zed-industries/claude-code-acp'],
       }),
     ).toBe('claude')
+    expect(accountKindForHarness('codex-acp', { command: 'npx' })).toBe('codex')
     expect(accountKindForHarness('grok', { command: 'grok' })).toBe('grok')
     expect(accountKindForHarness('pi', { command: 'pi' })).toBe('pi')
   })

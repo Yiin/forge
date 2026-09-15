@@ -30,7 +30,10 @@ export function harnessAccountRoutes(
     configState?: ConfigState
     loginManager?: LoginManager
     usagePoller?: UsagePoller
-    refreshModels?: (accountId: string) => void
+    refreshModels?: (
+      accountId: string,
+      signal?: AbortSignal,
+    ) => void | Promise<void>
   },
 ) {
   const store = new HarnessAccountStore(db)
@@ -137,7 +140,7 @@ export function harnessAccountRoutes(
       return c.json({ error: 'Account not found' }, 404)
     const catalog = readAccountModels(db, c.req.param('id'))
     if (isAccountModelsStale(catalog))
-      options?.refreshModels?.(c.req.param('id'))
+      void options?.refreshModels?.(c.req.param('id'), c.req.raw.signal)
     return c.json(
       catalog ?? {
         accountId: c.req.param('id'),

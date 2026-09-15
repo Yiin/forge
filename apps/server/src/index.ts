@@ -146,7 +146,10 @@ export function createApp(
   configState?: ConfigState,
   loginManager?: LoginManager,
   usagePoller?: UsagePoller,
-  refreshModels?: (accountId: string) => void,
+  refreshModels?: (
+    accountId: string,
+    signal?: AbortSignal,
+  ) => void | Promise<void>,
   workspaceFiles?: WorkspaceFiles,
   requestGuard = new RequestGuard(configState?.current.terminalAccess),
 ) {
@@ -423,18 +426,20 @@ export function startServer(port?: number): ServerType {
       ['pi', unsupportedUsageProbe],
     ]),
   })
-  const refreshModels = (accountId: string) => {
+  const refreshModels = (accountId: string, signal?: AbortSignal) => {
     const account = accountStore.get(accountId)
     const entry = account && configState.current.harness[account.harnessKey]
-    if (!account || !entry || entry.protocol !== 'acp') return
-    if (!['claude', 'kimi', 'opencode'].includes(account.kind)) return
+    if (!account || !entry || entry.adapterKind !== 'native') return
     void refreshAccountModels(db, {
       accountId,
       harnessKey: account.harnessKey,
-      probe: async () => {
+      signal,
+      probe: async (probeSignal) => {
+        if (probeSignal.aborted)
+          throw new Error('native model discovery cancelled')
         const harnessProcess = factory(account.harnessKey, accountId)
         if (!harnessProcess.newSession) return []
-        const result = await harnessProcess.newSession(
+        const started = harnessProcess.newSession(
           {
             id: `model-probe-${accountId}`,
             cwd: globalThis.process.cwd(),
@@ -443,6 +448,23 @@ export function startServer(port?: number): ServerType {
           () => undefined,
           () => undefined,
         )
+        const aborted = new Promise<never>((_, reject) => {
+          if (probeSignal.aborted) {
+            reject(new Error('native model discovery cancelled'))
+            return
+          }
+          probeSignal.addEventListener(
+            'abort',
+            () => reject(new Error('native model discovery cancelled')),
+            { once: true },
+          )
+        })
+        void started
+          .then(async (result) => {
+            if (probeSignal.aborted) await result.handle.kill()
+          })
+          .catch(() => undefined)
+        const result = await Promise.race([started, aborted])
         await result.handle.kill()
         return result.availableModels ?? result.handle.availableModels ?? []
       },

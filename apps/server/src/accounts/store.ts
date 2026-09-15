@@ -230,28 +230,22 @@ export const ACCOUNT_KINDS = [
   'opencode',
   'grok',
   'pi',
+  'cursor',
+  'devin',
+  'hermes',
 ] as const
 
 /**
- * Derives the account kind a harness entry belongs to by token-matching the
- * key, command, and args. Harnesses with no managed-account support (gemini,
- * mock, custom PTY entries) return null and run on ambient credentials.
+ * Resolves the account kind from the explicit harness registry key.
+ * Unknown and custom entries run without a managed account.
  */
 export function accountKindForHarness(
   key: string,
-  entry?: { command?: string; args?: string[] },
+  _entry?: { command?: string; args?: string[] },
 ): string | null {
-  const tokens = [key, entry?.command ?? '', ...(entry?.args ?? [])]
-    .join(' ')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-  for (const kind of [...ACCOUNT_KINDS].sort(
-    (left, right) => right.length - left.length,
-  )) {
-    if (tokens.includes(kind)) return kind
-  }
-  return null
+  if (key === 'claude-code-acp') return 'claude'
+  if (key === 'codex-acp') return 'codex'
+  return (ACCOUNT_KINDS as readonly string[]).includes(key) ? key : null
 }
 
 export function accountEnv(
