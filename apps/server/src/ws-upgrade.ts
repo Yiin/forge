@@ -90,16 +90,20 @@ export class WebSocketUpgrades {
       const terminal =
         /^\/api\/sessions\/[^/]+\/terminals\/[^/]+\/events$/.test(path ?? '')
       if (path !== '/ws' && !terminal) return this.reject(socket, 404)
-      const guard = this.requestGuard.check(
-        new Request(
-          `http://${request.headers.host ?? 'forge.invalid'}${request.url ?? '/'}`,
-          {
+      let guard: string | undefined
+      try {
+        const host = request.headers.host
+        if (!host) return this.reject(socket, 403)
+        guard = this.requestGuard.check(
+          new Request(`http://${host}${request.url ?? '/'}`, {
             method: 'GET',
             headers: request.headers as HeadersInit,
-          },
-        ),
-        { incoming: request },
-      )
+          }),
+          { incoming: request },
+        )
+      } catch {
+        return this.reject(socket, 403)
+      }
       if (guard) return this.reject(socket, 403)
       const controller = new AbortController()
       const owner: Opening = {

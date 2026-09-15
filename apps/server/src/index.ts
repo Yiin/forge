@@ -148,9 +148,9 @@ export function createApp(
   usagePoller?: UsagePoller,
   refreshModels?: (accountId: string) => void,
   workspaceFiles?: WorkspaceFiles,
+  requestGuard = new RequestGuard(configState?.current.terminalAccess),
 ) {
   const app = new Hono()
-  const requestGuard = new RequestGuard(configState?.current.terminalAccess)
   app.use('*', async (c, next) => {
     const method = c.req.method.toUpperCase()
     const failure = requestGuard.check(c.req.raw, {
@@ -391,6 +391,7 @@ export function startServer(port?: number): ServerType {
   uploadStore.setTerminalManager(terminals)
   manager.setTerminalManager(terminals)
   const terminalAuthority = new TerminalAuthority(config.terminalAccess)
+  const requestGuard = new RequestGuard(config.terminalAccess)
   const terminalRequests = new TerminalRequests(
     terminals.limits.http,
     terminals.limits.requestDeadlineMs,
@@ -473,13 +474,14 @@ export function startServer(port?: number): ServerType {
     usagePoller,
     refreshModels,
     workspaceFiles,
+    requestGuard,
   )
   usagePoller.start()
   const upgrades = new WebSocketUpgrades(
     app,
     terminals.limits.http,
     terminals.limits.requestDeadlineMs,
-    new RequestGuard(config.terminalAccess),
+    requestGuard,
   )
   app.get('/ws', websocketRoute(upgrades.upgradeWebSocket, db, bus))
   app.route(
@@ -491,7 +493,10 @@ export function startServer(port?: number): ServerType {
       fetch: app.fetch,
       port: listenPort,
     },
-    (address) => terminalAuthority.bind(address.port),
+    (address) => {
+      requestGuard.bind(address.port)
+      terminalAuthority.bind(address.port)
+    },
   )
   upgrades.install(server as Server)
   const shutdown = new ServerShutdown(
