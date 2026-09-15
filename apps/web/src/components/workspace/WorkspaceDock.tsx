@@ -11,6 +11,7 @@ import {
 import { Button } from '../ui/button'
 import { cn } from '@/lib/utils'
 import { BrowserPreview } from './BrowserPreview'
+import { TerminalSurface } from './TerminalSurface'
 import {
   DOCK_CHAT_MIN_WIDTH,
   type DockSurfaceKind,
@@ -263,6 +264,8 @@ function SurfaceContent({
       </div>
     )
   if (kind === 'browser') return <BrowserPreview sessionId={sessionId} />
+  if (kind === 'terminal')
+    return <TerminalSurface sessionId={sessionId} target={target} />
   if (!target.cwd)
     return (
       <div className="p-6 text-sm" role="status">
