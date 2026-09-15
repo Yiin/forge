@@ -251,4 +251,92 @@ describe('provider policy and model selection through native ACP frames', () => 
       await f.cleanup(handle)
     }
   }, 15000)
+  test('Grok keeps two native response boundaries and source signatures within one original turn', async () => {
+    const f = await providerFixture('grok')
+    f.deps.launch = {
+      ...f.deps.launch,
+      env: { ...f.deps.launch.env, FORGE_ACP_TEST_SCENARIO: 'grok-responses' },
+    }
+    const sources: unknown[] = []
+    const originalPut = f.deps.contentStore.put
+    f.deps.contentStore.put = async (input, signal) => {
+      if (input.purpose === 'source_metadata')
+        sources.push(JSON.parse(Buffer.from(input.bytes).toString('utf8')))
+      return originalPut(input, signal)
+    }
+    let handle: HarnessHandle | undefined
+    try {
+      handle = await createGrokAdapter({ ...f.deps, grokRail: 'public' }).spawn(
+        f.session,
+        (event) => f.events.push(event),
+      )
+      const receipt = await handle.prompt('Two native responses')
+      expect((await receipt.completion).status).toBe('completed')
+      const text = f.events.filter((event) => event.type === 'text_delta')
+      expect(text.map((event) => event.text)).toEqual([
+        'Response 1.',
+        'Response 2.',
+      ])
+      const boundaries = f.events.filter(
+        (event) => event.type === 'source_reference',
+      )
+      expect(boundaries.map((event) => event.boundary)).toEqual([
+        'opened',
+        'reasoning_closed',
+        'closed',
+        'opened',
+        'reasoning_closed',
+        'closed',
+      ])
+      const responseIds = boundaries.map((event) =>
+        'responseId' in event.subject ? event.subject.responseId : undefined,
+      )
+      expect(responseIds[0]).toBeTruthy()
+      expect(responseIds[3]).toBeTruthy()
+      expect(responseIds[0]).not.toBe(responseIds[3])
+      expect(responseIds.slice(0, 3)).toEqual(Array(3).fill(responseIds[0]))
+      expect(responseIds.slice(3)).toEqual(Array(3).fill(responseIds[3]))
+      const records = f.transactions.flatMap(
+        (transaction) => transaction.records,
+      )
+      expect(
+        records
+          .filter(
+            (record) =>
+              record.value.kind === 'event' &&
+              record.value.event.type === 'text_delta',
+          )
+          .map((record) => record.subject?.responseId),
+      ).toEqual([responseIds[0], responseIds[3]])
+      for (let index = 1; index <= 2; index++) {
+        expect(sources).toContainEqual(
+          expect.objectContaining({
+            native: expect.objectContaining({
+              update: expect.objectContaining({
+                sessionUpdate: 'reasoning_completed',
+                signature: `signature-${index}`,
+              }),
+            }),
+          }),
+        )
+        expect(sources).toContainEqual(
+          expect.objectContaining({
+            native: expect.objectContaining({
+              update: expect.objectContaining({
+                sessionUpdate: 'response_completed',
+                message_id: index === 1 ? 'native-one' : 'native-two',
+                stop_sequence: `stop-${index}`,
+              }),
+            }),
+          }),
+        )
+      }
+      expect(
+        f.events.filter((event) => event.type === 'turn_completed'),
+      ).toHaveLength(1)
+      expect(f.failures).toEqual([])
+    } finally {
+      await f.cleanup(handle)
+    }
+  }, 15000)
 })

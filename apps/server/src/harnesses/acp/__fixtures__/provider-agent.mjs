@@ -80,6 +80,38 @@ input.on('line', (line) => {
       })
       break
     case 'session/prompt':
+      if (scenario === 'grok-responses') {
+        const update = (value) =>
+          send({
+            method: 'session/update',
+            params: { sessionId, update: value },
+          })
+        for (const [index, message_id] of [
+          'native-one',
+          'native-two',
+        ].entries()) {
+          update({
+            sessionUpdate: 'response_started',
+            message_id,
+            input_tokens: index + 1,
+          })
+          update({
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: `Response ${index + 1}.` },
+          })
+          update({
+            sessionUpdate: 'reasoning_completed',
+            signature: `signature-${index + 1}`,
+          })
+          update({
+            sessionUpdate: 'response_completed',
+            message_id,
+            stop_reason: index ? 'end_turn' : 'tool_use',
+            stop_sequence: `stop-${index + 1}`,
+            usage: { output_tokens: index + 2 },
+          })
+        }
+      }
       reply(frame.id, { stopReason: 'end_turn' })
       break
     case 'session/set_mode':
