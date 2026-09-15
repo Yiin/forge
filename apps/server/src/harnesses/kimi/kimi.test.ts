@@ -705,10 +705,13 @@ describe('correction physical resources and source-shaped recovery', () => {
     })
     expect(host.budget.count('hostHomes')).toBe(1)
     await control(a.account.homePath, { op: 'releaseStartup' })
-    const first = await starting,
-      second = await retryFixtureAdmission(() =>
-        host.acquire(effectiveB, 'helper'),
-      )
+    const first = await starting
+    // A started server has already returned its startup HTTP buffer, so the
+    // next home's startup sees the whole host allowance.
+    expect(host.budget.count('hostHttpBufferBytes')).toBe(0)
+    const second = await retryFixtureAdmission(() =>
+      host.acquire(effectiveB, 'helper'),
+    )
     try {
       expect(host.budget.count('hostProcesses')).toBe(4)
       expect(host.budget.count('hostGuardians')).toBe(2)

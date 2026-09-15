@@ -637,7 +637,11 @@ describe('Cursor adapter through real Node wire and sidecar runtime', () => {
       selected: selected(),
       stateRoot,
       resources,
-      limits: { turnMs: 1000, preparationMs: 800 },
+      // The held flush, not preparation, must be what expires. Both budgets
+      // cover a cold sidecar spawn under full-suite load; the turn budget stays
+      // above the preparation budget so the turn deadline fires with the flush
+      // still pending.
+      limits: { turnMs: 4000, preparationMs: 3000 },
       sink: {
         ...recorded.sink,
         flush: async (value, signal) => {
@@ -655,7 +659,7 @@ describe('Cursor adapter through real Node wire and sidecar runtime', () => {
         permissionMode: 'auto',
         model: 'test',
       })
-      await vi.waitFor(() => expect(entered).toBe(true))
+      await vi.waitFor(() => expect(entered).toBe(true), { timeout: 3000 })
       const outcome = await receipt.completion
       expect(outcome).toMatchObject({
         status: 'failed',
@@ -674,7 +678,7 @@ describe('Cursor adapter through real Node wire and sidecar runtime', () => {
       held.resolve()
       await handle.kill()
     }
-  })
+  }, 15000)
   it('captures selected records before caller mutation and preserves protocol selectors with a short credential key', async () => {
     const accountEnv = { TEST_SCENARIO: 'short-key' },
       authority = {

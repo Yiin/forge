@@ -93,6 +93,45 @@ test('answers queued questions in order', async ({ page }) => {
   }
 })
 
+test('keeps a pending question reachable above the workspace dock', async ({
+  page,
+}) => {
+  const { forge, shell } = await openQuestion(page)
+  try {
+    const sessionId = new URL(page.url()).pathname.split('/').pop()
+    await page.evaluate(
+      ({ sessionId, takeover }) => {
+        if (!sessionId) throw new Error('Session URL has no session id')
+        localStorage.setItem(
+          'forge.shell.dock',
+          JSON.stringify({
+            width: 480,
+            sessions: {
+              [sessionId]: {
+                open: true,
+                takeover,
+                activeTabId: null,
+                tabs: [],
+              },
+            },
+          }),
+        )
+      },
+      { sessionId, takeover: !test.info().project.name.startsWith('phone') },
+    )
+    await page.reload()
+
+    const panel = shell.getByRole('region', { name: 'Question from Forge' })
+    await expect(panel).toBeVisible()
+    await panel.getByRole('button', { name: 'First' }).click()
+    await expect(shell.locator('.chat-answered-question')).toContainText(
+      'First',
+    )
+  } finally {
+    await stopProxiedForge(page, forge)
+  }
+})
+
 test('answers a multi-select question on the phone viewport', async ({
   page,
 }) => {
