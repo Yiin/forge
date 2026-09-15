@@ -1,4 +1,9 @@
-import type { HarnessAdapter, HarnessEvent } from '../harnesses/types.js'
+import type {
+  HarnessAdapter,
+  HarnessEvent,
+  PermissionReply,
+  QuestionAnswer,
+} from '../harnesses/types.js'
 import type { HarnessHandle, HarnessItem, HarnessProcess } from './harness.js'
 
 function item(event: HarnessEvent): HarnessItem | undefined {
@@ -57,6 +62,12 @@ function item(event: HarnessEvent): HarnessItem | undefined {
     case 'usage':
     case 'usage_snapshot':
       return make({ ...event })
+    case 'request_cancelled':
+      return make({
+        type: 'user_answer',
+        questionId: event.requestId,
+        expired: true,
+      })
     case 'plan':
       return make({
         type: 'plan',
@@ -111,6 +122,53 @@ function item(event: HarnessEvent): HarnessItem | undefined {
   }
 }
 
+function permissionReply(
+  request: Extract<HarnessEvent, { type: 'permission_requested' }>['request'],
+  answer: unknown,
+): PermissionReply {
+  if (typeof answer === 'object' && answer !== null)
+    return {
+      ...(answer as PermissionReply),
+      requestId: request.requestId,
+    } as PermissionReply
+  const selected = String(answer)
+  const optionId =
+    request.options.find(
+      (option) => option.id === selected || option.label === selected,
+    )?.id ?? selected
+  return optionId === 'deny'
+    ? { type: 'denied', requestId: request.requestId }
+    : { type: 'selected', requestId: request.requestId, optionId }
+}
+
+function questionAnswers(
+  request: Extract<HarnessEvent, { type: 'question_requested' }>['request'],
+  answer: unknown,
+): Record<string, QuestionAnswer> {
+  if (typeof answer === 'object' && answer !== null && !Array.isArray(answer))
+    return answer as Record<string, QuestionAnswer>
+  const value = Array.isArray(answer) ? answer.map(String) : String(answer)
+  return Object.fromEntries(
+    request.questions.map((question) => [
+      question.id,
+      Array.isArray(value)
+        ? { type: 'selected', optionIds: value }
+        : question.options.some(
+              (option) => option.id === value || option.label === value,
+            )
+          ? {
+              type: 'selected',
+              optionIds: [
+                question.options.find(
+                  (option) => option.id === value || option.label === value,
+                )!.id,
+              ],
+            }
+          : { type: 'free_text', text: value },
+    ]),
+  )
+}
+
 export function nativeHarness(
   adapter: HarnessAdapter,
   onBinding?: (sessionId: string, providerSessionId: string) => void,
@@ -135,19 +193,45 @@ export function nativeHarness(
           }
         : null,
     }
+    const buffered: HarnessEvent[] = []
+    let ready = false
+    let nativeHandle: import('../harnesses/types.js').HarnessHandle | undefined
+    const permissionRequests = new Map<
+      string,
+      Extract<HarnessEvent, { type: 'permission_requested' }>['request']
+    >()
+    const questionRequests = new Map<
+      string,
+      Extract<HarnessEvent, { type: 'question_requested' }>['request']
+    >()
+    const processEvent = (event: HarnessEvent) => {
+      if (event.type === 'permission_requested')
+        permissionRequests.set(event.request.requestId, event.request)
+      if (event.type === 'question_requested')
+        questionRequests.set(event.request.requestId, event.request)
+      if (event.type === 'request_cancelled') {
+        permissionRequests.delete(event.requestId)
+        questionRequests.delete(event.requestId)
+      }
+      if (event.type === 'run_failed') onExit(new Error(event.message))
+      const normalized = item(event)
+      if (normalized) onItem(normalized)
+    }
     const handle = await (resume ? adapter.load : adapter.spawn)!(
       nativeSession,
       (event) => {
-        const normalized = item(event)
-        if (normalized) onItem(normalized)
-        if (event.type === 'run_failed') onExit(new Error(event.message))
-        if (
-          event.type === 'turn_completed' &&
-          event.outcome.status !== 'completed'
-        )
-          onExit(new Error(event.outcome.status))
+        if (!ready) {
+          buffered.push(event)
+          return
+        }
+        if (event.type === 'turn_completed' && nativeHandle?.binding)
+          onBinding?.(session.id, nativeHandle.binding.providerSessionId)
+        processEvent(event)
       },
     )
+    nativeHandle = handle
+    ready = true
+    for (const event of buffered) processEvent(event)
     if (handle.binding)
       onBinding?.(session.id, handle.binding.providerSessionId)
     return {
@@ -192,12 +276,15 @@ export function nativeHarness(
       setModel: handle.setModel,
       configOptions: handle.configOptions,
       setConfigOption: handle.setConfigOption,
-      answerQuestion: handle.replyQuestion
-        ? (id, answer) =>
-            handle.replyQuestion!(id, {
-              [id]: { type: 'free_text', text: answer },
-            })
-        : undefined,
+      answerQuestion: (id, answer) => {
+        const permission = permissionRequests.get(id)
+        if (handle.replyPermission && permission)
+          return handle.replyPermission(permissionReply(permission, answer))
+        if (!handle.replyQuestion) return undefined
+        const request = questionRequests.get(id)
+        if (!request) throw new Error(`Unknown native question ${id}`)
+        return handle.replyQuestion(id, questionAnswers(request, answer))
+      },
       availableModels: handle.availableModels,
     }
   }
