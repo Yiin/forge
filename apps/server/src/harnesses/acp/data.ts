@@ -1,15 +1,30 @@
 import { createHash } from 'node:crypto'
 
 export function immutableData<T>(input: T, maximum = 1024 * 1024): T {
+  return copyData(input, maximum) as T
+}
+export function immutableNumericData(
+  input: unknown,
+  numeric: (path: string, value: number) => string,
+  maximum = 1024 * 1024,
+): unknown {
+  return copyData(input, maximum, numeric)
+}
+function copyData(
+  input: unknown,
+  maximum: number,
+  numeric?: (path: string, value: number) => string,
+): unknown {
   let bytes = 0,
     nodes = 0
   const ancestors = new Set<object>()
-  const copy = (value: unknown, depth: number): unknown => {
+  const copy = (value: unknown, depth: number, path: string): unknown => {
     if (++nodes > 65536 || depth > 64)
       throw Error('ACP value exceeds structure limit')
     if (value === null || value === undefined || typeof value === 'boolean')
       return value
     if (typeof value === 'number') {
+      if (numeric) return copy(numeric(path, value), depth, path)
       if (!Number.isFinite(value)) throw Error('ACP value must be finite')
       return value
     }
@@ -53,14 +68,20 @@ export function immutableData<T>(input: T, maximum = 1024 * 1024): T {
       bytes += Buffer.byteLength(key)
       if (bytes > maximum) throw Error('ACP value exceeds byte limit')
       Object.defineProperty(result, key, {
-        value: copy(descriptor.value, depth + 1),
+        value: copy(
+          descriptor.value,
+          depth + 1,
+          numeric
+            ? path + '/' + key.replaceAll('~', '~0').replaceAll('/', '~1')
+            : '',
+        ),
         enumerable: true,
       })
     }
     ancestors.delete(value)
     return Object.freeze(result)
   }
-  return copy(input, 0) as T
+  return copy(input, 0, '')
 }
 function encode(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
