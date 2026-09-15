@@ -72,11 +72,15 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
         'A line that wraps as the conversation narrows. '.repeat(6),
       )
       await expect(form).toHaveAttribute('data-composer-mode', 'expanded')
-      const wideHeight = (await composer.boundingBox())!.height
+      const wideBox = (await composer.boundingBox())!
+      const wideHeight = wideBox.height
       await composer.evaluate((node: HTMLTextAreaElement) =>
         node.setSelectionRange(5, 20),
       )
-      await page.setViewportSize({ width: 1000, height: 880 })
+      await page.setViewportSize({ width: 850, height: 880 })
+      await expect
+        .poll(async () => (await composer.boundingBox())!.width)
+        .toBeLessThan(wideBox.width)
       await expect
         .poll(async () => (await composer.boundingBox())!.height)
         .toBeGreaterThan(wideHeight)
