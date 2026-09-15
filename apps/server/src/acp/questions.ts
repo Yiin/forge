@@ -459,20 +459,21 @@ export class QuestionManager {
       // answers with one of them directly. Kimi packs its questions into
       // rawInput and offers one allow per possible answer, so the chosen answer
       // has to come back as that answer's own option, by name first and by
-      // position when the two lists line up. Anything else means the user
-      // deliberately answered, so send the narrowest allow, and cancel when the
-      // agent offered none.
+      // position when the two lists are one allow per answer. A plain approval
+      // triple can also match on length, so position alone would answer three
+      // choices with a reject. Anything else means the user deliberately
+      // answered, so send the narrowest allow, and cancel when there is none.
       const choices = question.questions.flatMap((entry) => entry.options)
       const chosen = choices.findIndex((option) => option.id === selected)
+      const oneAllowPerAnswer =
+        request.options.length === choices.length &&
+        request.options.every((option) => option.kind === 'allow_once')
       const proceed =
         request.options.find((option) => option.optionId === selected) ??
         (chosen >= 0
           ? (request.options.find(
               (option) => option.name === choices[chosen].label,
-            ) ??
-            (request.options.length === choices.length
-              ? request.options[chosen]
-              : undefined))
+            ) ?? (oneAllowPerAnswer ? request.options[chosen] : undefined))
           : undefined) ??
         request.options.find((option) => option.kind === 'allow_once') ??
         request.options.find((option) => option.kind === 'allow_always') ??

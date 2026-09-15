@@ -289,3 +289,51 @@ describe('Kimi-shaped permission questions', () => {
     db.close()
   })
 })
+
+describe('questions against a plain approval triple', () => {
+  it('never answers a third choice with the agent reject option', async () => {
+    const { db, session } = fixture()
+    const manager = new QuestionManager({ db, now: () => 1000 })
+    const request = {
+      sessionId: session.id,
+      toolCall: {
+        toolCallId: 'tool-1',
+        title: 'AskUserQuestion',
+        rawInput: {
+          questions: [
+            {
+              question: 'Pick one',
+              options: [
+                { label: 'First' },
+                { label: 'Second' },
+                { label: 'Third' },
+              ],
+            },
+          ],
+        },
+      },
+      options: [
+        { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
+        {
+          kind: 'allow_always',
+          name: 'Allow always',
+          optionId: 'allow-always',
+        },
+        { kind: 'reject_once', name: 'Reject once', optionId: 'reject-once' },
+      ],
+    } as unknown as Parameters<QuestionManager['handlePermission']>[0]
+    const pending = manager.handlePermission(request)
+    const held = manager.listPending(session.id)[0]
+    manager.answerQuestion(session.id, held.questionId, {
+      answers: {
+        [held.questions[0].id ?? 'question-0']: [
+          held.questions[0].options[2].id!,
+        ],
+      },
+    })
+    expect(await pending).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once' },
+    })
+    db.close()
+  })
+})
