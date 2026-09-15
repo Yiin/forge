@@ -1272,6 +1272,14 @@ export class SessionManager {
 
   private failPrompt(row: SessionRow, turnId: string, error: unknown) {
     if (this.turns.get(row.id) !== turnId) return
+    if (this.closeWork) {
+      this.finishTurn(
+        row,
+        turnId,
+        new Error('Session interrupted by server shutdown'),
+      )
+      return
+    }
     const message = errorMessage(error)
     const match = detectProviderError(message)
     if (match && row.account_id) {
@@ -1307,6 +1315,14 @@ export class SessionManager {
   }
 
   private finishPrompt(row: SessionRow, turnId: string) {
+    if (this.closeWork) {
+      this.finishTurn(
+        row,
+        turnId,
+        new Error('Session interrupted by server shutdown'),
+      )
+      return
+    }
     // A harness may emit its own framing. Complete the turn when it does not.
     if (this.turns.get(row.id) === turnId) {
       appendMessage(this.db, {

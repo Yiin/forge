@@ -1,3 +1,4 @@
+import { recoverSessions } from './recovery.js'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -1664,6 +1665,117 @@ describe('unproven recovery ownership', () => {
       } finally {
         release()
         await manager.close()
+        db.close()
+      }
+    },
+  )
+})
+
+describe('shutdown preserves durable turn recovery', () => {
+  it.each(['pending', 'admitted-rejected', 'admitted-resolved'] as const)(
+    'recovers the original accepted turn after %s shutdown',
+    async (mode) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'shutdown', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'shutdown',
+        cwd: '/tmp',
+      })
+      db.prepare('UPDATE sessions SET auto_resume=0 WHERE id=?').run(session.id)
+      let resolveSpawn!: (handle: HarnessHandle) => void
+      const heldSpawn = new Promise<HarnessHandle>((resolve) => {
+        resolveSpawn = resolve
+      })
+      let resolvePrompt!: () => void
+      let rejectPrompt!: (error: Error) => void
+      const heldPrompt = new Promise<void>((resolve, reject) => {
+        resolvePrompt = resolve
+        rejectPrompt = reject
+      })
+      void heldPrompt.catch(() => {})
+      let releaseKill!: () => void
+      const heldKill = new Promise<void>((resolve) => {
+        releaseKill = resolve
+      })
+      const prompt = vi.fn(() => heldPrompt)
+      const kill = vi.fn(async () => {
+        if (mode === 'admitted-rejected') rejectPrompt(Error('agent exited'))
+        else resolvePrompt()
+        await heldKill
+      })
+      const handle: HarnessHandle = { prompt, kill, cancel() {} }
+      const spawn = vi.fn(async () => (mode === 'pending' ? heldSpawn : handle))
+      const manager = new SessionManager(db, new EventBus(), () => ({ spawn }))
+      let replacement: SessionManager | undefined
+      try {
+        await manager.prompt(session.id, 'original user text')
+        await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1))
+        if (mode !== 'pending')
+          await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1))
+        const original = db
+          .prepare(
+            "SELECT turn_id FROM messages WHERE session_id=? AND type='turn_start' ORDER BY seq LIMIT 1",
+          )
+          .get(session.id) as { turn_id: string }
+        const closing = manager.close()
+        let closed = false
+        void closing.then(() => {
+          closed = true
+        })
+        resolveSpawn(handle)
+        await vi.waitFor(() => expect(kill).toHaveBeenCalledTimes(1))
+        expect(closed).toBe(false)
+        releaseKill()
+        await closing
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        expect(
+          db.prepare('SELECT status FROM sessions WHERE id=?').get(session.id),
+        ).toEqual({ status: 'running' })
+        expect(
+          db
+            .prepare(
+              "SELECT type FROM messages WHERE session_id=? AND type IN ('turn_end','turn_interrupted','error')",
+            )
+            .all(session.id),
+        ).toEqual([])
+        const user = db
+          .prepare(
+            "SELECT content FROM messages WHERE session_id=? AND role='user' AND type='text_delta'",
+          )
+          .get(session.id) as { content: string }
+        expect(JSON.parse(user.content).text).toBe('original user text')
+        const resume = vi.fn()
+        replacement = new SessionManager(db, new EventBus(), () => ({
+          spawn: resume,
+        }))
+        await recoverSessions(
+          db,
+          replacement,
+          new EventBus(),
+          { version: 'test', stopped_at: 1 },
+          'test',
+        )
+        expect(
+          db
+            .prepare(
+              "SELECT turn_id,type FROM messages WHERE session_id=? AND type='turn_interrupted'",
+            )
+            .all(session.id),
+        ).toEqual([{ turn_id: original.turn_id, type: 'turn_interrupted' }])
+        expect(
+          db.prepare('SELECT status FROM sessions WHERE id=?').get(session.id),
+        ).toEqual({ status: 'idle' })
+        expect(resume).not.toHaveBeenCalled()
+        expect(prompt).toHaveBeenCalledTimes(mode === 'pending' ? 0 : 1)
+      } finally {
+        resolveSpawn(handle)
+        resolvePrompt()
+        releaseKill()
+        await manager.close()
+        await replacement?.close()
         db.close()
       }
     },
