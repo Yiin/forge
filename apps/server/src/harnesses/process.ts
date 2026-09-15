@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
-import { signalProcessGroup, waitForProcessGroupExit } from './process-group.js'
+import * as processGroups from './process-group.js'
 import {
   DiagnosticTail,
   diagnosticError,
@@ -186,22 +186,24 @@ export class NativeProcess {
         if (!drainOutput) this.transport?.close(this.reason!)
         const pid = this.child.pid
         if (!this.groupRetired && pid) {
-          let alive = signalProcessGroup(pid, 'SIGTERM')
+          let alive = processGroups.signalProcessGroup(pid, 'SIGTERM')
           const graceDeadline = performance.now() + this.graceMs
           while (alive && performance.now() < graceDeadline) {
             await delay(
               Math.min(10, Math.max(1, graceDeadline - performance.now())),
             )
-            alive = signalProcessGroup(pid, 0)
+            alive = processGroups.signalProcessGroup(pid, 0)
           }
           deadline = performance.now() + this.cleanupTimeoutMs
           // Never check this group again after observing its removal.
-          if (alive && signalProcessGroup(pid, 'SIGKILL'))
-            await waitForProcessGroupExit(pid, deadline)
+          if (alive && processGroups.signalProcessGroup(pid, 'SIGKILL'))
+            await processGroups.waitForProcessGroupExit(pid, deadline)
         }
         this.groupRetired = true
-      } catch {
-        cleanupError = new Error('Native process group cleanup failed')
+      } catch (error) {
+        cleanupError = new Error('Native process group cleanup failed', {
+          cause: error,
+        })
         this.reason = cleanupError
       } finally {
         if (drainOutput) await this.drainOutput(deadline)
