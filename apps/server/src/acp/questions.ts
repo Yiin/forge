@@ -326,9 +326,18 @@ export class QuestionManager {
       if (!idKey) continue
       const optionIds: unknown = Array.isArray(value)
         ? value
-        : object(value).type === 'selected_with_text'
-          ? object(value).optionIds
-          : undefined
+        : typeof value === 'string' &&
+            question.options.length > 0 &&
+            !question.allowFreeInput
+          ? [value]
+          : object(value).type === 'selected_with_text'
+            ? object(value).optionIds
+            : undefined
+      if (
+        object(value).type === 'selected_with_text' &&
+        !Array.isArray(optionIds)
+      )
+        throw new QuestionError(400, `Invalid answer for ${question.question}`)
       if (!Array.isArray(optionIds)) continue
       if (
         optionIds.some(
@@ -418,13 +427,14 @@ export class QuestionManager {
       const values = object(value)
       const answer = values.answers ?? values.answer ?? value
       const answerValues = object(answer)
-      const first = Array.isArray(answer)
+      let first: unknown = Array.isArray(answer)
         ? (answer as unknown[])[0]
         : answer && typeof answer === 'object' && !Array.isArray(answer)
           ? answerValues.optionIds
             ? answer
             : Object.values(answerValues)[0]
           : answer
+      if (Array.isArray(first)) first = first[0]
       return {
         outcome: {
           outcome: 'selected' as const,
@@ -443,6 +453,12 @@ export class QuestionManager {
   ): Promise<Record<string, unknown>> | undefined {
     const question = classifyQuestion(method, params)
     if (!question) return undefined
+    if (
+      method !== 'cursor/ask_question' &&
+      new Set(question.questions.map((entry) => entry.question)).size !==
+        question.questions.length
+    )
+      throw new Error('Provider cannot represent duplicate question text')
     return this.hold(question, (value) => {
       if (value === undefined) return { outcome: 'cancelled' }
       const answer = typeof value === 'object' ? value : { answer: value }
