@@ -89,11 +89,15 @@ test('reconnects after restart without losing the cursor', async () => {
     dataDir,
     env: { FORGE_MOCK_HANG_PROMPT: '1' },
   })
-  const sessionId = await createSession(first)
-  await post(`${first.baseUrl}/api/sessions/${sessionId}/prompt`, {
-    text: 'hang',
-  })
-  await first.stop()
+  let sessionId: string
+  try {
+    sessionId = await createSession(first)
+    await post(`${first.baseUrl}/api/sessions/${sessionId}/prompt`, {
+      text: 'hang',
+    })
+  } finally {
+    await first.stop()
+  }
 
   const second = await launchForge({ dataDir })
   try {

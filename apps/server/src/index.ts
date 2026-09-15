@@ -64,7 +64,9 @@ import {
 } from './config.js'
 import { ptyHarness } from './pty/harness.js'
 import { acpHarness } from './acp/harness.js'
+import { createNativeAttachmentLoader } from './uploads/native.js'
 import { nativeHarness } from './sessions/native.js'
+import { NativeInteractions } from './sessions/native-interactions.js'
 import {
   createProductionNativeAdapter,
   harnessTransport,
@@ -160,6 +162,7 @@ export function createApp(
   workspaceFiles?: WorkspaceFiles,
   requestGuard = new RequestGuard(configState?.current.terminalAccess),
   previews?: PreviewManager,
+  nativeInteractions?: NativeInteractions,
 ) {
   const app = new Hono()
   app.use('*', async (c, next) => {
@@ -241,7 +244,7 @@ export function createApp(
     app.route('/', serverConfigRoutes())
     if (previews) app.route('/', previewRoutes(previews))
   }
-  if (questions) app.route('/', questionRoutes(questions))
+  if (questions) app.route('/', questionRoutes(questions, nativeInteractions))
   if (status) app.route('/', workspaceRoutes(status.db, uploadStore))
   if (runner && status)
     app.route(
@@ -381,6 +384,7 @@ export function startServer(port?: number): ServerType {
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
   const questions = new ServerQuestionManager({ db, bus })
+  const nativeInteractions = new NativeInteractions(db, bus)
   const configState: ConfigState = { current: config, path: configPath }
   const accountStore = new HarnessAccountStore(db)
   const factory: HarnessFactory = (key, accountId) => {
@@ -397,14 +401,19 @@ export function startServer(port?: number): ServerType {
             args: derived.args,
             env: derived.env,
             accountId: account?.id,
+            loadAttachment: createNativeAttachmentLoader(db, dataDir),
           })
         : undefined
     if (adapter)
-      return nativeHarness(adapter, (sessionId, providerSessionId) => {
-        db.prepare(
-          'UPDATE sessions SET provider_session_id = ? WHERE id = ?',
-        ).run(providerSessionId, sessionId)
-      })
+      return nativeHarness(
+        adapter,
+        (sessionId, providerSessionId) => {
+          db.prepare(
+            'UPDATE sessions SET provider_session_id = ? WHERE id = ?',
+          ).run(providerSessionId, sessionId)
+        },
+        nativeInteractions,
+      )
     if (derived?.protocol === 'pty') return ptyHarness(derived)
     if (derived?.protocol === 'acp')
       return acpHarness(derived, { db, bus, questions, accountId })
@@ -527,6 +536,8 @@ export function startServer(port?: number): ServerType {
     refreshModels,
     workspaceFiles,
     requestGuard,
+    undefined,
+    nativeInteractions,
   )
   const previews = new PreviewManager(
     workspaceFiles.targets,
@@ -602,11 +613,11 @@ export function startServer(port?: number): ServerType {
   shutdown.addCleanupHook(() => {
     previewServer?.close()
   })
-  shutdown.addCleanupHook(() => {
+  shutdown.addCleanupHook(async () => {
+    await manager.close()
     loginManager.close()
     usagePoller.stop()
     uploadStore.close()
-    manager.close()
   })
   process.on('SIGTERM', shutdown.signal)
   process.on('SIGINT', shutdown.signal)

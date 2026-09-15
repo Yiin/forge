@@ -12,6 +12,7 @@ export type ForgeServer = {
   stop: () => Promise<void>
 }
 export type LaunchOptions = {
+  fakeNative?: { kind: 'claude'; directory: string }
   frontendOrigin?: string | null
   env?: Record<string, string>
   dataDir?: string
@@ -164,8 +165,18 @@ export async function launchForge(
   if (dataDir !== tmpRoot && !dataDir.startsWith(`${tmpRoot}/`))
     throw new Error('e2e data directory must be under tmpdir')
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-  const fakeAgent = resolve(root, 'apps/server/test/fixtures/acp-mock-agent.ts')
-  const fakeAgentEnv = { ...options.fakeAgentEnv }
+  const native = options.fakeNative
+  const harnessKey = native?.kind ?? 'mock'
+  const fakeAgent = resolve(
+    root,
+    native
+      ? 'apps/server/src/harnesses/claude/fixtures/fake-claude.mjs'
+      : 'apps/server/test/fixtures/acp-mock-agent.ts',
+  )
+  const fakeAgentEnv = {
+    ...options.fakeAgentEnv,
+    ...(native ? { FORGE_CLAUDE_FIXTURE: native.directory } : {}),
+  }
   const repeat = options.env?.FORGE_E2E_REPLY_REPEAT
   if (repeat) {
     fakeAgentEnv.FORGE_MOCK_REPLY_REPEAT = repeat
@@ -204,16 +215,16 @@ export async function launchForge(
       'mode = "explicit"',
       `allowedOrigins = ${JSON.stringify(origins)}`,
       `allowedHostAuthorities = ${JSON.stringify([`127.0.0.1:${port}`, `localhost:${port}`])}`,
-      '[harness.mock]',
-      'name = "E2E native protocol fixture"',
+      `[harness.${harnessKey}]`,
+      `name = ${JSON.stringify(native ? 'E2E native Claude fixture' : 'E2E ACP fixture')}`,
       'protocol = "acp"',
-      'command = "bun"',
+      `command = ${JSON.stringify(native ? 'node' : 'bun')}`,
       `args = [${JSON.stringify(fakeAgent)}]`,
-      'adapterKind = "acp"',
+      `adapterKind = ${JSON.stringify(native ? 'native' : 'acp')}`,
       'enabled = true',
       // `env` is required by the harness schema, so the table is never optional.
       // Omitting it when there are no knobs stops the server from booting.
-      '[harness.mock.env]',
+      `[harness.${harnessKey}.env]`,
       ...(tomlEnv ? [tomlEnv] : []),
       '',
     ].join('\n'),
@@ -288,7 +299,7 @@ export async function launchForge(
   try {
     // The composer hides every harness without an account, so a fresh database
     // leaves Send disabled. Seed the one account the fixture harness needs.
-    await ensureMockAccount(baseUrl)
+    await ensureMockAccount(baseUrl, harnessKey, native ? 'native' : 'acp')
   } catch (error) {
     await stopForge(child, dataDir, !options.dataDir, port)
     throw error
@@ -350,19 +361,23 @@ export function withoutAmbientPaths(env: Record<string, string> | undefined) {
   )
 }
 
-async function ensureMockAccount(baseUrl: string): Promise<void> {
+async function ensureMockAccount(
+  baseUrl: string,
+  harnessKey: string,
+  adapterKind: 'native' | 'acp',
+): Promise<void> {
   const existing = (await (
-    await fetch(`${baseUrl}/api/harness-accounts?harness=mock`)
+    await fetch(`${baseUrl}/api/harness-accounts?harness=${harnessKey}`)
   ).json()) as unknown[]
   if (existing.length > 0) return
   const created = await fetch(`${baseUrl}/api/harness-accounts`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      harnessKey: 'mock',
+      harnessKey,
       label: 'E2E fixture account',
-      kind: 'mock',
-      adapterKind: 'acp',
+      kind: harnessKey,
+      adapterKind,
     }),
   })
   if (!created.ok)
