@@ -476,6 +476,7 @@ describe('typed ACP root runtime', () => {
           .spyOn(Date, 'now')
           .mockReturnValue(Date.now() + 24 * 60 * 60 * 1000 + 60000)
         restore = () => clock.mockRestore()
+        expect(handle.requiresResume).toBe(true)
         callback()
         if (active) {
           expect(() => f.deps.host.reserve('instance', 'processes')).toThrow(
@@ -736,3 +737,29 @@ describe('typed ACP root runtime', () => {
     }
   })
 })
+
+it('marks the original handle for exact resume after 256 completed roots', async () => {
+  const f = await fixture()
+  let handle: HarnessHandle | undefined
+  try {
+    handle = await createTypedAcpAdapter(f.deps).spawn(session, (event) =>
+      f.events.push(event),
+    )
+    expect(handle.requiresResume).toBe(false)
+    for (let index = 0; index < 256; index++) {
+      const receipt = await handle.prompt(`root ${index}`)
+      expect(await receipt.completion).toMatchObject({ status: 'completed' })
+    }
+    expect(handle.requiresResume).toBe(true)
+    expect(() => handle!.prompt('root 257')).toThrow()
+    await handle.kill()
+    expect(
+      f.events.filter((event) => event.type === 'turn_completed'),
+    ).toHaveLength(256)
+    expect(
+      f.events.filter((event) => event.type === 'run_failed'),
+    ).toHaveLength(0)
+  } finally {
+    await f.cleanup(handle)
+  }
+}, 30000)

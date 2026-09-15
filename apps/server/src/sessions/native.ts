@@ -344,6 +344,9 @@ export function nativeHarness(
     if (handle.binding)
       onBinding?.(session.id, handle.binding.providerSessionId)
     return {
+      get requiresResume() {
+        return handle.requiresResume
+      },
       prompt: (content) => {
         const input =
           typeof content === 'string'

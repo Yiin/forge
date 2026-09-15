@@ -301,6 +301,23 @@ export class SessionManager {
   private spawn(row: SessionRow) {
     return this.startOwned(() => this.spawnOriginal(row))
   }
+  private promptHandle(row: SessionRow): Promise<HarnessHandle> {
+    const original = this.handles.get(row.id)
+    if (!original) return this.spawn(row)
+    if (!original.requiresResume) return Promise.resolve(original)
+    return this.startOwned(async () => {
+      await this.disposeHandle(original)
+      this.assertOpen()
+      if (this.handles.get(row.id) !== original)
+        throw new Error('Session handle changed during retirement')
+      this.forgetHandle(row.id)
+      const saved = getActiveSession(this.db, row.id) as SessionRow | undefined
+      if (!saved) throw new Error('Session not found')
+      if (!saved.provider_session_id)
+        throw new Error('Retired harness has no saved native session')
+      return this.spawnOriginal(saved)
+    })
+  }
   private async spawnOriginal(row: SessionRow) {
     const generation = (this.generations.get(row.id) ?? 0) + 1
     this.generations.set(row.id, generation)
@@ -1202,8 +1219,11 @@ export class SessionManager {
     // Startup errors become timeline errors after acceptance. This keeps the
     // user row visible and leaves the session reachable for inspection.
     void (async () => {
+      const existing = this.handles.get(accepted.row.id)
       const handle =
-        this.handles.get(accepted.row.id) ?? (await this.spawn(accepted.row))
+        existing && !existing.requiresResume
+          ? existing
+          : await this.promptHandle(accepted.row)
       let row = accepted.row
       if (accepted.model !== undefined && accepted.model !== row.model) {
         if (!handle.setModel)

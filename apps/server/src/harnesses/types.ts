@@ -202,6 +202,7 @@ export function createCompletionHandle(
   }
 }
 export type HarnessHandle = {
+  readonly requiresResume?: boolean
   /**
    * Read the adapter's confirmed binding through a getter. Null means unconfirmed.
    * A generated ID or an initialize response without session identity is insufficient.
