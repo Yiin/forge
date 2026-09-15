@@ -443,14 +443,17 @@ export class QuestionManager {
             : Object.values(answerValues)[0]
           : answer
       if (Array.isArray(first)) first = first[0]
+      const optionIds = object(first).optionIds
+      const selected =
+        first && typeof first === 'object'
+          ? Array.isArray(optionIds)
+            ? optionIds[0]
+            : undefined
+          : first
       return {
         outcome: {
           outcome: 'selected' as const,
-          optionId: String(
-            first && typeof first === 'object'
-              ? object(first).optionIds?.[0]
-              : first,
-          ),
+          optionId: String(selected),
         },
       }
     }) as Promise<acp.RequestPermissionResponse>
