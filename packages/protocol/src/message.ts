@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { contentSnapshotTextSchema } from './harness.js'
 
 const id = z.string().min(1)
 const subagent = z.object({
@@ -10,17 +11,35 @@ const subagent = z.object({
 export const MessageContent = z.discriminatedUnion('type', [
   // Native passthrough rows retain provider-neutral event fields. Their
   // detailed validation happens at the harness boundary.
+  z
+    .object({
+      type: z.literal('content_snapshot'),
+      contentType: z.enum(['text', 'thought', 'plan']),
+      text: contentSnapshotTextSchema,
+      childId: id.optional(),
+    })
+    .catchall(z.unknown()),
   z.object({ type: z.literal('content_block') }).catchall(z.unknown()),
   z.object({ type: z.literal('source_reference') }).catchall(z.unknown()),
   z.object({ type: z.literal('usage') }).catchall(z.unknown()),
   z.object({ type: z.literal('usage_snapshot') }).catchall(z.unknown()),
   z.object({ type: z.literal('file_change') }).catchall(z.unknown()),
   z.object({ type: z.literal('child_updated') }).catchall(z.unknown()),
-  z.object({ type: z.literal('text_delta'), text: z.string() }),
-  z.object({ type: z.literal('thought_delta'), text: z.string() }),
+  z.object({
+    type: z.literal('text_delta'),
+    text: z.string(),
+    childId: id.optional(),
+  }),
+  z.object({
+    type: z.literal('thought_delta'),
+    text: z.string(),
+    childId: id.optional(),
+  }),
   z.object({
     type: z.literal('tool_call'),
     toolCallId: id,
+    childId: id.optional(),
+    nativeChildId: id.optional(),
     name: id,
     input: z.unknown(),
     subagent: subagent.optional(),
@@ -28,6 +47,8 @@ export const MessageContent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('tool_update'),
     toolCallId: id,
+    childId: id.optional(),
+    nativeChildId: id.optional(),
     status: z.string(),
     output: z.unknown().optional(),
     subagent: subagent.optional(),
@@ -35,6 +56,8 @@ export const MessageContent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('tool_result'),
     toolCallId: id,
+    childId: id.optional(),
+    nativeChildId: id.optional(),
     output: z.unknown(),
     isError: z.boolean().default(false),
     subagent: subagent.optional(),
@@ -129,6 +152,7 @@ export const MessageContent = z.discriminatedUnion('type', [
 ])
 export type MessageContent = z.infer<typeof MessageContent>
 export const messageContentTypes = [
+  'content_snapshot',
   'content_block',
   'source_reference',
   'usage',

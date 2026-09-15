@@ -181,7 +181,13 @@ describe('chat render model', () => {
         message({ type: 'text_delta', text: 'lo' }),
       ]),
     ).toEqual([
-      { kind: 'message', id: 'i', seq: 1, role: 'agent', text: 'hello' },
+      {
+        kind: 'message',
+        id: JSON.stringify(['s', 't', null, 'text', 'i']),
+        seq: 1,
+        role: 'agent',
+        text: 'hello',
+      },
     ])
   })
   it('appends pending user messages after server items', () => {
@@ -224,7 +230,7 @@ describe('chat render model', () => {
     expect(items).toEqual([
       {
         kind: 'tool',
-        id: 'i',
+        id: JSON.stringify(['s', 't', null, 'tool', 'i']),
         name: 'shell',
         state: 'done',
         input: 'ls',
@@ -261,7 +267,7 @@ describe('chat render model', () => {
     expect(items).toEqual([
       {
         kind: 'tool',
-        id: 'call-item',
+        id: JSON.stringify(['s', 't', null, 'tool', 'call-item']),
         name: 'shell',
         state: 'done',
         input: 'pwd',
@@ -277,7 +283,11 @@ describe('chat render model', () => {
       ),
     ).toEqual([
       { kind: 'system', id: 'resumed-recap', text: 'Resumed with recap' },
-      { kind: 'system', id: 'i', text: 'You stopped this turn.' },
+      {
+        kind: 'system',
+        id: JSON.stringify(['s', 't', null, 'turn_interrupted', 'i']),
+        text: 'You stopped this turn.',
+      },
     ])
   })
   it('keeps process details available without crowding the error row', () => {
@@ -292,7 +302,7 @@ describe('chat render model', () => {
     ).toEqual([
       {
         kind: 'system',
-        id: 'i',
+        id: JSON.stringify(['s', 't', null, 'error', 'i']),
         text: 'ACP agent exited with code 1',
         alert: true,
         code: 'command not found',
@@ -316,7 +326,7 @@ describe('chat render model', () => {
     expect(items).toEqual([
       {
         kind: 'epic-triage',
-        id: 'i',
+        id: JSON.stringify(['s', 't', null, 'epic_triage', 'i']),
         card: expect.objectContaining({
           runId: 'run-1',
           attempts: 2,
@@ -359,4 +369,143 @@ describe('chat render model', () => {
     ])
     expect(cancelled.at(-1)).toMatchObject({ answer: 'Cancelled' })
   })
+})
+
+it('replaces exact snapshot text while preserving thought and child ownership', () => {
+  const rows = [
+    message({ type: 'text_delta', text: 'old' }),
+    message({ type: 'thought_delta', text: 'private' }, { seq: 2 }),
+    message(
+      { type: 'text_delta', text: 'child', childId: 'child' },
+      { seq: 3 },
+    ),
+    message(
+      { type: 'content_snapshot', contentType: 'text', text: 'corrected' },
+      { seq: 4 },
+    ),
+    message({ type: 'text_delta', text: ' suffix' }, { seq: 5 }),
+    message(
+      { type: 'text_delta', text: 'other turn' },
+      { seq: 6, turnId: 'other' },
+    ),
+  ]
+  expect(
+    toRenderModel(rows)
+      .filter((i) => i.kind === 'message')
+      .map((i) => [i.text, i.thought ?? false]),
+  ).toEqual([
+    ['corrected suffix', false],
+    ['private', true],
+    ['other turn', false],
+  ])
+  expect(
+    toRenderModel(rows, false, [], [], 'child')
+      .filter((i) => i.kind === 'message')
+      .map((i) => i.text),
+  ).toEqual(['child'])
+  expect(
+    toRenderModel([
+      ...rows,
+      message(
+        { type: 'content_snapshot', contentType: 'text', text: '' },
+        { seq: 7 },
+      ),
+    ])[0],
+  ).toMatchObject({ text: '' })
+})
+
+it('replaces child snapshots and preserves native child actions and plan text', () => {
+  const rows = [
+    message({ type: 'text_delta', text: 'root' }),
+    message(
+      { type: 'text_delta', text: 'old child', childId: 'c' },
+      { seq: 2 },
+    ),
+    message(
+      {
+        type: 'content_snapshot',
+        contentType: 'text',
+        text: 'new child',
+        childId: 'c',
+      },
+      { seq: 3 },
+    ),
+    message(
+      {
+        type: 'content_snapshot',
+        contentType: 'plan',
+        text: 'Plan text',
+        childId: 'c',
+      },
+      { seq: 4, itemId: 'plan' },
+    ),
+    message(
+      {
+        type: 'tool_call',
+        toolCallId: 'call',
+        name: 'Child',
+        input: {},
+        nativeChildId: 'c',
+      },
+      { seq: 5, itemId: 'tool' },
+    ),
+  ]
+  expect(toRenderModel(rows).find((i) => i.kind === 'tool')).toMatchObject({
+    nativeChildId: 'c',
+  })
+  expect(
+    toRenderModel(rows)
+      .filter((i) => i.kind === 'message')
+      .map((i) => i.text),
+  ).toEqual(['root'])
+  const child = toRenderModel(rows, false, [], [], 'c')
+  expect(child.filter((i) => i.kind === 'message').map((i) => i.text)).toEqual([
+    'new child',
+  ])
+  expect(child.find((i) => i.kind === 'plan')).toMatchObject({
+    explanation: 'Plan text',
+  })
+})
+
+it('uses distinct stable render keys and tool owners across channels and turns', () => {
+  const rows = [
+    message({ type: 'text_delta', text: 'text' }),
+    message({ type: 'thought_delta', text: 'thought' }, { seq: 2 }),
+    message({ type: 'text_delta', text: 'next' }, { seq: 3, turnId: 'next' }),
+    message(
+      { type: 'tool_call', toolCallId: 'shared', name: 'first', input: {} },
+      { seq: 4, itemId: 'tool' },
+    ),
+    message(
+      { type: 'tool_call', toolCallId: 'shared', name: 'second', input: {} },
+      { seq: 5, itemId: 'tool', turnId: 'next' },
+    ),
+    message(
+      {
+        type: 'tool_result',
+        toolCallId: 'shared',
+        output: 'first done',
+        isError: false,
+      },
+      { seq: 6, itemId: 'result' },
+    ),
+  ]
+  const items = toRenderModel(rows)
+  expect(new Set(items.map((i) => i.id)).size).toBe(items.length)
+  const tools = items.flatMap((i) =>
+    i.kind === 'tool' ? [i] : i.kind === 'activity' ? i.tools : [],
+  )
+  expect(tools.map((i) => [i.name, i.state, i.output])).toEqual([
+    ['first', 'done', 'first done'],
+    ['second', 'running', undefined],
+  ])
+  const updated = toRenderModel([
+    ...rows,
+    message(
+      { type: 'content_snapshot', contentType: 'text', text: 'fixed' },
+      { seq: 7 },
+    ),
+  ])
+  expect(updated[0].id).toBe(items[0].id)
+  expect(updated[0]).toMatchObject({ seq: 7, text: 'fixed' })
 })
