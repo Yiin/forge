@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { Button } from '../ui/button'
 import { cn } from '@/lib/utils'
+import { BrowserPreview } from './BrowserPreview'
 import {
   DOCK_CHAT_MIN_WIDTH,
   type DockSurfaceKind,
@@ -94,7 +95,7 @@ export function WorkspaceDock({
   }
   const active = dock.tabs.find((tab) => tab.id === dock.activeTabId)
   const content = active ? (
-    <SurfaceContent kind={active.kind} target={target} />
+    <SurfaceContent kind={active.kind} target={target} sessionId={sessionId} />
   ) : (
     <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
       Select a workspace surface.
@@ -249,9 +250,11 @@ function SurfacePicker({
 function SurfaceContent({
   kind,
   target,
+  sessionId,
 }: {
   kind: DockSurfaceKind
   target: WorkspaceTarget
+  sessionId: string
 }) {
   if (kind === 'subagent')
     return (
@@ -259,6 +262,7 @@ function SurfaceContent({
         Child transcript is available when a child session is selected.
       </div>
     )
+  if (kind === 'browser') return <BrowserPreview sessionId={sessionId} />
   if (!target.cwd)
     return (
       <div className="p-6 text-sm" role="status">

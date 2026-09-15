@@ -114,10 +114,24 @@ export class PreviewManager {
   get(id: string) {
     return this.targets.get(id)
   }
-  list(sessionId?: string) {
-    return [...this.targets.values()].filter(
-      (t) => !sessionId || t.sessionId === sessionId,
-    )
+  list(sessionId: string) {
+    return [...this.targets.values()].filter((t) => t.sessionId === sessionId)
+  }
+  assertSession(id: string, sessionId: string) {
+    const target = this.targets.get(id)
+    if (!target)
+      throw new PreviewError(
+        'preview_not_found',
+        'Preview target not found',
+        404,
+      )
+    if (target.sessionId !== sessionId)
+      throw new PreviewError(
+        'preview_forbidden',
+        'Preview target is not part of this session',
+        403,
+      )
+    return target
   }
   remove(id: string) {
     this.targets.delete(id)
