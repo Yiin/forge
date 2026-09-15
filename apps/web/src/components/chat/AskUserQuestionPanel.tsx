@@ -5,7 +5,7 @@ import {
   Send,
   ShieldAlert,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import {
   pendingQuestionRequests,
@@ -26,31 +26,39 @@ type SelectedWithText = {
 type Answers = Record<string, string | string[] | SelectedWithText>
 
 export function AskUserQuestionPanel({ sessionId }: { sessionId: string }) {
-  const messages = useMessagesStore(
-    (state) => state.bySession[sessionId] ?? EMPTY_MESSAGES,
-  )
+  // The store appends into the per-session array in place and replaces only
+  // the record, so subscribe to the record or live replies never re-render.
+  const messagesBySession = useMessagesStore((state) => state.bySession)
+  const messages = messagesBySession[sessionId] ?? EMPTY_MESSAGES
   const requests = pendingQuestionRequests(messages)
-  const request =
-    requests.find(
-      (item) =>
-        item.requestStatus === 'pending' || item.requestStatus === undefined,
-    ) ?? requests[0]
+  const answerable = requests.filter(
+    (item) =>
+      item.requestStatus === 'pending' || item.requestStatus === undefined,
+  )
+  const request = answerable[0] ?? requests[0]
   if (!request) return null
   return (
     <QuestionCard
       key={request.requestId}
       sessionId={sessionId}
       request={request}
+      queued={answerable.length}
     />
   )
 }
 
+// Comet advances a single-select question shortly after the click so the
+// choice stays visible before the next question replaces it.
+const ADVANCE_DELAY_MS = 220
+
 function QuestionCard({
   sessionId,
   request,
+  queued,
 }: {
   sessionId: string
   request: PendingQuestionRequest
+  queued: number
 }) {
   const storageKey = `forge:question:${sessionId}:${request.requestId}`
   const [page, setPage] = useState(0)
@@ -62,12 +70,12 @@ function QuestionCard({
   const question = request.questions[page]!
   const isPermission = request.source === 'permission'
   const settled = request.requestStatus && request.requestStatus !== 'pending'
-  const setAnswer = (value: string | string[] | SelectedWithText) =>
-    setAnswers((current) => {
-      const next = { ...current, [question.id!]: value }
-      writeAnswers(storageKey, next, request.questions)
-      return next
-    })
+  const setAnswer = (value: string | string[] | SelectedWithText): Answers => {
+    const next = { ...answers, [question.id!]: value }
+    writeAnswers(storageKey, next, request.questions)
+    setAnswers(next)
+    return next
+  }
   useEffect(() => {
     document.getElementById('message-composer')?.blur()
   }, [page])
@@ -87,23 +95,25 @@ function QuestionCard({
       ? selectedIds.length > 0 || freeText.trim().length > 0
       : String(selected).trim().length > 0
     : false
-  const complete = request.questions.every((item) => {
-    const answer = answers[item.id!]
-    if (answer && typeof answer === 'object' && !Array.isArray(answer))
-      return answer.optionIds.length > 0 || answer.text.trim().length > 0
-    return item.multiSelect
-      ? Array.isArray(answer) && answer.length > 0
-      : typeof answer === 'string' && answer.trim().length > 0
-  })
-  const submit = async () => {
-    if (!canAdvance) return
+  const isComplete = (values: Answers) =>
+    request.questions.every((item) => {
+      const answer = values[item.id!]
+      if (answer && typeof answer === 'object' && !Array.isArray(answer))
+        return answer.optionIds.length > 0 || answer.text.trim().length > 0
+      return item.multiSelect
+        ? Array.isArray(answer) && answer.length > 0
+        : typeof answer === 'string' && answer.trim().length > 0
+    })
+  const complete = isComplete(answers)
+  const submit = async (payload: Answers = answers) => {
+    if (!isComplete(payload)) return
     setSending(true)
     setError(null)
     try {
       await api.answerQuestion({
         sessionId,
         questionId: request.requestId,
-        answers,
+        answers: payload,
       })
       sessionStorage.removeItem(storageKey)
       document.getElementById('message-composer')?.focus()
@@ -127,6 +137,21 @@ function QuestionCard({
       )
       setSending(false)
     }
+  }
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (advanceTimer.current) clearTimeout(advanceTimer.current)
+    },
+    [],
+  )
+  const advanceAfterSelect = (next: Answers) => {
+    if (advanceTimer.current) clearTimeout(advanceTimer.current)
+    advanceTimer.current = setTimeout(() => {
+      advanceTimer.current = null
+      if (page < request.questions.length - 1) setPage(page + 1)
+      else void submit(next)
+    }, ADVANCE_DELAY_MS)
   }
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -168,7 +193,7 @@ function QuestionCard({
                   ? values.filter((value) => value !== option.id)
                   : [...values, option.id!],
             )
-          } else setAnswer(option.id!)
+          } else advanceAfterSelect(setAnswer(option.id!))
         }
       } else if (event.key === 'Escape') {
         event.preventDefault()
@@ -177,7 +202,7 @@ function QuestionCard({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [cancel, freeText, question, selectedIds, sending, settled])
+  }, [answers, cancel, freeText, page, question, selectedIds, sending, settled])
   if (!question) return null
   if (settled) {
     const statusText = {
@@ -211,11 +236,13 @@ function QuestionCard({
             ? 'Permission request'
             : (question.header ?? 'Forge asks')}
         </span>
-        {request.questions.length > 1 && (
+        {request.questions.length > 1 ? (
           <span aria-live="polite">
             Question {page + 1} of {request.questions.length}
           </span>
-        )}
+        ) : queued > 1 ? (
+          <span aria-live="polite">{queued} questions</span>
+        ) : null}
       </div>
       {isPermission && (
         <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-sm">
@@ -249,7 +276,10 @@ function QuestionCard({
         question={question}
         value={selected}
         disabled={sending}
-        onChange={setAnswer}
+        onChange={(value) => {
+          const next = setAnswer(value)
+          if (!question.multiSelect) advanceAfterSelect(next)
+        }}
       />
       {(question.allowFreeInput || question.options.length === 0) && (
         <Input

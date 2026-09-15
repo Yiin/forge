@@ -19,6 +19,41 @@ export type PendingQuestionRequest = {
   questions: Question[]
 }
 
+type AskContent = Extract<Message['content'], { type: 'ask_user_question' }>
+
+// Legacy rows carry one bare question and label-only options. Replies address
+// options by ID, so every question and option gets a stable synthetic ID here
+// and everywhere else that has to match a stored reply back to its labels.
+export function requestQuestions(content: AskContent): Question[] {
+  const questions: Question[] =
+    content.questions ??
+    (content.question
+      ? [
+          {
+            question: content.question,
+            options: (content.options ?? []).map((label) => ({ label })),
+            allowFreeInput: (content.options ?? []).length === 0,
+          } as Question,
+        ]
+      : [])
+  return questions.map((question, index) => ({
+    ...question,
+    id: question.id ?? `${content.questionId}-${index + 1}`,
+    options: question.options.map((option, optionIndex) => ({
+      ...option,
+      id: option.id ?? `${content.questionId}-${index + 1}-${optionIndex + 1}`,
+    })),
+  }))
+}
+
+export function optionLabels(content: AskContent): Map<string, string> {
+  return new Map(
+    requestQuestions(content).flatMap((question) =>
+      question.options.map((option) => [option.id!, option.label] as const),
+    ),
+  )
+}
+
 export function pendingQuestionRequests(
   messages: Message[],
 ): PendingQuestionRequest[] {
@@ -36,17 +71,6 @@ export function pendingQuestionRequests(
       answered.has(content.questionId)
     )
       return []
-    const questions: Question[] =
-      content.questions ??
-      (content.question
-        ? [
-            {
-              question: content.question,
-              options: (content.options ?? []).map((label) => ({ label })),
-              allowFreeInput: (content.options ?? []).length === 0,
-            } as Question,
-          ]
-        : [])
     return [
       {
         requestId: content.questionId,
@@ -55,16 +79,7 @@ export function pendingQuestionRequests(
         toolName: content.toolName,
         toolContext: content.toolContext,
         permissionScope: content.permissionScope,
-        questions: questions.map((question, index) => ({
-          ...question,
-          id: question.id ?? `${content.questionId}-${index + 1}`,
-          options: question.options.map((option, optionIndex) => ({
-            ...option,
-            id:
-              option.id ??
-              `${content.questionId}-${index + 1}-${optionIndex + 1}`,
-          })),
-        })),
+        questions: requestQuestions(content),
       },
     ]
   })
@@ -79,6 +94,34 @@ export function pendingQuestions(messages: Message[]): PendingQuestion[] {
       index,
     })),
   )
+}
+
+// A stored reply holds option IDs. History has to read as the labels the user
+// clicked, so swap every known ID back before the answer is rendered.
+export function answerWithLabels(
+  labels: Map<string, string> | undefined,
+  answer: unknown,
+): unknown {
+  if (typeof answer === 'string') return labels?.get(answer) ?? answer
+  if (Array.isArray(answer))
+    return answer.map((item) => answerWithLabels(labels, item))
+  if (answer && typeof answer === 'object') {
+    const record = answer as Record<string, unknown>
+    if (record.type === 'selected_with_text')
+      return [
+        ...(Array.isArray(record.optionIds)
+          ? record.optionIds.map((id) => answerWithLabels(labels, id))
+          : []),
+        record.text,
+      ].filter((item) => typeof item === 'string' && item.trim().length > 0)
+    return Object.fromEntries(
+      Object.entries(record).map(([key, value]) => [
+        key,
+        answerWithLabels(labels, value),
+      ]),
+    )
+  }
+  return answer
 }
 
 export function answerText(answer: unknown): string {

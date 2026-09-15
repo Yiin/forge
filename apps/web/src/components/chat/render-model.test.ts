@@ -18,6 +18,75 @@ const message = (
 })
 
 describe('chat render model', () => {
+  it('renders an answered question with the labels the user clicked', () => {
+    const items = toRenderModel([
+      message(
+        {
+          type: 'ask_user_question',
+          questionId: 'q1',
+          question: 'Pick one',
+          options: ['First', 'Second'],
+        },
+        { itemId: 'ask' },
+      ),
+      message(
+        {
+          type: 'user_answer',
+          questionId: 'q1',
+          answers: { 'q1-1': 'q1-1-1' },
+        },
+        { itemId: 'answer', seq: 2, role: 'user' },
+      ),
+    ])
+    expect(items.at(-1)).toMatchObject({
+      kind: 'answered-question',
+      question: 'Pick one',
+      answer: { 'q1-1': 'First' },
+    })
+  })
+
+  it('keeps free text beside the selected option labels', () => {
+    const items = toRenderModel([
+      message(
+        {
+          type: 'ask_user_question',
+          questionId: 'q2',
+          questions: [
+            {
+              id: 'toppings',
+              question: 'Choose toppings',
+              options: [
+                { id: 'cheese', label: 'Cheese' },
+                { id: 'mushrooms', label: 'Mushrooms' },
+              ],
+              multiSelect: true,
+              allowFreeInput: true,
+            },
+          ],
+        },
+        { itemId: 'ask' },
+      ),
+      message(
+        {
+          type: 'user_answer',
+          questionId: 'q2',
+          answers: {
+            toppings: {
+              type: 'selected_with_text',
+              optionIds: ['cheese', 'mushrooms'],
+              text: 'extra basil',
+            },
+          },
+        },
+        { itemId: 'answer', seq: 2, role: 'user' },
+      ),
+    ])
+    expect(items.at(-1)).toMatchObject({
+      kind: 'answered-question',
+      answer: { toppings: ['Cheese', 'Mushrooms', 'extra basil'] },
+    })
+  })
+
   it('groups adjacent tools and agents within one turn', () => {
     const tool = {
       kind: 'tool' as const,
