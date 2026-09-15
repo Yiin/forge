@@ -31,7 +31,7 @@ function query(selection: WorkspaceSelection, extra: Record<string, string>) {
   })
   if (selection.workspaceId)
     params.set('expectedWorkspaceId', selection.workspaceId)
-  if (selection.workspaceRevision)
+  if (selection.workspaceRevision != null)
     params.set('expectedWorkspaceRevision', String(selection.workspaceRevision))
   return params
 }

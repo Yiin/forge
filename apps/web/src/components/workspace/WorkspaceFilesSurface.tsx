@@ -23,6 +23,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Spinner } from '../ui/spinner'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import {
   listWorkspaceFiles,
@@ -48,6 +58,7 @@ type OpenFile = {
   savedText: string
   dirty: boolean
   conflict: boolean
+  staleTarget: boolean
   saving: boolean
   error: string | null
 }
@@ -65,15 +76,27 @@ export function WorkspaceFilesSurface({ sessionId, target }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searching, setSearching] = useState(false)
+  const [closeRequested, setCloseRequested] = useState(false)
+  const requestGeneration = useRef(0)
+
+  useEffect(() => {
+    requestGeneration.current += 1
+    setOpen((current) => (current ? { ...current, staleTarget: true } : null))
+    setPath('')
+  }, [selection])
 
   const load = async (directory = path) => {
+    const generation = requestGeneration.current
     setLoading(true)
     setError(null)
     try {
-      setEntries(
-        (await listWorkspaceFiles(selection, directory, includeIgnored))
-          .entries,
+      const listing = await listWorkspaceFiles(
+        selection,
+        directory,
+        includeIgnored,
       )
+      if (generation !== requestGeneration.current) return
+      setEntries(listing.entries)
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -96,8 +119,10 @@ export function WorkspaceFilesSurface({ sessionId, target }: Props) {
       return
     }
     setError(null)
+    const generation = requestGeneration.current
     try {
       const snapshot = await readWorkspaceFile(selection, next)
+      if (generation !== requestGeneration.current) return
       if (snapshot.file.text === null || snapshot.file.readOnlyReason) {
         setError(
           `${next} is read-only: ${snapshot.file.readOnlyReason ?? 'unsupported content'}`,
@@ -111,6 +136,7 @@ export function WorkspaceFilesSurface({ sessionId, target }: Props) {
         savedText: snapshot.file.text,
         dirty: false,
         conflict: false,
+        staleTarget: false,
         saving: false,
         error: null,
       })
@@ -120,31 +146,53 @@ export function WorkspaceFilesSurface({ sessionId, target }: Props) {
   }
 
   const close = () => {
-    if (open?.dirty && !window.confirm('Discard unsaved changes?')) return
+    if (open?.dirty) {
+      setCloseRequested(true)
+      return
+    }
+    setOpen(null)
+  }
+  const discardAndClose = () => {
+    setCloseRequested(false)
     setOpen(null)
   }
   const save = async () => {
-    if (!open || open.saving || !open.dirty) return
-    setOpen({ ...open, saving: true, error: null })
+    if (!open || open.saving || !open.dirty || open.staleTarget) return
+    const submitted = open
+    setOpen({ ...submitted, saving: true, error: null })
     try {
-      const saved = await saveWorkspaceFile(selection, open.snapshot, open.text)
-      setOpen({
-        ...open,
-        snapshot: saved,
-        savedText: open.text,
-        dirty: false,
-        conflict: false,
-        saving: false,
+      const saved = await saveWorkspaceFile(
+        selection,
+        submitted.snapshot,
+        submitted.text,
+      )
+      setOpen((current) => {
+        if (!current) return current
+        const hasNewerEdits = current.text !== submitted.text
+        return {
+          ...current,
+          snapshot: saved,
+          savedText: submitted.text,
+          dirty: hasNewerEdits,
+          conflict: false,
+          saving: false,
+          error: null,
+        }
       })
     } catch (cause) {
       const conflict =
         cause instanceof WorkspaceFilesError && cause.code === 'conflict'
-      setOpen({
-        ...open,
-        saving: false,
-        conflict,
-        error: cause instanceof Error ? cause.message : 'Could not save file',
-      })
+      setOpen((current) =>
+        current
+          ? {
+              ...current,
+              saving: false,
+              conflict,
+              error:
+                cause instanceof Error ? cause.message : 'Could not save file',
+            }
+          : current,
+      )
     }
   }
 
@@ -295,6 +343,31 @@ export function WorkspaceFilesSurface({ sessionId, target }: Props) {
           </div>
         )}
       </div>
+      <AlertDialog open={closeRequested} onOpenChange={setCloseRequested}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save changes before closing?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your changes to {open?.path} are not saved.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={discardAndClose} variant="ghost">
+              Discard
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                setCloseRequested(false)
+                void save()
+              }}
+              disabled={open?.saving || open?.staleTarget}
+            >
+              Save
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -359,7 +432,7 @@ function EditorPanel({
           variant="ghost"
           size="icon-sm"
           className="pointer-coarse:size-11"
-          disabled={!open.dirty || open.saving}
+          disabled={!open.dirty || open.saving || open.staleTarget}
           onClick={onSave}
           aria-label="Save file"
         >
@@ -389,6 +462,14 @@ function EditorPanel({
           >
             <RotateCcw size={14} /> Reload
           </Button>
+        </div>
+      )}
+      {open.staleTarget && (
+        <div
+          className="border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs"
+          role="alert"
+        >
+          Workspace changed. Your edits are preserved, but saving is disabled.
         </div>
       )}
       {open.error && (
