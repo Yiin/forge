@@ -19,6 +19,14 @@ const send = (frame) =>
 const reply = (id, result) => send({ id, result })
 let watcher
 let advertised = false
+let currentModeId = 'default'
+const modes = () => ({
+  currentModeId,
+  availableModes: ['default', 'autoEdit', 'yolo', 'plan'].map((id) => ({
+    id,
+    name: id,
+  })),
+})
 const configOptions = [
   {
     id: 'native-model',
@@ -66,10 +74,23 @@ input.on('line', (line) => {
         })
         report('awaiting_advertisement')
       }
-      reply(frame.id, { sessionId })
+      reply(frame.id, {
+        sessionId,
+        ...(scenario === 'gemini-modes' ? { modes: modes() } : {}),
+      })
       break
     case 'session/prompt':
       reply(frame.id, { stopReason: 'end_turn' })
+      break
+    case 'session/set_mode':
+      if (
+        scenario !== 'gemini-modes' ||
+        !modes().availableModes.some((mode) => mode.id === frame.params.modeId)
+      )
+        throw Error('Unadvertised mode')
+      currentModeId = frame.params.modeId
+      report('mode_acknowledged', { modeId: currentModeId })
+      reply(frame.id, {})
       break
     case 'session/set_config_option':
       if (
