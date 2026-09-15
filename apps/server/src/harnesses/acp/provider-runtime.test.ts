@@ -68,6 +68,17 @@ describe('provider policy and model selection through native ACP frames', () => 
       const rows = await f.rows()
       const starts = rows.filter((row) => row.event === 'spawned')
       expect(starts).toHaveLength(3)
+      expect(f.writerOpens).toHaveLength(1)
+      const generations = f.events
+        .filter((event) => event.type === 'turn_completed')
+        .map((event) => event.runtimeGeneration)
+      expect(generations).toHaveLength(3)
+      expect(new Set(generations).size).toBe(1)
+      let ordinal = 0
+      for (const transaction of f.transactions) {
+        expect(transaction.afterOrdinal).toBe(ordinal)
+        ordinal = transaction.throughOrdinal
+      }
       for (const start of starts)
         expect(start.args).toEqual([
           '--no-auto-update',
