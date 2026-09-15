@@ -24,6 +24,7 @@ type MessagesState = {
     { commands?: unknown[]; requests?: unknown[]; usage?: unknown }
   >
   seenSeqs: Set<number>
+  liveEventsBySession: Record<string, Message[]>
   lastSeq: number
   volatile: VolatileEvent[]
   applyEvent: (event: ServerEvent) => void
@@ -72,6 +73,34 @@ function sameItem(left: Message, right: Message): boolean {
   return leftTool !== undefined && leftTool === toolCallId(right)
 }
 
+function mergeProjected(existing: Message, incoming: Message): Message {
+  const current = existing.content
+  const next = incoming.content
+  if (
+    (current.type !== 'text_delta' || next.type !== 'text_delta') &&
+    (current.type !== 'thought_delta' || next.type !== 'thought_delta')
+  )
+    return incoming
+  const currentText = current.text
+  const nextText = next.text
+  if (nextText.startsWith(currentText)) return incoming
+  if (currentText.startsWith(nextText)) return existing
+  const overlap = Math.min(currentText.length, nextText.length)
+  for (let length = overlap; length > 0; length--)
+    if (currentText.endsWith(nextText.slice(0, length)))
+      return {
+        ...incoming,
+        content: {
+          ...next,
+          text: currentText + nextText.slice(length),
+        },
+      }
+  return {
+    ...incoming,
+    content: { ...next, text: currentText + nextText },
+  }
+}
+
 function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
   const result = [...existing].sort((left, right) => left.seq - right.seq)
   for (const message of [...incoming].sort(
@@ -90,7 +119,7 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
 function mergeNewerMessages(
   history: Message[],
   newer: Message[],
-  seenSeqs: Set<number>,
+  liveEvents: Message[],
 ): Message[] {
   const result = [...history]
   for (const message of newer) {
@@ -99,9 +128,18 @@ function mergeNewerMessages(
     else if (message.seq > result[index].seq) {
       // If the history row was already live-folded, the newer projection is
       // cumulative. Otherwise this is a first delta and must be appended.
-      result[index] = seenSeqs.has(result[index].seq)
-        ? message
-        : foldMessage(result[index], message)
+      const raw = liveEvents
+        .filter(
+          (event) => event.seq > result[index].seq && sameItem(event, message),
+        )
+        .sort((left, right) => left.seq - right.seq)
+      result[index] =
+        raw.length && raw[0].seq === result[index].seq + 1
+          ? raw.reduce(foldMessage, result[index])
+          : mergeProjected(
+              result[index],
+              newer.find((item) => sameItem(item, result[index])) ?? message,
+            )
     }
   }
   return result.sort((left, right) => left.seq - right.seq)
@@ -141,7 +179,7 @@ export function foldEvent(
         (item) => item.itemId !== event.msg.itemId,
       ),
     },
-    lastSeq: event.seq,
+    lastSeq: Math.max(state.lastSeq, event.seq),
     seenSeqs: new Set(seenSeqs).add(event.seq),
   }
 }
@@ -153,9 +191,24 @@ export const useMessagesStore = create<MessagesState>((set) => ({
   snapshotCursorBySession: {},
   snapshotStateBySession: {},
   seenSeqs: new Set(),
+  liveEventsBySession: {},
   lastSeq: 0,
   volatile: [],
-  applyEvent: (event) => set((state) => foldEvent(state, event)),
+  applyEvent: (event) =>
+    set((state) => {
+      const folded = foldEvent(state, event)
+      if (state.seenSeqs.has(event.seq)) return folded
+      return {
+        ...folded,
+        liveEventsBySession: {
+          ...state.liveEventsBySession,
+          [event.sessionId]: [
+            ...(state.liveEventsBySession[event.sessionId] ?? []),
+            event.msg,
+          ].slice(-2000),
+        },
+      }
+    }),
   loadMessages: (sessionId, messages) =>
     set((state) => {
       const history = mergeMessages([], messages)
@@ -166,7 +219,11 @@ export const useMessagesStore = create<MessagesState>((set) => ({
       return {
         bySession: {
           ...state.bySession,
-          [sessionId]: mergeNewerMessages(history, newerLive, state.seenSeqs),
+          [sessionId]: mergeNewerMessages(
+            history,
+            newerLive,
+            state.liveEventsBySession[sessionId] ?? [],
+          ),
         },
         pendingBySession: {
           ...state.pendingBySession,
@@ -291,6 +348,7 @@ export const useMessagesStore = create<MessagesState>((set) => ({
       snapshotCursorBySession: {},
       snapshotStateBySession: {},
       seenSeqs: new Set(),
+      liveEventsBySession: {},
       lastSeq: 0,
       volatile: [],
     }),

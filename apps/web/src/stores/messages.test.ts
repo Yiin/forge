@@ -302,4 +302,82 @@ describe('message folding', () => {
       text: 'ab',
     })
   })
+
+  it('keeps the snapshot prefix when live text started before the snapshot', () => {
+    useMessagesStore.getState().reset()
+    useMessagesStore.getState().applyEvent(
+      event(
+        2,
+        message({
+          seq: 2,
+          content: { type: 'text_delta', text: 'b' },
+        }),
+      ),
+    )
+    useMessagesStore.getState().applyEvent(
+      event(
+        3,
+        message({
+          seq: 3,
+          content: { type: 'text_delta', text: 'c' },
+        }),
+      ),
+    )
+    useMessagesStore.getState().loadSnapshot({
+      type: 'sessionSnapshot',
+      sessionId: 'ses-1',
+      cursor: 2,
+      messages: [
+        message({
+          seq: 1,
+          content: { type: 'text_delta', text: 'a' },
+        }),
+        message({
+          seq: 2,
+          content: { type: 'text_delta', text: 'b' },
+        }),
+      ],
+    })
+    expect(useMessagesStore.getState().bySession['ses-1'][0].content).toEqual({
+      type: 'text_delta',
+      text: 'abc',
+    })
+  })
+
+  it('keeps repeated live deltas during snapshot reconciliation', () => {
+    useMessagesStore.getState().reset()
+    for (const [seq, text] of [
+      [2, 'a'],
+      [3, 'a'],
+    ] as const)
+      useMessagesStore
+        .getState()
+        .applyEvent(
+          event(seq, message({ seq, content: { type: 'text_delta', text } })),
+        )
+    useMessagesStore.getState().loadSnapshot({
+      type: 'sessionSnapshot',
+      sessionId: 'ses-1',
+      cursor: 2,
+      messages: [
+        message({ seq: 1, content: { type: 'text_delta', text: 'a' } }),
+        message({ seq: 2, content: { type: 'text_delta', text: 'a' } }),
+      ],
+    })
+    expect(useMessagesStore.getState().bySession['ses-1'][0].content).toEqual({
+      type: 'text_delta',
+      text: 'aaa',
+    })
+  })
+
+  it('keeps the global cursor monotonic across sessions', () => {
+    useMessagesStore.getState().reset()
+    useMessagesStore
+      .getState()
+      .applyEvent(event(8, message({ sessionId: 'ses-1', seq: 8 })))
+    useMessagesStore
+      .getState()
+      .applyEvent(event(3, message({ sessionId: 'ses-2', seq: 3 })))
+    expect(useMessagesStore.getState().lastSeq).toBe(8)
+  })
 })
