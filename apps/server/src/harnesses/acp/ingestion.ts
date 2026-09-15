@@ -48,8 +48,29 @@ export type AcpSourceRef = Readonly<{
   bytes: number
   sha256: string
 }>
+type ReplayableEvent = Extract<
+  HarnessEvent,
+  {
+    type:
+      | 'text_delta'
+      | 'thought_delta'
+      | 'content_snapshot'
+      | 'content_block'
+      | 'tool_started'
+      | 'tool_update'
+      | 'plan'
+      | 'usage_snapshot'
+      | 'source_reference'
+  }
+>
+export type AcpReplayEventBody = ReplayableEvent extends infer Event
+  ? Event extends unknown
+    ? Omit<Event, 'runId' | 'turnId' | 'runtimeGeneration' | 'deliveryId'>
+    : never
+  : never
 export type NeutralRecord =
   | Readonly<{ kind: 'event'; event: HarnessEvent }>
+  | Readonly<{ kind: 'replay'; event: AcpReplayEventBody }>
   | Readonly<{ kind: 'binding'; binding: ConfirmedNativeBinding }>
   | Readonly<{ kind: 'source'; reference: AcpSourceRef }>
   | Readonly<{
@@ -128,11 +149,17 @@ export type AcpIngestionFactory = {
     signal: AbortSignal,
   ): Promise<AcpSessionWriter>
 }
+export type AcpContentOwner = Readonly<{
+  owner: AcpLiveOwner | AcpReplayOwner
+  itemId: string
+  responseId?: string
+  childId?: string
+  intervalId?: string
+}>
 export type AcpContentStore = {
   put(
     input: Readonly<{
-      owner: AcpLiveOwner | AcpReplayOwner
-      itemId: string
+      owner: AcpContentOwner
       purpose: 'content' | 'source_metadata' | 'replay'
       mime: string
       bytes: Uint8Array
@@ -140,10 +167,7 @@ export type AcpContentStore = {
     }>,
     signal: AbortSignal,
   ): Promise<AcpSourceRef>
-  discard(
-    artifactId: string,
-    owner: AcpLiveOwner | AcpReplayOwner,
-  ): Promise<void>
+  discard(artifactId: string, owner: AcpContentOwner): Promise<void>
 }
 export type AcpRecordInput = Readonly<{
   value: NeutralRecord

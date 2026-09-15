@@ -155,7 +155,7 @@ export class JsonlRpcTransport {
     options: {
       signal?: AbortSignal
       timeoutMs?: number
-      onHandoff?: () => void
+      onHandoff?: (requestId: string) => void
     } = {},
   ): Promise<T> {
     return this.requestWithSubmission<T>(method, params, options).response
@@ -167,7 +167,7 @@ export class JsonlRpcTransport {
     input: {
       signal?: AbortSignal
       timeoutMs?: number
-      onHandoff?: () => void
+      onHandoff?: (requestId: string) => void
     } = {},
   ): { response: Promise<T>; submission: Promise<SubmissionEvidence> } {
     const options = { ...input }
@@ -249,7 +249,7 @@ export class JsonlRpcTransport {
         signal: controller.signal,
         deadline,
         operationId: id,
-        onHandoff: options.onHandoff,
+        onHandoff: options.onHandoff ? () => options.onHandoff!(id) : undefined,
       },
     )
     void write.logical.catch((error: unknown) =>
