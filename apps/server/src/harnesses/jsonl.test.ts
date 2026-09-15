@@ -717,16 +717,21 @@ describe.each(['standard', 'unversioned'] as const)(
       const io = rpc({ maxPendingRequests: 1 })
       const controller = new AbortController()
       try {
-        const request = io.transport.request('pending', undefined, {
-          signal: controller.signal,
-        })
+        const request = io.transport.requestWithSubmission(
+          'pending',
+          undefined,
+          {
+            signal: controller.signal,
+          },
+        )
         await expect(io.transport.request('overflow')).rejects.toThrow(
           'limit reached',
         )
         expect(io.transport.state.pendingRequests).toBe(1)
         const id = (io.writes[0] as { id: string }).id
         io.stdout.write(frame({ jsonrpc: '2.0', id, result: 1 }))
-        expect(await request).toBe(1)
+        expect(await request.response).toBe(1)
+        expect(await request.submission).toMatchObject({ status: 'written' })
         expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0)
         const timed = io.transport.request('timeout', undefined, {
           signal: controller.signal,
@@ -1194,4 +1199,444 @@ describe('RPC wire profiles', () => {
     ])
     await transport.close()
   })
+})
+
+describe('deferred frame admission', () => {
+  it('pauses one original chunk beyond64 frames and preserves captured fallback authority', async () => {
+    const io = streams(),
+      ready = deferred<void>()
+    let current = 'original',
+      captures = 0,
+      released = 0,
+      charged = 0
+    const values: Array<{ index: number; owner: string; ordinal: number }> = []
+    const transport = new JsonlTransport({
+      ...io,
+      maxUnreadBytes: 4096,
+      captureReadContext: () => current,
+      captureFrame: (_source, owner) => {
+        const ordinal = ++captures
+        const captured = {
+          context: { owner, ordinal },
+          release() {
+            released++
+          },
+        }
+        return ordinal === 63
+          ? {
+              ready: ready.promise,
+              resume: () => captured,
+              release: captured.release,
+            }
+          : captured
+      },
+      resources: {
+        measureOutgoing: (value) => Buffer.byteLength(JSON.stringify(value)),
+        reserve(_kind, bytes) {
+          charged += bytes
+          return () => {
+            charged -= bytes
+          }
+        },
+      },
+      onValue(value, _bytes, ownership) {
+        values.push({
+          ...(value as { index: number }),
+          ...(ownership!.capture as { owner: string; ordinal: number }),
+        })
+      },
+    })
+    const original = Buffer.from(
+      Array.from(
+        { length: 100 },
+        (_, index) => JSON.stringify({ index }) + '\n',
+      ).join(''),
+    )
+    io.stdout.write(original)
+    expect(values).toHaveLength(62)
+    expect(captures).toBe(63)
+    expect(transport.readState.paused).toBe(true)
+    expect(io.stdout.isPaused()).toBe(true)
+    expect(transport.readState.unreadBytes).toBeGreaterThan(0)
+    original.fill(0)
+    current = 'replacement'
+    ready.resolve()
+    await vi.waitFor(() => expect(values).toHaveLength(100))
+    expect(values.map((value) => value.index)).toEqual(
+      Array.from({ length: 100 }, (_, index) => index),
+    )
+    expect(values.every((value) => value.owner === 'original')).toBe(true)
+    expect(values.map((value) => value.ordinal)).toEqual(
+      Array.from({ length: 100 }, (_, index) => index + 1),
+    )
+    expect(captures).toBe(100)
+    expect(released).toBe(100)
+    await transport.close()
+    expect(charged).toBe(0)
+  })
+
+  it('close releases paused ownership and unread storage without resuming a late admission', async () => {
+    const io = streams(),
+      ready = deferred<void>()
+    let charged = 0,
+      released = 0,
+      resumed = 0,
+      parsed = 0
+    const transport = new JsonlTransport({
+      ...io,
+      captureFrame: () => ({
+        ready: ready.promise,
+        resume() {
+          resumed++
+          return {
+            context: null,
+            release() {
+              released++
+            },
+          }
+        },
+        release() {
+          released++
+        },
+      }),
+      resources: {
+        measureOutgoing: () => 0,
+        reserve(_kind, bytes) {
+          charged += bytes
+          return () => {
+            charged -= bytes
+          }
+        },
+      },
+      onValue() {
+        parsed++
+      },
+    })
+    io.stdout.write(Buffer.from('{"first":1}\n{"second":2}\n'))
+    expect(transport.readState.unreadBytes).toBeGreaterThan(0)
+    await transport.close()
+    expect(charged).toBe(0)
+    expect(released).toBe(1)
+    ready.resolve()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(resumed).toBe(0)
+    expect(parsed).toBe(0)
+    expect(io.stdout.listenerCount('data')).toBe(0)
+  })
+
+  it('refuses an unread suffix beyond its original byte allowance', async () => {
+    const io = streams(),
+      ready = deferred<void>()
+    let released = 0
+    const transport = new JsonlTransport({
+      ...io,
+      maxUnreadBytes: 8,
+      captureFrame: () => ({
+        ready: ready.promise,
+        resume() {
+          throw Error('must not resume')
+        },
+        release() {
+          released++
+        },
+      }),
+      onValue() {
+        throw Error('must not parse')
+      },
+    })
+    io.stdout.write(Buffer.from('{}\n{"tooMuch":true}\n'))
+    expect((await transport.done).message).toBe(
+      'JSONL unread capacity exceeded',
+    )
+    expect(released).toBe(1)
+    ready.resolve()
+  })
+})
+
+it('keeps an earlier queued suffix before a later delivered chunk across repeated pauses', async () => {
+  const io = streams(),
+    first = deferred<void>(),
+    second = deferred<void>()
+  let owner = 'first'
+  const values: Array<{ index: number; owner: unknown }> = []
+  const transport = new JsonlTransport({
+    ...io,
+    captureReadContext: () => owner,
+    captureFrame(source, context) {
+      const index = JSON.parse(source).index
+      const captured = { context, release() {} }
+      if (index === 1 || index === 2)
+        return {
+          ready: (index === 1 ? first : second).promise,
+          resume: () => captured,
+          release() {},
+        }
+      return captured
+    },
+    onValue(value, _bytes, ownership) {
+      values.push({
+        index: (value as { index: number }).index,
+        owner: ownership!.capture,
+      })
+    },
+  })
+  io.stdout.write(
+    Buffer.concat([
+      frame({ index: 1 }),
+      frame({ index: 2 }),
+      frame({ index: 3 }),
+    ]),
+  )
+  owner = 'second'
+  io.stdout.emit(
+    'data',
+    Buffer.concat([frame({ index: 4 }), frame({ index: 5 })]),
+  )
+  first.resolve()
+  await vi.waitFor(() => expect(values).toHaveLength(1))
+  second.resolve()
+  await vi.waitFor(() => expect(values).toHaveLength(5))
+  expect(values).toEqual(
+    [1, 2, 3, 4, 5].map((index) => ({
+      index,
+      owner: index <= 3 ? 'first' : 'second',
+    })),
+  )
+  await transport.close()
+})
+
+it('drains a deferred final frame after normal readable end and auto-close', async () => {
+  const io = streams(),
+    ready = deferred<void>(),
+    closed = deferred<void>()
+  const values: unknown[] = []
+  let released = 0
+  const transport = new JsonlTransport({
+    ...io,
+    captureFrame: () => ({
+      ready: ready.promise,
+      resume: () => ({
+        context: null,
+        release() {
+          released++
+        },
+      }),
+      release() {
+        released++
+      },
+    }),
+    onValue(value) {
+      values.push(value)
+    },
+  })
+  io.stdout.once('close', () => closed.resolve())
+  io.stdout.end(Buffer.from('{"final":true}'))
+  await closed.promise
+  expect(transport.closed).toBe(false)
+  expect(transport.readState.paused).toBe(true)
+  ready.resolve()
+  expect((await transport.done).message).toBe('JSONL stdout ended')
+  expect(values).toEqual([{ final: true }])
+  expect(released).toBe(1)
+})
+
+it('reuses one owned unread allocation through repeated frame pauses', async () => {
+  const io = streams(),
+    values: unknown[] = []
+  const transport = new JsonlTransport({
+    ...io,
+    captureFrame: () => ({
+      ready: Promise.resolve(),
+      resume: () => ({ context: null, release() {} }),
+      release() {},
+    }),
+    onValue(value) {
+      values.push(value)
+    },
+  })
+  const allocation = vi.spyOn(Buffer, 'allocUnsafeSlow')
+  try {
+    io.stdout.write(
+      Buffer.from(
+        Array.from(
+          { length: 100 },
+          (_, index) => JSON.stringify({ index }) + '\n',
+        ).join(''),
+      ),
+    )
+    await vi.waitFor(() => expect(values).toHaveLength(100))
+    expect(allocation).toHaveBeenCalledTimes(1)
+    expect(transport.readState.unreadBytes).toBe(0)
+  } finally {
+    allocation.mockRestore()
+    await transport.close()
+  }
+})
+
+it.each([false, true])(
+  'owns a raw native replay reader through paused cleanup=%s',
+  async (cancel) => {
+    const ready = deferred<void>(),
+      values: unknown[] = []
+    let captured = 0,
+      released = 0,
+      charged = 0
+    const payload = Buffer.from(
+      Array.from(
+        { length: 100 },
+        (_, index) => JSON.stringify({ index }) + '\n',
+      ).join(''),
+    )
+    const { process: runtime, value: wire } = await startFixture(
+      'bytes',
+      async (runtime) => {
+        const wire = new JsonlTransport({
+          stdin: runtime.child.stdin,
+          stdout: runtime.child.stdout,
+          captureFrame() {
+            const capture = {
+              context: ++captured,
+              release() {
+                released++
+              },
+            }
+            return captured === 63
+              ? {
+                  ready: ready.promise,
+                  resume: () => capture,
+                  release: capture.release,
+                }
+              : capture
+          },
+          resources: {
+            measureOutgoing: () => 0,
+            reserve(_kind, bytes) {
+              charged += bytes
+              return () => {
+                charged -= bytes
+              }
+            },
+          },
+          onValue(value) {
+            values.push(value)
+          },
+        })
+        runtime.ownTransport(wire)
+        return wire
+      },
+      {},
+      bytePayload([payload], false),
+    )
+    try {
+      await vi.waitFor(() => expect(values).toHaveLength(62))
+      expect(wire.readState.paused).toBe(true)
+      if (!cancel) {
+        ready.resolve()
+        await vi.waitFor(() => expect(values).toHaveLength(100))
+      }
+      await runtime.close()
+      expect(runtime.child.stdout.destroyed).toBe(true)
+      expect(charged).toBe(0)
+      expect(released).toBe(cancel ? 63 : 100)
+      expect(() => process.kill(runtime.child.pid!, 0)).toThrow()
+      ready.resolve()
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(values).toHaveLength(cancel ? 62 : 100)
+    } finally {
+      ready.resolve()
+      await runtime.close()
+    }
+  },
+)
+
+it('refuses negotiated frame limits below the retained unread chunk count', async () => {
+  const io = streams(),
+    ready = deferred<void>()
+  const transport = new JsonlTransport({
+    ...io,
+    captureFrame: () => ({
+      ready: ready.promise,
+      resume: () => ({ context: null, release() {} }),
+      release() {},
+    }),
+    onValue() {},
+  })
+  io.stdout.write(Buffer.from('{}\n{}\n'))
+  io.stdout.emit('data', Buffer.from('{}\n'))
+  expect(() =>
+    transport.setLimits({
+      maxLineBytes: 1024,
+      maxQueuedBytes: 1024,
+      maxQueuedFrames: 1,
+    }),
+  ).toThrow('retained work exceeds negotiated limits')
+  await transport.close()
+  ready.resolve()
+})
+
+it.each([false, true])(
+  'preserves the consumer pause after frame delivery: deferred=%s',
+  async (defer) => {
+    const io = streams(),
+      ready = deferred<void>(),
+      delivered = deferred<void>()
+    const values: unknown[] = []
+    let first = true
+    const transport = new JsonlTransport({
+      ...io,
+      captureFrame: () => {
+        const capture = { context: undefined, release() {} }
+        if (first && defer) {
+          first = false
+          return { ready: ready.promise, resume: () => capture, release() {} }
+        }
+        return capture
+      },
+      onValue(value) {
+        values.push(value)
+        if (values.length === 1) {
+          io.stdout.pause()
+          delivered.resolve()
+        }
+      },
+    })
+    try {
+      io.stdout.write('1\n')
+      if (defer) ready.resolve()
+      await delivered.promise
+      expect(io.stdout.isPaused()).toBe(true)
+      io.stdout.write('2\n')
+      expect(values).toEqual([1])
+      io.stdout.resume()
+      await vi.waitFor(() => expect(values).toEqual([1, 2]))
+    } finally {
+      await transport.close()
+    }
+  },
+)
+
+it('does not acquire or release a consumer pause when deferring an already paused stream', async () => {
+  const io = streams(),
+    ready = deferred<void>(),
+    delivered = deferred<void>()
+  const transport = new JsonlTransport({
+    ...io,
+    captureFrame: () => ({
+      ready: ready.promise,
+      resume: () => ({ context: undefined, release() {} }),
+      release() {},
+    }),
+    onValue() {
+      delivered.resolve()
+    },
+  })
+  try {
+    io.stdout.pause()
+    io.stdout.emit('data', Buffer.from('1\n'))
+    ready.resolve()
+    await delivered.promise
+    expect(io.stdout.isPaused()).toBe(true)
+  } finally {
+    await transport.close()
+  }
 })

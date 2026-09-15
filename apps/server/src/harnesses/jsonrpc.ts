@@ -1,10 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import { diagnosticError, positiveLimit } from './diagnostics.js'
-import { JsonlTransport, type JsonlOptions } from './jsonl.js'
+import {
+  JsonlTransport,
+  type JsonlOptions,
+  type Submission,
+  type SubmissionEvidence,
+  type JsonlValueOwnership,
+} from './jsonl.js'
 
 type RpcId = string | number
 export type JsonRpcRequest = Readonly<{
   type: 'request'
+  ownership?: JsonlValueOwnership
   id: RpcId
   method: string
   params: unknown
@@ -15,6 +22,7 @@ export type JsonRpcIncoming =
   | JsonRpcRequest
   | Readonly<{
       type: 'notification'
+      ownership?: JsonlValueOwnership
       method: string
       params: unknown
       runtimeGeneration: string
@@ -34,6 +42,8 @@ export type JsonlRpcOptions = Omit<
   maxQueuedIncomingFrames?: number
   maxQueuedIncomingBytes?: number
   requestTimeoutMs?: number
+  /** Synchronous frame observer. Retain ownership explicitly for async response processing. */
+  onEnvelope?: (value: unknown, ownership?: JsonlValueOwnership) => void
   onIncoming?: (message: JsonRpcIncoming) => void | Promise<void>
 }
 
@@ -42,6 +52,7 @@ type Pending = {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
   cleanup: () => void
+  cancelWrite: () => void
 }
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -62,10 +73,18 @@ export class JsonlRpcTransport {
   private readonly pending = new Map<RpcId, Pending>()
   private readonly incoming = new Map<
     RpcId,
-    { request: JsonRpcRequest; controller: AbortController }
+    {
+      request: JsonRpcRequest
+      controller: AbortController
+      release: () => void
+    }
   >()
   private readonly handlers = new Set<symbol>()
-  private readonly queue: { message: JsonRpcIncoming; bytes: number }[] = []
+  private readonly queue: {
+    message: JsonRpcIncoming
+    bytes: number
+    release: () => void
+  }[] = []
   private queuedIncomingBytes = 0
   private readonly maxQueuedFrames: number
   private readonly maxQueuedBytes: number
@@ -107,7 +126,7 @@ export class JsonlRpcTransport {
     )
     this.wire = new JsonlTransport({
       ...options,
-      onValue: (value, bytes) => this.route(value, bytes),
+      onValue: (value, bytes, ownership) => this.route(value, bytes, ownership),
       validateOutgoing: (value) => {
         if (!this.validEnvelope(value))
           throw new Error('Malformed outgoing JSON-RPC envelope')
@@ -133,16 +152,49 @@ export class JsonlRpcTransport {
   request<T = unknown>(
     method: string,
     params?: unknown,
-    options: { signal?: AbortSignal; timeoutMs?: number } = {},
+    options: {
+      signal?: AbortSignal
+      timeoutMs?: number
+      onHandoff?: (requestId: string) => void
+    } = {},
   ): Promise<T> {
+    return this.requestWithSubmission<T>(method, params, options).response
+  }
+
+  requestWithSubmission<T = unknown>(
+    method: string,
+    params?: unknown,
+    input: {
+      signal?: AbortSignal
+      timeoutMs?: number
+      onHandoff?: (requestId: string) => void
+    } = {},
+  ): { response: Promise<T>; submission: Promise<SubmissionEvidence> } {
+    const options = { ...input }
+    const id = `${this.options.runtimeGeneration}:${this.identity}:${++this.nextId}`
+    const refused = (error: unknown) => {
+      const response = Promise.reject<T>(error)
+      void response.catch(() => {})
+      return {
+        response,
+        submission: Promise.resolve(
+          Object.freeze({
+            operationId: id,
+            transportId: this.wire.transportId,
+            status: 'not_written' as const,
+            cancellation: options.signal?.aborted
+              ? ('before_handoff' as const)
+              : ('none' as const),
+          }),
+        ),
+      }
+    }
     if (this.reason || this.wire.closed)
-      return Promise.reject(
-        this.reason ?? new Error('JSON-RPC transport closed'),
-      )
+      return refused(this.reason ?? new Error('JSON-RPC transport closed'))
     if (options.signal?.aborted)
-      return Promise.reject(new Error('JSON-RPC request cancelled'))
+      return refused(new Error('JSON-RPC request cancelled'))
     if (this.pending.size >= this.maxPending)
-      return Promise.reject(new Error('JSON-RPC pending request limit reached'))
+      return refused(new Error('JSON-RPC pending request limit reached'))
     let timeoutMs: number
     try {
       timeoutMs = positiveLimit(
@@ -150,47 +202,69 @@ export class JsonlRpcTransport {
         'request timeout',
       )
     } catch (error) {
-      return Promise.reject(error)
+      return refused(error)
     }
     const deadline = performance.now() + timeoutMs
-    const id = `${this.options.runtimeGeneration}:${this.identity}:${++this.nextId}`
-    return new Promise<T>((resolve, reject) => {
-      const controller = new AbortController()
-      const cancel = () =>
-        this.settle(id, new Error('JSON-RPC request cancelled'))
-      const timer = setTimeout(
-        () => this.settle(id, new Error('JSON-RPC request timed out')),
-        timeoutMs,
-      )
+    const controller = new AbortController()
+    const cancel = () => {
+      this.settle(id, new Error('JSON-RPC request cancelled'), undefined, true)
+      controller.abort()
+      options.signal?.removeEventListener('abort', cancel)
+    }
+    const timeout = () => {
+      this.settle(id, new Error('JSON-RPC request timed out'), undefined, true)
+    }
+    let responseSettled = false
+    let writeSettled = false
+    const detach = () => {
+      if (responseSettled && writeSettled)
+        options.signal?.removeEventListener('abort', cancel)
+    }
+    const timer = setTimeout(timeout, timeoutMs)
+    const response = new Promise<T>((resolve, reject) => {
       this.pending.set(id, {
         deadline,
         resolve: resolve as (value: unknown) => void,
         reject,
-        cleanup: () => {
-          clearTimeout(timer)
-          options.signal?.removeEventListener('abort', cancel)
+        cancelWrite: () => {
           controller.abort()
+          options.signal?.removeEventListener('abort', cancel)
+        },
+        cleanup: () => {
+          responseSettled = true
+          clearTimeout(timer)
+          detach()
         },
       })
-      options.signal?.addEventListener('abort', cancel, { once: true })
-      void this.wire
-        .send(
-          this.envelope({
-            id,
-            method,
-            ...(params === undefined ? {} : { params }),
-          }),
-          { signal: controller.signal, deadline },
-        )
-        .catch((error: unknown) =>
-          this.settle(
-            id,
-            performance.now() >= deadline
-              ? new Error('JSON-RPC request timed out')
-              : diagnosticError(error, this.options.secrets),
-          ),
-        )
     })
+    void response.catch(() => {})
+    options.signal?.addEventListener('abort', cancel, { once: true })
+    const write = this.wire.sendWithSubmission(
+      this.envelope({
+        id,
+        method,
+        ...(params === undefined ? {} : { params }),
+      }),
+      {
+        signal: controller.signal,
+        deadline,
+        operationId: id,
+        onHandoff: options.onHandoff ? () => options.onHandoff!(id) : undefined,
+      },
+    )
+    void write.logical.catch((error: unknown) =>
+      this.settle(
+        id,
+        performance.now() >= deadline
+          ? new Error('JSON-RPC request timed out')
+          : diagnosticError(error, this.options.secrets),
+      ),
+    )
+    void write.submission.then(() => {
+      writeSettled = true
+      detach()
+    })
+    return { response, submission: write.submission }
   }
 
   notify(
@@ -205,13 +279,38 @@ export class JsonlRpcTransport {
   }
 
   respond(request: JsonRpcRequest, result: unknown) {
-    return this.reply(request, { result })
+    return this.respondWithSubmission(request, result).logical
+  }
+
+  respondWithSubmission(request: JsonRpcRequest, result: unknown): Submission {
+    return this.replyWithSubmission(request, { result })
   }
 
   respondError(request: JsonRpcRequest, code: number, message: string) {
-    if (this.isLiveRequest(request) && !Number.isSafeInteger(code))
-      return Promise.reject(new Error('Invalid JSON-RPC error code'))
-    return this.reply(request, { error: { code, message } })
+    return this.respondErrorWithSubmission(request, code, message).logical
+  }
+
+  respondErrorWithSubmission(
+    request: JsonRpcRequest,
+    code: number,
+    message: string,
+  ): Submission {
+    if (this.isLiveRequest(request) && !Number.isSafeInteger(code)) {
+      const logical = Promise.reject(new Error('Invalid JSON-RPC error code'))
+      void logical.catch(() => {})
+      return {
+        logical,
+        submission: Promise.resolve(
+          Object.freeze({
+            operationId: randomUUID(),
+            transportId: this.wire.transportId,
+            status: 'not_written',
+            cancellation: 'none',
+          }),
+        ),
+      }
+    }
+    return this.replyWithSubmission(request, { error: { code, message } })
   }
 
   /**
@@ -228,8 +327,10 @@ export class JsonlRpcTransport {
     if (index >= 0) {
       const [item] = this.queue.splice(index, 1)
       this.queuedIncomingBytes -= item!.bytes
+      item!.release()
     }
     incoming.controller.abort()
+    incoming.release()
     return true
   }
 
@@ -239,32 +340,51 @@ export class JsonlRpcTransport {
     return this.done
   }
 
-  private reply(request: JsonRpcRequest, response: Record<string, unknown>) {
-    if (!this.isLiveRequest(request) || this.replying.has(request))
-      return Promise.reject(
+  private replyWithSubmission(
+    request: JsonRpcRequest,
+    response: Record<string, unknown>,
+  ): Submission {
+    if (!this.isLiveRequest(request) || this.replying.has(request)) {
+      const logical = Promise.reject(
         new Error('JSON-RPC request is stale or already answered'),
       )
-    // Reserve the handle while its reply is queued. A failed send can be retried.
+      void logical.catch(() => {})
+      return {
+        logical,
+        submission: Promise.resolve(
+          Object.freeze({
+            operationId: randomUUID(),
+            transportId: this.wire.transportId,
+            status: 'not_written',
+            cancellation: 'none',
+          }),
+        ),
+      }
+    }
     this.replying.add(request)
-    return this.wire
-      .send(this.envelope({ id: request.id, ...response }), {
+    const write = this.wire.sendWithSubmission(
+      this.envelope({ id: request.id, ...response }),
+      {
         signal: request.signal,
-      })
+      },
+    )
+    const logical = write.logical
       .then(
         () => {
           this.dismiss(request)
         },
         (error: unknown) => {
-          // Request abort during shutdown must preserve the router's failure reason.
           throw this.reason ?? error
         },
       )
       .finally(() => {
         this.replying.delete(request)
       })
+    void logical.catch(() => {})
+    return { logical, submission: write.submission }
   }
 
-  private isLiveRequest(request: JsonRpcRequest): boolean {
+  isLiveRequest(request: JsonRpcRequest): boolean {
     return (
       !!request &&
       !this.reason &&
@@ -275,10 +395,16 @@ export class JsonlRpcTransport {
     )
   }
 
-  private settle(id: RpcId, error?: Error, value?: unknown) {
+  private settle(
+    id: RpcId,
+    error?: Error,
+    value?: unknown,
+    cancelWrite = false,
+  ) {
     const pending = this.pending.get(id)
     if (!pending) return
     this.pending.delete(id)
+    if (cancelWrite) pending.cancelWrite()
     pending.cleanup()
     if (error) pending.reject(error)
     else pending.resolve(value)
@@ -287,14 +413,19 @@ export class JsonlRpcTransport {
   private terminate(reason: Error) {
     if (this.reason) return
     this.reason = reason
-    for (const id of this.pending.keys()) this.settle(id, reason)
+    for (const id of this.pending.keys())
+      this.settle(id, reason, undefined, true)
     const incoming = [...this.incoming.values()]
     this.incoming.clear()
     this.replying.clear()
     this.handlers.clear()
+    for (const item of this.queue) item.release()
     this.queue.length = 0
     this.queuedIncomingBytes = 0
-    for (const { controller } of incoming) controller.abort()
+    for (const { controller, release } of incoming) {
+      controller.abort()
+      release()
+    }
     this.controller.abort()
   }
 
@@ -303,8 +434,13 @@ export class JsonlRpcTransport {
       const item = this.queue.shift()
       if (!item) return
       this.queuedIncomingBytes -= item.bytes
-      if (item.message.type === 'request' && !this.isLiveRequest(item.message))
+      if (
+        item.message.type === 'request' &&
+        !this.isLiveRequest(item.message)
+      ) {
+        item.release()
         continue
+      }
       const token = Symbol()
       this.handlers.add(token)
       try {
@@ -312,17 +448,23 @@ export class JsonlRpcTransport {
         if (work) {
           void Promise.resolve(work).then(
             () => {
+              item.release()
               this.handlers.delete(token)
               this.drainIncoming()
             },
             () => {
+              item.release()
               this.handlers.delete(token)
               this.failIncoming(item.message)
               this.drainIncoming()
             },
           )
-        } else this.handlers.delete(token)
+        } else {
+          item.release()
+          this.handlers.delete(token)
+        }
       } catch {
+        item.release()
         this.handlers.delete(token)
         this.failIncoming(item.message)
       }
@@ -377,8 +519,13 @@ export class JsonlRpcTransport {
     void this.close(new Error('Malformed JSON-RPC envelope'))
   }
 
-  private route(value: unknown, bytes: number) {
+  private route(
+    value: unknown,
+    bytes: number,
+    ownership?: JsonlValueOwnership,
+  ) {
     if (this.reason) return
+    this.options.onEnvelope?.(value, ownership)
     if (!this.validEnvelope(value)) {
       this.malformed()
       return
@@ -388,6 +535,7 @@ export class JsonlRpcTransport {
         method: value.method,
         params: value.params,
         runtimeGeneration: this.options.runtimeGeneration,
+        ...(this.options.captureFrame ? { ownership } : {}),
       }
       let message: JsonRpcIncoming
       if ('id' in value) {
@@ -407,7 +555,11 @@ export class JsonlRpcTransport {
           id,
           signal: controller.signal,
         })
-        this.incoming.set(id, { request: message, controller })
+        this.incoming.set(id, {
+          request: message,
+          controller,
+          release: ownership?.retain() ?? (() => {}),
+        })
       } else
         message = Object.freeze({
           ...common,
@@ -421,14 +573,23 @@ export class JsonlRpcTransport {
         void this.close(new Error('JSON-RPC incoming queue limit reached'))
         return
       }
-      this.queue.push({ message, bytes })
+      this.queue.push({
+        message,
+        bytes,
+        release: ownership?.retain() ?? (() => {}),
+      })
       this.queuedIncomingBytes += bytes
       this.drainIncoming()
       return
     }
     const pending = this.pending.get(value.id)
     if (pending && performance.now() >= pending.deadline) {
-      this.settle(value.id, new Error('JSON-RPC request timed out'))
+      this.settle(
+        value.id,
+        new Error('JSON-RPC request timed out'),
+        undefined,
+        true,
+      )
       return
     }
     if ('error' in value) {
@@ -437,6 +598,10 @@ export class JsonlRpcTransport {
         new Error(`${value.error.message} (code ${value.error.code})`),
         this.options.secrets,
       )
+      Object.defineProperty(error, 'code', {
+        value: value.error.code,
+        enumerable: true,
+      })
       this.settle(value.id, error)
     } else this.settle(value.id, undefined, value.result)
   }

@@ -5,7 +5,10 @@ import {
   getSession,
 } from '../db/queries.js'
 import { readFile } from 'node:fs/promises'
-import { withProjectActivity } from '../db/project-activity.js'
+import {
+  acquireProjectActivity,
+  withProjectActivity,
+} from '../db/project-activity.js'
 import { join } from 'node:path'
 import type { EventBus } from '../events/bus.js'
 import type { DatabaseSync } from 'node:sqlite'
@@ -31,8 +34,31 @@ import {
 import type { WorkspaceChoice } from '@forge/protocol/commands'
 import type { QueuedPrompt } from '@forge/protocol/session'
 import { rewriteSkillInvocation } from '../skills/registry.js'
+import { TerminalError } from '../terminals/error.js'
 
 type Db = DatabaseSync
+type DraftPromotionInput = {
+  draftId: string
+  projectId: string
+  harness: string
+  text: string
+  attachmentIds?: string[]
+  accountId?: string | null
+  model?: string
+  clientItemId?: string
+  workspace?: WorkspaceChoice
+}
+type PromotionOwner = {
+  releaseProject: () => void
+  attempt?: Promise<{ sessionId: string }>
+  rollback?: {
+    draftId: string
+    projectId: string
+    sessionId: string
+    uploads?: UploadStore
+    error: unknown
+  }
+}
 export type SessionRow = {
   id: string
   project_id: string
@@ -77,6 +103,13 @@ function recoveryRecap(db: Db, sessionId: string) {
 }
 
 export class SessionManager {
+  private readonly promotions = new Map<string, PromotionOwner>()
+  private terminals?: import('../terminals/manager.js').TerminalManager
+  setTerminalManager(
+    manager: import('../terminals/manager.js').TerminalManager,
+  ) {
+    this.terminals = manager
+  }
   private readonly handles = new Map<string, HarnessHandle>()
   private readonly availableModels = new Map<string, HarnessModel[]>()
   private readonly handleHarnesses = new Map<string, string>()
@@ -843,97 +876,170 @@ export class SessionManager {
   }
 
   async promoteDraft(
-    input: {
-      draftId: string
-      projectId: string
-      harness: string
-      text: string
-      attachmentIds?: string[]
-      accountId?: string | null
-      model?: string
-      clientItemId?: string
-      workspace?: WorkspaceChoice
-    },
+    input: DraftPromotionInput,
     requestId: string,
     uploads?: UploadStore,
   ) {
-    return withProjectActivity(this.db, input.projectId, async () => {
-      // Idempotency keys on the promotion attempt (requestId), never on the
-      // draft id: drafts are reused across sessions, so a draft-scoped lookup
-      // would return a previous session and silently drop the new prompt.
-      const existing = this.db
-        .prepare('SELECT session_id FROM draft_promotions WHERE request_id = ?')
-        .get(requestId) as { session_id: string } | undefined
-      if (existing) {
-        if (!getActiveSession(this.db, existing.session_id))
-          throw new Error('Session not found')
-        return { sessionId: existing.session_id }
-      }
-      const project = this.db
-        .prepare(
-          'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
-        )
-        .get(input.projectId) as { path: string } | undefined
-      if (!project) throw new Error('Project not found')
-      const workspace = await this.resolveWorkspace(
-        input.projectId,
-        project.path,
-        input.workspace,
-      )
-      const session = this.create({
-        projectId: input.projectId,
-        harness: input.harness,
-        accountId: input.accountId,
-        ...workspace,
-        title: 'New session',
-      })
-      try {
-        try {
-          this.db
-            .prepare(
-              'INSERT INTO draft_promotions (draft_id, request_id, session_id) VALUES (?, ?, ?)',
+    const retained = this.promotions.get(requestId)
+    return withProjectActivity(
+      this.db,
+      retained?.rollback?.projectId ?? input.projectId,
+      async () => {
+        if (retained)
+          return (
+            retained.attempt ??
+            this.runPromotionAttempt(requestId, retained, () =>
+              this.rollbackDraftPromotion(retained),
             )
-            .run(input.draftId, requestId, session.id)
-        } catch {
-          await this.discard(session.id)
-          const winner = this.db
-            .prepare(
-              'SELECT session_id FROM draft_promotions WHERE request_id = ?',
-            )
-            .get(requestId) as { session_id: string }
-          return { sessionId: winner.session_id }
-        }
-        if (uploads)
-          await uploads.promoteDraft(input.draftId, session.id, input.projectId)
-        await this.prompt(
-          session.id,
-          input.text,
-          requestId,
-          input.attachmentIds,
-          input.harness,
-          input.accountId,
-          input.model,
-          input.clientItemId,
-        )
-        return { sessionId: session.id }
-      } catch (error) {
-        if (uploads)
-          await uploads.rollbackPromotion(
-            input.draftId,
-            session.id,
-            input.projectId,
           )
-        this.db
-          .prepare('DELETE FROM draft_promotions WHERE session_id = ?')
-          .run(session.id)
-        await this.discard(session.id)
-        this.db
-          .prepare('DELETE FROM messages WHERE session_id = ?')
-          .run(session.id)
-        this.db.prepare('DELETE FROM sessions WHERE id = ?').run(session.id)
-        throw error
-      }
+        // Idempotency keys on the promotion attempt (requestId), never on the
+        // draft id: drafts are reused across sessions, so a draft-scoped lookup
+        // would return a previous session and silently drop the new prompt.
+        const existing = this.db
+          .prepare(
+            'SELECT session_id FROM draft_promotions WHERE request_id = ?',
+          )
+          .get(requestId) as { session_id: string } | undefined
+        if (existing) {
+          if (!getActiveSession(this.db, existing.session_id))
+            throw new Error('Session not found')
+          return { sessionId: existing.session_id }
+        }
+        if (this.promotions.size >= (this.terminals?.limits.http ?? 32))
+          throw new TerminalError(
+            'capacity',
+            429,
+            'Draft promotion capacity reached',
+          )
+        const owner: PromotionOwner = {
+          releaseProject: acquireProjectActivity(this.db, input.projectId),
+        }
+        this.promotions.set(requestId, owner)
+        return this.runPromotionAttempt(requestId, owner, () =>
+          this.promoteDraftAttempt(input, requestId, uploads, owner),
+        )
+      },
+    )
+  }
+
+  private runPromotionAttempt(
+    requestId: string,
+    owner: PromotionOwner,
+    operation: () => Promise<{ sessionId: string }>,
+  ) {
+    const attempt = Promise.resolve().then(operation)
+    owner.attempt = attempt
+    void attempt
+      .finally(() => {
+        if (owner.attempt !== attempt) return
+        owner.attempt = undefined
+        if (!owner.rollback) {
+          owner.releaseProject()
+          this.promotions.delete(requestId)
+        }
+      })
+      .catch(() => {})
+    return attempt
+  }
+
+  private async promoteDraftAttempt(
+    input: DraftPromotionInput,
+    requestId: string,
+    uploads: UploadStore | undefined,
+    owner: PromotionOwner,
+  ) {
+    const project = this.db
+      .prepare(
+        'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
+      )
+      .get(input.projectId) as { path: string } | undefined
+    if (!project) throw new Error('Project not found')
+    const workspace = await this.resolveWorkspace(
+      input.projectId,
+      project.path,
+      input.workspace,
+    )
+    const session = this.create({
+      projectId: input.projectId,
+      harness: input.harness,
+      accountId: input.accountId,
+      ...workspace,
+      title: 'New session',
     })
+    try {
+      try {
+        this.db
+          .prepare(
+            'INSERT INTO draft_promotions (draft_id, request_id, session_id) VALUES (?, ?, ?)',
+          )
+          .run(input.draftId, requestId, session.id)
+      } catch {
+        await this.discard(session.id)
+        const winner = this.db
+          .prepare(
+            'SELECT session_id FROM draft_promotions WHERE request_id = ?',
+          )
+          .get(requestId) as { session_id: string }
+        return { sessionId: winner.session_id }
+      }
+      if (uploads)
+        await uploads.promoteDraft(input.draftId, session.id, input.projectId)
+      await this.prompt(
+        session.id,
+        input.text,
+        requestId,
+        input.attachmentIds,
+        input.harness,
+        input.accountId,
+        input.model,
+        input.clientItemId,
+      )
+      return { sessionId: session.id }
+    } catch (error) {
+      owner.rollback = {
+        draftId: input.draftId,
+        projectId: input.projectId,
+        sessionId: session.id,
+        uploads,
+        error,
+      }
+      return this.rollbackDraftPromotion(owner)
+    }
+  }
+
+  private async rollbackDraftPromotion(owner: PromotionOwner): Promise<never> {
+    const { draftId, projectId, sessionId, uploads, error } = owner.rollback!
+    const rollback = async () => {
+      if (uploads)
+        await uploads.rollbackPromotion(draftId, sessionId, projectId)
+      this.db
+        .prepare('DELETE FROM draft_promotions WHERE session_id = ?')
+        .run(sessionId)
+      await this.discard(sessionId)
+      this.db
+        .prepare('DELETE FROM messages WHERE session_id = ?')
+        .run(sessionId)
+      this.db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId)
+    }
+    try {
+      if (this.terminals)
+        await this.terminals.removeSession(sessionId, rollback)
+      else await rollback()
+    } catch (cleanup) {
+      const failure = new TerminalError(
+        'rollback_cleanup_unknown',
+        503,
+        'Promotion rollback did not complete',
+        { sessionId },
+      )
+      failure.cause = new AggregateError(
+        [error, cleanup],
+        'Promotion failed and rollback did not complete',
+      )
+      throw failure
+    }
+    owner.rollback = undefined
+    throw error
   }
   async interrupt(id: string) {
     await this.handles.get(id)?.cancel()
@@ -959,6 +1065,18 @@ export class SessionManager {
   }
 
   async removeSessionWorktree(id: string) {
+    const operation = () => this.removeSessionWorktreeData(id)
+    const row = this.db
+      .prepare('SELECT worktree_path FROM sessions WHERE id=?')
+      .get(id) as { worktree_path: string | null } | undefined
+    if (!row) throw new WorktreeRemovalError('Session not found')
+    if (!row.worktree_path) return false
+    return this.terminals
+      ? this.terminals.removeWorkspace(id, operation)
+      : operation()
+  }
+
+  private async removeSessionWorktreeData(id: string) {
     const session = this.db
       .prepare(
         `SELECT sessions.*, projects.path AS project_path

@@ -24,6 +24,37 @@ function shortNativeDeadlines() {
       ...args,
     )) as typeof setTimeout)
 }
+
+function holdNativeDeadlines() {
+  const original = globalThis.setTimeout
+  const clear = globalThis.clearTimeout
+  const pending = new Map<ReturnType<typeof setTimeout>, () => void>()
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: (...args: unknown[]) => void,
+    ms?: number,
+    ...args: unknown[]
+  ) => {
+    if (ms && ms >= 29000 && ms <= 30000) {
+      const timer = original(() => {}, ms)
+      pending.set(timer, () => callback(...args))
+      return timer
+    }
+    return original(callback, ms, ...args)
+  }) as typeof setTimeout)
+  vi.spyOn(globalThis, 'clearTimeout').mockImplementation((timer) => {
+    pending.delete(timer as ReturnType<typeof setTimeout>)
+    clear(timer)
+  })
+  return () => {
+    // Preparation has cleared its timer; turn/start precedes notification deadlines.
+    const deadline = pending.entries().next().value
+    expect(deadline).toBeDefined()
+    const [timer, expire] = deadline!
+    clear(timer)
+    pending.delete(timer)
+    expire()
+  }
+}
 const attachment = [
   { type: 'attachment' as const, attachmentId: 'upload', mime: 'image/png' },
 ]
@@ -174,14 +205,20 @@ describe('Codex delivery ownership and retirement', () => {
             ]
       const p = await peer([{ method: 'turn/start', before }])
       const h = await p.start()
-      shortNativeDeadlines()
+      const expireStart = holdNativeDeadlines()
       const send = Promise.resolve(h.prompt('input'))
-      const rejected = expect(send).rejects.toThrow('CANCELLED')
-      await eventually(async () => (await methods(p)).includes('turn/start'))
-      const first = h.cancel()
-      expect(h.cancel()).toBe(first)
-      await first
-      await rejected
+      await Promise.all([
+        expect(send).rejects.toThrow('CANCELLED'),
+        (async () => {
+          await eventually(async () =>
+            (await methods(p)).includes('turn/start'),
+          )
+          const first = h.cancel()
+          expect(h.cancel()).toBe(first)
+          expireStart()
+          await first
+        })(),
+      ])
       expect(await methods(p)).not.toContain('turn/interrupt')
       expect(h.binding?.providerSessionId).toBe('root')
       expect(

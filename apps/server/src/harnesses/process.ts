@@ -13,6 +13,9 @@ export type NativeProcessOptions = {
   cwd?: string
   /** Pass accountEnv overrides here. Other inherited values remain available. */
   env?: NodeJS.ProcessEnv
+  /** Use only env when the caller has captured its complete launch environment. */
+  inheritEnv?: boolean
+  onCreated?: (runtime: NativeProcess) => void
   secrets?: readonly string[]
   stderrLimit?: number
   signal?: AbortSignal
@@ -39,6 +42,7 @@ export class NativeProcess {
   private finish!: (reason: Error) => void
   private end!: (reason: Error) => void
   private closing?: Promise<void>
+  private groupRetired = false
   private reason?: Error
   private transport?: OwnedTransport
   private readonly graceMs: number
@@ -60,7 +64,10 @@ export class NativeProcess {
     })
     this.child = spawn(options.command, options.args ?? [], {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env:
+        options.inheritEnv === false
+          ? { ...options.env }
+          : { ...process.env, ...options.env },
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,
     })
@@ -110,7 +117,9 @@ export class NativeProcess {
       throw new Error('Native process failed to spawn')
     }
     let timer: ReturnType<typeof setTimeout> | undefined
+    void runtime.spawned.catch(() => {})
     try {
+      options.onCreated?.(runtime)
       const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(
           () => reject(new Error('Native startup timed out')),
@@ -176,7 +185,7 @@ export class NativeProcess {
       try {
         if (!drainOutput) this.transport?.close(this.reason!)
         const pid = this.child.pid
-        if (pid) {
+        if (!this.groupRetired && pid) {
           let alive = signalProcessGroup(pid, 'SIGTERM')
           const graceDeadline = performance.now() + this.graceMs
           while (alive && performance.now() < graceDeadline) {
@@ -190,6 +199,7 @@ export class NativeProcess {
           if (alive && signalProcessGroup(pid, 'SIGKILL'))
             await waitForProcessGroupExit(pid, deadline)
         }
+        this.groupRetired = true
       } catch {
         cleanupError = new Error('Native process group cleanup failed')
         this.reason = cleanupError
@@ -219,9 +229,10 @@ export class NativeProcess {
       if (cleanupError) throw cleanupError
     })
     const retryable = attempt.catch((error) => {
-      // A settled refusal may still have a safe cleanup path. Let a later
-      // caller retry it, while callers during this attempt still join it.
-      if (this.closing === retryable) this.closing = undefined
+      // Only the original child-close observation can retry after group retirement.
+      // A failed group proof never grants another use of its numeric PID.
+      if (this.groupRetired && this.closing === retryable)
+        this.closing = undefined
       throw error
     })
     this.closing = retryable

@@ -1,0 +1,16 @@
+{
+  "node": "24.21.0",
+  "platform": "linux",
+  "arch": "x64",
+  "nodePty": "1.1.0",
+  "nodeAddonApi": "7.1.1",
+  "nodeGyp": "11.4.2",
+  "sourceDateEpoch": "1767225600",
+  "headers": "The selected Node distribution's local include/node directory",
+  "headerDownloadsDuringBuild": false,
+  "compiler": "/usr/bin/g++",
+  "linker": "/usr/bin/ld",
+  "python": "/usr/bin/python3",
+  "reproducibility": "Two isolated scratch builds must produce identical pty.node bytes",
+  "provenance": "Each build inventories actual Node, headers, native inputs, compiler, linker, libc, command, environment, and output"
+}

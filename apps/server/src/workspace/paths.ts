@@ -121,6 +121,7 @@ export const descriptorPath = (handle: FileHandle, name = '') =>
   `/proc/self/fd/${handle.fd}${name ? `/${name}` : ''}`
 export type PathHooks = {
   beforeDirectoryOpen?: (relative: string) => Promise<void>
+  onCreated?: (chain: WorkspacePath) => void
 }
 
 export function filesystemError(
@@ -156,6 +157,9 @@ export class WorkspacePath {
   private handles: FileHandle[] = []
   private identities: string[] = []
   private relatives: string[] = []
+  private closing?: Promise<void>
+  private closeRequested = false
+  private readonly opening = new Set<Promise<FileHandle>>()
   private constructor(
     readonly root: string,
     readonly relative: string,
@@ -177,15 +181,12 @@ export class WorkspacePath {
       )
     const chain = new WorkspacePath(root, relative)
     try {
+      hooks?.onCreated?.(chain)
       signal?.throwIfAborted()
-      const rootHandle = await open(
-        root,
-        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
-      )
-      chain.handles.push(rootHandle)
-      chain.identities.push(identity(await rootHandle.stat({ bigint: true })))
-      chain.relatives.push('')
-      if (chain.identities[0] !== rootIdentity)
+      const rootHandle = await chain.openDirectory(root, rootIdentity, '')
+      signal?.throwIfAborted()
+      chain.checkOpen()
+      if (identity(await rootHandle.stat({ bigint: true })) !== rootIdentity)
         throw new WorkspaceError(
           'conflict',
           409,
@@ -209,13 +210,10 @@ export class WorkspacePath {
           )
         const rel = directories.slice(0, index + 1).join('/')
         await hooks?.beforeDirectoryOpen?.(rel)
-        const handle = await open(
-          child,
-          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
-        )
-        chain.handles.push(handle)
-        chain.identities.push(identity(before))
-        chain.relatives.push(rel)
+        signal?.throwIfAborted()
+        const handle = await chain.openDirectory(child, identity(before), rel)
+        signal?.throwIfAborted()
+        chain.checkOpen()
         if (identity(await handle.stat({ bigint: true })) !== identity(before))
           throw new WorkspaceError(
             'conflict',
@@ -232,6 +230,32 @@ export class WorkspacePath {
       throw filesystemError(error)
     }
   }
+  private checkOpen() {
+    if (this.closeRequested) throw Error('Workspace path is closing')
+  }
+  private openDirectory(
+    path: string,
+    expected: string,
+    relative: string,
+  ): Promise<FileHandle> {
+    const operation = Promise.resolve()
+      .then(() => {
+        this.checkOpen()
+        return open(
+          path,
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        )
+      })
+      .then((handle) => {
+        this.handles.push(handle)
+        this.identities.push(expected)
+        this.relatives.push(relative)
+        return handle
+      })
+      .finally(() => this.opening.delete(operation))
+    this.opening.add(operation)
+    return operation
+  }
   get parent() {
     return this.handles.at(-1)!
   }
@@ -239,6 +263,7 @@ export class WorkspacePath {
     return descriptorPath(this.parent, this.relative.split('/').at(-1)!)
   }
   async verify() {
+    this.checkOpen()
     for (let i = 0; i < this.handles.length; i++) {
       const handle = this.handles[i]!
       const expected = this.relatives[i]
@@ -301,11 +326,34 @@ export class WorkspacePath {
     }
   }
   async close() {
-    await Promise.allSettled(
-      this.handles
-        .splice(0)
-        .reverse()
-        .map((handle) => handle.close()),
-    )
+    this.closeRequested = true
+    if (this.closing) return this.closing
+    this.closing = Promise.resolve()
+      .then(async () => {
+        const failed = new Map<FileHandle, unknown>()
+        for (;;) {
+          const handles = this.handles.filter((handle) => !failed.has(handle))
+          const results = await Promise.allSettled(
+            handles.map((handle) => handle.close()),
+          )
+          const closed = new Set<FileHandle>()
+          results.forEach((result, index) => {
+            if (result.status === 'fulfilled') closed.add(handles[index]!)
+            else failed.set(handles[index]!, result.reason)
+          })
+          const keep = this.handles.map((handle) => !closed.has(handle))
+          this.handles = this.handles.filter((_, index) => keep[index])
+          this.identities = this.identities.filter((_, index) => keep[index])
+          this.relatives = this.relatives.filter((_, index) => keep[index])
+          if (this.opening.size) await Promise.allSettled(this.opening)
+          if (this.handles.some((handle) => !failed.has(handle))) continue
+          if (failed.size) throw failed.values().next().value
+          return
+        }
+      })
+      .finally(() => {
+        this.closing = undefined
+      })
+    return this.closing
   }
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Owned process fixture. It never starts a provider or reads native account state.
 import { createServer } from 'node:http'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
+import { renameSync, writeFileSync } from 'node:fs'
 
 const wire = JSON.parse(
   await readFile(new URL('./opencode-wire.json', import.meta.url), 'utf8'),
@@ -40,10 +41,14 @@ const report = {
     process.env.OPENCODE_SERVER_PASSWORD !== 'stale',
   requests,
 }
-async function save() {
-  if (config.report) await writeFile(config.report, JSON.stringify(report))
+function save() {
+  if (!config.report) return
+  // Shutdown can interrupt a write; publish only a complete report for cleanup checks.
+  const temporary = `${config.report}.tmp`
+  writeFileSync(temporary, JSON.stringify(report))
+  renameSync(temporary, config.report)
 }
-await save()
+save()
 if (config.mode === 'exit') process.exit(3)
 const server = createServer(async (req, res) => {
   const chunks = []
@@ -59,7 +64,7 @@ const server = createServer(async (req, res) => {
     directoryMatches:
       decodeURIComponent(req.headers['x-opencode-directory'] ?? '') === cwd,
   })
-  await save()
+  save()
   if (req.headers.authorization !== auth) {
     res.writeHead(401).end()
     return
@@ -180,7 +185,7 @@ const server = createServer(async (req, res) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const origin = `http://127.0.0.1:${server.address().port}`
 report.origin = origin
-await save()
+save()
 const line = `opencode server listening on ${config.mode === 'bad-origin' ? 'http://192.0.2.1:1234' : origin}\n`
 for (const char of line)
   await new Promise((resolve) => process.stdout.write(char, resolve))

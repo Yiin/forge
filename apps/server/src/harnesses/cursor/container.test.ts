@@ -1,6 +1,7 @@
 import { mkdtemp, lstat, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { once } from 'node:events'
 import { expect, it, vi } from 'vitest'
 import { CursorContainer, processIdentity } from './container.js'
 import { createCursorResources, cursorLimits } from './limits.js'
@@ -8,6 +9,7 @@ import { writeMarker } from './store.js'
 import type { CursorLaunch } from './launch.js'
 import type { CursorOwner } from './contracts.js'
 import { NativeProcess } from '../process.js'
+import * as processGroups from '../process-group.js'
 import type { CursorWire } from './wire.js'
 import { CursorError } from './limits.js'
 
@@ -73,6 +75,8 @@ it('closes the exact direct process after refused retirement and retries direct 
       )
     ).process
     container.process = child
+    const groupSignal = vi.spyOn(processGroups, 'signalProcessGroup')
+    const groupExit = vi.spyOn(processGroups, 'waitForProcessGroupExit')
     const physicalClose = child.close.bind(child)
     const physicalObservation = (child as any).waitForChildClose.bind(child)
     let observations = 0
@@ -111,6 +115,8 @@ it('closes the exact direct process after refused retirement and retries direct 
       })
       expect(closes).toBe(1)
       const done = await child.done
+      const signalCalls = groupSignal.mock.calls.slice()
+      const exitCalls = groupExit.mock.calls.slice()
       if (rejectDirect) {
         const first = container.close(),
           second = container.close()
@@ -121,6 +127,8 @@ it('closes the exact direct process after refused retirement and retries direct 
         expect(closes).toBe(2)
         expect(observations).toBe(2)
         expect(await child.done).toBe(done)
+        expect(groupSignal.mock.calls).toEqual(signalCalls)
+        expect(groupExit.mock.calls).toEqual(exitCalls)
       }
       await expect(lstat(`/proc/${original!.pid}`)).rejects.toMatchObject({
         code: 'ENOENT',
@@ -166,6 +174,8 @@ it('closes the exact direct process after refused retirement and retries direct 
         Object.values(resources.snapshot()).every((value) => value === 0),
       ).toBe(true)
     } finally {
+      groupSignal.mockRestore()
+      groupExit.mockRestore()
       await physicalClose().catch(() => {})
       await writeFile(
         `${prefix}-cleanup.json`,
@@ -260,5 +270,49 @@ it('retains the writer fence and container charge when done resolves but direct 
   } finally {
     release()
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('retains an unproved original group failure instead of signalling its numeric PID again', async () => {
+  const runtime = (
+    await NativeProcess.start(
+      {
+        command: process.execPath,
+        args: [
+          '-e',
+          "process.on('SIGTERM', () => {}); process.stdout.write('ready'); setInterval(() => {}, 1000)",
+        ],
+        killGraceMs: 10,
+      },
+      async (owner) => {
+        await once(owner.child.stdout, 'data')
+      },
+    )
+  ).process
+  const originalClose = once(runtime.child, 'close')
+  const groupSignal = vi.spyOn(processGroups, 'signalProcessGroup')
+  const groupExit = vi
+    .spyOn(processGroups, 'waitForProcessGroupExit')
+    .mockRejectedValueOnce(new Error('Synthetic original group proof refused'))
+  try {
+    const first = runtime.close()
+    await expect(first).rejects.toThrow('Native process group cleanup failed')
+    await originalClose
+    const signals = groupSignal.mock.calls.slice()
+    const observations = groupExit.mock.calls.slice()
+    const reason = await runtime.done
+    const retry = runtime.close()
+    expect(retry).toBe(first)
+    expect(runtime.close()).toBe(first)
+    await expect(retry).rejects.toThrow('Native process group cleanup failed')
+    expect(await runtime.done).toBe(reason)
+    expect(groupSignal.mock.calls).toEqual(signals)
+    expect(groupExit.mock.calls).toEqual(observations)
+    expect(signals.filter(([, signal]) => signal === 'SIGKILL')).toHaveLength(1)
+  } finally {
+    groupSignal.mockRestore()
+    groupExit.mockRestore()
+    await runtime.close().catch(() => {})
+    await originalClose
   }
 })

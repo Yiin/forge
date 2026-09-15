@@ -203,6 +203,8 @@ describe('default harness configuration', () => {
       'gemini',
       'opencode',
       'grok',
+      'devin',
+      'hermes',
       'pi',
     ])
     expect(

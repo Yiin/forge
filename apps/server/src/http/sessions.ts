@@ -17,6 +17,7 @@ import { readAccountModels } from '../accounts/models.js'
 import { WorkspaceTargets } from '../workspace/target.js'
 import { WorkspaceError } from '../workspace/paths.js'
 import { WorktreeRemovalError } from '../git/worktrees.js'
+import { TerminalError } from '../terminals/error.js'
 import { withProjectActivity } from '../db/project-activity.js'
 
 export function sessionRoutes(
@@ -25,6 +26,11 @@ export function sessionRoutes(
   workspaceTargets = new WorkspaceTargets(manager.database),
 ) {
   const app = new Hono()
+  app.onError((error, c) => {
+    if (error instanceof TerminalError)
+      return c.json(error.body(), error.status)
+    throw error
+  })
   app.post('/api/sessions', async (c) => {
     const value = schema.safeParse(await c.req.json())
     if (!value.success) return c.json({ error: value.error.message }, 400)
@@ -65,6 +71,8 @@ export function sessionRoutes(
         201,
       )
     } catch (error) {
+      if (error instanceof TerminalError)
+        return c.json(error.body(), error.status)
       return c.json({ error: errorMessage(error) }, 400)
     }
   })
@@ -283,6 +291,8 @@ export function sessionRoutes(
       try {
         await manager.removeSessionWorktree(c.req.param('id') ?? '')
       } catch (error) {
+        if (error instanceof TerminalError)
+          return c.json(error.body(), error.status)
         const status =
           error instanceof WorktreeRemovalError ? error.status : 400
         return c.json({ error: errorMessage(error) }, status)
