@@ -1,6 +1,27 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { stopForge, stopProxiedForge } from '../helpers/forgeServer.js'
+import {
+  stopForge,
+  stopProxiedForge,
+  withoutAmbientPaths,
+} from '../helpers/forgeServer.js'
+
+describe('isolated Forge launch environment', () => {
+  it('does not let caller paths select a different server or data directory', () => {
+    expect(
+      withoutAmbientPaths({
+        FORGE_CONFIG: '/home/user/.forge/forge.toml',
+        FORGE_DATA_DIR: '/home/user/.forge',
+        FORGE_DB: '/home/user/.forge/forge.db',
+        FORGE_E2E: '1',
+        FORGE_MOCK_PROMPT_DELAY_MS: '25',
+      }),
+    ).toEqual({
+      FORGE_E2E: '1',
+      FORGE_MOCK_PROMPT_DELAY_MS: '25',
+    })
+  })
+})
 
 describe('proxied Forge server cleanup', () => {
   // Waiting for handlers would hang on the harness-discovery requests the

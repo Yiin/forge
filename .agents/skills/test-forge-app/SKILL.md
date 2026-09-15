@@ -7,9 +7,9 @@ description: Launch and test Forge in an isolated browser session.
 
 Run commands from the Forge repository root.
 
-## Start an isolated server
+## Start an isolated real server
 
-Run:
+Run the supported real-server launcher:
 
 ```sh
 bun e2e/scripts/launch-forge.ts
@@ -19,6 +19,13 @@ Keep the process open. It prints `FORGE_URL` and `FORGE_DATA_DIR`.
 Use the printed `FORGE_URL` as the first URL in the controlled browser.
 The launcher uses a new directory below the system temporary directory.
 The values are on one line for easy capture.
+It starts the normal Node server through the production request loader.
+It sets `FORGE_CONFIG` to the isolated config file.
+It does not set `FORGE_E2E`, so the in-memory stub is not used.
+The helper also seeds a `harness_accounts` row for the mock harness.
+
+Specs that call `launchForge()` use the same real-server path.
+Do not use `FORGE_E2E=1` for browser QA.
 
 ## Browser checks
 
