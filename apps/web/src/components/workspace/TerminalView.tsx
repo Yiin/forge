@@ -13,15 +13,17 @@ export function TerminalView({
   terminal,
   onDescriptor,
   onError,
+  onClearError,
 }: {
   sessionId: string
   terminal: TerminalDescriptor
   onDescriptor: (value: TerminalDescriptor) => void
   onError: (message: string) => void
+  onClearError: (message: string) => void
 }) {
   const host = useRef<HTMLDivElement>(null)
-  const callbacks = useRef({ onDescriptor, onError, terminal })
-  callbacks.current = { onDescriptor, onError, terminal }
+  const callbacks = useRef({ onDescriptor, onError, onClearError, terminal })
+  callbacks.current = { onDescriptor, onError, onClearError, terminal }
   useEffect(() => {
     if (!host.current) return
     const endpoint = `/api/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(terminal.id)}`
@@ -35,9 +37,18 @@ export function TerminalView({
     const fit = new FitAddon()
     emulator.loadAddon(fit)
     emulator.open(host.current)
-    const input = terminalInputQueue(endpoint, (message) =>
-      callbacks.current.onError(message),
-    )
+    let resizeError: string | undefined
+    const input = terminalInputQueue(endpoint, (message) => {
+      if (message === 'Terminal resize failed (503)') resizeError = message
+      callbacks.current.onError(message)
+    })
+    const retireInput = () => {
+      input.close()
+      if (resizeError && terminalState === 'exited') {
+        callbacks.current.onClearError(resizeError)
+        resizeError = undefined
+      }
+    }
     let stopped = false,
       socket: WebSocket | undefined,
       retry: ReturnType<typeof setTimeout> | undefined
@@ -50,6 +61,7 @@ export function TerminalView({
     let attempts = 0
     let ended = false,
       exitSeq = 0
+    let terminalState = terminal.state
     const pending: Array<{ seq: number; bytes: Uint8Array }> = []
     const dimensions = { cols: 0, rows: 0 }
     const measure = () => {
@@ -62,7 +74,10 @@ export function TerminalView({
           rows = Math.min(300, Math.max(1, emulator.rows))
         if (emulator.cols !== cols || emulator.rows !== rows)
           emulator.resize(cols, rows)
-        if (cols !== dimensions.cols || rows !== dimensions.rows) {
+        if (
+          terminalState === 'running' &&
+          (cols !== dimensions.cols || rows !== dimensions.rows)
+        ) {
           if (input.resize(cols, rows)) {
             dimensions.cols = cols
             dimensions.rows = rows
@@ -73,7 +88,7 @@ export function TerminalView({
     const observer = new ResizeObserver(measure)
     observer.observe(host.current)
     const send = (text: string, binary = false) => {
-      if (callbacks.current.terminal.state !== 'running') return
+      if (terminalState !== 'running') return
       input.input(text, binary)
     }
     const data = emulator.onData((text) => send(text))
@@ -120,6 +135,9 @@ export function TerminalView({
               event.descriptor.sessionId !== sessionId
             )
               throw Error('Terminal replay owner changed.')
+            terminalState = event.descriptor.state
+            if (terminalState === 'running') measure()
+            else if (terminalState !== 'starting') retireInput()
             callbacks.current.onDescriptor(event.descriptor)
             if (event.replayGap) {
               callbacks.current.onError(
@@ -160,6 +178,8 @@ export function TerminalView({
           } else {
             received = event.seq
             ended = true
+            terminalState = 'exited'
+            retireInput()
             exitSeq = event.seq
             if (!pending.length) cursor = exitSeq
             callbacks.current.onDescriptor({
