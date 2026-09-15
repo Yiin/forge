@@ -23,7 +23,6 @@ import { SessionManager } from './manager.js'
 import { nativeHarness } from './native.js'
 import { NativeInteractions } from './native-interactions.js'
 import { EventBus } from '../events/bus.js'
-import { QuestionManager } from '../acp/questions.js'
 import { questionRoutes } from '../http/questions.js'
 import { stringify } from 'smol-toml'
 import { loadConfigSync, reconcileConfig, convertConfig } from '../config.js'
@@ -259,8 +258,7 @@ it.each(['grok', 'gemini', 'hermes'] as const)(
 it('routes the browser permission answer through the original production session handle', async () => {
   const f = await fixture('custom-acp', 'permission')
   const bus = new EventBus(),
-    interactions = new NativeInteractions(f.db, bus),
-    questions = new QuestionManager({ db: f.db, bus })
+    interactions = new NativeInteractions(f.db, bus)
   const manager = new SessionManager(
     f.db,
     bus,
@@ -272,10 +270,10 @@ it('routes the browser permission answer through the original production session
   cleanups.push(() => manager.close())
   await manager.prompt(f.session.id, 'Permission')
   await vi.waitFor(() =>
-    expect(questions.listPending(f.session.id)).toHaveLength(1),
+    expect(interactions.listPending(f.session.id)).toHaveLength(1),
   )
-  const request = questions.listPending(f.session.id)[0]!
-  const app = questionRoutes(questions, interactions)
+  const request = interactions.listPending(f.session.id)[0]!
+  const app = questionRoutes(interactions)
   const result = await app.request(
     `/api/sessions/${f.session.id}/questions/${request.questionId}/answer`,
     {
@@ -283,7 +281,9 @@ it('routes the browser permission answer through the original production session
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         answers: {
-          [request.questionId]: request.questions[0]!.options[0]!.label,
+          [request.questionId]: (
+            request.questions[0] as { options: { label: string }[] }
+          ).options[0]!.label,
         },
       }),
     },
