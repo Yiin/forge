@@ -61,7 +61,7 @@ export class UploadStore {
     this.now = options.now ?? Date.now
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS attachments (
-        id TEXT PRIMARY KEY, session_id TEXT, filename TEXT NOT NULL,
+        id TEXT PRIMARY KEY, session_id TEXT, project_id TEXT, filename TEXT NOT NULL,
         mime TEXT NOT NULL, size_bytes INTEGER NOT NULL, sha256 TEXT,
         rel_path TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL
       );
@@ -126,7 +126,7 @@ export class UploadStore {
     if (input.sizeBytes > MAX_UPLOAD_BYTES)
       throw new RangeError('Upload exceeds 1 GiB')
     const project = this.db
-      .prepare('SELECT id FROM projects WHERE id = ?')
+      .prepare('SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL')
       .get(projectId)
     if (!project) throw new Error('Project not found')
     const id = newId()
@@ -212,6 +212,10 @@ export class UploadStore {
       this.db.exec('BEGIN')
       let result: { lastInsertRowid: number | bigint }
       try {
+        const active = this.db
+          .prepare('SELECT 1 FROM projects WHERE id = ? AND deleted_at IS NULL')
+          .get(projectId)
+        if (!active) throw new Error('Project is being deleted')
         result = row.session_id
           ? message.run(
               row.session_id,
@@ -480,10 +484,33 @@ export class UploadStore {
       .get(id) as { id: string } | undefined
     if (!project) return false
     const sessions = this.db
-      .prepare('SELECT id FROM sessions WHERE project_id = ?')
-      .all(id) as Array<{ id: string }>
-    for (const session of sessions) await this.deleteSession(session.id)
-    this.db.prepare('DELETE FROM projects WHERE id = ?').run(id)
+      .prepare(
+        'SELECT id, status FROM sessions WHERE project_id = ? AND deleted_at IS NULL',
+      )
+      .all(id) as Array<{ id: string; status: string }>
+    if (sessions.some((session) => session.status === 'running'))
+      throw new Error('Project has active sessions')
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.db
+        .prepare(
+          'DELETE FROM attachments WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ? AND deleted_at IS NULL)',
+        )
+        .run(id)
+      this.db.prepare('DELETE FROM attachments WHERE project_id = ?').run(id)
+      this.db
+        .prepare(
+          "UPDATE sessions SET deleted_at = ?, status = 'archived' WHERE project_id = ? AND deleted_at IS NULL",
+        )
+        .run(this.now(), id)
+      this.db
+        .prepare('UPDATE projects SET deleted_at = ? WHERE id = ?')
+        .run(this.now(), id)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
     await rm(join(this.options.dataDir, 'projects', id), {
       recursive: true,
       force: true,

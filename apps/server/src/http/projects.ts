@@ -16,8 +16,8 @@ export function projectRoutes(db: DatabaseSync, uploads?: UploadStore) {
       db
         .prepare(
           c.req.query('includeArchived') === '1'
-            ? 'SELECT * FROM projects ORDER BY created_at DESC'
-            : 'SELECT * FROM projects WHERE archived_at IS NULL ORDER BY created_at DESC',
+            ? 'SELECT * FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC'
+            : 'SELECT * FROM projects WHERE archived_at IS NULL AND deleted_at IS NULL ORDER BY created_at DESC',
         )
         .all(),
     ),
@@ -41,10 +41,16 @@ export function projectRoutes(db: DatabaseSync, uploads?: UploadStore) {
     return c.json({ ok: true })
   })
   app.delete('/api/projects/:id', async (c) => {
-    if (!getProject(db, c.req.param('id')))
-      return c.json({ error: 'Project not found' }, 404)
+    const project = db
+      .prepare('SELECT id FROM projects WHERE id = ?')
+      .get(c.req.param('id'))
+    if (!project) return c.json({ error: 'Project not found' }, 404)
     if (uploads) await uploads.deleteProject(c.req.param('id') ?? '')
-    else db.prepare('DELETE FROM projects WHERE id = ?').run(c.req.param('id'))
+    else
+      db.prepare('UPDATE projects SET deleted_at = ? WHERE id = ?').run(
+        Date.now(),
+        c.req.param('id'),
+      )
     return c.json({ ok: true })
   })
   app.get('/api/projects/:id/usage', (c) => {

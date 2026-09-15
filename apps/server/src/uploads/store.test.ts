@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MAX_UPLOAD_BYTES, UploadStore } from './store.js'
+import { migrate } from '../db/migrate.js'
+import { createProject, createSession } from '../db/queries.js'
 
 const resources: Array<{ store: UploadStore; db: DatabaseSync; dir: string }> =
   []
@@ -20,13 +22,13 @@ async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), 'forge-upload-'))
   const db = new DatabaseSync(':memory:')
   db.exec(
-    `CREATE TABLE projects (id TEXT PRIMARY KEY);
+    `CREATE TABLE projects (id TEXT PRIMARY KEY, deleted_at INTEGER);
      CREATE TABLE sessions (
        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'idle',
        deleted_at INTEGER
      );`,
   )
-  db.prepare('INSERT INTO projects VALUES (?)').run('project-one')
+  db.prepare('INSERT INTO projects (id) VALUES (?)').run('project-one')
   db.prepare('INSERT INTO sessions (id, project_id) VALUES (?, ?)').run(
     'session-one',
     'project-one',
@@ -37,6 +39,107 @@ async function fixture() {
 }
 
 describe('UploadStore', () => {
+  it('tombstones a project while retaining migrated session and epic records', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-upload-migrated-'))
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, {
+      name: 'Project',
+      path: dir,
+      now: 1,
+    })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'test',
+      title: 'Retained',
+      cwd: dir,
+      now: 2,
+    })
+    db.prepare(
+      `INSERT INTO messages
+       (session_id, turn_id, item_id, role, type, content, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(session.id, 'turn', 'item', 'user', 'text', '"kept"', 3)
+    db.prepare(
+      `INSERT INTO epic_runs
+       (id, project_id, epic_bead_id, status, mode, worker_count, base_branch, config, origin_session_id, started_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'run',
+      project.id,
+      'bead',
+      'completed',
+      'serial',
+      1,
+      'main',
+      '{}',
+      session.id,
+      4,
+    )
+    db.prepare(
+      `INSERT INTO native_session_bindings
+       (session_id, provider, account_id, cwd, provider_session_id, state, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(session.id, 'test', null, dir, 'native', 'available', 5)
+    const store = new UploadStore(db, { dataDir: dir })
+    resources.push({ store, db, dir })
+
+    await store.deleteProject(project.id)
+
+    expect(
+      db
+        .prepare('SELECT deleted_at FROM projects WHERE id = ?')
+        .get(project.id),
+    ).toMatchObject({ deleted_at: expect.any(Number) })
+    expect(
+      db
+        .prepare('SELECT deleted_at FROM sessions WHERE id = ?')
+        .get(session.id),
+    ).toMatchObject({
+      deleted_at: expect.any(Number),
+    })
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM messages WHERE session_id = ?')
+        .get(session.id),
+    ).toMatchObject({
+      count: 1,
+    })
+    expect(
+      db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM native_session_bindings WHERE session_id = ?',
+        )
+        .get(session.id),
+    ).toMatchObject({
+      count: 1,
+    })
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM epic_runs WHERE project_id = ?')
+        .get(project.id),
+    ).toMatchObject({
+      count: 1,
+    })
+  })
+
+  it('refuses project deletion while a session is running', async () => {
+    const { store, db } = await fixture()
+    db.prepare("UPDATE sessions SET status = 'running' WHERE id = ?").run(
+      'session-one',
+    )
+    await expect(store.deleteProject('project-one')).rejects.toThrow(
+      'Project has active sessions',
+    )
+    expect(
+      db
+        .prepare('SELECT deleted_at FROM projects WHERE id = ?')
+        .get('project-one'),
+    ).toMatchObject({
+      deleted_at: null,
+    })
+  })
+
   it('streams a body to disk and appends an ordered attachment reference', async () => {
     const { store, db, dir } = await fixture()
     const body = new TextEncoder().encode('hello upload')
@@ -117,7 +220,7 @@ describe('UploadStore', () => {
     const { store, db, dir } = await fixture()
     const old = Date.now() - 25 * 60 * 60 * 1000
     db.prepare(
-      'INSERT INTO attachments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO attachments (id, session_id, filename, mime, size_bytes, sha256, rel_path, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       'att_stale',
       'session-one',
@@ -130,7 +233,7 @@ describe('UploadStore', () => {
       old,
     )
     db.prepare(
-      'INSERT INTO attachments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO attachments (id, session_id, filename, mime, size_bytes, sha256, rel_path, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       'att_complete',
       'session-one',
@@ -173,7 +276,7 @@ describe('UploadStore', () => {
     await mkdir(files, { recursive: true })
     await writeFile(join(files, 'stored'), 'data')
     db.prepare(
-      'INSERT INTO attachments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO attachments (id, session_id, filename, mime, size_bytes, sha256, rel_path, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       'att_delete',
       'session-one',
@@ -201,7 +304,7 @@ describe('UploadStore', () => {
     await mkdir(files, { recursive: true })
     await writeFile(join(files, 'orphan'), 'orphan')
     db.prepare(
-      'INSERT INTO attachments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO attachments (id, session_id, filename, mime, size_bytes, sha256, rel_path, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       'att_missing',
       'session-one',

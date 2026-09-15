@@ -13,7 +13,7 @@ export function skillRoutes(db: DatabaseSync, globalRoot?: string) {
   })
   app.get('/api/projects/:id/skills', async (c) => {
     const row = db
-      .prepare('SELECT path FROM projects WHERE id = ?')
+      .prepare('SELECT path FROM projects WHERE id = ? AND deleted_at IS NULL')
       .get(c.req.param('id')) as { path: string } | undefined
     if (!row) return c.json({ error: 'Project not found' }, 404)
     return c.json({ skills: await listSkills(row.path, globalRoot) })

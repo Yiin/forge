@@ -88,7 +88,7 @@ export class WorkspaceTargets {
     if (target.kind === 'project') {
       const row = this.db
         .prepare(
-          'SELECT id, path FROM projects WHERE id = ? AND archived_at IS NULL',
+          'SELECT id, path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
         )
         .get(target.projectId) as { id: string; path: string } | undefined
       if (!row)
@@ -102,7 +102,7 @@ export class WorkspaceTargets {
     }
     const row = this.db
       .prepare(
-        `SELECT s.project_id, s.cwd, s.worktree_path, p.path FROM sessions s JOIN projects p ON s.project_id = p.id WHERE s.id = ? AND s.deleted_at IS NULL`,
+        `SELECT s.project_id, s.cwd, s.worktree_path, p.path FROM sessions s JOIN projects p ON s.project_id = p.id AND p.deleted_at IS NULL WHERE s.id = ? AND s.deleted_at IS NULL`,
       )
       .get(target.sessionId) as
       | {

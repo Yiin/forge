@@ -23,9 +23,12 @@ async function fixture() {
   await mkdir(project, { recursive: true })
   const db = new DatabaseSync(':memory:')
   db.exec(
-    'CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL); CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT NOT NULL)',
+    'CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL, deleted_at INTEGER); CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT NOT NULL)',
   )
-  db.prepare('INSERT INTO projects VALUES (?, ?)').run('project-one', project)
+  db.prepare('INSERT INTO projects (id, path) VALUES (?, ?)').run(
+    'project-one',
+    project,
+  )
   db.prepare('INSERT INTO sessions VALUES (?, ?)').run(
     'session-one',
     'project-one',
@@ -41,7 +44,7 @@ describe('range and project file routes', () => {
     const path = join(dir, 'attachment.bin')
     await writeFile(path, '0123456789')
     db.prepare(
-      'INSERT INTO attachments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO attachments (id, session_id, filename, mime, size_bytes, sha256, rel_path, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       'att_one',
       'session-one',
@@ -117,7 +120,7 @@ describe('range and project file routes', () => {
     const { db, store, dir } = await fixture()
     await writeFile(join(dir, 'attachment.txt'), 'hello')
     db.prepare(
-      'INSERT INTO attachments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO attachments (id, session_id, filename, mime, size_bytes, sha256, rel_path, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       'att_two',
       'session-one',

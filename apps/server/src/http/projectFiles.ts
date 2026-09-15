@@ -8,8 +8,9 @@ import { fileResponse } from './rangeStream.js'
 export function projectFileRoutes(db: DatabaseSync) {
   const app = new Hono()
   const root = (id: string) => {
-    const row = db.prepare('SELECT path FROM projects WHERE id = ?').get(id) as
-      { path: string } | undefined
+    const row = db
+      .prepare('SELECT path FROM projects WHERE id = ? AND deleted_at IS NULL')
+      .get(id) as { path: string } | undefined
     if (!row) throw new Error('Project not found')
     return row.path
   }

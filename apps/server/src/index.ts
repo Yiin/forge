@@ -199,7 +199,9 @@ export function createApp(
         projectPath: (projectId) =>
           (
             status.db
-              .prepare('SELECT path FROM projects WHERE id = ?')
+              .prepare(
+                'SELECT path FROM projects WHERE id = ? AND deleted_at IS NULL',
+              )
               .get(projectId) as { path?: string } | undefined
           )?.path,
         db: status.db,
@@ -287,7 +289,9 @@ export function startServer(
   void pruneWorktreesForRepositories(
     (
       db
-        .prepare('SELECT DISTINCT path FROM projects WHERE path IS NOT NULL')
+        .prepare(
+          'SELECT DISTINCT path FROM projects WHERE path IS NOT NULL AND deleted_at IS NULL',
+        )
         .all() as Array<{
         path: string
       }>
