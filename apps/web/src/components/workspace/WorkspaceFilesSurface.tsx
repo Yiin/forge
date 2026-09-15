@@ -34,6 +34,7 @@ import {
   AlertDialogTitle,
 } from '../ui/alert-dialog'
 import { cn } from '@/lib/utils'
+import { readFilePreferences } from '@/lib/settings-preferences'
 import {
   listWorkspaceFiles,
   readWorkspaceFile,
@@ -78,6 +79,7 @@ export function WorkspaceFilesSurface({ sessionId, target }: Props) {
   const [searching, setSearching] = useState(false)
   const [closeRequested, setCloseRequested] = useState(false)
   const requestGeneration = useRef(0)
+  const filePreferences = readFilePreferences()
 
   useEffect(() => {
     requestGeneration.current += 1
@@ -110,6 +112,28 @@ export function WorkspaceFilesSurface({ sessionId, target }: Props) {
   useEffect(() => {
     void load('')
   }, [selection, includeIgnored])
+
+  useEffect(() => {
+    if (
+      !filePreferences.autosave ||
+      !open?.dirty ||
+      open.saving ||
+      open.staleTarget
+    )
+      return
+    const timer = window.setTimeout(
+      () => void save(),
+      filePreferences.autosaveDelayMs,
+    )
+    return () => window.clearTimeout(timer)
+  }, [
+    filePreferences.autosave,
+    filePreferences.autosaveDelayMs,
+    open?.text,
+    open?.dirty,
+    open?.saving,
+    open?.staleTarget,
+  ])
 
   const openPath = async (next: string) => {
     const entry = entries.find((item) => item.path === next)
