@@ -152,6 +152,7 @@ export function WorkspaceDock({
   )
   return (
     <aside
+      data-overlay={dock.takeover || mobile}
       className={cn(
         'workspace-dock flex min-h-0 flex-col border-l border-border bg-background',
         dock.takeover || mobile
