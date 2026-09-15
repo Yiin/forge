@@ -21,6 +21,16 @@ import {
 import { putUpload } from './upload'
 export type ApiOptions = { baseUrl?: string; fetch?: typeof globalThis.fetch }
 export type UploadProgress = (fraction: number) => void
+export type PreviewTarget = {
+  id: string
+  sessionId: string
+  workspaceId: string
+  workspaceRevision: number
+  origin: string
+  publicUrl: string | null
+  status: 'ready' | 'unavailable' | 'removed'
+  reason: string | null
+}
 type BodySchema = { parse: (value: unknown) => unknown }
 const base = () =>
   typeof window === 'undefined' ? 'http://localhost:3000' : ''
@@ -276,6 +286,34 @@ export class ForgeApi {
   }
   btw(input: Btw) {
     return this.post(`/api/sessions/${input.sessionId}/btw`, btw, input)
+  }
+  registerPreview(sessionId: string, origin: string) {
+    return this.post('/api/previews', null, {
+      sessionId,
+      origin,
+    }) as Promise<PreviewTarget>
+  }
+  listPreviews(sessionId: string) {
+    return this.get(
+      `/api/previews?sessionId=${encodeURIComponent(sessionId)}`,
+    ) as Promise<{
+      targets: PreviewTarget[]
+    }>
+  }
+  previewReachability(id: string, sessionId: string) {
+    return this.get(
+      `/api/previews/${encodeURIComponent(id)}/reachability?sessionId=${encodeURIComponent(sessionId)}`,
+    ) as Promise<{
+      reachable: boolean
+      status: PreviewTarget['status']
+      reason: string | null
+    }>
+  }
+  removePreview(id: string, sessionId: string) {
+    return this.request(
+      'DELETE',
+      `/api/previews/${encodeURIComponent(id)}?sessionId=${encodeURIComponent(sessionId)}`,
+    )
   }
   private async post(
     path: string,
