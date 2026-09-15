@@ -80,7 +80,7 @@ describe('NativeContentRow', () => {
     expect(useShellStore.getState().dock('session-1').tabs).toContainEqual(
       expect.objectContaining({
         kind: 'subagent',
-        childSessionId: 'child-1',
+        nativeChildId: 'child-1',
       }),
     )
     childView.unmount()
