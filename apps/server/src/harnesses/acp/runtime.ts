@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { NativeCleanupError } from '../native-cleanup.js'
 import {
   harnessEventSchema,
   type TerminalOutcome,
@@ -68,6 +69,10 @@ export type AcpRuntimeDependencies = {
   broker: AcpInteractionBroker
   grokRail?: 'public' | 'comet'
   childHistory?: AcpChildHistory
+  saveChildHistory?(
+    session: HarnessSession,
+    history: AcpChildHistory,
+  ): Promise<void>
   services(
     connection: AcpConnection,
     terminalHistory: AcpTerminalHistory,
@@ -612,18 +617,34 @@ export function createTypedAcpAdapter(
         load,
       )
     } catch (error) {
-      await Promise.allSettled(handlers)
-      await contentChain.catch(() => {})
-      await Promise.allSettled([
-        services?.filesystem.close(),
-        services?.terminals.close(),
-        attachments.close(),
-        content.close(),
-      ])
-      await terminalHistory?.close()
-      normalizer.close()
-      responses.close()
-      children.close()
+      const cleanup = async () => {
+        await Promise.allSettled(handlers)
+        await contentChain.catch(() => {})
+        const results = await Promise.allSettled([
+          services?.filesystem.close(),
+          services?.terminals.close(),
+          attachments.close(),
+          content.close(),
+          ...(error instanceof NativeCleanupError
+            ? [error.retryCleanup()]
+            : []),
+        ])
+        const failed = results.filter((result) => result.status === 'rejected')
+        if (failed.length)
+          throw new AggregateError(
+            failed.map((result) => result.reason),
+            'ACP startup cleanup remains unresolved',
+          )
+        await terminalHistory?.close()
+        normalizer.close()
+        responses.close()
+        children.close()
+      }
+      try {
+        await cleanup()
+      } catch {
+        throw new NativeCleanupError(cleanup)
+      }
       throw error
     }
     let io = connection
@@ -1107,6 +1128,7 @@ export function createTypedAcpAdapter(
           normalizer.close()
           responses.close()
           await terminalHistory?.close()
+          await deps.saveChildHistory?.(session, children.snapshot())
           children.close()
           for (const root of roots.values()) root.releaseOwner()
           roots.clear()

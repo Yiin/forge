@@ -7,6 +7,7 @@ import type {
   ConfirmedNativeBinding,
   HarnessEvent,
   CompletionPersistenceFailure,
+  HarnessHistoryEvent,
 } from '../types.js'
 import { immutableData, canonical, digest } from './data.js'
 import type { AcpResourceHost } from './limits.js'
@@ -48,26 +49,7 @@ export type AcpSourceRef = Readonly<{
   bytes: number
   sha256: string
 }>
-type ReplayableEvent = Extract<
-  HarnessEvent,
-  {
-    type:
-      | 'text_delta'
-      | 'thought_delta'
-      | 'content_snapshot'
-      | 'content_block'
-      | 'tool_started'
-      | 'tool_update'
-      | 'plan'
-      | 'usage_snapshot'
-      | 'source_reference'
-  }
->
-export type AcpReplayEventBody = ReplayableEvent extends infer Event
-  ? Event extends unknown
-    ? Omit<Event, 'runId' | 'turnId' | 'runtimeGeneration' | 'deliveryId'>
-    : never
-  : never
+export type AcpReplayEventBody = HarnessHistoryEvent
 export type NeutralRecord =
   | Readonly<{ kind: 'event'; event: HarnessEvent }>
   | Readonly<{ kind: 'replay'; event: AcpReplayEventBody }>

@@ -3,6 +3,7 @@ import {
   questionAnswerSchema,
 } from '@forge/protocol/harness'
 import type { NativeInteractions } from './native-interactions.js'
+import type { HarnessHistoryEvent } from '../harnesses/types.js'
 import type {
   HarnessAdapter,
   HarnessEvent,
@@ -11,8 +12,18 @@ import type {
 } from '../harnesses/types.js'
 import type { HarnessHandle, HarnessItem, HarnessProcess } from './harness.js'
 
-function item(event: HarnessEvent): HarnessItem | undefined {
-  const make = (value: unknown) => value as HarnessItem
+export function nativeItem(
+  event: HarnessEvent | (HarnessHistoryEvent & { turnId: string }),
+): HarnessItem | undefined {
+  const make = (value: unknown) =>
+    ({
+      ...(value as Record<string, unknown>),
+      ...('childId' in event &&
+      typeof event.childId === 'string' &&
+      !['child_started', 'child_finished', 'child_updated'].includes(event.type)
+        ? { childId: event.childId }
+        : {}),
+    }) as HarnessItem
   switch (event.type) {
     case 'turn_started':
       return make({ type: 'turn_start', turnId: event.turnId })
@@ -47,6 +58,7 @@ function item(event: HarnessEvent): HarnessItem | undefined {
         type: 'tool_call',
         toolCallId: event.childId,
         name: 'child',
+        nativeChildId: event.childId,
         input: { description: event.description },
         turnId: event.turnId,
         itemId: event.itemId,
@@ -55,12 +67,14 @@ function item(event: HarnessEvent): HarnessItem | undefined {
       return make({
         type: 'tool_update',
         toolCallId: event.childId,
+        nativeChildId: event.childId,
         status: event.outcome.status,
         output: event.outcome,
         turnId: event.turnId,
         itemId: event.itemId,
       })
     case 'child_updated':
+    case 'content_snapshot':
     case 'content_block':
     case 'file_change':
     case 'source_reference':
@@ -271,7 +285,7 @@ export function nativeHarness(
         interactions.register(
           session.id,
           captured,
-          item(captured)!,
+          nativeItem(captured)!,
           (answer, cancelled) => {
             if (captured.type === 'permission_requested') {
               const reply: PermissionReply = cancelled
@@ -309,7 +323,7 @@ export function nativeHarness(
         questionRequests.delete(event.requestId)
       }
       if (event.type === 'run_failed') onExit(new Error(event.message))
-      const normalized = item(event)
+      const normalized = nativeItem(event)
       if (normalized) onItem(normalized)
     }
     const handle = await (resume ? adapter.load : adapter.spawn)!(
