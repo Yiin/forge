@@ -77,6 +77,8 @@ import { claudeUsageProbe } from './accounts/probes/claude.js'
 import { refreshAccountModels } from './accounts/models.js'
 import { pruneWorktreesForRepositories } from './git/worktrees.js'
 import { RequestGuard } from './request-guard.js'
+import { PreviewManager } from './previews/manager.js'
+import { previewPublicRoutes, previewRoutes } from './previews/transport.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -149,6 +151,7 @@ export function createApp(
   refreshModels?: (accountId: string) => void,
   workspaceFiles?: WorkspaceFiles,
   requestGuard = new RequestGuard(configState?.current.terminalAccess),
+  previews?: PreviewManager,
 ) {
   const app = new Hono()
   app.use('*', async (c, next) => {
@@ -224,6 +227,7 @@ export function createApp(
       }),
     )
     app.route('/', serverConfigRoutes())
+    if (previews) app.route('/', previewRoutes(previews))
   }
   if (questions) app.route('/', questionRoutes(questions))
   if (status) app.route('/', workspaceRoutes(status.db, uploadStore))
@@ -477,6 +481,11 @@ export function startServer(port?: number): ServerType {
     workspaceFiles,
     requestGuard,
   )
+  const previews = new PreviewManager(
+    workspaceFiles.targets,
+    config.preview?.publicOrigin,
+  )
+  app.route('/', previewRoutes(previews))
   usagePoller.start()
   const upgrades = new WebSocketUpgrades(
     app,
@@ -499,6 +508,13 @@ export function startServer(port?: number): ServerType {
       terminalAuthority.bind(address.port)
     },
   )
+  const previewServer = config.preview
+    ? serve({
+        fetch: previewPublicRoutes(previews).fetch,
+        hostname: config.preview.listenerHost,
+        port: config.preview.listenerPort,
+      })
+    : undefined
   upgrades.install(server as Server)
   const shutdown = new ServerShutdown(
     server as Server,
@@ -534,6 +550,10 @@ export function startServer(port?: number): ServerType {
       )
   })
   shutdown.addCleanupHook(() => workspaceFiles.close())
+  shutdown.addCleanupHook(() => previews.close())
+  shutdown.addCleanupHook(() => {
+    previewServer?.close()
+  })
   shutdown.addCleanupHook(() => {
     loginManager.close()
     usagePoller.stop()

@@ -21,7 +21,8 @@
     "./skills": "./src/skills.ts",
     "./harness": "./src/harness.ts",
     "./timeline": "./src/timeline.ts",
-    "./workspace": "./src/workspace.ts"
+    "./workspace": "./src/workspace.ts",
+    "./preview": "./src/preview.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
