@@ -80,9 +80,11 @@ describe('installed SDK through the typed ACP runtime', () => {
           cwd: f.session.cwd,
           providerSessionId: 'sdk-resume',
         }
-        loading = createTypedAcpAdapter(f.deps).load!(
-          { ...f.session, binding },
-          (event) => f.events.push(event),
+        loading = Promise.resolve(
+          createTypedAcpAdapter(f.deps).load!(
+            { ...f.session, binding },
+            (event) => f.events.push(event),
+          ),
         )
         let settled = false
         void loading.then(
