@@ -194,10 +194,14 @@ describe('message folding', () => {
 
   it('drops events at or below the global cursor', () => {
     const state = foldEvent(
-      { bySession: {}, lastSeq: 4 },
+      { bySession: {}, lastSeq: 4, seenSeqs: new Set([4]) },
       event(4, message({})),
     )
-    expect(state).toEqual({ bySession: {}, lastSeq: 4 })
+    expect(state).toEqual({
+      bySession: {},
+      lastSeq: 4,
+      seenSeqs: new Set([4]),
+    })
   })
 
   it('reconciles pending rows when the server item arrives', () => {
@@ -246,6 +250,163 @@ describe('message folding', () => {
     const state = useMessagesStore.getState()
     expect(state.bySession['ses-1']).toHaveLength(5)
     expect(state.bySession['ses-2']).toHaveLength(4)
-    expect(state.lastSeq).toBe(9)
+    expect(state.lastSeq).toBe(0)
+  })
+
+  it('reconciles REST snapshots with live deltas without moving the live cursor', () => {
+    useMessagesStore.getState().reset()
+    useMessagesStore.getState().loadMessages('ses-1', [
+      message({
+        seq: 8,
+        itemId: 'item-1',
+        content: { type: 'text_delta', text: 'hello' },
+      }),
+    ])
+    expect(useMessagesStore.getState().lastSeq).toBe(0)
+    useMessagesStore.getState().applyEvent(
+      event(
+        8,
+        message({
+          seq: 8,
+          itemId: 'item-1',
+          content: { type: 'text_delta', text: 'hello' },
+        }),
+      ),
+    )
+    useMessagesStore.getState().applyEvent(
+      event(
+        9,
+        message({
+          seq: 9,
+          itemId: 'item-1',
+          content: { type: 'text_delta', text: ' world' },
+        }),
+      ),
+    )
+    expect(useMessagesStore.getState().bySession['ses-1'][0].content).toEqual({
+      type: 'text_delta',
+      text: 'hello world',
+    })
+    expect(useMessagesStore.getState().lastSeq).toBe(9)
+  })
+
+  it('keeps the newest snapshot cursor and queued state after reload', () => {
+    useMessagesStore.getState().reset()
+    useMessagesStore.getState().loadSnapshot({
+      type: 'sessionSnapshot',
+      sessionId: 'ses-1',
+      cursor: 12,
+      messages: [message({ seq: 4 })],
+      queuedPrompts: [
+        { id: 'q1', sessionId: 'ses-1', text: 'later', createdAt: 1 },
+      ],
+    })
+    expect(useMessagesStore.getState().snapshotCursorBySession['ses-1']).toBe(
+      12,
+    )
+    expect(useMessagesStore.getState().queuedBySession['ses-1']).toHaveLength(1)
+    expect(useMessagesStore.getState().lastSeq).toBe(0)
+  })
+
+  it('does not double-fold cumulative live text when a snapshot races it', () => {
+    useMessagesStore.getState().reset()
+    const first = message({
+      seq: 1,
+      content: { type: 'text_delta', text: 'a' },
+    })
+    const second = message({
+      seq: 2,
+      content: { type: 'text_delta', text: 'b' },
+    })
+    useMessagesStore.getState().applyEvent(event(1, first))
+    useMessagesStore.getState().applyEvent(event(2, second))
+    useMessagesStore.getState().loadSnapshot({
+      type: 'sessionSnapshot',
+      sessionId: 'ses-1',
+      cursor: 1,
+      messages: [first],
+    })
+    expect(useMessagesStore.getState().bySession['ses-1'][0].content).toEqual({
+      type: 'text_delta',
+      text: 'ab',
+    })
+  })
+
+  it('keeps the snapshot prefix when live text started before the snapshot', () => {
+    useMessagesStore.getState().reset()
+    useMessagesStore.getState().applyEvent(
+      event(
+        2,
+        message({
+          seq: 2,
+          content: { type: 'text_delta', text: 'b' },
+        }),
+      ),
+    )
+    useMessagesStore.getState().applyEvent(
+      event(
+        3,
+        message({
+          seq: 3,
+          content: { type: 'text_delta', text: 'c' },
+        }),
+      ),
+    )
+    useMessagesStore.getState().loadSnapshot({
+      type: 'sessionSnapshot',
+      sessionId: 'ses-1',
+      cursor: 2,
+      messages: [
+        message({
+          seq: 1,
+          content: { type: 'text_delta', text: 'a' },
+        }),
+        message({
+          seq: 2,
+          content: { type: 'text_delta', text: 'b' },
+        }),
+      ],
+    })
+    expect(useMessagesStore.getState().bySession['ses-1'][0].content).toEqual({
+      type: 'text_delta',
+      text: 'abc',
+    })
+  })
+
+  it('keeps repeated live deltas during snapshot reconciliation', () => {
+    useMessagesStore.getState().reset()
+    for (const [seq, text] of [
+      [2, 'a'],
+      [3, 'a'],
+    ] as const)
+      useMessagesStore
+        .getState()
+        .applyEvent(
+          event(seq, message({ seq, content: { type: 'text_delta', text } })),
+        )
+    useMessagesStore.getState().loadSnapshot({
+      type: 'sessionSnapshot',
+      sessionId: 'ses-1',
+      cursor: 2,
+      messages: [
+        message({ seq: 1, content: { type: 'text_delta', text: 'a' } }),
+        message({ seq: 2, content: { type: 'text_delta', text: 'a' } }),
+      ],
+    })
+    expect(useMessagesStore.getState().bySession['ses-1'][0].content).toEqual({
+      type: 'text_delta',
+      text: 'aaa',
+    })
+  })
+
+  it('keeps the global cursor monotonic across sessions', () => {
+    useMessagesStore.getState().reset()
+    useMessagesStore
+      .getState()
+      .applyEvent(event(8, message({ sessionId: 'ses-1', seq: 8 })))
+    useMessagesStore
+      .getState()
+      .applyEvent(event(3, message({ sessionId: 'ses-2', seq: 3 })))
+    expect(useMessagesStore.getState().lastSeq).toBe(8)
   })
 })

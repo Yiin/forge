@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ForgeSocket, normalizeMessage, type ForgeWebSocket } from './socket'
+import { ForgeSocket, type ForgeWebSocket } from './socket'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore } from '../stores/sessions'
 
@@ -144,41 +144,34 @@ describe('ForgeSocket', () => {
     expect(useMessagesStore.getState().queuedBySession['ses-1']).toHaveLength(1)
     socket.stop()
   })
-})
 
-describe('normalizeMessage', () => {
-  it('moves the row type into the content so history rows render', () => {
-    expect(
-      normalizeMessage({
-        seq: 7,
+  it('keeps replay cursors local to each session subscription', () => {
+    const first = new ForgeSocket({
+      sessions: ['ses-1'],
+      createWebSocket: () => new MockSocket(),
+    }).start()
+    MockSocket.sockets[0].open()
+    MockSocket.sockets[0].message({
+      seq: 20,
+      sessionId: 'ses-1',
+      msg: {
+        seq: 20,
         sessionId: 'ses-1',
-        type: 'text_delta',
+        turnId: 'turn-1',
+        itemId: 'item-20',
         role: 'agent',
-        content: { text: 'hello' },
-        createdAt: '2024-01-01T00:00:00.000Z',
-      }),
-    ).toEqual({
-      seq: 7,
-      sessionId: 'ses-1',
-      turnId: 'ses-1-turn',
-      itemId: 'ses-1-text_delta',
-      role: 'agent',
-      type: 'text_delta',
-      content: { type: 'text_delta', text: 'hello' },
-      createdAt: '2024-01-01T00:00:00.000Z',
+        type: 'turn_start',
+        content: { type: 'turn_start' },
+        createdAt: 'now',
+      },
     })
-  })
-  it('keeps a row that already carries the full message shape', () => {
-    const message = {
-      seq: 3,
-      sessionId: 'ses-1',
-      turnId: 'turn-1',
-      itemId: 'item-1',
-      role: 'agent',
-      type: 'text_delta',
-      content: { type: 'text_delta', text: 'kept' },
-      createdAt: '2024-01-01T00:00:00.000Z',
-    }
-    expect(normalizeMessage(message)).toEqual(message)
+    const second = new ForgeSocket({
+      sessions: ['ses-2'],
+      createWebSocket: () => new MockSocket(),
+    }).start()
+    MockSocket.sockets[1].open()
+    expect(JSON.parse(MockSocket.sockets[1].sent[0]).cursor).toBe(0)
+    first.stop()
+    second.stop()
   })
 })
