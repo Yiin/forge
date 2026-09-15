@@ -324,17 +324,25 @@ export class QuestionManager {
       if (value === undefined)
         throw new QuestionError(400, `Missing answer key: ${question.question}`)
       if (!idKey) continue
+      if (value === null)
+        throw new QuestionError(400, `Invalid answer for ${question.question}`)
+      const answerObject = object(value)
+      if (
+        answerObject.type === 'selected_with_text' &&
+        typeof answerObject.text !== 'string'
+      )
+        throw new QuestionError(400, `Invalid answer for ${question.question}`)
       const optionIds: unknown = Array.isArray(value)
         ? value
         : typeof value === 'string' &&
             question.options.length > 0 &&
             !question.allowFreeInput
           ? [value]
-          : object(value).type === 'selected_with_text'
-            ? object(value).optionIds
+          : answerObject.type === 'selected_with_text'
+            ? answerObject.optionIds
             : undefined
       if (
-        object(value).type === 'selected_with_text' &&
+        answerObject.type === 'selected_with_text' &&
         !Array.isArray(optionIds)
       )
         throw new QuestionError(400, `Invalid answer for ${question.question}`)
