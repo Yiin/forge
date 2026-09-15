@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { HarnessEvent } from '@forge/protocol/harness'
 import {
@@ -40,6 +41,19 @@ async function httpServer(handler: (response: ServerResponse) => void) {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
   return `http://127.0.0.1:${address.port}`
+}
+async function readReport(path: string, timeoutMs = 1_000) {
+  const deadline = performance.now() + timeoutMs
+  while (true) {
+    try {
+      return JSON.parse(await readFile(path, 'utf8'))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      if (performance.now() >= deadline)
+        throw new Error(`Timed out waiting for fixture report: ${path}`)
+      await delay(10)
+    }
+  }
 }
 async function owned(mode = 'normal', selected = false) {
   const cwd = await mkdtemp(join(tmpdir(), 'forge owned ž-'))
@@ -237,7 +251,7 @@ describe('OpenCode owned process and HTTP bounds', () => {
       await expect(
         createOpenCodeAdapter(fake.options).spawn(fake.session, () => {}),
       ).rejects.toThrow()
-      const report = JSON.parse(await readFile(fake.report, 'utf8'))
+      const report = await readReport(fake.report)
       await expectStopped(report.pid)
     },
   )

@@ -2,15 +2,10 @@
 // Owned process fixture. It never starts a provider or reads native account state.
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
-import { renameSync, writeFileSync } from 'node:fs'
+import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 
-const wire = JSON.parse(
-  await readFile(new URL('./opencode-wire.json', import.meta.url), 'utf8'),
-)
 const config = process.env.FORGE_OPENCODE_FIXTURE_CONFIG
-  ? JSON.parse(
-      await readFile(process.env.FORGE_OPENCODE_FIXTURE_CONFIG, 'utf8'),
-    )
+  ? JSON.parse(readFileSync(process.env.FORGE_OPENCODE_FIXTURE_CONFIG, 'utf8'))
   : {}
 const cwd = process.cwd()
 const auth = `Basic ${Buffer.from(`${process.env.OPENCODE_SERVER_USERNAME}:${process.env.OPENCODE_SERVER_PASSWORD}`).toString('base64')}`
@@ -49,6 +44,9 @@ function save() {
   renameSync(temporary, config.report)
 }
 save()
+const wire = JSON.parse(
+  await readFile(new URL('./opencode-wire.json', import.meta.url), 'utf8'),
+)
 if (config.mode === 'exit') process.exit(3)
 const server = createServer(async (req, res) => {
   const chunks = []
