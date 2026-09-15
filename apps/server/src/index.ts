@@ -64,6 +64,11 @@ import {
 } from './config.js'
 import { ptyHarness } from './pty/harness.js'
 import { acpHarness } from './acp/harness.js'
+import { nativeHarness } from './sessions/native.js'
+import {
+  createProductionNativeAdapter,
+  harnessTransport,
+} from './sessions/native-factory.js'
 import {
   HarnessAccountStore,
   accountKindForHarness,
@@ -385,6 +390,21 @@ export function startServer(port?: number): ServerType {
     if (account && account.harnessKey !== key)
       throw new Error('Account does not belong to harness')
     const derived = account ? deriveAccountHarness(entry, account) : entry
+    const adapter =
+      harnessTransport(key, derived) === 'native'
+        ? createProductionNativeAdapter(key, {
+            command: derived.command,
+            args: derived.args,
+            env: derived.env,
+            accountId: account?.id,
+          })
+        : undefined
+    if (adapter)
+      return nativeHarness(adapter, (sessionId, providerSessionId) => {
+        db.prepare(
+          'UPDATE sessions SET provider_session_id = ? WHERE id = ?',
+        ).run(providerSessionId, sessionId)
+      })
     if (derived?.protocol === 'pty') return ptyHarness(derived)
     if (derived?.protocol === 'acp')
       return acpHarness(derived, { db, bus, questions, accountId })

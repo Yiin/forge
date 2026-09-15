@@ -304,6 +304,7 @@ export class SessionManager {
         id: row.id,
         cwd: row.cwd,
         harness: row.harness,
+        accountId: row.account_id,
         providerSessionId: row.provider_session_id,
       },
       onItem,
@@ -352,6 +353,7 @@ export class SessionManager {
       id: row.id,
       cwd: row.cwd,
       harness: row.harness,
+      accountId: row.account_id,
       providerSessionId: row.provider_session_id,
     }
     let result: {
