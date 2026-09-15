@@ -1,5 +1,11 @@
-import { appendMessage, createSession, getSession } from '../db/queries.js'
+import {
+  appendMessage,
+  createSession,
+  getActiveSession,
+  getSession,
+} from '../db/queries.js'
 import { readFile } from 'node:fs/promises'
+import { withProjectActivity } from '../db/project-activity.js'
 import { join } from 'node:path'
 import type { EventBus } from '../events/bus.js'
 import type { DatabaseSync } from 'node:sqlite'
@@ -138,28 +144,30 @@ export class SessionManager {
     workspace?: WorkspaceChoice,
     signal?: AbortSignal,
   ) {
-    const status = await gitStatus(projectPath, undefined, { signal })
-    if (!workspace || workspace.mode === 'local') {
-      return {
-        cwd: projectPath,
-        worktreePath: null,
-        branch: status.branch,
+    return withProjectActivity(this.db, projectId, async () => {
+      const status = await gitStatus(projectPath, undefined, { signal })
+      if (!workspace || workspace.mode === 'local') {
+        return {
+          cwd: projectPath,
+          worktreePath: null,
+          branch: status.branch,
+        }
       }
-    }
-    const worktree = await provisionWorktree({
-      repoPath: projectPath,
-      dataDir: this.dataDir,
-      projectId,
-      baseRef:
-        workspace.baseRef ?? status.defaultBranch ?? status.branch ?? 'HEAD',
-      branch: workspace.branch,
-      signal,
+      const worktree = await provisionWorktree({
+        repoPath: projectPath,
+        dataDir: this.dataDir,
+        projectId,
+        baseRef:
+          workspace.baseRef ?? status.defaultBranch ?? status.branch ?? 'HEAD',
+        branch: workspace.branch,
+        signal,
+      })
+      return {
+        cwd: worktree.path,
+        worktreePath: worktree.path,
+        branch: worktree.branch,
+      }
     })
-    return {
-      cwd: worktree.path,
-      worktreePath: worktree.path,
-      branch: worktree.branch,
-    }
   }
 
   private resolveAccount(harness: string, accountId?: string | null) {
@@ -193,17 +201,19 @@ export class SessionManager {
   }
 
   list(projectId?: string, parentSessionId?: string) {
+    const visible =
+      "SELECT * FROM sessions WHERE deleted_at IS NULL AND project_id IN (SELECT id FROM projects WHERE deleted_at IS NULL) AND retention = 'permanent'"
     if (parentSessionId) {
       const sql = projectId
-        ? "SELECT * FROM sessions WHERE project_id = ? AND parent_session_id = ? AND retention = 'permanent' ORDER BY last_activity_at DESC"
-        : "SELECT * FROM sessions WHERE parent_session_id = ? AND retention = 'permanent' ORDER BY last_activity_at DESC"
+        ? `${visible} AND project_id = ? AND parent_session_id = ? ORDER BY last_activity_at DESC`
+        : `${visible} AND parent_session_id = ? ORDER BY last_activity_at DESC`
       return projectId
         ? this.db.prepare(sql).all(projectId, parentSessionId)
         : this.db.prepare(sql).all(parentSessionId)
     }
     const sql = projectId
-      ? "SELECT * FROM sessions WHERE project_id = ? AND retention = 'permanent' ORDER BY last_activity_at DESC"
-      : "SELECT * FROM sessions WHERE retention = 'permanent' ORDER BY last_activity_at DESC"
+      ? `${visible} AND project_id = ? ORDER BY last_activity_at DESC`
+      : `${visible} ORDER BY last_activity_at DESC`
     return projectId
       ? this.db.prepare(sql).all(projectId)
       : this.db.prepare(sql).all()
@@ -527,160 +537,164 @@ export class SessionManager {
     configOptions?: Record<string, string | boolean>,
     delivery?: 'immediate' | 'turn-boundary',
   ) {
-    let row = getSession(this.db, id) as SessionRow | undefined
-    if (!row) throw new Error('Session not found')
-    if (requestId) {
-      const seen = this.db
-        .prepare(
-          `SELECT 1 FROM messages
+    const owner = getActiveSession(this.db, id) as SessionRow | undefined
+    if (!owner) throw new Error('Session not found')
+    return withProjectActivity(this.db, owner.project_id, async () => {
+      let row = owner
+      if (requestId) {
+        const seen = this.db
+          .prepare(
+            `SELECT 1 FROM messages
            WHERE session_id = ? AND type = 'turn_start'
              AND json_extract(content, '$.requestId') = ?
            UNION ALL
            SELECT 1 FROM queued_prompts
            WHERE session_id = ? AND request_id = ?`,
-        )
-        .get(id, requestId, id, requestId)
-      if (seen) return
-    }
-    if ((delivery ?? 'immediate') === 'immediate' && this.turns.has(id))
-      throw new PromptBusyError()
-    if (delivery === 'turn-boundary' && this.turns.has(id)) {
-      this.db
-        .prepare(
-          `INSERT INTO queued_prompts
+          )
+          .get(id, requestId, id, requestId)
+        if (seen) return
+      }
+      if ((delivery ?? 'immediate') === 'immediate' && this.turns.has(id))
+        throw new PromptBusyError()
+      if (delivery === 'turn-boundary' && this.turns.has(id)) {
+        this.db
+          .prepare(
+            `INSERT INTO queued_prompts
            (id, session_id, text, attachment_ids, model, config_options, client_item_id, request_id, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          makeId('queued_'),
-          id,
-          text,
-          attachmentIds ? JSON.stringify(attachmentIds) : null,
-          model ?? null,
-          configOptions ? JSON.stringify(configOptions) : null,
-          clientItemId ?? null,
-          requestId ?? null,
-          Math.max(
-            Date.now(),
-            Number(
-              (
-                this.db
-                  .prepare(
-                    'SELECT COALESCE(MAX(created_at), 0) AS created_at FROM queued_prompts WHERE session_id = ?',
-                  )
-                  .get(id) as { created_at: number }
-              ).created_at,
-            ) + 1,
-          ),
-        )
-      this.publishQueuedPrompts(id)
-      return
-    }
-    const nextHarness = harness ?? row.harness
-    const nextAccount =
-      accountId === undefined
-        ? harness && harness !== row.harness
-          ? this.resolveAccount(nextHarness)
-          : row.account_id
-        : this.resolveAccount(nextHarness, accountId)
-    if (nextHarness !== row.harness || nextAccount !== row.account_id) {
-      if (this.turns.has(id))
-        throw new Error('Cannot change harness during a turn')
-      const oldHandle = this.handles.get(id)
-      if (oldHandle) {
-        await oldHandle.kill()
-        this.forgetHandle(id)
+          )
+          .run(
+            makeId('queued_'),
+            id,
+            text,
+            attachmentIds ? JSON.stringify(attachmentIds) : null,
+            model ?? null,
+            configOptions ? JSON.stringify(configOptions) : null,
+            clientItemId ?? null,
+            requestId ?? null,
+            Math.max(
+              Date.now(),
+              Number(
+                (
+                  this.db
+                    .prepare(
+                      'SELECT COALESCE(MAX(created_at), 0) AS created_at FROM queued_prompts WHERE session_id = ?',
+                    )
+                    .get(id) as { created_at: number }
+                ).created_at,
+              ) + 1,
+            ),
+          )
+        this.publishQueuedPrompts(id)
+        return
       }
-      const timer = this.reapTimers.get(id)
-      if (timer) clearTimeout(timer)
-      this.reapTimers.delete(id)
-      this.db
-        .prepare(
-          "UPDATE sessions SET harness = ?, account_id = ?, provider_session_id = NULL, status = 'idle', last_activity_at = ? WHERE id = ?",
-        )
-        .run(nextHarness, nextAccount, Date.now(), id)
-      row = {
-        ...row,
-        harness: nextHarness,
-        account_id: nextAccount,
-        provider_session_id: null,
+      const nextHarness = harness ?? row.harness
+      const nextAccount =
+        accountId === undefined
+          ? harness && harness !== row.harness
+            ? this.resolveAccount(nextHarness)
+            : row.account_id
+          : this.resolveAccount(nextHarness, accountId)
+      if (nextHarness !== row.harness || nextAccount !== row.account_id) {
+        if (this.turns.has(id))
+          throw new Error('Cannot change harness during a turn')
+        const oldHandle = this.handles.get(id)
+        if (oldHandle) {
+          await oldHandle.kill()
+          this.forgetHandle(id)
+        }
+        if (!getActiveSession(this.db, id)) throw new Error('Session not found')
+        const timer = this.reapTimers.get(id)
+        if (timer) clearTimeout(timer)
+        this.reapTimers.delete(id)
+        this.db
+          .prepare(
+            "UPDATE sessions SET harness = ?, account_id = ?, provider_session_id = NULL, status = 'idle', last_activity_at = ? WHERE id = ?",
+          )
+          .run(nextHarness, nextAccount, Date.now(), id)
+        row = {
+          ...row,
+          harness: nextHarness,
+          account_id: nextAccount,
+          provider_session_id: null,
+        }
       }
-    }
-    const turnId = makeId('turn_')
-    const attachments: import('./harness.js').PromptContent[] = []
-    if (!this.firstPrompt.has(id)) this.firstPrompt.set(id, text)
-    this.turns.set(id, turnId)
-    appendMessage(this.db, {
-      sessionId: id,
-      turnId,
-      itemId: makeId('item_'),
-      role: 'user',
-      type: 'turn_start',
-      content: {
+      const turnId = makeId('turn_')
+      const attachments: import('./harness.js').PromptContent[] = []
+      if (!this.firstPrompt.has(id)) this.firstPrompt.set(id, text)
+      this.turns.set(id, turnId)
+      appendMessage(this.db, {
+        sessionId: id,
+        turnId,
+        itemId: makeId('item_'),
+        role: 'user',
         type: 'turn_start',
-        ...(requestId ? { requestId } : {}),
-      } as never,
-      eventBus: this.bus,
-    })
-    for (const attachmentId of attachmentIds ?? []) {
-      const attachment = this.db
-        .prepare(
-          "SELECT id, filename, mime, size_bytes, rel_path FROM attachments WHERE id = ? AND session_id = ? AND status = 'complete'",
-        )
-        .get(attachmentId, id) as
-        | {
-            id: string
-            filename: string
-            mime: string
-            size_bytes: number
-            rel_path: string | null
-          }
-        | undefined
-      if (attachment?.rel_path) {
-        const absolutePath = join(this.dataDir, attachment.rel_path)
-        if (attachment.mime.startsWith('image/'))
-          attachments.push({
-            kind: 'image',
-            mime: attachment.mime,
-            bytes: await readFile(absolutePath),
-            path: absolutePath,
-          })
-        else
-          attachments.push({
-            kind: 'file',
-            path: absolutePath,
-            name: attachment.filename,
-            mime: attachment.mime,
-          })
-        appendMessage(this.db, {
-          sessionId: id,
-          turnId,
-          itemId: makeId('item_'),
-          role: 'user',
-          type: 'attachment_ref',
-          content: {
+        content: {
+          type: 'turn_start',
+          ...(requestId ? { requestId } : {}),
+        } as never,
+        eventBus: this.bus,
+      })
+      for (const attachmentId of attachmentIds ?? []) {
+        const attachment = this.db
+          .prepare(
+            "SELECT id, filename, mime, size_bytes, rel_path FROM attachments WHERE id = ? AND session_id = ? AND status = 'complete'",
+          )
+          .get(attachmentId, id) as
+          | {
+              id: string
+              filename: string
+              mime: string
+              size_bytes: number
+              rel_path: string | null
+            }
+          | undefined
+        if (attachment?.rel_path) {
+          const absolutePath = join(this.dataDir, attachment.rel_path)
+          if (attachment.mime.startsWith('image/'))
+            attachments.push({
+              kind: 'image',
+              mime: attachment.mime,
+              bytes: await readFile(absolutePath),
+              path: absolutePath,
+            })
+          else
+            attachments.push({
+              kind: 'file',
+              path: absolutePath,
+              name: attachment.filename,
+              mime: attachment.mime,
+            })
+          appendMessage(this.db, {
+            sessionId: id,
+            turnId,
+            itemId: makeId('item_'),
+            role: 'user',
             type: 'attachment_ref',
-            attachmentId: attachment.id,
-            filename: attachment.filename,
-            mime: attachment.mime,
-            sizeBytes: attachment.size_bytes,
-            path: attachment.rel_path,
-          },
-          eventBus: this.bus,
-        })
+            content: {
+              type: 'attachment_ref',
+              attachmentId: attachment.id,
+              filename: attachment.filename,
+              mime: attachment.mime,
+              sizeBytes: attachment.size_bytes,
+              path: attachment.rel_path,
+            },
+            eventBus: this.bus,
+          })
+        }
       }
-    }
-    appendMessage(this.db, {
-      sessionId: id,
-      turnId,
-      itemId: clientItemId ?? makeId('item_'),
-      role: 'user',
-      type: 'text_delta',
-      content: { type: 'text_delta', text } as never,
-      eventBus: this.bus,
+      appendMessage(this.db, {
+        sessionId: id,
+        turnId,
+        itemId: clientItemId ?? makeId('item_'),
+        role: 'user',
+        type: 'text_delta',
+        content: { type: 'text_delta', text } as never,
+        eventBus: this.bus,
+      })
+      this.status(id, 'running')
+      return { row, turnId, model, attachments }
     })
-    this.status(id, 'running')
-    return { row, turnId, model, attachments }
   }
 
   async prompt(
@@ -843,77 +857,83 @@ export class SessionManager {
     requestId: string,
     uploads?: UploadStore,
   ) {
-    // Idempotency keys on the promotion attempt (requestId), never on the
-    // draft id: drafts are reused across sessions, so a draft-scoped lookup
-    // would return a previous session and silently drop the new prompt.
-    const existing = this.db
-      .prepare('SELECT session_id FROM draft_promotions WHERE request_id = ?')
-      .get(requestId) as { session_id: string } | undefined
-    if (existing) return { sessionId: existing.session_id }
-    const project = this.db
-      .prepare(
-        'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
-      )
-      .get(input.projectId) as { path: string } | undefined
-    if (!project) throw new Error('Project not found')
-    const workspace = await this.resolveWorkspace(
-      input.projectId,
-      project.path,
-      input.workspace,
-    )
-    const session = this.create({
-      projectId: input.projectId,
-      harness: input.harness,
-      accountId: input.accountId,
-      ...workspace,
-      title: 'New session',
-    })
-    try {
-      try {
-        this.db
-          .prepare(
-            'INSERT INTO draft_promotions (draft_id, request_id, session_id) VALUES (?, ?, ?)',
-          )
-          .run(input.draftId, requestId, session.id)
-      } catch {
-        await this.discard(session.id)
-        const winner = this.db
-          .prepare(
-            'SELECT session_id FROM draft_promotions WHERE request_id = ?',
-          )
-          .get(requestId) as { session_id: string }
-        return { sessionId: winner.session_id }
+    return withProjectActivity(this.db, input.projectId, async () => {
+      // Idempotency keys on the promotion attempt (requestId), never on the
+      // draft id: drafts are reused across sessions, so a draft-scoped lookup
+      // would return a previous session and silently drop the new prompt.
+      const existing = this.db
+        .prepare('SELECT session_id FROM draft_promotions WHERE request_id = ?')
+        .get(requestId) as { session_id: string } | undefined
+      if (existing) {
+        if (!getActiveSession(this.db, existing.session_id))
+          throw new Error('Session not found')
+        return { sessionId: existing.session_id }
       }
-      if (uploads)
-        await uploads.promoteDraft(input.draftId, session.id, input.projectId)
-      await this.prompt(
-        session.id,
-        input.text,
-        requestId,
-        input.attachmentIds,
-        input.harness,
-        input.accountId,
-        input.model,
-        input.clientItemId,
-      )
-      return { sessionId: session.id }
-    } catch (error) {
-      if (uploads)
-        await uploads.rollbackPromotion(
-          input.draftId,
-          session.id,
-          input.projectId,
+      const project = this.db
+        .prepare(
+          'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
         )
-      this.db
-        .prepare('DELETE FROM draft_promotions WHERE session_id = ?')
-        .run(session.id)
-      await this.discard(session.id)
-      this.db
-        .prepare('DELETE FROM messages WHERE session_id = ?')
-        .run(session.id)
-      this.db.prepare('DELETE FROM sessions WHERE id = ?').run(session.id)
-      throw error
-    }
+        .get(input.projectId) as { path: string } | undefined
+      if (!project) throw new Error('Project not found')
+      const workspace = await this.resolveWorkspace(
+        input.projectId,
+        project.path,
+        input.workspace,
+      )
+      const session = this.create({
+        projectId: input.projectId,
+        harness: input.harness,
+        accountId: input.accountId,
+        ...workspace,
+        title: 'New session',
+      })
+      try {
+        try {
+          this.db
+            .prepare(
+              'INSERT INTO draft_promotions (draft_id, request_id, session_id) VALUES (?, ?, ?)',
+            )
+            .run(input.draftId, requestId, session.id)
+        } catch {
+          await this.discard(session.id)
+          const winner = this.db
+            .prepare(
+              'SELECT session_id FROM draft_promotions WHERE request_id = ?',
+            )
+            .get(requestId) as { session_id: string }
+          return { sessionId: winner.session_id }
+        }
+        if (uploads)
+          await uploads.promoteDraft(input.draftId, session.id, input.projectId)
+        await this.prompt(
+          session.id,
+          input.text,
+          requestId,
+          input.attachmentIds,
+          input.harness,
+          input.accountId,
+          input.model,
+          input.clientItemId,
+        )
+        return { sessionId: session.id }
+      } catch (error) {
+        if (uploads)
+          await uploads.rollbackPromotion(
+            input.draftId,
+            session.id,
+            input.projectId,
+          )
+        this.db
+          .prepare('DELETE FROM draft_promotions WHERE session_id = ?')
+          .run(session.id)
+        await this.discard(session.id)
+        this.db
+          .prepare('DELETE FROM messages WHERE session_id = ?')
+          .run(session.id)
+        this.db.prepare('DELETE FROM sessions WHERE id = ?').run(session.id)
+        throw error
+      }
+    })
   }
   async interrupt(id: string) {
     await this.handles.get(id)?.cancel()

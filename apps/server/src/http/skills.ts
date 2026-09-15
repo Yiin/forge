@@ -1,13 +1,13 @@
 import { Hono } from 'hono'
 import { listSkills } from '../skills/registry.js'
 import type { DatabaseSync } from 'node:sqlite'
+import { getActiveSession } from '../db/queries.js'
 
 export function skillRoutes(db: DatabaseSync, globalRoot?: string) {
   const app = new Hono()
   app.get('/api/sessions/:id/skills', async (c) => {
-    const row = db
-      .prepare('SELECT cwd FROM sessions WHERE id = ?')
-      .get(c.req.param('id')) as { cwd: string } | undefined
+    const row = getActiveSession(db, c.req.param('id')) as
+      { cwd: string } | undefined
     if (!row) return c.json({ error: 'Session not found' }, 404)
     return c.json({ skills: await listSkills(row.cwd, globalRoot) })
   })

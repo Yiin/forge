@@ -2,6 +2,12 @@ import { createHash } from 'node:crypto'
 import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
 import { join } from 'node:path'
+import { finished, pipeline } from 'node:stream/promises'
+import { Readable, Transform } from 'node:stream'
+import {
+  assertProjectIdle,
+  withProjectActivity,
+} from '../db/project-activity.js'
 import type { DatabaseSync } from 'node:sqlite'
 import { EventBus } from '../events/bus.js'
 
@@ -52,6 +58,7 @@ export class UploadStore {
   private readonly bus: EventBus
   private readonly now: () => number
   private readonly sweeper: ReturnType<typeof setInterval>
+  private readonly activeUploads = new Map<string, number>()
 
   constructor(
     private readonly db: DatabaseSync,
@@ -98,7 +105,10 @@ export class UploadStore {
     if (input.sizeBytes > MAX_UPLOAD_BYTES)
       throw new RangeError('Upload exceeds 1 GiB')
     const session = this.db
-      .prepare('SELECT project_id FROM sessions WHERE id = ?')
+      .prepare(
+        `SELECT sessions.project_id FROM sessions JOIN projects ON projects.id = sessions.project_id
+         WHERE sessions.id = ? AND sessions.deleted_at IS NULL AND projects.deleted_at IS NULL`,
+      )
       .get(sessionId) as { project_id: string } | undefined
     if (!session) throw new Error('Session not found')
     const id = newId()
@@ -153,11 +163,44 @@ export class UploadStore {
       .prepare('SELECT * FROM attachments WHERE id = ?')
       .get(attachmentId) as UploadRow | undefined
     if (!row) throw new Error('Attachment not found')
-    const session = this.db
-      .prepare('SELECT project_id FROM sessions WHERE id = ?')
-      .get(row.session_id) as { project_id: string } | undefined
+    const session = row.session_id
+      ? (this.db
+          .prepare(
+            `SELECT sessions.project_id FROM sessions JOIN projects ON projects.id = sessions.project_id
+             WHERE sessions.id = ? AND sessions.deleted_at IS NULL AND projects.deleted_at IS NULL`,
+          )
+          .get(row.session_id) as { project_id: string } | undefined)
+      : undefined
+    if (row.session_id && !session) throw new Error('Session not found')
     const projectId = session?.project_id ?? row.project_id
     if (!projectId) throw new Error('Session not found')
+    if (
+      !this.db
+        .prepare('SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL')
+        .get(projectId)
+    )
+      throw new Error('Project not found')
+    this.activeUploads.set(
+      projectId,
+      (this.activeUploads.get(projectId) ?? 0) + 1,
+    )
+    try {
+      return await withProjectActivity(this.db, projectId, () =>
+        this.writeUpload(row, projectId, body),
+      )
+    } finally {
+      const remaining = this.activeUploads.get(projectId)! - 1
+      if (remaining) this.activeUploads.set(projectId, remaining)
+      else this.activeUploads.delete(projectId)
+    }
+  }
+
+  private async writeUpload(
+    row: UploadRow,
+    projectId: string,
+    body: ReadableStream<Uint8Array>,
+  ) {
+    const attachmentId = row.id
     const ownerId = row.session_id ?? row.draft_id
     if (!ownerId) throw new Error('Attachment owner not found')
     const safeName = `${attachmentId}-${toSafeFilename(row.filename)}`
@@ -172,37 +215,46 @@ export class UploadStore {
     const absolutePath = join(this.options.dataDir, relPath)
     await mkdir(join(absolutePath, '..'), { recursive: true })
     const output = createWriteStream(absolutePath, { flags: 'wx' })
+    let opened = false
+    output.once('open', () => {
+      opened = true
+    })
+    const closed = finished(output)
+    void closed.catch(() => undefined)
     const hash = createHash('sha256')
     let received = 0
     let lastProgress = 0
     try {
-      for await (const chunk of body as AsyncIterable<Uint8Array>) {
-        received += chunk.byteLength
-        if (received > MAX_UPLOAD_BYTES)
-          throw new RangeError('Upload exceeds 1 GiB')
-        hash.update(chunk)
-        if (!output.write(chunk))
-          await new Promise<void>((resolve, reject) => {
-            output.once('drain', resolve)
-            output.once('error', reject)
-          })
-        const now = this.now()
-        if (now - lastProgress >= 500) {
-          lastProgress = now
-          this.bus.publish({
-            seq: null,
-            type: 'uploadProgress',
-            attachmentId,
-            sessionId: row.session_id ?? row.draft_id!,
-            bytesReceived: received,
-            sizeBytes: row.size_bytes,
-          })
-        }
-      }
-      await new Promise<void>((resolve, reject) => {
-        output.end(() => resolve())
-        output.once('error', reject)
+      const measure = new Transform({
+        transform: (chunk: Buffer, _encoding, callback) => {
+          received += chunk.byteLength
+          if (received > MAX_UPLOAD_BYTES) {
+            callback(new RangeError('Upload exceeds 1 GiB'))
+            return
+          }
+          hash.update(chunk)
+          const now = this.now()
+          if (now - lastProgress >= 500) {
+            lastProgress = now
+            this.bus.publish({
+              seq: null,
+              type: 'uploadProgress',
+              attachmentId,
+              sessionId: row.session_id ?? row.draft_id!,
+              bytesReceived: received,
+              sizeBytes: row.size_bytes,
+            })
+          }
+          callback(null, chunk)
+        },
       })
+      await pipeline(
+        Readable.fromWeb(
+          body as import('node:stream/web').ReadableStream<Uint8Array>,
+        ),
+        measure,
+        output,
+      )
       const sha256 = hash.digest('hex')
       const message = this.db.prepare(
         `INSERT INTO messages
@@ -252,7 +304,8 @@ export class UploadStore {
       }
     } catch (error) {
       output.destroy()
-      await rm(absolutePath, { force: true })
+      await closed.catch(() => undefined)
+      if (opened) await rm(absolutePath, { force: true })
       this.db
         .prepare('UPDATE attachments SET status = ? WHERE id = ?')
         .run('failed', attachmentId)
@@ -375,39 +428,41 @@ export class UploadStore {
   }
 
   async promoteDraft(draftId: string, sessionId: string, projectId: string) {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM attachments WHERE draft_id = ? AND status = 'complete'",
-      )
-      .all(draftId) as UploadRow[]
-    for (const row of rows) {
-      const oldPath = row.rel_path
-        ? join(this.options.dataDir, row.rel_path)
-        : null
-      const filename = `${row.id}-${toSafeFilename(row.filename)}`
-      const relPath = join(
-        'projects',
-        projectId,
-        'sessions',
-        sessionId,
-        'files',
-        filename,
-      )
-      if (oldPath) {
-        await mkdir(join(this.options.dataDir, relPath, '..'), {
-          recursive: true,
-        })
-        await (
-          await import('node:fs/promises')
-        ).rename(oldPath, join(this.options.dataDir, relPath))
-      }
-      this.db
+    return withProjectActivity(this.db, projectId, async () => {
+      const rows = this.db
         .prepare(
-          'UPDATE attachments SET session_id = ?, draft_id = NULL, project_id = ?, rel_path = ? WHERE id = ?',
+          "SELECT * FROM attachments WHERE draft_id = ? AND status = 'complete'",
         )
-        .run(sessionId, projectId, relPath, row.id)
-    }
-    return rows.map((row) => row.id)
+        .all(draftId) as UploadRow[]
+      for (const row of rows) {
+        const oldPath = row.rel_path
+          ? join(this.options.dataDir, row.rel_path)
+          : null
+        const filename = `${row.id}-${toSafeFilename(row.filename)}`
+        const relPath = join(
+          'projects',
+          projectId,
+          'sessions',
+          sessionId,
+          'files',
+          filename,
+        )
+        if (oldPath) {
+          await mkdir(join(this.options.dataDir, relPath, '..'), {
+            recursive: true,
+          })
+          await (
+            await import('node:fs/promises')
+          ).rename(oldPath, join(this.options.dataDir, relPath))
+        }
+        this.db
+          .prepare(
+            'UPDATE attachments SET session_id = ?, draft_id = NULL, project_id = ?, rel_path = ? WHERE id = ?',
+          )
+          .run(sessionId, projectId, relPath, row.id)
+      }
+      return rows.map((row) => row.id)
+    })
   }
 
   async rollbackPromotion(
@@ -415,35 +470,37 @@ export class UploadStore {
     sessionId: string,
     projectId: string,
   ) {
-    const rows = this.db
-      .prepare('SELECT * FROM attachments WHERE session_id = ?')
-      .all(sessionId) as UploadRow[]
-    for (const row of rows) {
-      const oldPath = row.rel_path
-        ? join(this.options.dataDir, row.rel_path)
-        : null
-      const relPath = join(
-        'projects',
-        projectId,
-        'sessions',
-        draftId,
-        'files',
-        `${row.id}-${toSafeFilename(row.filename)}`,
-      )
-      if (oldPath) {
-        await mkdir(join(this.options.dataDir, relPath, '..'), {
-          recursive: true,
-        })
-        await (
-          await import('node:fs/promises')
-        ).rename(oldPath, join(this.options.dataDir, relPath))
-      }
-      this.db
-        .prepare(
-          'UPDATE attachments SET session_id = NULL, draft_id = ?, rel_path = ?, project_id = ? WHERE id = ?',
+    return withProjectActivity(this.db, projectId, async () => {
+      const rows = this.db
+        .prepare('SELECT * FROM attachments WHERE session_id = ?')
+        .all(sessionId) as UploadRow[]
+      for (const row of rows) {
+        const oldPath = row.rel_path
+          ? join(this.options.dataDir, row.rel_path)
+          : null
+        const relPath = join(
+          'projects',
+          projectId,
+          'sessions',
+          draftId,
+          'files',
+          `${row.id}-${toSafeFilename(row.filename)}`,
         )
-        .run(draftId, relPath, projectId, row.id)
-    }
+        if (oldPath) {
+          await mkdir(join(this.options.dataDir, relPath, '..'), {
+            recursive: true,
+          })
+          await (
+            await import('node:fs/promises')
+          ).rename(oldPath, join(this.options.dataDir, relPath))
+        }
+        this.db
+          .prepare(
+            'UPDATE attachments SET session_id = NULL, draft_id = ?, rel_path = ?, project_id = ? WHERE id = ?',
+          )
+          .run(draftId, relPath, projectId, row.id)
+      }
+    })
   }
 
   async deleteSession(id: string) {
@@ -483,6 +540,9 @@ export class UploadStore {
       .prepare('SELECT id FROM projects WHERE id = ?')
       .get(id) as { id: string } | undefined
     if (!project) return false
+    if (this.activeUploads.has(id))
+      throw new Error('Project has active uploads')
+    assertProjectIdle(this.db, id)
     const sessions = this.db
       .prepare(
         'SELECT id, status FROM sessions WHERE project_id = ? AND deleted_at IS NULL',
@@ -494,7 +554,7 @@ export class UploadStore {
     try {
       this.db
         .prepare(
-          'DELETE FROM attachments WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ? AND deleted_at IS NULL)',
+          'DELETE FROM attachments WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)',
         )
         .run(id)
       this.db.prepare('DELETE FROM attachments WHERE project_id = ?').run(id)

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/index.js'
+import { migrate } from '../src/db/migrate.js'
 import { EventBus } from '../src/events/bus.js'
 import { UploadStore } from '../src/uploads/store.js'
 
@@ -16,15 +17,18 @@ afterEach(async () => {
 async function fixture() {
   const dataDir = await mkdtemp(join(tmpdir(), 'forge-app-routes-'))
   const db = new DatabaseSync(':memory:')
-  db.exec(`
-    CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL);
-    CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL);
-    CREATE TABLE epic_runs (id TEXT PRIMARY KEY, status TEXT NOT NULL);
-    INSERT INTO projects VALUES ('project', '${dataDir}');
-    INSERT INTO sessions VALUES ('session', 'project', 'idle');
-  `)
+  migrate(db)
+  db.prepare(
+    'INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)',
+  ).run('project', 'Project', dataDir, 1)
+  db.prepare(
+    `INSERT INTO sessions
+      (id, project_id, harness, title, cwd, kind, status, auto_resume, created_at, last_activity_at)
+      VALUES ('session', 'project', 'default', 'Session', ?, 'chat', 'idle', 0, 1, 1)`,
+  ).run(dataDir)
   const store = new UploadStore(db, { dataDir, bus: new EventBus() })
   cleanups.push(() => store.close())
+  cleanups.push(() => db.close())
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }))
   return { db, store, dataDir }
 }

@@ -129,7 +129,7 @@ describe('Pi original question handles', () => {
   it.each(['select', 'confirm'] as const)(
     'Q6, 34: %s display redacts overlapping values and keeps exact native replies',
     async (method) => {
-      const f = await fixture({ behavior: 'manual' })
+      const f = await fixture({ behavior: 'manual', pauseInput: true })
       owned.push(f)
       const shorter = 'fixture-overlap',
         longer = shorter + '-hidden'
@@ -169,9 +169,13 @@ describe('Pi original question handles', () => {
           optionIds: [question.options[index]!.id],
         },
       })
-      const reply = (await f.wire()).find(
-        (frame) => frame.type === 'extension_ui_response',
-      )!
+      await f.control({ resumeInput: true })
+      const reply = await f.wait(
+        async () =>
+          (await f.wire()).find(
+            (frame) => frame.type === 'extension_ui_response',
+          ) ?? false,
+      )
       expect(reply.id).toBe('original-display')
       expect(
         method === 'select' ? reply.value === longer : reply.confirmed === true,
@@ -337,35 +341,65 @@ describe('Pi original question handles', () => {
       ).toMatchObject({ value: 'Two' })
     },
   )
-  it('35: submission waits for persistence and rejects a duplicate throughout', async () => {
-    const held = latch()
-    const entered = latch()
-    const q = await question(
-      'input',
-      {},
-      {
-        persistRecord: async (_owner, _binding, record) => {
-          if (record.body.type === 'ui_reply') {
-            entered.resolve()
-            await held.promise
-          }
+  it.each(['before', 'after'] as const)(
+    '35: submission waits for persistence and rejects a duplicate throughout, peer consumes %s persistence',
+    async (order) => {
+      const held = latch()
+      const entered = latch()
+      const q = await question(
+        'input',
+        {},
+        {
+          persistRecord: async (_owner, _binding, record) => {
+            if (record.body.type === 'ui_reply') {
+              entered.resolve()
+              await held.promise
+            }
+          },
         },
-      },
-    )
-    const reply = q.answer({ type: 'free_text', text: '' })
-    await entered.promise
-    expect(await pending(Promise.resolve(reply))).toBe(true)
-    await expect(
-      q.answer({ type: 'free_text', text: 'duplicate' }),
-    ).rejects.toThrow('PI_REQUEST_UNAVAILABLE')
-    held.resolve()
-    await reply
-    expect(
-      (await q.f.wire()).filter(
-        (command) => command.type === 'extension_ui_response',
-      ),
-    ).toHaveLength(1)
-  })
+        { pauseInput: order === 'after' },
+      )
+      const replies = async () =>
+        (await q.f.wire()).filter(
+          (command) => command.type === 'extension_ui_response',
+        )
+      const observedReply = () =>
+        q.f.wait(async () => {
+          const frames = await replies()
+          return frames.length > 0 ? frames : false
+        })
+      const reply = Promise.resolve(q.answer({ type: 'free_text', text: '' }))
+      try {
+        await entered.promise
+        expect(await pending(reply)).toBe(true)
+        await expect(
+          q.answer({ type: 'free_text', text: 'duplicate' }),
+        ).rejects.toThrow('PI_REQUEST_UNAVAILABLE')
+        if (order === 'before') await observedReply()
+        else expect(await replies()).toEqual([])
+        held.resolve()
+        await reply
+        await expect(
+          q.answer({ type: 'free_text', text: 'duplicate after persistence' }),
+        ).rejects.toThrow('PI_REQUEST_UNAVAILABLE')
+        // Sender completion does not acknowledge peer consumption.
+        if (order === 'after') {
+          expect(await replies()).toEqual([])
+          await q.f.control({ resumeInput: true })
+        }
+        expect(await observedReply()).toEqual([
+          {
+            type: 'extension_ui_response',
+            id: 'original-native-id',
+            value: '',
+          },
+        ])
+      } finally {
+        held.resolve()
+        await Promise.allSettled([reply])
+      }
+    },
+  )
   it('35: silent native expiry remains submission-only and is never retried', async () => {
     const q = await question('input')
     await q.f.control({ silentExpire: 'original-native-id' })

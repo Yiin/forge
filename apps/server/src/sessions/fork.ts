@@ -1,4 +1,8 @@
-import { appendMessage, createSession, getSession } from '../db/queries.js'
+import {
+  appendMessage,
+  createSession,
+  getActiveSession,
+} from '../db/queries.js'
 import type { DatabaseSync } from 'node:sqlite'
 
 export type ForkContext = {
@@ -40,7 +44,7 @@ export function createFork(
     retention?: 'permanent' | 'discardable'
   },
 ): ForkContext {
-  const parent = getSession(db, input.sessionId) as Row | undefined
+  const parent = getActiveSession(db, input.sessionId) as Row | undefined
   if (!parent) throw new Error('Session not found')
   const source = db
     .prepare('SELECT seq FROM messages WHERE session_id = ? AND seq = ?')

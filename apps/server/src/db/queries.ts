@@ -167,6 +167,7 @@ export function createSession(
     now?: number
   },
 ) {
+  if (!getProject(db, input.projectId)) throw new Error('Project not found')
   const now = input.now ?? Date.now()
   const value = { id: id('ses_'), ...input, kind: input.kind ?? 'chat', now }
   db.prepare(
@@ -212,6 +213,13 @@ export const getProject = (db: Db, projectId: string) =>
     .get(projectId)
 export const getSession = (db: Db, sessionId: string) =>
   db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId)
+export const getActiveSession = (db: Db, sessionId: string) =>
+  db
+    .prepare(
+      `SELECT sessions.* FROM sessions JOIN projects ON projects.id = sessions.project_id
+       WHERE sessions.id = ? AND sessions.deleted_at IS NULL AND projects.deleted_at IS NULL`,
+    )
+    .get(sessionId)
 
 export function createRun(
   db: Db,

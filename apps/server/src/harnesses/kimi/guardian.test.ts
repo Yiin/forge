@@ -420,6 +420,7 @@ describe('Kimi guardian process and release acceptance', () => {
   test('holds the descriptor while a descendant survives its early leader exit', async () => {
     const authority = await selected(),
       running = await guardian(authority)
+    expect(running.result).toMatchObject({ type: 'result' })
     const effective = await effectiveAuthority(
       captureAuthority(authority, kimiLimits()),
     )
@@ -446,6 +447,7 @@ describe('Kimi guardian process and release acceptance', () => {
   test('hard guardian death leaves a dirty fence until the captured group is absent', async () => {
     const authority = await selected(),
       running = await guardian(authority)
+    expect(running.result).toMatchObject({ type: 'result' })
     const effective = await effectiveAuthority(
       captureAuthority(authority, kimiLimits()),
     )
@@ -477,6 +479,7 @@ describe('Kimi guardian process and release acceptance', () => {
   test('SIGTERM closes the owned group before the permanent lease becomes reusable', async () => {
     const authority = await selected(),
       running = await guardian(authority)
+    expect(running.result).toMatchObject({ type: 'result' })
     await command(authority.account.homePath, { op: 'spawn_descendant' })
     running.child.kill('SIGTERM')
     await deadline(running.closed, 10000)
@@ -493,6 +496,7 @@ describe('Kimi guardian process and release acceptance', () => {
   test('parent EOF cleans the native group even when the response channel has ended', async () => {
     const authority = await selected(),
       running = await guardian(authority)
+    expect(running.result).toMatchObject({ type: 'result' })
     await command(authority.account.homePath, { op: 'spawn_descendant' })
     running.child.stdin.end()
     await deadline(running.closed, 10000)

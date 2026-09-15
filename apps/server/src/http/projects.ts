@@ -35,7 +35,9 @@ export function projectRoutes(db: DatabaseSync, uploads?: UploadStore) {
     const body = (await c.req.json()) as { name?: string }
     if (!body.name?.trim()) return c.json({ error: 'name is required' }, 400)
     const result = db
-      .prepare('UPDATE projects SET name = ? WHERE id = ?')
+      .prepare(
+        'UPDATE projects SET name = ? WHERE id = ? AND deleted_at IS NULL',
+      )
       .run(body.name.trim(), c.req.param('id')) as { changes?: number }
     if (!result.changes) return c.json({ error: 'Project not found' }, 404)
     return c.json({ ok: true })

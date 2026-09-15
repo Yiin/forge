@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { DatabaseSync } from 'node:sqlite'
-import { createProject, listSessions } from '../db/queries.js'
+import { createProject, getActiveSession, listSessions } from '../db/queries.js'
 import type { UploadStore } from '../uploads/store.js'
 import { sessionResponses } from './session-response.js'
 
@@ -33,6 +33,8 @@ export function workspaceRoutes(db: DatabaseSync, uploads?: UploadStore) {
   app.post('/api/sessions/:id', async (c) => {
     const body = (await c.req.json()) as { title?: string }
     if (!body.title?.trim()) return c.json({ error: 'title is required' }, 400)
+    if (!getActiveSession(db, c.req.param('id')))
+      return c.json({ error: 'Session not found' }, 404)
     let result
     try {
       result = db
@@ -48,6 +50,8 @@ export function workspaceRoutes(db: DatabaseSync, uploads?: UploadStore) {
   })
   app.post('/api/sessions/:id/settle', async (c) => {
     const body = (await c.req.json()) as { settled?: boolean }
+    if (!getActiveSession(db, c.req.param('id')))
+      return c.json({ error: 'Session not found' }, 404)
     const status = body.settled ? 'archived' : 'idle'
     const result = db
       .prepare('UPDATE sessions SET status = ? WHERE id = ?')

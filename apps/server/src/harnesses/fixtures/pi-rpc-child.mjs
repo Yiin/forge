@@ -148,6 +148,7 @@ function controls() {
     const control = JSON.parse(
       readFileSync(join(directory, 'control', name), 'utf8'),
     )
+    if (control.resumeInput) process.stdin.resume()
     if (control.state) Object.assign(state, control.state)
     if (control.silentExpire) nativeResolvers.delete(control.silentExpire)
     if (control.release)
