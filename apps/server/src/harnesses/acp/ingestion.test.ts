@@ -54,6 +54,201 @@ function writer(commit: AcpSessionWriter['commit']): AcpSessionWriter {
 }
 afterEach(() => vi.useRealTimers())
 describe('ACP ordered durable prefix', () => {
+  it('fails only an original unfinished admission and latches once', async () => {
+    const onFailure = vi.fn(),
+      commit = vi.fn(async (tx: PrefixTransaction) => ack(tx))
+    const journal = new AcpJournal(writer(commit), options(onFailure))
+    try {
+      const ticket = journal.reserve(owner(), source)
+      expect(() => ({ ...ticket }).failAdmission()).toThrow('Foreign')
+      ticket.failAdmission()
+      ticket.failAdmission()
+      await expect(ticket.committed).rejects.toThrow('admission failed')
+      expect(onFailure).toHaveBeenCalledTimes(1)
+      expect(commit).not.toHaveBeenCalled()
+      expect(() => ticket.finish(records)).toThrow('retired')
+    } finally {
+      await journal.close()
+    }
+  })
+  it('cannot relabel a finished ticket while its original commit is held', async () => {
+    const entered = deferred<void>(),
+      release = deferred<void>(),
+      onFailure = vi.fn()
+    const journal = new AcpJournal(
+      writer(async (tx) => {
+        entered.resolve()
+        await release.promise
+        return ack(tx)
+      }),
+      options(onFailure),
+    )
+    try {
+      const ticket = journal.reserve(owner(), source)
+      ticket.finish(records)
+      await entered.promise
+      expect(() => ticket.failAdmission()).toThrow('already finished')
+      release.resolve()
+      await ticket.committed
+      expect(() => ticket.failAdmission()).toThrow('already finished')
+      expect(onFailure).not.toHaveBeenCalled()
+    } finally {
+      release.resolve()
+      await journal.close()
+    }
+  })
+  it.each(['ack', 'reject'] as const)(
+    'preserves an entered terminal when a later producer fails: %s',
+    async (outcome) => {
+      const entered = deferred<void>(),
+        gate = deferred<void>()
+      const journal = new AcpJournal(
+        writer(async (tx) => {
+          entered.resolve()
+          await gate.promise
+          if (outcome === 'reject') throw Error('original writer refused')
+          return ack(tx)
+        }),
+        options(),
+      )
+      const original = owner('first'),
+        later = owner('later'),
+        identity = { receiptId: 'receipt', completionId: 'completion' }
+      try {
+        const first = journal.reserve(
+          original,
+          { kind: 'terminal', producerTicket: 'terminal' },
+          true,
+        )
+        first.finish(records)
+        await entered.promise
+        const second = journal.reserve(later, source)
+        second.failAdmission()
+        await expect(second.committed).rejects.toThrow('admission failed')
+        expect(journal.completionFailure(original, identity)).toMatchObject({
+          code: 'persistence_unknown',
+          persistence: {
+            classification: 'ack_unknown',
+            required: { state: 'unproved', terminal: { phase: 'entered' } },
+          },
+        })
+        gate.resolve()
+        if (outcome === 'ack') {
+          await first.committed
+          expect(() => journal.completionFailure(original, identity)).toThrow(
+            'already acknowledged',
+          )
+          expect(journal.completionFailure(later, identity)).toMatchObject({
+            code: 'completion_not_committed',
+            persistence: {
+              failure: { lastAcknowledged: { throughOrdinal: 1 } },
+            },
+          })
+        } else {
+          await expect(first.committed).rejects.toThrow('unproved')
+          expect(journal.completionFailure(original, identity)).toMatchObject({
+            code: 'persistence_unknown',
+            persistence: {
+              classification: 'commit_failed',
+              required: {
+                terminal: { phase: 'entered', physical: 'rejected' },
+              },
+            },
+          })
+        }
+      } finally {
+        gate.resolve()
+        await journal.close()
+      }
+    },
+  )
+  it('does not reenter the physical writer through a synchronous commit callback', async () => {
+    const gate = deferred<void>(),
+      calls: PrefixTransaction[] = []
+    let second!: ReturnType<AcpJournal['reserve']>
+    const journal = new AcpJournal(
+      writer(async (tx) => {
+        calls.push(tx)
+        if (calls.length === 1) {
+          second.finish(records)
+          await gate.promise
+        }
+        return ack(tx)
+      }),
+      options(),
+    )
+    try {
+      const first = journal.reserve(owner(), source)
+      second = journal.reserve(owner('second'), source)
+      first.finish(records)
+      expect(calls).toHaveLength(1)
+      gate.resolve()
+      await Promise.all([first.committed, second.committed])
+      expect(calls.map((tx) => [tx.afterOrdinal, tx.throughOrdinal])).toEqual([
+        [0, 1],
+        [1, 2],
+      ])
+    } finally {
+      gate.resolve()
+      await journal.close()
+    }
+  })
+  it('coalesces bounded admission waits and wakes only after original slots commit', async () => {
+    const entered = deferred<void>(),
+      release = deferred<void>()
+    const journal = new AcpJournal(
+      writer(async (tx) => {
+        entered.resolve()
+        await release.promise
+        return ack(tx)
+      }),
+      options(),
+    )
+    try {
+      const tickets = Array.from({ length: 62 }, () =>
+        journal.reserve(owner(), source),
+      )
+      const waiting = journal.admissionReady()!
+      expect(waiting).toBe(journal.admissionReady())
+      expect(journal.admissionReady(true)).toBeUndefined()
+      let ready = false
+      void waiting.then(() => {
+        ready = true
+      })
+      tickets[0]!.finish(records)
+      await entered.promise
+      expect(ready).toBe(false)
+      release.resolve()
+      await waiting
+      expect(journal.admissionReady()).toBeUndefined()
+      journal.reserve(owner(), source)
+      const closeWait = journal.admissionReady()!
+      await journal.close()
+      await expect(closeWait).rejects.toThrow('unavailable')
+    } finally {
+      release.resolve()
+      await journal.close()
+    }
+  })
+  it('wakes credit waiters and rejects admission waits on producer failure', async () => {
+    const journal = new AcpJournal(
+      writer(async (tx) => ack(tx)),
+      options(),
+    )
+    try {
+      const credit = journal.reserveCredits(62)
+      const first = journal.admissionReady()!
+      credit.consume()
+      await first
+      const ticket = journal.reserve(owner(), source)
+      const next = journal.admissionReady()!
+      ticket.failAdmission()
+      await expect(next).rejects.toThrow('unavailable')
+      credit.release()
+    } finally {
+      await journal.close()
+    }
+  })
   it('waits for earlier slots and captures immutable original ownership', async () => {
     const calls: PrefixTransaction[] = []
     const sink = writer(async (transaction) => {
