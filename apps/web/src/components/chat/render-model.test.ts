@@ -18,6 +18,110 @@ const message = (
 })
 
 describe('chat render model', () => {
+  it('renders an answered question with the labels the user clicked', () => {
+    const items = toRenderModel([
+      message(
+        {
+          type: 'ask_user_question',
+          questionId: 'q1',
+          question: 'Pick one',
+          options: ['First', 'Second'],
+        },
+        { itemId: 'ask' },
+      ),
+      message(
+        {
+          type: 'user_answer',
+          questionId: 'q1',
+          answers: { 'q1-1': 'q1-1-1' },
+        },
+        { itemId: 'answer', seq: 2, role: 'user' },
+      ),
+    ])
+    expect(items.at(-1)).toMatchObject({
+      kind: 'answered-question',
+      question: 'Pick one',
+      answer: { 'q1-1': 'First' },
+    })
+  })
+
+  it('resolves a reused option ID against its own question', () => {
+    const items = toRenderModel([
+      message(
+        {
+          type: 'ask_user_question',
+          questionId: 'q3',
+          questions: [
+            {
+              id: 'keep',
+              question: 'Keep it?',
+              options: [{ id: 'yes', label: 'Yes' }],
+            },
+            {
+              id: 'ship',
+              question: 'Ship it?',
+              options: [{ id: 'yes', label: 'Yes, ship now' }],
+            },
+          ],
+        },
+        { itemId: 'ask' },
+      ),
+      message(
+        {
+          type: 'user_answer',
+          questionId: 'q3',
+          answers: { keep: 'yes', ship: 'yes' },
+        },
+        { itemId: 'answer', seq: 2, role: 'user' },
+      ),
+    ])
+    expect(items.at(-1)).toMatchObject({
+      answer: { keep: 'Yes', ship: 'Yes, ship now' },
+    })
+  })
+
+  it('keeps free text beside the selected option labels', () => {
+    const items = toRenderModel([
+      message(
+        {
+          type: 'ask_user_question',
+          questionId: 'q2',
+          questions: [
+            {
+              id: 'toppings',
+              question: 'Choose toppings',
+              options: [
+                { id: 'cheese', label: 'Cheese' },
+                { id: 'mushrooms', label: 'Mushrooms' },
+              ],
+              multiSelect: true,
+              allowFreeInput: true,
+            },
+          ],
+        },
+        { itemId: 'ask' },
+      ),
+      message(
+        {
+          type: 'user_answer',
+          questionId: 'q2',
+          answers: {
+            toppings: {
+              type: 'selected_with_text',
+              optionIds: ['cheese', 'mushrooms'],
+              text: 'extra basil',
+            },
+          },
+        },
+        { itemId: 'answer', seq: 2, role: 'user' },
+      ),
+    ])
+    expect(items.at(-1)).toMatchObject({
+      kind: 'answered-question',
+      answer: { toppings: ['Cheese', 'Mushrooms', 'extra basil'] },
+    })
+  })
+
   it('groups adjacent tools and agents within one turn', () => {
     const tool = {
       kind: 'tool' as const,
@@ -201,5 +305,37 @@ describe('chat render model', () => {
         }),
       },
     ])
+  })
+
+  it('separates an expired request from a cancelled one', () => {
+    const ask = message(
+      {
+        type: 'ask_user_question',
+        questionId: 'q9',
+        question: 'Pick one',
+        options: ['First'],
+      },
+      { itemId: 'ask' },
+    )
+    const expired = toRenderModel([
+      ask,
+      message(
+        { type: 'user_answer', questionId: 'q9', expired: true },
+        { itemId: 'answer', seq: 2, role: 'user' },
+      ),
+    ])
+    expect(expired.at(-1)).toMatchObject({
+      kind: 'answered-question',
+      question: 'Pick one',
+      answer: 'Expired',
+    })
+    const cancelled = toRenderModel([
+      ask,
+      message(
+        { type: 'user_answer', questionId: 'q9', cancelled: true },
+        { itemId: 'answer', seq: 2, role: 'user' },
+      ),
+    ])
+    expect(cancelled.at(-1)).toMatchObject({ answer: 'Cancelled' })
   })
 })

@@ -1,5 +1,5 @@
 import { open } from 'node:fs/promises'
-import { readProcNames } from './proc-names.js'
+import { isUninspectableProcEntry, readProcNames } from './proc-names.js'
 import { setTimeout as delay } from 'node:timers/promises'
 
 export function signalProcessGroup(pid: number, signal: NodeJS.Signals | 0) {
@@ -54,9 +54,9 @@ export async function groupHasRunningMember(pid: number, deadline: number) {
         await file.close()
       }
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (code !== 'ENOENT' && code !== 'ESRCH') throw error
-      // A member can exit between the listing and its own state read.
+      if (!isUninspectableProcEntry(error)) throw error
+      // A member can exit, or belong to another user, between the listing and
+      // its own state read.
       return false
     }
   }

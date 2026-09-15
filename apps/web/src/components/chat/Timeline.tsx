@@ -1,4 +1,12 @@
-import { ChevronDown, File, FileImage } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  Circle,
+  File,
+  FileImage,
+  LoaderCircle,
+  X,
+} from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Virtualizer } from 'virtua'
 import { useParams } from '@tanstack/react-router'
@@ -172,10 +180,61 @@ function RenderItemContent({
     return <SubagentCard child={item.child} skills={skills} />
   if (item.kind === 'activity') return <ActivityStack item={item} />
   if (item.kind === 'epic-triage') return <EpicTriageCard card={item.card} />
+  if (item.kind === 'plan') return <PlanCard item={item} />
   if (item.kind === 'attachment') return <AttachmentItem item={item} />
   if (item.kind === 'system') return <SystemItem item={item} />
   if (item.kind === 'working') return <WorkingRow />
   return null
+}
+
+function PlanCard({
+  item,
+}: {
+  item: Extract<ChatRenderItem, { kind: 'plan' }>
+}) {
+  return (
+    <article
+      className="mx-auto mb-3 max-w-3xl rounded-xl border border-border/60 bg-muted/20 p-4"
+      aria-label="Plan progress"
+    >
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Plan</h2>
+        <span className="text-xs text-muted-foreground">
+          {item.steps.filter((step) => step.status === 'completed').length}/
+          {item.steps.length} complete
+        </span>
+      </div>
+      {item.explanation && (
+        <p className="mt-1 text-sm text-muted-foreground">{item.explanation}</p>
+      )}
+      <ol className="mt-3 space-y-2">
+        {item.steps.map((step) => (
+          <li key={step.id} className="flex items-start gap-2 text-sm">
+            <span className="mt-0.5 shrink-0">
+              {step.status === 'completed' ? (
+                <Check className="size-4 text-emerald-500" />
+              ) : step.status === 'running' ? (
+                <LoaderCircle className="size-4 animate-spin text-primary" />
+              ) : step.status === 'failed' ? (
+                <X className="size-4 text-destructive" />
+              ) : (
+                <Circle className="size-4 text-muted-foreground" />
+              )}
+            </span>
+            <span
+              className={
+                step.status === 'completed'
+                  ? 'text-muted-foreground line-through'
+                  : ''
+              }
+            >
+              {step.title}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </article>
+  )
 }
 
 function WorkingRow() {

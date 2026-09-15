@@ -12,6 +12,7 @@ export type PendingQuestion = {
   questionId: string
   sessionId: string
   questions: Array<{
+    id?: string
     header?: string
     question: string
     options: QuestionOption[]
@@ -20,6 +21,9 @@ export type PendingQuestion = {
     isSecret?: boolean
   }>
   source: 'permission' | 'ext'
+  toolName?: string
+  toolContext?: string
+  permissionScope?: 'once' | 'session'
   method?: string
   raw: Record<string, unknown>
 }
@@ -57,7 +61,7 @@ const object = (value: unknown): Record<string, unknown> =>
 
 const normalizeQuestions = (value: unknown): PendingQuestion['questions'] => {
   if (!Array.isArray(value)) return []
-  return value.flatMap((entry) => {
+  return value.flatMap((entry, questionIndex) => {
     const item = object(entry)
     const question =
       typeof item.question === 'string'
@@ -66,7 +70,7 @@ const normalizeQuestions = (value: unknown): PendingQuestion['questions'] => {
           ? item.prompt
           : undefined
     if (!question || !Array.isArray(item.options)) return []
-    const options = item.options.flatMap((option) => {
+    const options = item.options.flatMap((option, optionIndex) => {
       const value = object(option)
       const label =
         typeof value.label === 'string'
@@ -81,7 +85,10 @@ const normalizeQuestions = (value: unknown): PendingQuestion['questions'] => {
               ...(typeof value.description === 'string'
                 ? { description: value.description }
                 : {}),
-              ...(typeof value.id === 'string' ? { id: value.id } : {}),
+              id:
+                typeof value.id === 'string'
+                  ? value.id
+                  : `option-${questionIndex}-${optionIndex}`,
               ...(typeof value.value === 'string'
                 ? { value: value.value }
                 : {}),
@@ -91,6 +98,7 @@ const normalizeQuestions = (value: unknown): PendingQuestion['questions'] => {
     })
     return [
       {
+        id: typeof item.id === 'string' ? item.id : `question-${questionIndex}`,
         ...(typeof item.header === 'string' ? { header: item.header } : {}),
         question,
         options,
@@ -198,6 +206,11 @@ export class QuestionManager {
         question: question.questions[0].question,
         options: question.questions[0].options.map((option) => option.label),
         source: question.source,
+        ...(question.toolName ? { toolName: question.toolName } : {}),
+        ...(question.toolContext ? { toolContext: question.toolContext } : {}),
+        ...(question.permissionScope
+          ? { permissionScope: question.permissionScope }
+          : {}),
       },
     })
   }
@@ -270,7 +283,9 @@ export class QuestionManager {
     const secretIds = new Set(
       saved.questions
         .filter((question) => (question as { isSecret?: boolean }).isSecret)
-        .map((question) => question.question),
+        .flatMap((question) =>
+          question.id ? [question.id, question.question] : [question.question],
+        ),
     )
     if (!secretIds.size) return answer
     if (
@@ -292,9 +307,60 @@ export class QuestionManager {
   private validateAnswer(held: Held, answer: unknown) {
     if (typeof answer !== 'object' || answer === null || Array.isArray(answer))
       return
-    const allowed = new Set(held.questions.map((question) => question.question))
-    const unknown = Object.keys(answer).find((key) => !allowed.has(key))
+    const answerMap = answer as Record<string, unknown>
+    const allowed = new Set(
+      held.questions.flatMap((question) =>
+        question.id ? [question.id, question.question] : [question.question],
+      ),
+    )
+    const unknown = Object.keys(answerMap).find((key) => !allowed.has(key))
     if (unknown) throw new QuestionError(400, `Unknown answer key: ${unknown}`)
+    for (const question of held.questions) {
+      const idKey =
+        question.id !== undefined && answerMap[question.id] !== undefined
+      const value = idKey
+        ? answerMap[question.id!]
+        : answerMap[question.question]
+      if (value === undefined)
+        throw new QuestionError(400, `Missing answer key: ${question.question}`)
+      if (!idKey) continue
+      if (value === null)
+        throw new QuestionError(400, `Invalid answer for ${question.question}`)
+      const answerObject = object(value)
+      if (
+        answerObject.type === 'selected_with_text' &&
+        typeof answerObject.text !== 'string'
+      )
+        throw new QuestionError(400, `Invalid answer for ${question.question}`)
+      const optionIds: unknown = Array.isArray(value)
+        ? value
+        : typeof value === 'string' &&
+            question.options.length > 0 &&
+            !question.allowFreeInput
+          ? [value]
+          : answerObject.type === 'selected_with_text'
+            ? answerObject.optionIds
+            : undefined
+      if (
+        answerObject.type === 'selected_with_text' &&
+        !Array.isArray(optionIds)
+      )
+        throw new QuestionError(400, `Invalid answer for ${question.question}`)
+      if (!Array.isArray(optionIds)) continue
+      if (
+        optionIds.some(
+          (optionId) =>
+            typeof optionId !== 'string' ||
+            !question.options.some((option) => option.id === optionId),
+        )
+      )
+        throw new QuestionError(400, `Invalid option for ${question.question}`)
+      if (!question.multiSelect && optionIds.length > 1)
+        throw new QuestionError(
+          400,
+          `Multiple options for ${question.question}`,
+        )
+    }
   }
   private hold(
     question: PendingQuestion,
@@ -338,20 +404,86 @@ export class QuestionManager {
     const questions = normalizeQuestions(
       object(request.toolCall.rawInput).questions,
     )
+    // A request that carries its own questions is a question, even though it
+    // arrived on the permission method. Only the bare form is a tool approval,
+    // so only the bare form gets the tool name, context and allow scope.
     const question: PendingQuestion = {
       questionId: id(),
       sessionId: request.sessionId,
-      questions: questions.length
-        ? questions
-        : [{ question: request.toolCall.title ?? 'Question', options: [] }],
       source: 'permission',
       raw: request as unknown as Record<string, unknown>,
+      ...(questions.length
+        ? { questions }
+        : {
+            questions: [
+              {
+                id: 'permission',
+                question: request.toolCall.title ?? 'Question',
+                options: request.options.map((option) => ({
+                  id: option.optionId,
+                  label: option.name,
+                })),
+              },
+            ],
+            toolName: request.toolCall.title ?? undefined,
+            toolContext: JSON.stringify(request.toolCall.rawInput ?? null),
+            permissionScope: request.options.some(
+              (option) => option.kind === 'allow_always',
+            )
+              ? ('session' as const)
+              : ('once' as const),
+          }),
     }
     return this.hold(question, (value) => {
       if (value === undefined)
         return { outcome: { outcome: 'cancelled' as const } }
+      const values = object(value)
+      const answer = values.answers ?? values.answer ?? value
+      const answerValues = object(answer)
+      let first: unknown = Array.isArray(answer)
+        ? (answer as unknown[])[0]
+        : answer && typeof answer === 'object' && !Array.isArray(answer)
+          ? answerValues.optionIds
+            ? answer
+            : Object.values(answerValues)[0]
+          : answer
+      if (Array.isArray(first)) first = first[0]
+      const optionIds = object(first).optionIds
+      const selected =
+        first && typeof first === 'object'
+          ? Array.isArray(optionIds)
+            ? optionIds[0]
+            : undefined
+          : first
+      // The wire only accepts an option the agent offered. A bare approval
+      // answers with one of them directly. Kimi packs its questions into
+      // rawInput and offers one allow per possible answer, so the chosen answer
+      // has to come back as that answer's own option, by name first and by
+      // position when the two lists are one allow per answer. A plain approval
+      // triple can also match on length, so position alone would answer three
+      // choices with a reject. Anything else means the user deliberately
+      // answered, so send the narrowest allow, and cancel when there is none.
+      const choices = question.questions.flatMap((entry) => entry.options)
+      const chosen = choices.findIndex((option) => option.id === selected)
+      const oneAllowPerAnswer =
+        request.options.length === choices.length &&
+        request.options.every((option) => option.kind === 'allow_once')
+      const proceed =
+        request.options.find((option) => option.optionId === selected) ??
+        (chosen >= 0
+          ? (request.options.find(
+              (option) => option.name === choices[chosen].label,
+            ) ?? (oneAllowPerAnswer ? request.options[chosen] : undefined))
+          : undefined) ??
+        request.options.find((option) => option.kind === 'allow_once') ??
+        request.options.find((option) => option.kind === 'allow_always') ??
+        request.options.find((option) => option.kind.startsWith('allow'))
+      if (!proceed) return { outcome: { outcome: 'cancelled' as const } }
       return {
-        outcome: { outcome: 'selected' as const, optionId: String(value) },
+        outcome: {
+          outcome: 'selected' as const,
+          optionId: proceed.optionId,
+        },
       }
     }) as Promise<acp.RequestPermissionResponse>
   }
@@ -361,15 +493,47 @@ export class QuestionManager {
   ): Promise<Record<string, unknown>> | undefined {
     const question = classifyQuestion(method, params)
     if (!question) return undefined
+    if (
+      method !== 'cursor/ask_question' &&
+      new Set(question.questions.map((entry) => entry.question)).size !==
+        question.questions.length
+    )
+      throw new Error('Provider cannot represent duplicate question text')
     return this.hold(question, (value) => {
       if (value === undefined) return { outcome: 'cancelled' }
       const answer = typeof value === 'object' ? value : { answer: value }
       if (method === 'cursor/ask_question') return { answers: answer }
+      const values = object(answer)
       const answers = Object.fromEntries(
-        question.questions.map((entry) => [
-          entry.question,
-          Array.isArray(answer) ? answer : [String(answer)],
-        ]),
+        question.questions.map((entry) => {
+          const value =
+            values[entry.id ?? ''] ?? values[entry.question] ?? answer
+          const combined = object(value)
+          const selectedIds = Array.isArray(combined.optionIds)
+            ? combined.optionIds.map(String)
+            : Array.isArray(value)
+              ? value.filter((item): item is string => typeof item === 'string')
+              : typeof value === 'string' &&
+                  entry.options.some((option) => option.id === value)
+                ? [value]
+                : undefined
+          const optionIds = selectedIds ? new Set(selectedIds) : undefined
+          const labels = optionIds
+            ? entry.options
+                .filter((option) => option.id && optionIds.has(option.id))
+                .map((option) => option.label)
+            : []
+          const text =
+            typeof combined.text === 'string' ? combined.text : undefined
+          return [
+            entry.question,
+            optionIds
+              ? [...labels, ...(text ? [text] : [])]
+              : Array.isArray(value)
+                ? value
+                : [String(value)],
+          ]
+        }),
       )
       return { outcome: 'accepted', answers }
     }) as Promise<Record<string, unknown>>

@@ -39,16 +39,29 @@ export const MessageContent = z.discriminatedUnion('type', [
     questions: z
       .array(
         z.object({
+          id: id.optional(),
           header: z.string().optional(),
           question: z.string(),
           options: z.array(
-            z.object({ label: z.string(), description: z.string().optional() }),
+            z.object({
+              id: id.optional(),
+              label: z.string(),
+              description: z.string().optional(),
+            }),
           ),
           multiSelect: z.boolean().optional(),
+          allowFreeInput: z.boolean().optional(),
+          isSecret: z.boolean().optional(),
         }),
       )
       .optional(),
     source: z.enum(['permission', 'ext']).optional(),
+    requestStatus: z
+      .enum(['pending', 'replying', 'submitted', 'expired', 'uncertain'])
+      .optional(),
+    toolName: z.string().optional(),
+    toolContext: z.string().optional(),
+    permissionScope: z.enum(['once', 'session']).optional(),
   }),
   z.object({
     type: z.literal('user_answer'),
@@ -56,6 +69,9 @@ export const MessageContent = z.discriminatedUnion('type', [
     answer: z.string().optional(),
     answers: z.unknown().optional(),
     cancelled: z.boolean().optional(),
+    // A request the user never answered ran out of time. That is not the same
+    // as a cancellation, and the transcript has to say which one happened.
+    expired: z.boolean().optional(),
   }),
   z.object({
     type: z.literal('attachment_ref'),
@@ -91,6 +107,17 @@ export const MessageContent = z.discriminatedUnion('type', [
       }),
     ),
   }),
+  z.object({
+    type: z.literal('plan'),
+    explanation: z.string().optional(),
+    steps: z.array(
+      z.object({
+        id,
+        title: z.string(),
+        status: z.enum(['pending', 'running', 'completed', 'failed']),
+      }),
+    ),
+  }),
 ])
 export type MessageContent = z.infer<typeof MessageContent>
 export const messageContentTypes = [
@@ -107,6 +134,7 @@ export const messageContentTypes = [
   'turn_interrupted',
   'error',
   'epic_triage',
+  'plan',
 ] as const
 export const Message = z.object({
   seq: z.number().int().nonnegative(),

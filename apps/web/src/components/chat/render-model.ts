@@ -2,6 +2,7 @@ import type { Message } from '@forge/protocol/message'
 import type { SubagentSession } from './subagent'
 import type { PendingUserMessage } from '../../stores/messages'
 import { interruptReasonText } from './interrupt-copy'
+import { answerWithLabels, requestQuestions } from './question-logic'
 
 export type ToolState = 'running' | 'done' | 'error'
 export type ActivityState = ToolState | 'unknown'
@@ -33,6 +34,16 @@ export type ChatRenderItem =
       sizeBytes?: number
     }
   | { kind: 'answered-question'; id: string; question: string; answer: unknown }
+  | {
+      kind: 'plan'
+      id: string
+      explanation?: string
+      steps: Array<{
+        id: string
+        title: string
+        status: 'pending' | 'running' | 'completed' | 'failed'
+      }>
+    }
   | {
       kind: 'epic-triage'
       id: string
@@ -135,19 +146,25 @@ export function toRenderModel(
     ? [{ kind: 'system', id: 'resumed-recap', text: 'Resumed with recap' }]
     : []
   const questions = new Map<string, string>()
+  const questionOptions = new Map<string, ReturnType<typeof requestQuestions>>()
   const anchors = new Map<string, number>()
   const turnIds = new Map<string, string>()
   const childTurnIds = new Map<string, string>()
   const toolIds = new Map<string, Extract<ChatRenderItem, { kind: 'tool' }>>()
   for (const message of messages) {
     turnIds.set(message.itemId, message.turnId)
-    if (message.content.type === 'ask_user_question')
+    if (message.content.type === 'ask_user_question') {
       questions.set(
         message.content.questionId,
         message.content.question ??
           message.content.questions?.[0]?.question ??
           'Question',
       )
+      questionOptions.set(
+        message.content.questionId,
+        requestQuestions(message.content),
+      )
+    }
     const content = message.content
     if (content.type === 'text_delta' || content.type === 'thought_delta') {
       const previous = result.at(-1)
@@ -226,12 +243,24 @@ export function toRenderModel(
         kind: 'answered-question',
         id: message.itemId,
         question: questions.get(content.questionId) ?? 'Question',
-        answer: content.cancelled
-          ? 'Cancelled'
-          : (content.answers ?? content.answer),
+        answer: content.expired
+          ? 'Expired'
+          : content.cancelled
+            ? 'Cancelled'
+            : answerWithLabels(
+                questionOptions.get(content.questionId),
+                content.answers ?? content.answer,
+              ),
       })
     } else if (content.type === 'epic_triage') {
       result.push({ kind: 'epic-triage', id: message.itemId, card: content })
+    } else if (content.type === 'plan') {
+      result.push({
+        kind: 'plan',
+        id: message.itemId,
+        explanation: content.explanation,
+        steps: content.steps,
+      })
     } else if (content.type === 'turn_interrupted') {
       result.push({
         kind: 'system',
