@@ -173,12 +173,14 @@ function RenderItemContent({
 }) {
   if (item.kind === 'message')
     return <MessageRow item={item} sessionId={sessionId} skills={skills} />
-  if (item.kind === 'tool') return <ToolCallRow item={item} />
+  if (item.kind === 'tool')
+    return <ToolCallRow item={item} sessionId={sessionId} />
   if (item.kind === 'answered-question')
     return <AnsweredQuestionRow question={item.question} answer={item.answer} />
   if (item.kind === 'subagent')
     return <SubagentCard child={item.child} skills={skills} />
-  if (item.kind === 'activity') return <ActivityStack item={item} />
+  if (item.kind === 'activity')
+    return <ActivityStack item={item} sessionId={sessionId} />
   if (item.kind === 'epic-triage') return <EpicTriageCard card={item.card} />
   if (item.kind === 'plan') return <PlanCard item={item} />
   if (item.kind === 'attachment') return <AttachmentItem item={item} />
