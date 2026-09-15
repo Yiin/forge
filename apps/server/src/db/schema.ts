@@ -1,4 +1,10 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+} from 'drizzle-orm/sqlite-core'
 
 export const workspaceTargetRevisions = sqliteTable(
   'workspace_target_revisions',
@@ -67,7 +73,7 @@ export const messages = sqliteTable(
     seq: integer('seq').primaryKey({ autoIncrement: true }),
     sessionId: text('session_id')
       .notNull()
-      .references(() => sessions.id),
+      .references(() => sessions.id, { onDelete: 'cascade' }),
     turnId: text('turn_id').notNull(),
     itemId: text('item_id').notNull(),
     role: text('role').notNull(),
@@ -76,6 +82,27 @@ export const messages = sqliteTable(
     createdAt: integer('created_at').notNull(),
   },
   (table) => [index('messages_session_seq_idx').on(table.sessionId, table.seq)],
+)
+export const nativeInteractions = sqliteTable(
+  'native_interactions',
+  {
+    requestId: text('request_id').notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id),
+    runtimeGeneration: text('runtime_generation'),
+    kind: text('kind').notNull(),
+    request: text('request').notNull(),
+    status: text('status').notNull(),
+    answer: text('answer'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.requestId] }),
+    index('native_interactions_session_idx').on(table.sessionId),
+  ],
 )
 // Epic iteration provider columns are added by migration 0008.
 export const attachments = sqliteTable('attachments', {

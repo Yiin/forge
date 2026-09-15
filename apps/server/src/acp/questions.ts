@@ -16,10 +16,22 @@ export type PendingQuestion = {
     question: string
     options: QuestionOption[]
     multiSelect?: boolean
+    allowFreeInput?: boolean
+    isSecret?: boolean
   }>
   source: 'permission' | 'ext'
   method?: string
   raw: Record<string, unknown>
+}
+export type NativeInteractionStatus =
+  'pending' | 'replying' | 'submitted' | 'cancelled' | 'expired' | 'uncertain'
+export type NativeInteraction = PendingQuestion & {
+  status: NativeInteractionStatus
+  runtimeGeneration?: string
+  answer?: unknown
+  createdAt: number
+  updatedAt: number
+  expiresAt: number
 }
 
 type Db = { prepare(sql: string): any; exec(sql: string): unknown }
@@ -32,6 +44,8 @@ export type QuestionHooks = {
   bus?: EventBus
   turnId?: (sessionId: string) => string
   now?: () => number
+  runtimeGeneration?: string
+  expiryMs?: number
 }
 
 const id = () =>
@@ -81,6 +95,8 @@ const normalizeQuestions = (value: unknown): PendingQuestion['questions'] => {
         question,
         options,
         ...(item.multiSelect === true ? { multiSelect: true } : {}),
+        ...(item.allowFreeInput === true ? { allowFreeInput: true } : {}),
+        ...(item.isSecret === true ? { isSecret: true } : {}),
       },
     ]
   })
@@ -128,8 +144,18 @@ export class QuestionManager {
   private readonly pending = new Map<string, Held>()
   private readonly answered = new Map<string, unknown>()
   private readonly now: () => number
+  private readonly expiryMs: number
+  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
   constructor(private readonly hooks: QuestionHooks) {
     this.now = hooks.now ?? Date.now
+    this.expiryMs = hooks.expiryMs ?? 5 * 60_000
+    // A resolver belongs to one runtime. A new manager cannot safely restore it.
+    this.hooks.db
+      .prepare(
+        `UPDATE native_interactions SET status = 'expired', updated_at = ?
+         WHERE status IN ('pending', 'replying')`,
+      )
+      .run(this.now())
   }
   get size() {
     return this.pending.size
@@ -138,6 +164,25 @@ export class QuestionManager {
     return this.hooks.turnId?.(sessionId) ?? `question-${sessionId}`
   }
   private save(question: PendingQuestion) {
+    const now = this.now()
+    const expiresAt = now + this.expiryMs
+    this.hooks.db
+      .prepare(
+        `INSERT INTO native_interactions
+          (request_id, session_id, runtime_generation, kind, request, status,
+           created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+      )
+      .run(
+        question.questionId,
+        question.sessionId,
+        this.hooks.runtimeGeneration ?? null,
+        question.source === 'permission' ? 'permission' : 'question',
+        JSON.stringify(this.publicRequest(question)),
+        now,
+        now,
+        expiresAt,
+      )
     appendMessage(this.hooks.db, {
       sessionId: question.sessionId,
       turnId: this.turnId(question.sessionId),
@@ -156,13 +201,132 @@ export class QuestionManager {
       },
     })
   }
+  private publicRequest(question: PendingQuestion) {
+    return {
+      ...question,
+      raw: undefined,
+      questions: question.questions.map((entry) => ({
+        ...entry,
+        options: entry.options.map(({ value: _value, ...option }) => option),
+      })),
+    }
+  }
+  listPending(sessionId?: string): NativeInteraction[] {
+    const rows = (
+      sessionId
+        ? this.hooks.db
+            .prepare(
+              `SELECT * FROM native_interactions WHERE session_id = ?
+             ORDER BY created_at`,
+            )
+            .all(sessionId)
+        : this.hooks.db
+            .prepare(`SELECT * FROM native_interactions ORDER BY created_at`)
+            .all()
+    ) as Array<Record<string, unknown>>
+    return rows.map((row) => ({
+      ...(JSON.parse(String(row.request)) as PendingQuestion),
+      status: row.status as NativeInteractionStatus,
+      ...(row.runtime_generation
+        ? { runtimeGeneration: String(row.runtime_generation) }
+        : {}),
+      ...(row.answer !== null && row.answer !== undefined
+        ? { answer: JSON.parse(String(row.answer)) }
+        : {}),
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+      expiresAt: Number(row.expires_at),
+    }))
+  }
+  private setStatus(
+    sessionId: string,
+    requestId: string,
+    status: NativeInteractionStatus,
+    answer?: unknown,
+  ) {
+    const row = this.hooks.db
+      .prepare(
+        'SELECT request FROM native_interactions WHERE session_id = ? AND request_id = ?',
+      )
+      .get(sessionId, requestId) as { request?: string } | undefined
+    const storedAnswer =
+      answer === undefined ? undefined : this.redact(row?.request, answer)
+    this.hooks.db
+      .prepare(
+        `UPDATE native_interactions SET status = ?, answer = ?, updated_at = ?
+         WHERE session_id = ? AND request_id = ?`,
+      )
+      .run(
+        status,
+        storedAnswer === undefined ? null : JSON.stringify(storedAnswer),
+        this.now(),
+        sessionId,
+        requestId,
+      )
+  }
+  private redact(request: string | undefined, answer: unknown) {
+    if (!request) return answer
+    const saved = JSON.parse(request) as PendingQuestion
+    const secretIds = new Set(
+      saved.questions
+        .filter((question) => (question as { isSecret?: boolean }).isSecret)
+        .map((question) => question.question),
+    )
+    if (!secretIds.size) return answer
+    if (
+      typeof answer === 'object' &&
+      answer !== null &&
+      !Array.isArray(answer)
+    ) {
+      return Object.fromEntries(
+        Object.entries(answer as Record<string, unknown>).map(
+          ([key, value]) => [
+            key,
+            secretIds.has(key) || key === 'answer' ? '[redacted]' : value,
+          ],
+        ),
+      )
+    }
+    return '[redacted]'
+  }
+  private validateAnswer(held: Held, answer: unknown) {
+    if (typeof answer !== 'object' || answer === null || Array.isArray(answer))
+      return
+    const allowed = new Set(held.questions.map((question) => question.question))
+    const unknown = Object.keys(answer).find((key) => !allowed.has(key))
+    if (unknown) throw new QuestionError(400, `Unknown answer key: ${unknown}`)
+  }
   private hold(
     question: PendingQuestion,
     response: (answer: unknown) => unknown,
   ): Promise<unknown> {
     this.save(question)
+    const key = `${question.sessionId}:${question.questionId}`
+    const timer = setTimeout(() => {
+      const held = this.pending.get(key)
+      if (!held) return
+      this.pending.delete(key)
+      this.setStatus(question.sessionId, question.questionId, 'expired')
+      appendMessage(this.hooks.db, {
+        sessionId: question.sessionId,
+        turnId: this.turnId(question.sessionId),
+        itemId: id(),
+        role: 'user',
+        type: 'user_answer',
+        createdAt: this.now(),
+        eventBus: this.hooks.bus,
+        content: {
+          type: 'user_answer',
+          questionId: question.questionId,
+          expired: true,
+        },
+      })
+      held.resolve(undefined)
+    }, this.expiryMs)
+    timer.unref?.()
+    this.timers.set(key, timer)
     return new Promise((resolve) =>
-      this.pending.set(`${question.sessionId}:${question.questionId}`, {
+      this.pending.set(key, {
         ...question,
         resolve: (value) => resolve(response(value)),
       }),
@@ -233,9 +397,16 @@ export class QuestionManager {
         )
       throw new QuestionError(410, 'Question is no longer pending')
     }
+    this.validateAnswer(held, answer)
     held.answered = answer
     this.pending.delete(key)
-    this.answered.set(key, answer)
+    clearTimeout(this.timers.get(key))
+    this.timers.delete(key)
+    this.answered.set(
+      key,
+      this.redact(JSON.stringify({ questions: held.questions }), answer),
+    )
+    this.setStatus(sessionId, questionId, 'submitted', answer)
     appendMessage(this.hooks.db, {
       sessionId,
       turnId: this.turnId(sessionId),
@@ -247,8 +418,22 @@ export class QuestionManager {
       content: {
         type: 'user_answer',
         questionId,
-        ...(body.answer !== undefined ? { answer: body.answer } : {}),
-        ...(body.answers !== undefined ? { answers: body.answers } : {}),
+        ...(body.answer !== undefined
+          ? {
+              answer: this.redact(
+                JSON.stringify({ questions: held.questions }),
+                body.answer,
+              ),
+            }
+          : {}),
+        ...(body.answers !== undefined
+          ? {
+              answers: this.redact(
+                JSON.stringify({ questions: held.questions }),
+                body.answers,
+              ),
+            }
+          : {}),
       },
     })
     held.resolve(answer)
@@ -267,7 +452,10 @@ export class QuestionManager {
       throw new QuestionError(410, 'Question is no longer pending')
     }
     this.pending.delete(key)
+    clearTimeout(this.timers.get(key))
+    this.timers.delete(key)
     this.answered.set(key, undefined)
+    this.setStatus(sessionId, questionId, 'cancelled')
     appendMessage(this.hooks.db, {
       sessionId,
       turnId: this.turnId(sessionId),
@@ -291,6 +479,9 @@ export class QuestionManager {
     for (const [key, held] of this.pending)
       if (key.startsWith(`${sessionId}:`)) {
         this.pending.delete(key)
+        clearTimeout(this.timers.get(key))
+        this.timers.delete(key)
+        this.setStatus(sessionId, held.questionId, 'cancelled')
         appendMessage(this.hooks.db, {
           sessionId,
           turnId: this.turnId(sessionId),

@@ -3,6 +3,9 @@ import { answerQuestion, cancelQuestion } from '@forge/protocol/commands'
 import { QuestionError, QuestionManager } from '../acp/questions.js'
 export function questionRoutes(manager: QuestionManager) {
   const app = new Hono()
+  app.get('/api/sessions/:id/questions', (c) =>
+    c.json({ questions: manager.listPending(c.req.param('id')) }),
+  )
   app.post('/api/sessions/:id/questions/:questionId/answer', async (c) => {
     try {
       const input = await c.req.json()
