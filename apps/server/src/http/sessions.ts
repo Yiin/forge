@@ -19,13 +19,13 @@ import { WorkspaceError } from '../workspace/paths.js'
 import { WorktreeRemovalError } from '../git/worktrees.js'
 import { TerminalError } from '../terminals/error.js'
 import { withProjectActivity } from '../db/project-activity.js'
-import type { QuestionManager } from '../acp/questions.js'
+import type { NativeInteractions } from '../sessions/native-interactions.js'
 
 export function sessionRoutes(
   manager: SessionManager,
   uploads?: UploadStore,
   workspaceTargets = new WorkspaceTargets(manager.database),
-  questions?: QuestionManager,
+  questions?: NativeInteractions,
 ) {
   const app = new Hono()
   app.onError((error, c) => {

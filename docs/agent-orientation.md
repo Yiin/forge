@@ -11,13 +11,12 @@ Keep Forge branding and the upstream MIT notice.
 - `apps/server/src/sessions`: delivery, lifecycle, recovery, forks, and workspace targets.
 - `apps/server/src/accounts`: account homes, login, discovery, usage, and limits.
 - `apps/server/src/db` and `apps/server/drizzle`: SQLite and migrations.
-- `apps/server/src/git`: existing Git services. Planned `workspace`, `terminals`, and `previews` directories hold new workspace services.
+- `apps/server/src/{git,workspace,terminals,previews}`: Git, descriptor-backed files, owned terminals, and isolated previews.
 - `apps/server/src/epics`: Beads workers, worktrees, completion, and gates.
 - `packages/protocol`: shared Zod wire schemas and transcript contracts.
 - `apps/web/src/{components,stores,lib}`: UI, state, and replay.
 - `e2e` and `scripts/epic-gate.sh`: browser fixtures and the integration gate.
 
-Verify which planned services exist in your checkout.
 Keep the Node production server, Bun packages, React, shadcn/ui Base UI, and Tailwind.
 Geist assets and complete theme-role mappings belong to `forge-kcj.17`; font-family declarations alone do not deliver them.
 
@@ -26,7 +25,10 @@ Geist assets and complete theme-role mappings belong to `forge-kcj.17`; font-fam
 Keep provider instance IDs stable and adapter kind explicit.
 Scope native bindings to provider, account, and canonical effective cwd.
 Never fall back from native to ACP or replace failed resume with a fresh session.
-Confine ACP types to dedicated adapters. Preserve intentional custom ACP and PTY harness configurations.
+Confine ACP types to dedicated ACP modules, including `harnesses/acp` and `sessions/acp-*`. Preserve intentional custom ACP and PTY harness configurations.
+Native providers use direct adapters; Grok, Gemini, Devin, and Hermes use dedicated ACP profiles.
+Read [providers.md](providers.md) for discovery limits, supported boundaries, and synthetic validation.
+Request routes use `NativeInteractions`; do not restore the removed universal ACP question manager.
 
 Separate prompt acceptance, provider delivery, turn completion, cancellation, and process exit.
 Use one projection for history and live events, with stable display identities and explicit replay cursors.

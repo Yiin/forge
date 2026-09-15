@@ -6,7 +6,10 @@ import {
   saveConfig,
   type ConfigState,
 } from '../config.js'
-import { spawnAcpClient } from '../acp/client.js'
+import { createAcpDiscovery } from '../harnesses/acp/discovery.js'
+import { AcpResourceHost } from '../harnesses/acp/limits.js'
+import { productionAcpProfile } from '../sessions/acp-factory.js'
+import { harnessTransport } from '../sessions/native-factory.js'
 import {
   settingsPatchSchema,
   settingsSchema,
@@ -19,7 +22,7 @@ export type ConfigRoutesOptions = {
   config?: ForgeConfig
   configState?: ConfigState
   configPath?: string
-  db?: { prepare(sql: string): { run(...values: unknown[]): unknown } }
+  host?: AcpResourceHost
 }
 
 export function harnessRoutes(options: ConfigRoutesOptions = {}) {
@@ -27,6 +30,7 @@ export function harnessRoutes(options: ConfigRoutesOptions = {}) {
     current: options.config ?? defaultConfig(),
   }
   const app = new Hono()
+  const host = options.host ?? new AcpResourceHost()
   const save = async (next: ForgeConfig) => {
     state.current = next
     if (options.configPath ?? state.path)
@@ -62,28 +66,49 @@ export function harnessRoutes(options: ConfigRoutesOptions = {}) {
         ? state.current.harness[body.name]
         : undefined
     if (!entry) return c.json({ ok: false, stderrTail: 'Unknown harness' }, 404)
-    if (entry.protocol === 'pty') return testPty(entry, c)
+    const transport = harnessTransport(body.name ?? 'custom-acp', entry)
+    if (transport === 'pty') return testPty(entry, c)
+    if (transport === 'native')
+      return c.json({
+        ok: false,
+        status: 'unverified',
+        authentication: 'unknown',
+        stderrTail:
+          'Select an account and refresh its models to test native discovery.',
+      })
     try {
-      const client = await spawnAcpClient(
-        entry,
-        options.db && body.name
-          ? {
-              capabilityStore: { db: options.db, harnessKey: body.name },
-            }
-          : {},
-      )
-      const result = {
-        ok: true,
-        agentName:
-          (client.capabilities.agent as { name?: string }).name ?? null,
-        protocolVersion: null,
-        capabilities: {
-          loadSession: client.capabilities.loadSession,
-          ...client.capabilities.agent,
+      const key = body.name ?? 'custom-acp'
+      const result = await createAcpDiscovery(
+        productionAcpProfile(key, entry),
+        {
+          providerInstanceId: key,
+          account: { kind: 'native-default', configurationId: key },
+          command: entry.command,
+          args: entry.args,
+          env: entry.env,
         },
-      }
-      await client.kill()
-      return c.json(result)
+        host,
+      ).refresh(process.cwd())
+      return c.json(
+        {
+          ok: result.status === 'available',
+          status: result.status,
+          authentication: result.authentication,
+          models: result.models,
+          stderrTail:
+            result.error ??
+            (result.status === 'unverified'
+              ? 'Executable found. ACP support and authentication are unverified.'
+              : result.status === 'missing'
+                ? 'Executable is unavailable.'
+                : undefined),
+        },
+        result.status === 'missing' ||
+          result.status === 'failed' ||
+          result.status === 'missing-acp-extra'
+          ? 422
+          : 200,
+      )
     } catch (error) {
       return c.json(
         {

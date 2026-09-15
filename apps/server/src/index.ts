@@ -1,3 +1,4 @@
+import { closeAcpDiscovery } from './harnesses/acp/discovery.js'
 import { serve, type ServerType } from '@hono/node-server'
 import { Hono } from 'hono'
 import { createRequire } from 'node:module'
@@ -30,8 +31,6 @@ import { migrate } from './db/migrate.js'
 import { EventBus } from './events/bus.js'
 import { searchRoutes } from './http/search.js'
 import { questionRoutes } from './http/questions.js'
-import type { QuestionManager } from './acp/questions.js'
-import { QuestionManager as ServerQuestionManager } from './acp/questions.js'
 import { websocketRoute } from './ws.js'
 import { projectRoutes } from './http/projects.js'
 import { sessionRoutes } from './http/sessions.js'
@@ -154,7 +153,7 @@ function webAssets(webDir: string) {
 export function createApp(
   uploadStore?: UploadStore,
   status?: Parameters<typeof statusRoutes>[0],
-  questions?: QuestionManager,
+  nativeInteractions?: NativeInteractions,
   manager?: SessionManager,
   runner?: EpicRunner,
   webDir?: string,
@@ -168,7 +167,7 @@ export function createApp(
   workspaceFiles?: WorkspaceFiles,
   requestGuard = new RequestGuard(configState?.current.terminalAccess),
   previews?: PreviewManager,
-  nativeInteractions?: NativeInteractions,
+  acpResources = new AcpResourceHost(),
 ) {
   const app = new Hono()
   app.use('*', async (c, next) => {
@@ -207,7 +206,12 @@ export function createApp(
     if (manager) {
       app.route(
         '/',
-        sessionRoutes(manager, uploadStore, workspaceFiles?.targets, questions),
+        sessionRoutes(
+          manager,
+          uploadStore,
+          workspaceFiles?.targets,
+          nativeInteractions,
+        ),
       )
       app.route('/', forkRoutes(manager))
       app.route('/', sideChatRoutes(manager))
@@ -229,7 +233,7 @@ export function createApp(
     )
     app.route('/', fsBrowseRoutes())
     app.route('/', searchRoutes(uploadStore.database))
-    app.route('/', harnessRoutes({ configState, db: uploadStore.database }))
+    app.route('/', harnessRoutes({ configState, host: acpResources }))
     if (manager && configState)
       app.route(
         '/',
@@ -252,7 +256,7 @@ export function createApp(
     app.route('/', serverConfigRoutes())
     if (previews) app.route('/', previewRoutes(previews))
   }
-  if (questions) app.route('/', questionRoutes(questions, nativeInteractions))
+  if (nativeInteractions) app.route('/', questionRoutes(nativeInteractions))
   if (status) app.route('/', workspaceRoutes(status.db, uploadStore))
   if (runner && status)
     app.route(
@@ -391,7 +395,6 @@ export function startServer(port?: number): ServerType {
   clearExpiredLimits(db, Date.now())
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
-  const questions = new ServerQuestionManager({ db, bus })
   const nativeInteractions = new NativeInteractions(db, bus)
   const configState: ConfigState = { current: config, path: configPath }
   const accountStore = new HarnessAccountStore(db)
@@ -553,7 +556,7 @@ export function startServer(port?: number): ServerType {
           liveProcesses,
         })),
     },
-    questions,
+    nativeInteractions,
     manager,
     runner,
     productionWebDir(),
@@ -564,7 +567,7 @@ export function startServer(port?: number): ServerType {
     workspaceFiles,
     requestGuard,
     undefined,
-    nativeInteractions,
+    acpResources,
   )
   const previews = new PreviewManager(
     workspaceFiles.targets,
@@ -605,6 +608,7 @@ export function startServer(port?: number): ServerType {
   const shutdown = new ServerShutdown(
     server as Server,
     () => {
+      void closeAcpDiscovery(acpResources).catch(() => {})
       modelRefreshStopped = true
       for (const operation of modelRefreshes.values())
         operation.controller.abort()
@@ -621,6 +625,7 @@ export function startServer(port?: number): ServerType {
     },
     terminals.limits.shutdownCallbacks,
   )
+  shutdown.addCleanupHook(() => closeAcpDiscovery(acpResources))
   shutdown.addCleanupHook(() => terminalRequests.settled())
   shutdown.addCleanupHook(async () => {
     if (!(await terminals.closeAll()))
