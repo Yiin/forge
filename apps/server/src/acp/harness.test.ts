@@ -63,6 +63,54 @@ describe('ACP harness adapter', () => {
     ).toMatchObject({ provider_session_id: 'forge-mock-session' })
   })
 
+  it('persists ACP permission requests against the Forge session', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const command = spawnMockAgent({ ASK_QUESTION: '1' })
+    const questions = new QuestionManager({ db })
+    const process = acpHarness(
+      {
+        name: 'mock',
+        command: command.command,
+        args: command.args,
+        env: command.env as Record<string, string>,
+        protocol: 'acp',
+        enabled: true,
+      },
+      { db, bus: new EventBus(), questions },
+    )
+    const handle = await process.spawn(
+      { id: session.id, cwd: '/tmp', harness: 'mock' },
+      () => undefined,
+      () => undefined,
+    )
+    handles.push(handle)
+    const prompt = handle.prompt('hello')
+    for (let attempt = 0; attempt < 100 && questions.size === 0; attempt++)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    const pending = questions.listPending(session.id)
+    expect(pending).toHaveLength(1)
+    expect(pending[0].sessionId).toBe(session.id)
+    expect(
+      db.prepare('SELECT session_id FROM native_interactions').get(),
+    ).toEqual({ session_id: session.id })
+    questions.answerQuestion(session.id, pending[0].questionId, {
+      answers: {
+        [pending[0].questions[0].id ?? 'question-0']: [
+          pending[0].questions[0].options[0].id,
+        ],
+      },
+    })
+    await prompt
+  })
+
   it('uses the session cwd for every ACP lifecycle operation', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)

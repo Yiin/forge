@@ -60,6 +60,43 @@ describe('ACP client services', () => {
     db.close()
   })
 
+  it('stores extension questions against the owning Forge session', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-acp-'))
+    dirs.push(dir)
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'Forge', path: dir })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'native',
+      title: 'Native',
+      cwd: dir,
+    })
+    const questions = new QuestionManager({ db, now: () => 1000 })
+    const services = createAcpServices({
+      cwd: dir,
+      projectRoot: dir,
+      questionManager: questions,
+      forgeSessionId: session.id,
+    })
+    const pending = services.onExtRequest?.('cursor/ask_question', {
+      sessionId: 'provider-session',
+      questions: [{ question: 'Pick one', options: [{ label: 'First' }] }],
+    })
+    const stored = questions.listPending(session.id)
+    expect(stored).toHaveLength(1)
+    expect(
+      db.prepare('SELECT session_id FROM native_interactions').get(),
+    ).toEqual({ session_id: session.id })
+    questions.answerQuestion(session.id, stored[0].questionId, {
+      answers: { 'question-0': [stored[0].questions[0].options[0].id] },
+    })
+    await expect(pending).resolves.toEqual({
+      answers: { 'question-0': [stored[0].questions[0].options[0].id] },
+    })
+    db.close()
+  })
+
   it('auto-grants allow_always and reads and writes inside the project', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'forge-acp-'))
     dirs.push(dir)
