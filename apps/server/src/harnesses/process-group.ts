@@ -1,4 +1,5 @@
-import { opendir, open } from 'node:fs/promises'
+import { open } from 'node:fs/promises'
+import { readProcNames } from './proc-names.js'
 import { setTimeout as delay } from 'node:timers/promises'
 
 export function signalProcessGroup(pid: number, signal: NodeJS.Signals | 0) {
@@ -30,42 +31,35 @@ export async function groupHasRunningMember(pid: number, deadline: number) {
   }
   const inspect = async () => {
     check()
-    const directory = await opendir('/proc')
-    try {
+    const names = await readProcNames('/proc', {
+      maximum: 65_536,
+      check,
+      limitError: () => new Error('Native process inspection limit reached'),
+    })
+    const buffer = Buffer.alloc(4096)
+    for (const name of names) {
       check()
-      const buffer = Buffer.alloc(4096)
-      let reads = 0
-      while (true) {
+      try {
         check()
-        const entry = await directory.read()
-        check()
-        if (!entry) return false
-        if (!/^\d+$/.test(entry.name)) continue
-        if (++reads > 65_536)
-          throw new Error('Native process inspection limit reached')
+        const file = await open(`/proc/${name}/stat`, 'r')
         try {
           check()
-          const file = await open(`/proc/${entry.name}/stat`, 'r')
-          try {
-            check()
-            // One bounded read at a time. Do not read argv or the environment.
-            const { bytesRead } = await file.read(buffer, 0, buffer.length, 0)
-            check()
-            if (bytesRead === buffer.length)
-              throw new Error('Native process stat exceeds limit')
-            const stat = buffer.toString('utf8', 0, bytesRead)
-            if (statIsRunningGroupMember(stat, pid)) return true
-          } finally {
-            await file.close()
-          }
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code
-          if (code !== 'ENOENT' && code !== 'ESRCH') throw error
+          // One bounded read at a time. Do not read argv or the environment.
+          const { bytesRead } = await file.read(buffer, 0, buffer.length, 0)
+          check()
+          if (bytesRead === buffer.length)
+            throw new Error('Native process stat exceeds limit')
+          const stat = buffer.toString('utf8', 0, bytesRead)
+          if (statIsRunningGroupMember(stat, pid)) return true
+        } finally {
+          await file.close()
         }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code !== 'ENOENT' && code !== 'ESRCH') throw error
       }
-    } finally {
-      await directory.close()
     }
+    return false
   }
   check()
   let timer: ReturnType<typeof setTimeout> | undefined

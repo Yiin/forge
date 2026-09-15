@@ -1,4 +1,5 @@
-import { open, opendir, readlink } from 'node:fs/promises'
+import { open, readlink } from 'node:fs/promises'
+import { readProcNames } from '../proc-names.js'
 import { statIsRunningGroupMember } from '../process-group.js'
 import { KimiError } from './limits.js'
 
@@ -44,46 +45,52 @@ export async function ownedListener(
       sockets.add(`socket:[${fields[9]}]`)
   }
   if (!sockets.size) return false
-  const directory = await opendir('/proc')
-  let processes = 0
-  try {
-    for await (const entry of directory) {
+  const inspection = {
+    maximum: 65536,
+    check,
+    limitError: () => new KimiError('kimi_listener_inspection_limit'),
+  }
+  for (const name of await readProcNames('/proc', inspection)) {
+    check()
+    let member = false
+    try {
+      member = statIsRunningGroupMember(
+        await readBounded(`/proc/${name}/stat`, 4096),
+        pgid,
+      )
+    } catch (error) {
+      if (
+        ['ENOENT', 'ESRCH'].includes(
+          (error as NodeJS.ErrnoException).code ?? '',
+        )
+      )
+        continue
+      throw error
+    }
+    if (!member) continue
+    let descriptors: string[]
+    try {
+      descriptors = await readProcNames(`/proc/${name}/fd`, {
+        ...inspection,
+        maximum: 4096,
+      })
+    } catch (error) {
+      if (
+        ['ENOENT', 'ESRCH'].includes(
+          (error as NodeJS.ErrnoException).code ?? '',
+        )
+      )
+        continue
+      throw error
+    }
+    for (const fd of descriptors) {
       check()
-      if (!/^\d+$/.test(entry.name)) continue
-      if (++processes > 65536)
-        throw new KimiError('kimi_listener_inspection_limit')
-      let member = false
       try {
-        member = statIsRunningGroupMember(
-          await readBounded(`/proc/${entry.name}/stat`, 4096),
-          pgid,
-        )
+        if (sockets.has(await readlink(`/proc/${name}/fd/${fd}`))) return true
       } catch (error) {
-        if (
-          ['ENOENT', 'ESRCH'].includes(
-            (error as NodeJS.ErrnoException).code ?? '',
-          )
-        )
-          continue
-        throw error
-      }
-      if (!member) continue
-      const descriptors = await opendir(`/proc/${entry.name}/fd`)
-      let count = 0
-      for await (const fd of descriptors) {
-        check()
-        if (++count > 4096)
-          throw new KimiError('kimi_listener_inspection_limit')
-        try {
-          if (sockets.has(await readlink(`/proc/${entry.name}/fd/${fd.name}`)))
-            return true
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-        }
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
     }
-  } finally {
-    /* Async directory iteration closes its descriptor, including early returns. */
   }
   throw new KimiError('kimi_foreign_listener')
 }
