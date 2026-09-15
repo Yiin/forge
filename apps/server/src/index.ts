@@ -450,8 +450,9 @@ export function startServer(port?: number): ServerType {
     factory,
     undefined,
     (harness) =>
+      configState.current.harness[harness]?.adapterKind !== 'acp' &&
       accountKindForHarness(harness, configState.current.harness[harness]) !==
-      null,
+        null,
     dataDir,
   )
   const terminals = new TerminalManager(db, workspaceFiles.targets)
@@ -468,8 +469,9 @@ export function startServer(port?: number): ServerType {
     createEpicSessionAdapter(manager),
     bus,
     (harness) =>
+      configState.current.harness[harness]?.adapterKind !== 'acp' &&
       accountKindForHarness(harness, configState.current.harness[harness]) !==
-      null,
+        null,
   )
   const loginManager = new LoginManager(
     accountStore,

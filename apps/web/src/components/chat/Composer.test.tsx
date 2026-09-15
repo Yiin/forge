@@ -813,3 +813,76 @@ describe('Composer', () => {
     expect(screen.getByRole('button', { name: /Remove/ })).toBeTruthy()
   })
 })
+
+it('keeps an accountless session selection while provider metadata loads', async () => {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    },
+  )
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener() {},
+    removeEventListener() {},
+  }))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({ ok: true, json: async () => [] }),
+  )
+  let resolveHarnesses!: (
+    value: Awaited<ReturnType<typeof accountsApi.listHarnesses>>,
+  ) => void
+  const pending = new Promise<
+    Awaited<ReturnType<typeof accountsApi.listHarnesses>>
+  >((resolve) => {
+    resolveHarnesses = resolve
+  })
+  vi.spyOn(accountsApi, 'listHarnesses').mockReturnValue(pending)
+  vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([])
+  vi.spyOn(accountsApi, 'listHarnessStatus').mockResolvedValue([])
+  const send = vi.fn().mockResolvedValue(undefined)
+  const view = render(
+    <Composer sessionId="accountless" harness="grok" onSend={send} />,
+  )
+  try {
+    fireEvent.change(screen.getByLabelText('Message composer'), {
+      target: { value: 'Preserve selection' },
+    })
+    resolveHarnesses([
+      {
+        key: 'custom-acp',
+        name: 'Custom',
+        enabled: true,
+        protocol: 'acp',
+        adapterKind: 'custom',
+      },
+      {
+        key: 'grok',
+        name: 'Grok',
+        enabled: true,
+        protocol: 'acp',
+        adapterKind: 'acp',
+      },
+    ])
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled'),
+      ).toBe(false),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        'Preserve selection',
+        [],
+        expect.objectContaining({ harness: 'grok', accountId: undefined }),
+      ),
+    )
+  } finally {
+    view.unmount()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  }
+})
