@@ -1469,7 +1469,7 @@ export class SessionManager {
       contextMethod: context.method,
     }
   }
-  async answer(id: string, questionId: string, answer: string) {
+  async answer(id: string, questionId: string, answer: unknown) {
     const row = getSession(this.db, id) as SessionRow | undefined
     if (!row) throw new Error('Session not found')
     const turnId = this.turns.get(id) ?? makeId('turn_')

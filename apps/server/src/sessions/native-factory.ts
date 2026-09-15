@@ -5,6 +5,7 @@ import {
 import type { HarnessConfig } from '@forge/protocol/config'
 import type { HarnessAdapter } from '../harnesses/types.js'
 
+/** Native adapters which are implemented and safe to select in production. */
 const productionNativeAdapters: Record<
   string,
   (options: ClaudeAdapterOptions) => HarnessAdapter
@@ -26,6 +27,7 @@ export function createProductionNativeAdapter(
 
 export type HarnessTransport = 'native' | 'pty' | 'acp' | 'unconfigured'
 
+/** Select a configured transport without treating planned native support as implemented. */
 export function harnessTransport(
   key: string,
   entry: HarnessConfig | undefined,

@@ -2033,6 +2033,11 @@ describe('Claude steering, cancellation, and process ownership', () => {
     await h.cancel()
     expect(await receipt.completion).toMatchObject({ status: 'interrupted' })
     await expect(h.prompt('after stop')).rejects.toThrow('closed')
+    // An escalated cancel kills the process, so the session owner must hear
+    // about it and drop the handle instead of reusing a closed one.
+    expect(t.events.filter((e) => e.type === 'run_failed')).toMatchObject([
+      { code: 'claude_interrupt_failed' },
+    ])
   })
   it('closes ignored interrupts and owned descendants, then tolerates repeated close', async () => {
     const t = await setup(

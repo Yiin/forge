@@ -66,6 +66,24 @@ describe('NativeContentRow', () => {
     expect(useShellStore.getState().dock('session-1').tabs).toContainEqual(
       expect.objectContaining({ kind: 'file', path: 'src/main.ts' }),
     )
+    fireEvent.click(screen.getByRole('button', { name: /file change/i }))
+    const childView = render(
+      <NativeContentRow
+        sessionId="session-1"
+        item={{ kind: 'native', id: 'child', content: content[5] }}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /child updated/i }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open child transcript' }),
+    )
+    expect(useShellStore.getState().dock('session-1').tabs).toContainEqual(
+      expect.objectContaining({
+        kind: 'subagent',
+        childSessionId: 'child-1',
+      }),
+    )
+    childView.unmount()
     view.unmount()
   })
 })

@@ -34,7 +34,7 @@ export type HarnessHandle = {
   setModel?(modelId: string): Promise<void> | void
   configOptions?(): SessionConfigOption[]
   setConfigOption?(configId: string, value: string | boolean): Promise<void>
-  answerQuestion?(questionId: string, answer: string): Promise<void> | void
+  answerQuestion?(questionId: string, answer: unknown): Promise<void> | void
   availableModels?: HarnessModel[]
 }
 

@@ -51,6 +51,7 @@ import type {
 type Props = {
   sessionId: string
   target: { workspaceId?: string | null; workspaceRevision?: number | null }
+  initialPath?: string
 }
 type OpenFile = {
   path: string
@@ -64,7 +65,11 @@ type OpenFile = {
   error: string | null
 }
 
-export function WorkspaceFilesSurface({ sessionId, target }: Props) {
+export function WorkspaceFilesSurface({
+  sessionId,
+  target,
+  initialPath,
+}: Props) {
   const selection = useMemo<WorkspaceSelection>(
     () => ({ sessionId, ...target }),
     [sessionId, target],
@@ -79,12 +84,14 @@ export function WorkspaceFilesSurface({ sessionId, target }: Props) {
   const [searching, setSearching] = useState(false)
   const [closeRequested, setCloseRequested] = useState(false)
   const requestGeneration = useRef(0)
+  const initialPathOpened = useRef<string | undefined>(undefined)
   const filePreferences = readFilePreferences()
 
   useEffect(() => {
     requestGeneration.current += 1
     setOpen((current) => (current ? { ...current, staleTarget: true } : null))
     setPath('')
+    initialPathOpened.current = undefined
   }, [selection])
 
   const load = async (directory = path) => {
@@ -168,6 +175,16 @@ export function WorkspaceFilesSurface({ sessionId, target }: Props) {
       setError(cause instanceof Error ? cause.message : 'Could not read file')
     }
   }
+
+  useEffect(() => {
+    if (!initialPath) {
+      initialPathOpened.current = undefined
+      return
+    }
+    if (initialPathOpened.current === initialPath) return
+    initialPathOpened.current = initialPath
+    void openPath(initialPath)
+  }, [initialPath])
 
   const close = () => {
     if (open?.dirty) {
