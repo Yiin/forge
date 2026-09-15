@@ -40,13 +40,11 @@ it('owns only tabs while keeping close actions and arrow navigation accessible',
   useShellStore
     .getState()
     .openDockTab(sessionId, { id: 'files', kind: 'files', title: 'Files' })
-  useShellStore
-    .getState()
-    .openDockTab(sessionId, {
-      id: 'terminal',
-      kind: 'terminal',
-      title: 'Terminal',
-    })
+  useShellStore.getState().openDockTab(sessionId, {
+    id: 'terminal',
+    kind: 'terminal',
+    title: 'Terminal',
+  })
   render(
     <WorkspaceDock
       sessionId={sessionId}
