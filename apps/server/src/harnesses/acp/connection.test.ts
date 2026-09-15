@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { deferred, expectStopped } from '../transport-test-helpers.js'
 import { AcpConnection, type AcpConnectionOptions } from './connection.js'
 import { AcpResourceHost } from './limits.js'
+import { NativeProcess } from '../process.js'
 import {
   committedPrefix,
   emptyPrefix,
@@ -504,4 +505,177 @@ describe('ACP owned session connection', () => {
       await f.cleanup()
     }
   })
+})
+
+it('replaces only the transport while retaining the writer, public generation, and exact session', async () => {
+  const f = await setup('normal')
+  const open = f.options.ingestion.open.bind(f.options.ingestion)
+  const closeWriter = vi.fn(async () => {})
+  const openWriter = vi.fn(async (...args: Parameters<typeof open>) => ({
+    ...(await open(...args)),
+    close: closeWriter,
+  }))
+  f.options.ingestion.open = openWriter
+  const failures = vi.fn()
+  f.options.failure = failures
+  const generations: string[] = []
+  f.options.prepareClient = async (connection) => {
+    generations.push(connection.transportGeneration)
+    return {
+      fs: { readTextFile: false, writeTextFile: false },
+      terminal: false,
+    }
+  }
+  let connection: AcpConnection | undefined
+  try {
+    connection = await AcpConnection.open(f.options, session, false)
+    const journal = connection.journal,
+      generation = connection.generation,
+      binding = connection.binding
+    const pid = connection.process.child.pid!
+    const transport = connection.transportGeneration
+    const replaced = await connection.replace('yolo')
+    expect(replaced).toBe(connection)
+    expect(connection.journal).toBe(journal)
+    expect(connection.generation).toBe(generation)
+    expect(connection.binding).toEqual(binding)
+    expect(connection.transportGeneration).not.toBe(transport)
+    expect(connection.rpc).toBe(replaced.rpc)
+    await expectStopped(pid)
+    expect(openWriter).toHaveBeenCalledTimes(1)
+    expect(closeWriter).not.toHaveBeenCalled()
+    expect(failures).not.toHaveBeenCalled()
+    expect(generations).toEqual([transport, connection.transportGeneration])
+    const records = f.transactions.flatMap((transaction) => transaction.records)
+    expect(
+      new Set(records.map((record) => record.owner.runtimeGeneration)),
+    ).toEqual(new Set([generation]))
+    expect(
+      new Set(
+        records
+          .filter((record) => record.source.kind === 'native')
+          .map((record) => record.source.transportGeneration),
+      ),
+    ).toEqual(new Set(generations))
+    expect(
+      f.transactions.every(
+        (transaction, index) =>
+          !index ||
+          transaction.afterOrdinal ===
+            f.transactions[index - 1]!.throughOrdinal,
+      ),
+    ).toBe(true)
+  } finally {
+    await connection?.close()
+    await f.cleanup()
+  }
+  expect(closeWriter).toHaveBeenCalledTimes(1)
+})
+
+it('failed exact-load replacement leaves its original journal open and never opens another writer', async () => {
+  const f = await setup('fail-load')
+  const open = f.options.ingestion.open.bind(f.options.ingestion)
+  const closeWriter = vi.fn(async () => {})
+  const openWriter = vi.fn(async (...args: Parameters<typeof open>) => ({
+    ...(await open(...args)),
+    close: closeWriter,
+  }))
+  f.options.ingestion.open = openWriter
+  let connection: AcpConnection | undefined
+  try {
+    connection = await AcpConnection.open(f.options, session, false)
+    const journal = connection.journal,
+      generation = connection.generation
+    await expect(connection.replace('manual')).rejects.toThrow()
+    expect(connection.journal).toBe(journal)
+    expect(connection.generation).toBe(generation)
+    expect(openWriter).toHaveBeenCalledTimes(1)
+    expect(closeWriter).not.toHaveBeenCalled()
+    await journal.append(connection.control, {
+      kind: 'disposition',
+      status: 'ignored',
+    })
+    const release = f.options.host.reserve('instance', 'processes', 8)
+    release()
+  } finally {
+    await connection?.close()
+    await f.cleanup()
+  }
+  expect(closeWriter).toHaveBeenCalledTimes(1)
+})
+
+it('replacement refuses to create another process until the original physical cleanup succeeds', async () => {
+  const f = await setup('normal')
+  let connection: AcpConnection | undefined
+  try {
+    connection = await AcpConnection.open(f.options, session, false)
+    const original = connection.process,
+      close = original.close.bind(original)
+    const refused = vi
+      .spyOn(original, 'close')
+      .mockRejectedValueOnce(Error('original cleanup refused'))
+      .mockImplementation(close)
+    await expect(connection.replace('yolo')).rejects.toThrow(
+      'original cleanup refused',
+    )
+    expect(connection.process).toBe(original)
+    expect(() => f.options.host.reserve('instance', 'processes', 8)).toThrow(
+      'resource limit',
+    )
+    expect(refused).toHaveBeenCalledTimes(1)
+    await connection.replace('yolo')
+    expect(connection.process).not.toBe(original)
+    await expectStopped(original.child.pid!)
+  } finally {
+    await connection?.close()
+    await f.cleanup()
+  }
+})
+
+it('retains a failed replacement process cleanup without closing the shared writer', async () => {
+  const f = await setup('fail-load')
+  const open = f.options.ingestion.open.bind(f.options.ingestion)
+  const closeWriter = vi.fn(async () => {})
+  f.options.ingestion.open = async (...args) => ({
+    ...(await open(...args)),
+    close: closeWriter,
+  })
+  let connection: AcpConnection | undefined
+  let rejectCleanup = true
+  let close: { mockRestore(): void } | undefined
+  try {
+    connection = await AcpConnection.open(f.options, session, false)
+    const original = connection.process,
+      originalClose = NativeProcess.prototype.close
+    close = vi
+      .spyOn(NativeProcess.prototype, 'close')
+      .mockImplementation(function (this: NativeProcess, reason?: Error) {
+        if (this !== original && rejectCleanup)
+          return Promise.reject(Error('candidate cleanup refused'))
+        return originalClose.call(this, reason)
+      })
+    await expect(connection.replace('manual')).rejects.toThrow(
+      'candidate cleanup refused',
+    )
+    expect(connection.process).not.toBe(original)
+    await expectStopped(original.child.pid!)
+    expect(closeWriter).not.toHaveBeenCalled()
+    expect(() => f.options.host.reserve('instance', 'processes', 8)).toThrow(
+      'resource limit',
+    )
+    rejectCleanup = false
+    await connection.retireProcess()
+    const release = f.options.host.reserve('instance', 'processes', 8)
+    release()
+    await connection.journal.append(connection.control, {
+      kind: 'disposition',
+      status: 'ignored',
+    })
+  } finally {
+    rejectCleanup = false
+    await connection?.close()
+    close?.mockRestore()
+    await f.cleanup()
+  }
+  expect(closeWriter).toHaveBeenCalledTimes(1)
 })
