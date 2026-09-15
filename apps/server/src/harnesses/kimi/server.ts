@@ -568,6 +568,7 @@ export class KimiServer {
             this.hostBudget.limits.httpMs +
               this.hostBudget.limits.guardianControlMs,
             true,
+            true,
           )
           releaseBlob()
           return result
@@ -621,6 +622,8 @@ export class KimiServer {
         },
         this.hostBudget.limits.httpMs +
           this.hostBudget.limits.guardianControlMs,
+        false,
+        !isJson,
       )
     } catch (error) {
       // Synchronous RPC admission refusal proves no IPC frame was queued.
