@@ -9,12 +9,17 @@ import { AttachmentItem } from './TranscriptItems'
 
 export function SubagentTranscript({
   messages,
+  messagesVersion,
   skills = [],
 }: {
   messages: Message[]
+  messagesVersion: number
   skills?: string[]
 }) {
-  const items = useMemo(() => toRenderModel(messages), [messages])
+  const items = useMemo(
+    () => toRenderModel(messages),
+    [messages, messagesVersion],
+  )
   return (
     <div
       className="subagent-transcript h-[min(60vh,460px)] overflow-auto border-t border-border p-3 [&_.chat-row]:max-w-none [&_.chat-tool]:max-w-none [&_.subagent-card]:max-w-none [&_.activity-stack]:max-w-none"

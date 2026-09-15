@@ -13,8 +13,19 @@ export const fixture = fileURLToPath(
 )
 const owned = new Set<NativeProcess>()
 afterEach(async () => {
-  await Promise.all([...owned].map((runtime) => runtime.close()))
-  owned.clear()
+  const failures: unknown[] = []
+  for (const runtime of owned) {
+    try {
+      await runtime.close()
+      owned.delete(runtime)
+    } catch (error) {
+      // Keep failed owners registered. The next cleanup pass can retry them,
+      // and the failure remains visible instead of being silently discarded.
+      failures.push(error)
+    }
+  }
+  if (failures.length)
+    throw new AggregateError(failures, 'Native process cleanup failed')
 })
 
 export function deferred<T>() {

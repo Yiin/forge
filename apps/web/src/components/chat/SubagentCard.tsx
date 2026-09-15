@@ -29,9 +29,9 @@ export function SubagentCard({
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const [now, setNow] = useState(() => Date.now())
-  const messages = useMessagesStore(
-    (state) => state.bySession[child.id] ?? EMPTY_MESSAGES,
-  )
+  const messagesBySession = useMessagesStore((state) => state.bySession)
+  const messagesVersion = useMessagesStore((state) => state.lastSeq)
+  const messages = messagesBySession[child.id] ?? EMPTY_MESSAGES
   const status = deriveSubagentStatus(messages, child.status)
   const preview = resultPreview(messages)
   const tools = toolCount(messages)
@@ -165,7 +165,11 @@ export function SubagentCard({
       ) : expanded ? (
         messages.length ? (
           <div className="mt-2 border-t border-border/45 pt-2">
-            <SubagentTranscript messages={messages} skills={skills} />
+            <SubagentTranscript
+              messages={messages}
+              messagesVersion={messagesVersion}
+              skills={skills}
+            />
           </div>
         ) : (
           <div className="mt-2 border-t border-border/45 pt-2 text-xs text-muted-foreground">

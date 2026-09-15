@@ -67,6 +67,32 @@ function toolCallId(message: Message): string | undefined {
   return undefined
 }
 
+type MessageIndex = {
+  byItemId: Map<string, number>
+  byToolCallId: Map<string, number>
+}
+
+const messageIndexes = new WeakMap<Message[], MessageIndex>()
+
+function indexMessages(items: Message[]): MessageIndex {
+  const existing = messageIndexes.get(items)
+  if (existing) return existing
+  const index: MessageIndex = {
+    byItemId: new Map(),
+    byToolCallId: new Map(),
+  }
+  for (let position = 0; position < items.length; position++) {
+    const item = items[position]!
+    if (!index.byItemId.has(item.itemId))
+      index.byItemId.set(item.itemId, position)
+    const toolId = toolCallId(item)
+    if (toolId && !index.byToolCallId.has(toolId))
+      index.byToolCallId.set(toolId, position)
+  }
+  messageIndexes.set(items, index)
+  return index
+}
+
 function sameItem(left: Message, right: Message): boolean {
   if (left.itemId === right.itemId) return true
   const leftTool = toolCallId(left)
@@ -103,15 +129,37 @@ function mergeProjected(existing: Message, incoming: Message): Message {
 
 function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
   const result = [...existing].sort((left, right) => left.seq - right.seq)
+  // A whole session's history goes through here, so look items up by index
+  // rather than scanning the result for every incoming row. The index is local
+  // because the final sort invalidates its positions.
+  const index: MessageIndex = { byItemId: new Map(), byToolCallId: new Map() }
+  const seqs = new Set<number>()
+  for (const [position, item] of result.entries()) {
+    seqs.add(item.seq)
+    if (!index.byItemId.has(item.itemId))
+      index.byItemId.set(item.itemId, position)
+    const itemTool = toolCallId(item)
+    if (itemTool !== undefined && !index.byToolCallId.has(itemTool))
+      index.byToolCallId.set(itemTool, position)
+  }
   for (const message of [...incoming].sort(
     (left, right) => left.seq - right.seq,
   )) {
     // A snapshot and replay can contain the same durable row. Sequence is the
     // durable event identity, so do not fold an overlap twice.
-    if (result.some((item) => item.seq === message.seq)) continue
-    const index = result.findIndex((item) => sameItem(item, message))
-    if (index < 0) result.push(message)
-    else result[index] = foldMessage(result[index], message)
+    if (seqs.has(message.seq)) continue
+    seqs.add(message.seq)
+    const tool = toolCallId(message)
+    const at =
+      index.byItemId.get(message.itemId) ??
+      (tool === undefined ? undefined : index.byToolCallId.get(tool)) ??
+      -1
+    if (at < 0) {
+      result.push(message)
+      index.byItemId.set(message.itemId, result.length - 1)
+      if (tool !== undefined && !index.byToolCallId.has(tool))
+        index.byToolCallId.set(tool, result.length - 1)
+    } else result[at] = foldMessage(result[at]!, message)
   }
   return result.sort((left, right) => left.seq - right.seq)
 }
@@ -150,29 +198,43 @@ export function foldEvent(
     Partial<Pick<MessagesState, 'pendingBySession' | 'seenSeqs'>>,
   event: ServerEvent,
 ): FoldedMessagesState {
-  const seenSeqs = new Set<number>(state.seenSeqs ?? [])
+  // The seen set is updated in place for the same reason the item array is:
+  // a replayed session copies it once per event otherwise.
+  const seenSeqs = state.seenSeqs ?? new Set<number>()
   if (seenSeqs.has(event.seq))
     return { ...state, lastSeq: Math.max(state.lastSeq, event.seq) }
   const items = state.bySession[event.sessionId] ?? []
   const pending = state.pendingBySession?.[event.sessionId] ?? []
+  const index = indexMessages(items)
   // Fold by itemId first. Older rows can lack the server-generated itemId,
   // so use the ACP toolCallId for lifecycle updates and results.
-  let index = event.msg.itemId
-    ? items.findIndex((item) => item.itemId === event.msg.itemId)
+  let itemIndex = event.msg.itemId
+    ? (index.byItemId.get(event.msg.itemId) ?? -1)
     : -1
   if (
-    index < 0 &&
+    itemIndex < 0 &&
     (event.msg.content.type === 'tool_update' ||
       event.msg.content.type === 'tool_result')
   ) {
     const id = toolCallId(event.msg)
-    if (id) index = items.findIndex((item) => toolCallId(item) === id)
+    if (id) itemIndex = index.byToolCallId.get(id) ?? -1
   }
-  const nextItems = [...items]
-  if (index < 0) nextItems.push(event.msg)
-  else nextItems[index] = foldMessage(nextItems[index], event.msg)
+  if (itemIndex < 0) {
+    itemIndex = items.length
+    items.push(event.msg)
+  } else {
+    items[itemIndex] = foldMessage(items[itemIndex]!, event.msg)
+  }
+  if (!index.byItemId.has(event.msg.itemId))
+    index.byItemId.set(event.msg.itemId, itemIndex)
+  const toolId = toolCallId(event.msg)
+  if (toolId && !index.byToolCallId.has(toolId))
+    index.byToolCallId.set(toolId, itemIndex)
   return {
-    bySession: { ...state.bySession, [event.sessionId]: nextItems },
+    // The item array is append-only and is updated in place. This avoids a
+    // full session copy for every replayed delta. Consumers subscribe to the
+    // record, which is replaced here, so they still observe each update.
+    bySession: { ...state.bySession, [event.sessionId]: items },
     pendingBySession: {
       ...state.pendingBySession,
       [event.sessionId]: pending.filter(
@@ -180,7 +242,7 @@ export function foldEvent(
       ),
     },
     lastSeq: Math.max(state.lastSeq, event.seq),
-    seenSeqs: new Set(seenSeqs).add(event.seq),
+    seenSeqs: seenSeqs.add(event.seq),
   }
 }
 
@@ -196,8 +258,10 @@ export const useMessagesStore = create<MessagesState>((set) => ({
   volatile: [],
   applyEvent: (event) =>
     set((state) => {
+      // foldEvent marks the sequence in place, so read it before folding.
+      const seen = state.seenSeqs.has(event.seq)
       const folded = foldEvent(state, event)
-      if (state.seenSeqs.has(event.seq)) return folded
+      if (seen) return folded
       return {
         ...folded,
         liveEventsBySession: {
