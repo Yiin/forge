@@ -8,6 +8,8 @@ let vanished: 'none' | 'every member' | 'other members' = 'none'
 /** The code the kernel refuses a vanished member's descriptor directory with. */
 let refusal: 'ENOENT' | 'EACCES' = 'ENOENT'
 let refused = 0
+let tcpGone = false
+let procGone = false
 /** Every directory the scan listed. */
 const listed: string[] = []
 /** Whether other members report as gone when their state is read, and how many did. */
@@ -23,6 +25,16 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return {
     ...actual,
     opendir: (path: string, ...rest: never[]) => {
+      if (path === '/proc' && procGone) {
+        procGone = false
+        return Promise.reject(
+          Object.assign(new Error(`ENOENT: '${path}'`), {
+            code: 'ENOENT',
+            syscall: 'opendir',
+            path,
+          }),
+        )
+      }
       listed.push(path)
       const member = /^\/proc\/(\d+)\/fd$/.exec(path)
       const gone =
@@ -56,6 +68,16 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       )
     },
     open: (path: string, ...rest: never[]) => {
+      if (path === '/proc/net/tcp' && tcpGone) {
+        tcpGone = false
+        return Promise.reject(
+          Object.assign(new Error(`ENOENT: '${path}'`), {
+            code: 'ENOENT',
+            syscall: 'open',
+            path,
+          }),
+        )
+      }
       const member = /^\/proc\/(\d+)\/stat$/.exec(path)
       if (!stateGone || !member || Number(member[1]) === process.pid)
         return actual.open(path, ...rest)
@@ -75,6 +97,8 @@ afterEach(async () => {
   vanished = 'none'
   refusal = 'ENOENT'
   refused = 0
+  tcpGone = false
+  procGone = false
   stateGone = false
   unread = 0
   linksDenied = false
@@ -179,6 +203,21 @@ test('reports no listener before the port is bound', async () => {
   await new Promise<void>((resolve) =>
     servers.splice(0)[0]!.close(() => resolve()),
   )
+  await expect(
+    ownedListener(port, await processGroup(), performance.now() + 10_000),
+  ).resolves.toBe(false)
+})
+
+test('does not fail when the proc socket table disappears during inspection', async () => {
+  tcpGone = true
+  await expect(
+    ownedListener(4000, await processGroup(), performance.now() + 10_000),
+  ).resolves.toBe(false)
+})
+
+test('does not fail when the proc directory disappears during inspection', async () => {
+  const port = await listen()
+  procGone = true
   await expect(
     ownedListener(port, await processGroup(), performance.now() + 10_000),
   ).resolves.toBe(false)
