@@ -39,6 +39,7 @@ type ForgeRoutePage = {
 
 type ChildOwnership = {
   close: Promise<{ code: number | null; signal: NodeJS.Signals | null }>
+  exited: boolean
   closed: boolean
   cleanup?: Promise<void>
 }
@@ -386,8 +387,12 @@ function captureChildOwnership(child: ChildProcess): ChildOwnership {
   const existing = childOwnership.get(child)
   if (existing) return existing
   const ownership: ChildOwnership = {
+    exited: child.exitCode !== null || child.signalCode !== null,
     closed: false,
     close: new Promise((resolve) => {
+      child.once('exit', () => {
+        ownership.exited = true
+      })
       child.once('close', (code, signal) => {
         ownership.closed = true
         resolve({ code, signal })
@@ -406,7 +411,7 @@ async function stopOwnedForge(
   port: number | undefined,
 ): Promise<void> {
   const errors: unknown[] = []
-  if (child.pid && !ownership.closed) {
+  if (child.pid && !ownership.closed && !ownership.exited) {
     try {
       process.kill(-child.pid, 'SIGTERM')
     } catch {
@@ -422,7 +427,7 @@ async function stopOwnedForge(
     )
   } catch (error) {
     errors.push(error)
-    if (child.pid && !ownership.closed) {
+    if (child.pid && !ownership.closed && !ownership.exited) {
       try {
         process.kill(-child.pid, 'SIGKILL')
       } catch (killError) {

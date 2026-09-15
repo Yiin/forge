@@ -96,7 +96,7 @@ describe('proxied Forge server cleanup', () => {
 
   it('waits for the original close event and coalesces repeated cleanup', async () => {
     const child = Object.assign(new EventEmitter(), {
-      exitCode: 0,
+      exitCode: null,
       signalCode: null,
       pid: 123,
       kill: vi.fn(),
@@ -116,6 +116,24 @@ describe('proxied Forge server cleanup', () => {
       await expect(first).resolves.toBeUndefined()
       await expect(second).resolves.toBeUndefined()
       expect(kill).toHaveBeenCalledExactlyOnceWith(-123, 'SIGTERM')
+    } finally {
+      kill.mockRestore()
+    }
+  })
+
+  it('does not signal a process group after the child has exited', async () => {
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: null,
+      signalCode: 'SIGTERM',
+      pid: 456,
+      kill: vi.fn(),
+    })
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true)
+    try {
+      const stopping = stopForge(child as never)
+      child.emit('close', null, 'SIGTERM')
+      await expect(stopping).resolves.toBeUndefined()
+      expect(kill).not.toHaveBeenCalled()
     } finally {
       kill.mockRestore()
     }
