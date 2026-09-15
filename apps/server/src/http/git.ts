@@ -24,7 +24,9 @@ export function gitRoutes(options: { db: DatabaseSync; dataDir: string }) {
   const app = new Hono()
   const project = (id: string) =>
     db
-      .prepare('SELECT path FROM projects WHERE id = ? AND archived_at IS NULL')
+      .prepare(
+        'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
+      )
       .get(id) as { path: string } | undefined
   const cwdFor = async (id: string, requested: string | undefined) => {
     const row = project(id)

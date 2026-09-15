@@ -30,7 +30,7 @@ export function sessionRoutes(
     try {
       const project = manager.database
         .prepare(
-          'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL',
+          'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
         )
         .get(value.data.projectId) as { path: string } | undefined
       if (!project) return c.json({ error: 'Project not found' }, 404)
@@ -186,7 +186,7 @@ export function sessionRoutes(
           const row = manager.database
             .prepare(
               `SELECT sessions.*, projects.path AS project_path
-         FROM sessions JOIN projects ON projects.id = sessions.project_id
+         FROM sessions JOIN projects ON projects.id = sessions.project_id AND projects.deleted_at IS NULL
          WHERE sessions.id = ? AND sessions.deleted_at IS NULL`,
             )
             .get(value.data.sessionId) as

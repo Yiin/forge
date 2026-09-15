@@ -26,10 +26,13 @@ describe('skill routes', () => {
     )
     const db = new DatabaseSync(':memory:')
     db.exec(`
-      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL);
+      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL, deleted_at INTEGER);
       CREATE TABLE sessions (id TEXT PRIMARY KEY, cwd TEXT NOT NULL);
     `)
-    db.prepare('INSERT INTO projects VALUES (?, ?)').run('project', workspace)
+    db.prepare('INSERT INTO projects (id, path) VALUES (?, ?)').run(
+      'project',
+      workspace,
+    )
     db.prepare('INSERT INTO sessions VALUES (?, ?)').run('session', workspace)
     const app = skillRoutes(db, join(workspace, 'missing-global-root'))
     expect(

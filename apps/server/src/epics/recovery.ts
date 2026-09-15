@@ -110,7 +110,7 @@ export async function recoverEpicRuns(
     .all()
   for (const run of terminal) {
     const project = db
-      .prepare('SELECT path FROM projects WHERE id = ?')
+      .prepare('SELECT path FROM projects WHERE id = ? AND deleted_at IS NULL')
       .get(run.project_id) as { path?: string } | undefined
     if (!project?.path) continue
     for (const path of await listRunWorktrees(project.path, run.id)) {
@@ -125,7 +125,7 @@ export async function recoverEpicRuns(
 
   for (const run of runs) {
     const project = db
-      .prepare('SELECT path FROM projects WHERE id = ?')
+      .prepare('SELECT path FROM projects WHERE id = ? AND deleted_at IS NULL')
       .get(run.project_id) as { path?: string } | undefined
     const repoPath = project?.path
     const iterations = db

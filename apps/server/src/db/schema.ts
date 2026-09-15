@@ -17,6 +17,7 @@ export const projects = sqliteTable('projects', {
   path: text('path').notNull(),
   createdAt: integer('created_at').notNull(),
   archivedAt: integer('archived_at'),
+  deletedAt: integer('deleted_at'),
 })
 export const sessions = sqliteTable('sessions', {
   id: text('id').primaryKey(),

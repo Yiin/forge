@@ -851,7 +851,9 @@ export class SessionManager {
       .get(requestId) as { session_id: string } | undefined
     if (existing) return { sessionId: existing.session_id }
     const project = this.db
-      .prepare('SELECT path FROM projects WHERE id = ? AND archived_at IS NULL')
+      .prepare(
+        'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
+      )
       .get(input.projectId) as { path: string } | undefined
     if (!project) throw new Error('Project not found')
     const workspace = await this.resolveWorkspace(
@@ -940,7 +942,7 @@ export class SessionManager {
     const session = this.db
       .prepare(
         `SELECT sessions.*, projects.path AS project_path
-         FROM sessions JOIN projects ON projects.id = sessions.project_id
+         FROM sessions JOIN projects ON projects.id = sessions.project_id AND projects.deleted_at IS NULL
          WHERE sessions.id = ?`,
       )
       .get(id) as

@@ -207,7 +207,9 @@ export const listSessions = (db: Db, projectId?: string) =>
         )
         .all()
 export const getProject = (db: Db, projectId: string) =>
-  db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId)
+  db
+    .prepare('SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL')
+    .get(projectId)
 export const getSession = (db: Db, sessionId: string) =>
   db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId)
 
