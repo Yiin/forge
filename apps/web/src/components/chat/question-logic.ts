@@ -1,4 +1,5 @@
 import type { Message } from '@forge/protocol/message'
+import type { NativeInteraction } from '@forge/protocol/ws'
 
 export type Question = NonNullable<
   Extract<Message['content'], { type: 'ask_user_question' }>['questions']
@@ -12,10 +13,9 @@ export type PendingQuestion = {
 export type PendingQuestionRequest = {
   requestId: string
   source?: 'permission' | 'ext'
-  // Snapshot rows carry the live native-interaction status, which includes
-  // 'cancelled'; stored message content only ever carries the narrower set.
-  requestStatus?:
-    'pending' | 'replying' | 'submitted' | 'cancelled' | 'expired' | 'uncertain'
+  // A snapshot row overrides the stored content status, so this takes the wire
+  // status set. It is wider: stored content never carries 'cancelled'.
+  requestStatus?: NativeInteraction['status']
   toolName?: string
   toolContext?: string
   permissionScope?: 'once' | 'session'
