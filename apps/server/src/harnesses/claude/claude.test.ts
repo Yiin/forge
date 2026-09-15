@@ -568,6 +568,7 @@ describe('Claude content and root ownership', () => {
       expect(settled).toBe(false)
       await t.gate()
       await file(t.directory, 'stopped')
+      await t.until((events) => text(events) === 'hello')
       expect(settled).toBe(false)
       expect(text(t.events)).toBe('hello')
       expect(
