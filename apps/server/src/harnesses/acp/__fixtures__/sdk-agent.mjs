@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { appendFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import {
   AgentSideConnection,
@@ -10,7 +11,14 @@ import {
 // The installed SDK owns parsing, validation, request IDs, and dispatch.
 const scenario = process.env.FORGE_ACP_TEST_SCENARIO ?? 'normal'
 if (
-  !['normal', 'permission', 'hang-prompt', 'resume-replay'].includes(scenario)
+  ![
+    'normal',
+    'permission',
+    'hang-prompt',
+    'resume-replay',
+    'filesystem',
+    'terminal',
+  ].includes(scenario)
 )
   throw Error(`Unknown SDK fixture scenario: ${scenario}`)
 const reportPath = process.env.FORGE_ACP_TEST_REPORT
@@ -47,8 +55,8 @@ function session(id) {
   if (!value) throw Error('Unknown fixture session')
   return value
 }
-function createSession(id) {
-  sessions.set(id, { active: undefined, turn: 0 })
+function createSession(id, cwd) {
+  sessions.set(id, { active: undefined, turn: 0, cwd })
   return { sessionId: id, modes: structuredClone(modes) }
 }
 const connection = new AgentSideConnection(
@@ -71,12 +79,12 @@ const connection = new AgentSideConnection(
     async authenticate() {
       throw Error('Fixture authentication is unavailable')
     },
-    async newSession() {
+    async newSession({ cwd }) {
       sessionCount += 1
-      return createSession(`sdk-session-${sessionCount}`)
+      return createSession(`sdk-session-${sessionCount}`, cwd)
     },
-    async loadSession({ sessionId }) {
-      createSession(sessionId)
+    async loadSession({ sessionId, cwd }) {
+      createSession(sessionId, cwd)
       if (scenario === 'resume-replay') {
         for (let index = 0; index < 70; index += 1)
           await client.sessionUpdate({
@@ -86,6 +94,7 @@ const connection = new AgentSideConnection(
               content: { type: 'text', text: `History ${index}.` },
             },
           })
+        report('replay_sent', { count: 70 })
       }
       return { modes: structuredClone(modes) }
     },
@@ -143,11 +152,41 @@ const connection = new AgentSideConnection(
             return { stopReason: 'refusal' }
         }
         if (active.cancelled) return { stopReason: 'cancelled' }
+        let text = 'Hello from SDK.'
+        if (scenario === 'filesystem') {
+          const path = join(owner.cwd, 'sdk-file.txt')
+          await client.writeTextFile({
+            sessionId,
+            path,
+            content: 'SDK file.\r\nSecond line.é',
+          })
+          if (active.cancelled) return { stopReason: 'cancelled' }
+          text = (await client.readTextFile({ sessionId, path })).content
+        }
+        if (scenario === 'terminal') {
+          const terminal = await client.createTerminal({
+            sessionId,
+            command: process.execPath,
+            args: [
+              '-e',
+              'process.stdout.write(JSON.stringify({pid:process.pid,cwd:process.cwd(),text:"SDK terminal"}))',
+            ],
+            cwd: owner.cwd,
+            outputByteLimit: 4096,
+          })
+          try {
+            await terminal.waitForExit()
+            text = (await terminal.currentOutput()).output
+          } finally {
+            await terminal.release()
+          }
+        }
+        if (active.cancelled) return { stopReason: 'cancelled' }
         await client.sessionUpdate({
           sessionId,
           update: {
             sessionUpdate: 'agent_message_chunk',
-            content: { type: 'text', text: 'Hello from SDK.' },
+            content: { type: 'text', text },
           },
         })
         return { stopReason: active.cancelled ? 'cancelled' : 'end_turn' }

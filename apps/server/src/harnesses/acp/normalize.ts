@@ -40,12 +40,14 @@ type State = {
 /** Produces ordered journal inputs. Only the runtime can publish or finish a root. */
 export class AcpNormalizer {
   private readonly states = new Map<string, State>()
+  private closed = false
   constructor(
     private readonly content: Content,
     private readonly host: AcpResourceHost,
     private readonly instanceId: string,
   ) {}
   private state(input: Subject) {
+    if (this.closed) throw Error('ACP normalizer is closed')
     const subject = immutableData(input)
     const key = digest(subject)
     let state = this.states.get(key)
@@ -553,5 +555,11 @@ export class AcpNormalizer {
     this.states.delete(key)
     for (const tool of state.tools.values()) tool.release()
     for (const release of state.releases) release()
+  }
+  close() {
+    if ([...this.states.values()].some((state) => state.active))
+      throw Error('ACP normalizer still owns content work')
+    this.closed = true
+    for (const state of this.states.values()) this.retire(state.subject)
   }
 }

@@ -188,6 +188,7 @@ export type AcpTicket = {
   readonly ordinal: number
   readonly committed: Promise<void>
   finish(records: readonly AcpRecordInput[]): void
+  failAdmission(): void
 }
 
 export const emptyPrefix = (journalId: string) =>
@@ -219,10 +220,22 @@ export class AcpJournal {
     operationId: string
     terminalOwners: readonly AcpRecordOwner[]
     classification:
-      'commit_failed' | 'invalid_ack' | 'logical_deadline' | 'admission_failed'
+      | 'commit_failed'
+      | 'invalid_ack'
+      | 'logical_deadline'
+      | 'admission_failed'
+      | 'ack_unknown'
+  }
+  private activeCommit?: {
+    selected: readonly Slot[]
+    evidence(): JournalPendingEvidence
   }
   private bytes = 0
   private credits = 0
+  private readonly admissionWaiters = new Map<
+    boolean,
+    { promise: Promise<void>; resolve(): void; reject(error: unknown): void }
+  >()
   private closed = false
   constructor(
     private readonly writer: AcpSessionWriter,
@@ -246,6 +259,35 @@ export class AcpJournal {
     this.next = this.committedThrough = writer.committedThrough
     this.prefixHash = writer.prefixHash
   }
+  admissionReady(control = false): Promise<void> | undefined {
+    if (this.closed || this.failure) throw Error('ACP journal is unavailable')
+    if (this.next >= Number.MAX_SAFE_INTEGER)
+      throw Error('ACP journal admission limit')
+    if (this.slots.length + this.credits < (control ? 64 : 62)) return
+    let waiter = this.admissionWaiters.get(control)
+    if (!waiter) {
+      let resolve!: () => void, reject!: (error: unknown) => void
+      const promise = new Promise<void>((yes, no) => {
+        resolve = yes
+        reject = no
+      })
+      void promise.catch(() => {})
+      waiter = { promise, resolve, reject }
+      this.admissionWaiters.set(control, waiter)
+    }
+    return waiter.promise
+  }
+  private wakeAdmission() {
+    for (const [control, waiter] of this.admissionWaiters) {
+      if (this.closed || this.failure) {
+        this.admissionWaiters.delete(control)
+        waiter.reject(Error('ACP journal is unavailable'))
+      } else if (this.slots.length + this.credits < (control ? 64 : 62)) {
+        this.admissionWaiters.delete(control)
+        waiter.resolve()
+      }
+    }
+  }
   reserveCredits(count: number) {
     if (
       this.closed ||
@@ -262,10 +304,12 @@ export class AcpJournal {
         if (!remaining) throw Error('ACP journal credit exhausted')
         remaining--
         this.credits--
+        this.wakeAdmission()
       },
       release: () => {
         this.credits -= remaining
         remaining = 0
+        this.wakeAdmission()
       },
     }
   }
@@ -303,7 +347,14 @@ export class AcpJournal {
       reject,
     }
     this.slots.push(slot)
-    return {
+    const journal = this
+    const ticket: AcpTicket = {
+      failAdmission() {
+        if (this !== ticket) throw Error('Foreign ACP journal ticket')
+        if (slot.records) throw Error('ACP journal ticket is already finished')
+        if (journal.closed) throw Error('ACP journal is closed')
+        journal.failAdmission(slot)
+      },
       ordinal: slot.ordinal,
       committed,
       finish: (input) => {
@@ -340,6 +391,7 @@ export class AcpJournal {
         this.pump()
       },
     }
+    return ticket
   }
   append(
     owner: AcpRecordOwner,
@@ -354,36 +406,46 @@ export class AcpJournal {
     ticket.finish([{ value }])
     return ticket.committed
   }
+  private failAdmission(first: Slot) {
+    if (this.failure) return
+    this.failure = {
+      evidence: immutableData({
+        kind: 'journal_prefix',
+        journalId: this.journalId,
+        phase: 'pre_admission',
+        lastAcknowledged: {
+          kind: 'journal_prefix',
+          throughOrdinal: this.committedThrough,
+          prefixHash: this.prefixHash,
+        },
+      }),
+      owner: first.owner,
+      operationId: first.source.producerTicket,
+      terminalOwners: [],
+      classification: 'admission_failed',
+    }
+    this.wakeAdmission()
+    for (const slot of this.slots)
+      if (!this.activeCommit?.selected.includes(slot))
+        slot.reject(Error('ACP persistence admission failed'))
+    try {
+      this.options.onFailure()
+    } catch {
+      /* Failure is already latched. */
+    }
+  }
   private pump() {
-    if (this.running || this.failure || this.closed || !this.slots[0]?.records)
+    if (
+      this.running ||
+      this.activeCommit ||
+      this.failure ||
+      this.closed ||
+      !this.slots[0]?.records
+    )
       return
     this.running = this.commitNext()
       .catch(() => {
-        if (this.failure) return
-        const first = this.slots[0]!
-        this.failure = {
-          evidence: immutableData({
-            kind: 'journal_prefix',
-            journalId: this.journalId,
-            phase: 'pre_admission',
-            lastAcknowledged: {
-              kind: 'journal_prefix',
-              throughOrdinal: this.committedThrough,
-              prefixHash: this.prefixHash,
-            },
-          }),
-          owner: first.owner,
-          operationId: first.source.producerTicket,
-          terminalOwners: [],
-          classification: 'admission_failed',
-        }
-        for (const slot of this.slots)
-          slot.reject(Error('ACP persistence admission failed'))
-        try {
-          this.options.onFailure()
-        } catch {
-          /* Failure is already latched. */
-        }
+        this.failAdmission(this.slots[0]!)
       })
       .finally(() => {
         this.running = undefined
@@ -448,7 +510,8 @@ export class AcpJournal {
       physical: 'pending' | 'rejected' | 'invalid_ack',
       classification: 'logical_deadline' | 'commit_failed' | 'invalid_ack',
     ) => {
-      if (this.failure) return
+      if (this.failure && this.failure.classification !== 'admission_failed')
+        return
       this.failure = {
         evidence: immutableData({ ...base, physical }),
         owner: selected[0]!.owner,
@@ -458,6 +521,7 @@ export class AcpJournal {
           .map((slot) => slot.owner),
         classification,
       }
+      this.wakeAdmission()
       controller.abort()
       for (const slot of this.slots)
         slot.reject(Error('ACP persistence is unproved'))
@@ -471,6 +535,10 @@ export class AcpJournal {
       () => fail('pending', 'logical_deadline'),
       this.options.commitMs ?? 15000,
     )
+    this.activeCommit = {
+      selected,
+      evidence: () => immutableData({ ...base, physical: 'pending' }),
+    }
     try {
       let ack: CommittedPrefix
       try {
@@ -478,14 +546,16 @@ export class AcpJournal {
       } catch (error) {
         if (
           !(error instanceof AcpUnknownAcknowledgement) ||
-          this.failure ||
+          (this.failure &&
+            this.failure.classification !== 'admission_failed') ||
           this.closed
         )
           throw error
         base.invocation = 2
         ack = await this.writer.commit(transaction, controller.signal)
       }
-      if (this.failure) return
+      if (this.failure && this.failure.classification !== 'admission_failed')
+        return
       if (
         ack.transactionId !== transaction.transactionId ||
         ack.throughOrdinal !== throughOrdinal ||
@@ -496,7 +566,17 @@ export class AcpJournal {
       }
       this.committedThrough = throughOrdinal
       this.prefixHash = ack.prefixHash
+      if (this.failure?.classification === 'admission_failed')
+        this.failure.evidence = immutableData({
+          ...this.failure.evidence,
+          lastAcknowledged: {
+            kind: 'journal_prefix',
+            throughOrdinal,
+            prefixHash: ack.prefixHash,
+          },
+        })
       this.slots.splice(0, selected.length)
+      this.wakeAdmission()
       for (const slot of selected) {
         this.bytes -= slot.bytes
         slot.releaseBytes?.()
@@ -507,6 +587,7 @@ export class AcpJournal {
     } catch {
       fail('rejected', 'commit_failed')
     } finally {
+      this.activeCommit = undefined
       releaseCommit()
       clearTimeout(timer)
     }
@@ -518,7 +599,22 @@ export class AcpJournal {
     if (!this.failure) throw Error('ACP journal has no persistence failure')
     if (!this.liveOwners.has(digest(owner)))
       throw Error('Foreign ACP completion owner')
-    const cause = this.failure.owner
+    if (this.committedTerminals.has(digest(owner)))
+      throw Error('ACP terminal is already acknowledged')
+    const active = this.activeCommit
+    const failure =
+      active && this.failure.classification === 'admission_failed'
+        ? {
+            evidence: active.evidence(),
+            owner: active.selected[0]!.owner,
+            operationId: active.selected[0]!.source.producerTicket,
+            terminalOwners: active.selected
+              .filter((slot) => slot.source.kind === 'terminal')
+              .map((slot) => slot.owner),
+            classification: 'ack_unknown' as const,
+          }
+        : this.failure
+    const cause = failure.owner
     const authority = (value: AcpRecordOwner) => ({
       sessionId: value.sessionId,
       providerInstanceId: value.providerInstanceId,
@@ -529,12 +625,12 @@ export class AcpJournal {
     })
     if (canonical(authority(owner)) !== canonical(authority(cause)))
       throw Error('Foreign ACP completion owner')
-    const entered = this.failure.evidence.phase === 'entered'
+    const entered = failure.evidence.phase === 'entered'
     const sameRoot =
       cause.phase === 'live' &&
       cause.runId === owner.runId &&
       cause.turnId === owner.turnId
-    const terminalEntered = this.failure.terminalOwners.some(
+    const terminalEntered = failure.terminalOwners.some(
       (candidate) =>
         candidate.phase === 'live' && digest(candidate) === digest(owner),
     )
@@ -545,7 +641,7 @@ export class AcpJournal {
       runId: owner.runId,
       turnId: owner.turnId,
       code: entered ? 'persistence_unknown' : 'completion_not_committed',
-      classification: this.failure.classification,
+      classification: failure.classification,
       cause: {
         relation: sameRoot ? 'own_required_write' : 'session_fence',
         owner:
@@ -556,7 +652,7 @@ export class AcpJournal {
                 runtimeGeneration: cause.runtimeGeneration,
                 runId: cause.runId,
                 turnId: cause.turnId,
-                operationId: this.failure.operationId,
+                operationId: failure.operationId,
               }
             : {
                 kind: 'session',
@@ -564,16 +660,16 @@ export class AcpJournal {
                 runtimeGeneration: cause.runtimeGeneration,
               },
       },
-      failure: this.failure.evidence,
+      failure: failure.evidence,
       required: terminalEntered
-        ? { state: 'unproved', terminal: this.failure.evidence }
+        ? { state: 'unproved', terminal: failure.evidence }
         : {
             state: entered ? 'unproved' : 'not_committed',
             terminal: {
               kind: 'journal_prefix',
               journalId: this.journalId,
               phase: 'pre_admission',
-              lastAcknowledged: this.failure.evidence.lastAcknowledged,
+              lastAcknowledged: failure.evidence.lastAcknowledged,
             },
           },
     })
@@ -601,6 +697,7 @@ export class AcpJournal {
   }
   async close() {
     this.closed = true
+    this.wakeAdmission()
     for (const slot of this.slots) slot.reject(Error('ACP journal closed'))
     await this.running
     await this.writer.close()

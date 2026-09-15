@@ -9,7 +9,12 @@ import { confirmedNativeBindingSchema } from '@forge/protocol/harness'
 import type { ConfirmedNativeBinding, HarnessSession } from '../types.js'
 import { startNativeProcess, type NativeProcess } from '../process.js'
 import { JsonlRpcTransport, type JsonRpcIncoming } from '../jsonrpc.js'
-import type { JsonlValueOwnership, SubmissionEvidence } from '../jsonl.js'
+import type {
+  JsonlValueOwnership,
+  SubmissionEvidence,
+  JsonlFrameCapture,
+  JsonlDeferredCapture,
+} from '../jsonl.js'
 import {
   AcpJournal,
   type AccountScope,
@@ -30,12 +35,14 @@ import { AcpCatalog } from './config.js'
 import type { AcpResourceHost } from './limits.js'
 import { immutableData } from './data.js'
 import { positiveLimit } from '../diagnostics.js'
+import type { AcpChildAdmission } from './children.js'
 
 export type AcpFrame = {
   readonly owner: AcpRecordOwner
   readonly ticket: AcpTicket
   readonly numbers: NumericCapture
   readonly wireOrdinal: number
+  readonly childAdmission?: AcpChildAdmission
   claimed: boolean
 }
 type Call = {
@@ -50,10 +57,18 @@ export type AcpConnectionOptions = {
   host: AcpResourceHost
   ingestion: AcpIngestionFactory
   controlMs?: number
+  prepareClient?(connection: AcpConnection): Promise<{
+    fs: { readTextFile: boolean; writeTextFile: boolean }
+    terminal: boolean
+  }>
   route(
     strings: Readonly<Record<string, string>>,
     fallback: AcpRecordOwner,
-  ): AcpRecordOwner
+    numbers: NumericCapture,
+    wireOrdinal: number,
+  ):
+    | AcpRecordOwner
+    | { owner: AcpRecordOwner; childAdmission: AcpChildAdmission }
   incoming(
     message: JsonRpcIncoming,
     frame: AcpFrame,
@@ -134,6 +149,14 @@ export class AcpConnection {
   private readonly calls = new Map<string, Call>()
   private current: AcpRecordOwner
   private confirmed: ConfirmedNativeBinding | null = null
+  private capabilities: {
+    image?: boolean
+    audio?: boolean
+    embeddedContext?: boolean
+  } = {}
+  get promptCapabilities() {
+    return this.capabilities
+  }
   private wireOrdinal = 0
   private closing?: Promise<void>
   private constructor(
@@ -169,55 +192,112 @@ export class AcpConnection {
       requestTimeoutMs: options.controlMs ?? 15000,
       secrets: launch.secrets,
       resources: options.host.transport(launch.providerInstanceId),
-      captureFrame: (source) => {
-        const strings: Record<string, string> = Object.create(null)
-        let stringBytes = 0
-        const numbers = captureNumbers(source, (path, value) => {
-          if (
-            path === '/id' ||
-            path === '/method' ||
-            (path.startsWith('/params/') &&
-              path.split('/').length <= 7 &&
-              /\/(sessionId|session_id|parent_session_id|child_session_id|subagent_id|agentId|parentAgentId|attempt_id|parent_prompt_id|prompt_id|promptId|type|sessionUpdate|toolCallId)$/.test(
-                path,
-              ))
-          ) {
-            stringBytes += Buffer.byteLength(path) + Buffer.byteLength(value)
-            if (stringBytes > 16384 || Buffer.byteLength(value) > 512)
-              throw Error('ACP routing metadata exceeds limit')
-            strings[path] = value
+      maxUnreadBytes: 32 * 1024 * 1024,
+      captureReadContext: () => this.current,
+      captureFrame: (source, readContext) => {
+        let releaseCapture = options.host.reserve(
+          launch.providerInstanceId,
+          'retained',
+          4 * 1024 * 1024 + source.length * 2,
+        )
+        let retained = true
+        const release = () => {
+          if (retained) {
+            retained = false
+            releaseCapture()
           }
-        })
-        const response =
-          strings['/method'] === undefined
-            ? this.calls.get(strings['/id'] ?? '')
-            : undefined
-        const owner =
-          response?.owner ?? options.route(Object.freeze(strings), this.current)
-        const wireOrdinal = ++this.wireOrdinal
-        const ticket = journal.reserve(owner, {
-          kind: 'native',
-          producerTicket: randomUUID(),
-          transportGeneration: this.generation,
-          wireOrdinal,
-        })
-        const frame: AcpFrame = {
-          owner,
-          ticket,
-          numbers,
-          wireOrdinal,
-          claimed: false,
         }
-        return {
-          context: frame,
-          release() {
-            if (!frame.claimed) {
-              frame.claimed = true
-              ticket.finish([
-                { value: { kind: 'disposition', status: 'ignored' } },
-              ])
+        try {
+          const strings: Record<string, string> = Object.create(null)
+          let stringBytes = 0
+          const numbers = captureNumbers(source, (path, value) => {
+            if (
+              path === '/id' ||
+              path === '/method' ||
+              (path.startsWith('/params/') &&
+                path.split('/').length <= 7 &&
+                /\/(sessionId|session_id|parent_session_id|child_session_id|subagent_id|agentId|parentAgentId|attempt_id|parent_prompt_id|prompt_id|promptId|type|sessionUpdate|toolCallId)$/.test(
+                  path,
+                ))
+            ) {
+              stringBytes += Buffer.byteLength(path) + Buffer.byteLength(value)
+              if (stringBytes > 16384 || Buffer.byteLength(value) > 512)
+                throw Error('ACP routing metadata exceeds limit')
+              strings[path] = value
             }
-          },
+          })
+          const response =
+            strings['/method'] === undefined
+              ? this.calls.get(strings['/id'] ?? '')
+              : undefined
+          const wireOrdinal = ++this.wireOrdinal
+          const routing =
+            response?.owner ??
+            options.route(
+              Object.freeze(strings),
+              readContext as AcpRecordOwner,
+              numbers,
+              wireOrdinal,
+            )
+          const owner = 'owner' in routing ? routing.owner : routing
+          const childAdmission =
+            'owner' in routing ? routing.childAdmission : undefined
+          const releaseRetained = options.host.reserve(
+            launch.providerInstanceId,
+            'retained',
+            65536 +
+              stringBytes * 4 +
+              numbers.numbers.reduce(
+                (bytes, token) =>
+                  bytes +
+                  128 +
+                  4 *
+                    (Buffer.byteLength(token.path) +
+                      Buffer.byteLength(token.text)),
+                0,
+              ),
+          )
+          releaseCapture()
+          releaseCapture = releaseRetained
+          const admit = (): JsonlFrameCapture | JsonlDeferredCapture => {
+            const ready = journal.admissionReady()
+            if (ready) return { ready, resume: admit, release }
+            const ticket = journal.reserve(owner, {
+              kind: 'native',
+              producerTicket: randomUUID(),
+              transportGeneration: this.generation,
+              wireOrdinal,
+            })
+            const frame: AcpFrame = {
+              owner,
+              ticket,
+              numbers,
+              wireOrdinal,
+              claimed: false,
+              childAdmission,
+            }
+            return {
+              context: frame,
+              release() {
+                release()
+                if (!frame.claimed) {
+                  frame.claimed = true
+                  try {
+                    ticket.finish([
+                      { value: { kind: 'disposition', status: 'ignored' } },
+                    ])
+                  } catch (error) {
+                    ticket.failAdmission()
+                    throw error
+                  }
+                }
+              },
+            }
+          }
+          return admit()
+        } catch (error) {
+          release()
+          throw error
         }
       },
       onEnvelope: (value, ownership) => {
@@ -248,7 +328,11 @@ export class AcpConnection {
               { value: { kind: 'disposition', status: 'failed' } },
             ])
           } catch {
-            /* Original ticket may already be committed. */
+            try {
+              frame.ticket.failAdmission()
+            } catch {
+              /* Finished tickets retain their original authority. */
+            }
           }
           options.failure(error)
           throw error
@@ -352,12 +436,15 @@ export class AcpConnection {
     await frame.ticket.committed
     return value
   }
+  async retireProcess(): Promise<void> {
+    await this.process.close()
+    this.releaseProcess()
+    for (const call of this.calls.values()) call.release?.()
+    this.calls.clear()
+  }
   close(): Promise<void> {
     this.closing ??= (async () => {
-      await this.process.close()
-      this.releaseProcess()
-      for (const call of this.calls.values()) call.release?.()
-      this.calls.clear()
+      await this.retireProcess()
       await this.journal.close()
     })()
     return this.closing
@@ -482,19 +569,25 @@ export class AcpConnection {
             control,
             releaseProcess,
           )
+          const clientCapabilities = (await options.prepareClient?.(
+            connection,
+          )) ?? {
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+          }
           const initialized = zInitializeResponse.parse(
             await connection.controlCall(
               'initialize',
               {
                 protocolVersion: 1,
-                clientCapabilities: {
-                  fs: { readTextFile: false, writeTextFile: false },
-                  terminal: false,
-                },
+                clientCapabilities,
                 clientInfo: { name: 'forge', version: '1' },
               },
               control,
             ),
+          )
+          connection.capabilities = immutableData(
+            initialized.agentCapabilities?.promptCapabilities ?? {},
           )
           if (initialized.protocolVersion !== 1)
             throw Error('ACP protocol version is unsupported')
@@ -521,6 +614,9 @@ export class AcpConnection {
                 cwd,
                 mcpServers: [],
                 ...(load ? { sessionId: expected!.providerSessionId } : {}),
+                ...(options.profile === 'grok'
+                  ? { _meta: { yoloMode: false, autoMode: false } }
+                  : {}),
               },
               owner,
             ).response
