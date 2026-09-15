@@ -7,7 +7,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Composer } from './Composer'
 import { accountsApi } from '../../lib/accounts-api'
 import { api } from '../../lib/api'
@@ -15,6 +15,21 @@ import { useMessagesStore } from '../../stores/messages'
 import type { HarnessSelection } from './harness-picker-logic'
 
 describe('Composer', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: false,
+      addEventListener() {},
+      removeEventListener() {},
+    }))
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+  })
   afterEach(() => {
     cleanup()
     useMessagesStore.setState({ volatile: [] })

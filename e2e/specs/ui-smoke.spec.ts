@@ -59,6 +59,41 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
     ).toBeVisible({
       timeout: 10_000,
     })
+    if (test.info().project.name === 'desktop') {
+      await page.setViewportSize({ width: 1320, height: 880 })
+      const form = page.locator('.composer-root')
+      const pill = page.locator('.chat-composer-glass')
+      await expect(form).toHaveAttribute('data-composer-mode', 'compact')
+      expect((await pill.boundingBox())?.height).toBe(49)
+      expect(
+        await pill.evaluate((node) => getComputedStyle(node).borderRadius),
+      ).toBe('26px')
+      await composer.fill(
+        'A line that wraps as the conversation narrows. '.repeat(6),
+      )
+      await expect(form).toHaveAttribute('data-composer-mode', 'expanded')
+      const wideHeight = (await composer.boundingBox())!.height
+      await composer.evaluate((node: HTMLTextAreaElement) =>
+        node.setSelectionRange(5, 20),
+      )
+      await page.setViewportSize({ width: 1000, height: 880 })
+      await expect
+        .poll(async () => (await composer.boundingBox())!.height)
+        .toBeGreaterThan(wideHeight)
+      expect(
+        await composer.evaluate((node: HTMLTextAreaElement) => [
+          node.selectionStart,
+          node.selectionEnd,
+        ]),
+      ).toEqual([5, 20])
+      await composer.fill('line\n'.repeat(80))
+      await expect
+        .poll(async () => (await pill.boundingBox())!.height)
+        .toBe(308)
+      await composer.fill('')
+      await page.setViewportSize({ width: 1320, height: 880 })
+      await expect(form).toHaveAttribute('data-composer-mode', 'compact')
+    }
     if (test.info().project.name.startsWith('phone')) {
       await expect(composer).toBeVisible()
       await expect(composer).toBeEnabled()
