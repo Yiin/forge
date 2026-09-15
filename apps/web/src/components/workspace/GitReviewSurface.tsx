@@ -71,7 +71,7 @@ export function GitReviewSurface({
   useEffect(load, [projectId, sessionId, cwd, scope, baseRef, commit])
   return (
     <section className="flex h-full min-h-0 flex-col" aria-label="Git changes">
-      <div className="flex flex-wrap items-center gap-1 border-b border-border p-2">
+      <div className="flex min-h-[38px] flex-wrap items-center gap-1 border-b border-border px-2 py-1 pointer-coarse:min-h-11">
         {(['working', 'branch', 'latest-turn'] as const).map((value) => (
           <Button
             key={value}
@@ -125,8 +125,8 @@ export function GitReviewSurface({
         <div className="min-h-0 flex-1 overflow-auto p-2">
           <div className="mb-2 text-xs text-muted-foreground">
             {diff.files.length} files ·{' '}
-            <span className="text-green-600">+{diff.additions}</span>{' '}
-            <span className="text-red-600">−{diff.deletions}</span>
+            <span className="text-success-foreground">+{diff.additions}</span>{' '}
+            <span className="text-destructive">−{diff.deletions}</span>
           </div>
           {diff.files.map((file) => (
             <DiffFileView
@@ -164,7 +164,7 @@ function DiffFileView({
   return (
     <article className="mb-3 overflow-hidden rounded-md border border-border">
       <button
-        className="flex min-h-11 w-full items-center gap-2 bg-muted/40 px-2 text-left text-xs"
+        className="flex h-[38px] w-full items-center gap-2 bg-muted/40 px-2 text-left text-xs focus-visible:outline-2 focus-visible:outline-ring pointer-coarse:h-11"
         onClick={onToggle}
         aria-expanded={!collapsed}
       >
@@ -174,17 +174,17 @@ function DiffFileView({
             ? `${file.oldPath} → ${file.newPath}`
             : path}
         </code>
-        <span className="text-green-600">+{file.additions}</span>
-        <span className="text-red-600">−{file.deletions}</span>
+        <span className="text-success-foreground">+{file.additions}</span>
+        <span className="text-destructive">−{file.deletions}</span>
       </button>
       {!collapsed && (
-        <div className="overflow-x-auto font-mono text-[11px] leading-5">
+        <div className="overflow-x-auto font-mono text-xs leading-[21px]">
           {file.status === 'binary' ? (
             <p className="p-3 text-muted-foreground">Binary file changed.</p>
           ) : (
             file.hunks.map((hunk, index) => (
               <div key={index}>
-                <div className="bg-blue-500/10 px-2 text-blue-700 dark:text-blue-300">
+                <div className="flex h-7 items-center bg-muted/40 px-2 text-muted-foreground">
                   @@ −{hunk.oldStart},{hunk.oldCount} +{hunk.newStart},
                   {hunk.newCount} @@
                 </div>
@@ -195,15 +195,17 @@ function DiffFileView({
                     <div
                       key={lineIndex}
                       className={cn(
-                        'group flex min-w-max',
-                        line.type === 'addition' && 'bg-green-500/10',
-                        line.type === 'deletion' && 'bg-red-500/10',
+                        'group flex min-w-max border-l-[3px] border-transparent',
+                        line.type === 'addition' &&
+                          'border-l-success bg-success/10',
+                        line.type === 'deletion' &&
+                          'border-l-destructive bg-destructive/10',
                       )}
                     >
-                      <span className="w-10 shrink-0 select-none px-2 text-right text-muted-foreground">
+                      <span className="w-9 shrink-0 select-none px-2 text-right text-muted-foreground">
                         {number ?? ''}
                       </span>
-                      <span className="w-4 shrink-0 select-none">
+                      <span className="w-7 shrink-0 select-none text-center">
                         {line.type === 'addition'
                           ? '+'
                           : line.type === 'deletion'
@@ -215,7 +217,7 @@ function DiffFileView({
                       </span>
                       {number && line.type !== 'context' && (
                         <button
-                          className="ml-2 hidden shrink-0 rounded px-1 text-muted-foreground group-hover:inline-flex"
+                          className="ml-2 inline-flex h-6 shrink-0 items-center rounded px-1 text-muted-foreground opacity-0 hover:bg-accent focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100 pointer-coarse:size-11 pointer-coarse:justify-center pointer-coarse:opacity-100"
                           onClick={() => {
                             const text = window.prompt(
                               `Comment on ${path}:${number}`,

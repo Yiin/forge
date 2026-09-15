@@ -41,7 +41,7 @@ export function GitHistorySurface({
   useEffect(() => load(), [projectId, sessionId, cwd])
   return (
     <section className="flex h-full min-h-0 flex-col" aria-label="Git history">
-      <div className="border-b border-border p-3 text-xs text-muted-foreground">
+      <div className="flex h-[38px] shrink-0 items-center border-b border-border px-3 text-xs text-muted-foreground">
         Commit history
       </div>
       {error && (
@@ -53,15 +53,15 @@ export function GitHistorySurface({
         {page?.commits.map((commit) => (
           <button
             key={commit.sha}
-            className="flex min-h-14 w-full gap-2 border-b border-border px-3 py-2 text-left hover:bg-accent"
+            className="flex h-9 w-full items-center gap-3 border-b border-border px-3 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring pointer-coarse:h-11"
             onClick={() => onCommit(commit.sha)}
           >
-            <GitCommit size={14} className="mt-1 shrink-0" />
-            <span className="min-w-0">
-              <span className="block truncate text-xs font-medium">
+            <GitCommit size={14} className="shrink-0" />
+            <span className="flex min-w-0 flex-1 items-center gap-3">
+              <span className="min-w-0 flex-1 truncate text-xs font-medium">
                 {commit.subject}
               </span>
-              <span className="block truncate text-[11px] text-muted-foreground">
+              <span className="max-w-[45%] truncate text-[11px] text-muted-foreground">
                 {commit.sha.slice(0, 7)} · {commit.author} ·{' '}
                 {new Date(commit.date).toLocaleDateString()}
               </span>
