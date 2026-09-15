@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrate } from '../db/migrate.js'
 import { createProject, createSession } from '../db/queries.js'
 import { EventBus } from '../events/bus.js'
@@ -1293,4 +1293,205 @@ describe('draft promotion idempotency', () => {
         .get(result.sessionId),
     ).toEqual({ status: 'errored' })
   })
+})
+
+describe('saved native session admission', () => {
+  it.each(['confirmed', 'unproven', 'refused'] as const)(
+    'loads the original binding before a new prompt: %s',
+    async (mode) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'Native', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'claude',
+        title: 'Native',
+        cwd: '/tmp',
+      })
+      db.prepare('UPDATE sessions SET provider_session_id=? WHERE id=?').run(
+        'original-native',
+        session.id,
+      )
+      const calls: string[] = []
+      const handle: HarnessHandle = {
+        prompt: async () => {
+          calls.push('prompt')
+        },
+        cancel: () => {},
+        kill: () => {
+          calls.push('kill')
+        },
+      }
+      const manager = new SessionManager(db, new EventBus(), () => ({
+        capabilities: { loadSession: true },
+        spawn: () => {
+          calls.push('spawn')
+          return handle
+        },
+        loadSession: async (saved) => {
+          expect(saved.providerSessionId).toBe('original-native')
+          calls.push('load')
+          if (mode === 'refused') throw Error('synthetic resume refusal')
+          return { handle, proven: mode === 'confirmed' }
+        },
+      }))
+      try {
+        await manager.prompt(session.id, 'next prompt')
+        await vi.waitFor(() =>
+          expect(
+            db
+              .prepare('SELECT status FROM sessions WHERE id=?')
+              .get(session.id),
+          ).toEqual({ status: mode === 'confirmed' ? 'idle' : 'errored' }),
+        )
+        expect(calls).not.toContain('spawn')
+        expect(calls).toContain('load')
+        if (mode === 'confirmed') expect(calls).toContain('prompt')
+        else expect(calls).not.toContain('prompt')
+        if (mode === 'unproven') expect(calls).toContain('kill')
+        expect(
+          db
+            .prepare('SELECT provider_session_id FROM sessions WHERE id=?')
+            .get(session.id),
+        ).toEqual({ provider_session_id: 'original-native' })
+      } finally {
+        manager.close()
+        db.close()
+      }
+    },
+  )
+})
+
+describe('native shutdown ownership', () => {
+  it('joins every original handle and preserves a refused cleanup', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'cleanup', path: '/tmp' })
+    const sessions = [1, 2].map(() =>
+      createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'cleanup',
+        cwd: '/tmp',
+      }),
+    )
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const refused = Error('original cleanup refused')
+    const calls: string[] = []
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async (session) => ({
+        prompt: async () => {},
+        cancel: () => {},
+        kill: async () => {
+          calls.push(session.id)
+          if (session.id === sessions[0].id) throw refused
+          await held
+        },
+      }),
+    }))
+    try {
+      for (const session of sessions) await manager.prompt(session.id, 'hello')
+      await vi.waitFor(() =>
+        expect(
+          db
+            .prepare("SELECT COUNT(*) AS n FROM sessions WHERE status='idle'")
+            .get()?.n,
+        ).toBe(2),
+      )
+      let settled = false
+      const close = manager.close()
+      const observed = close
+        .catch((error) => error)
+        .finally(() => {
+          settled = true
+        })
+      expect(manager.close()).toBe(close)
+      await vi.waitFor(() => expect(calls).toHaveLength(2))
+      expect(settled).toBe(false)
+      release()
+      expect(await observed).toMatchObject({ errors: [refused] })
+      expect(calls).toEqual(sessions.map((session) => session.id))
+    } finally {
+      release()
+      await manager.close().catch(() => {})
+      db.close()
+    }
+  })
+})
+
+describe('native steering admission', () => {
+  it.each(['before', 'after'] as const)(
+    'preserves durable ownership when persistence fails %s delivery',
+    async (stage) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'native', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'native',
+        cwd: '/tmp',
+      })
+      let release!: () => void
+      const active = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const steer = vi.fn(async () => {
+        if (stage === 'after') throw Error('submission uncertain')
+      })
+      const manager = new SessionManager(db, new EventBus(), () => ({
+        spawn: async () => ({
+          prompt: () => active,
+          steer,
+          cancel: () => release(),
+          kill: () => release(),
+        }),
+      }))
+      try {
+        await manager.prompt(session.id, 'first')
+        await vi.waitFor(() => expect(manager.models(session.id)).toEqual([]))
+        if (stage === 'before')
+          db.exec(
+            "CREATE TRIGGER fail_steering BEFORE INSERT ON messages WHEN json_extract(NEW.content,'$.steeringRequestId') IS NOT NULL BEGIN SELECT RAISE(ABORT,'disk failed'); END",
+          )
+        const send = () =>
+          manager.prompt(
+            session.id,
+            'steering',
+            'original-steer',
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            'original-item',
+            undefined,
+            'immediate',
+          )
+        await expect(send()).rejects.toThrow(
+          stage === 'before' ? 'disk failed' : 'submission uncertain',
+        )
+        expect(steer).toHaveBeenCalledTimes(stage === 'before' ? 0 : 1)
+        if (stage === 'before') {
+          db.exec('DROP TRIGGER fail_steering')
+          await send()
+          expect(steer).toHaveBeenCalledTimes(1)
+        }
+        await expect(send()).rejects.toThrow('already admitted')
+        expect(steer).toHaveBeenCalledTimes(1)
+      } finally {
+        release()
+        await manager.close()
+        await vi.waitFor(() =>
+          expect(
+            db.prepare('SELECT status FROM sessions WHERE id=?').get(session.id)
+              ?.status,
+          ).toBe('idle'),
+        )
+        db.close()
+      }
+    },
+  )
 })

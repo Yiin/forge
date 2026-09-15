@@ -22,8 +22,20 @@ export type HarnessItem = MessageContent & {
 
 export type PromptContent =
   | { kind: 'text'; text: string }
-  | { kind: 'image'; mime: string; bytes: Buffer; path?: string }
-  | { kind: 'file'; path: string; name: string; mime: string }
+  | {
+      kind: 'image'
+      attachmentId?: string
+      mime: string
+      bytes: Buffer
+      path?: string
+    }
+  | {
+      kind: 'file'
+      attachmentId?: string
+      path: string
+      name: string
+      mime: string
+    }
 
 export type HarnessHandle = {
   prompt(content: string | PromptContent[]): Promise<void> | void
