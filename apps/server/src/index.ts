@@ -283,6 +283,26 @@ export function serverPort(
 }
 
 export function startServer(port?: number): ServerType {
+  const configPath = resolve(
+    process.env.FORGE_CONFIG ?? resolve(homedir(), '.forge/forge.toml'),
+  )
+  let config: ReturnType<typeof defaultConfig>
+  let saveConfig = false
+  try {
+    const loaded = loadConfigSync(configPath)
+    config = reconcileConfig(loaded, defaultConfig())
+    if (JSON.stringify(loaded.harness) !== JSON.stringify(config.harness))
+      saveConfig = true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      config = defaultConfig()
+      saveConfig = true
+    } else {
+      throw error
+    }
+  }
+  const listenPort = serverPort(port, process.env.FORGE_PORT, config.port)
+  if (saveConfig) saveConfigSync(configPath, config)
   // Loaded lazily: the Bun e2e launcher cannot resolve node:sqlite, and it
   // never reaches this branch.
   const { DatabaseSync } = require('node:sqlite') as {
@@ -320,23 +340,6 @@ export function startServer(port?: number): ServerType {
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
   const questions = new ServerQuestionManager({ db, bus })
-  const configPath = resolve(
-    process.env.FORGE_CONFIG ?? resolve(homedir(), '.forge/forge.toml'),
-  )
-  let config: ReturnType<typeof defaultConfig>
-  try {
-    const loaded = loadConfigSync(configPath)
-    config = reconcileConfig(loaded, defaultConfig())
-    if (JSON.stringify(loaded.harness) !== JSON.stringify(config.harness))
-      saveConfigSync(configPath, config)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      config = defaultConfig()
-      saveConfigSync(configPath, config)
-    } else {
-      throw error
-    }
-  }
   const configState: ConfigState = { current: config, path: configPath }
   const accountStore = new HarnessAccountStore(db)
   const factory: HarnessFactory = (key, accountId) => {
@@ -468,7 +471,7 @@ export function startServer(port?: number): ServerType {
   const server = serve(
     {
       fetch: app.fetch,
-      port: serverPort(port, process.env.FORGE_PORT, config.port),
+      port: listenPort,
     },
     (address) => terminalAuthority.bind(address.port),
   )
