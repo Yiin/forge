@@ -1352,6 +1352,7 @@ class ClaudeSession implements ClaudeHandle {
             await this.close(
               new Error('Claude queued input could not be cancelled'),
               true,
+              true,
             )
             return
           }
@@ -1382,9 +1383,13 @@ class ClaudeSession implements ClaudeHandle {
           this.controls.size ||
           this.normalizer.state.activeTasks
         )
-          await this.close(new Error('Claude interrupt grace expired'), true)
+          await this.close(
+            new Error('Claude interrupt grace expired'),
+            true,
+            true,
+          )
       } catch (error) {
-        await this.close(this.safe(error), true)
+        await this.close(this.safe(error), true, true)
       } finally {
         clearTimeout(timer)
         this.cancelling = undefined
@@ -1396,7 +1401,16 @@ class ClaudeSession implements ClaudeHandle {
   kill() {
     return this.close(new Error('Claude session closed'), true)
   }
-  private close(reason: Error, interrupted: boolean): Promise<void> {
+  /**
+   * `interrupted` keeps a stopped turn out of the failure channel. `abandoned`
+   * still announces the process death, because an escalated cancel tears the
+   * session down and the engine must forget the handle instead of reusing it.
+   */
+  private close(
+    reason: Error,
+    interrupted: boolean,
+    abandoned = false,
+  ): Promise<void> {
     if (this.closing) return this.closing
     this.closing = Promise.resolve().then(() => this.process.close(reason))
     this.closed = true
@@ -1431,12 +1445,16 @@ class ClaudeSession implements ClaudeHandle {
         ? { status: 'interrupted' }
         : { status: 'failed', code: 'claude_runtime_failed', message },
     )
-    if (!interrupted && !this.failureReported) {
+    if ((!interrupted || abandoned) && !this.failureReported) {
       this.failureReported = true
       const runId = this.lastRunId ?? randomUUID()
       this.emit(
         { runId, turnId: randomUUID() },
-        { type: 'run_failed', code: 'claude_runtime_failed', message },
+        {
+          type: 'run_failed',
+          code: abandoned ? 'claude_interrupt_failed' : 'claude_runtime_failed',
+          message,
+        },
       )
     }
     this.deliveries.clear()

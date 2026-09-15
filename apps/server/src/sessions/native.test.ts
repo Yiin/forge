@@ -210,6 +210,56 @@ describe('native session interaction bridge', () => {
     expect(fake.permissionReplies).toEqual([])
   })
 
+  it('replays events an adapter emitted before its handle resolved', async () => {
+    const received: any[] = []
+    const adapter = {
+      kind: 'native',
+      capabilities: {
+        loadSession: false,
+        steer: false,
+        queue: false,
+        cancel: true,
+        permissions: false,
+        questions: false,
+        models: false,
+      },
+      spawn: async (_session: any, callback: any) => {
+        callback({ type: 'turn_started', turnId: 'turn-1' })
+        callback({
+          type: 'text_delta',
+          turnId: 'turn-1',
+          itemId: 'item-1',
+          text: 'early',
+        })
+        expect(received).toEqual([])
+        return {
+          binding: null,
+          prompt: () => ({
+            receiptId: 'receipt-1',
+            runId: 'run-1',
+            turnId: 'turn-1',
+            completion: createCompletionHandle({
+              completionId: 'completion-1',
+              runId: 'run-1',
+              turnId: 'turn-1',
+            }),
+          }),
+          cancel() {},
+          kill() {},
+        }
+      },
+    } as unknown as HarnessAdapter
+    await nativeHarness(adapter).spawn(
+      { id: 'session-1', cwd: process.cwd(), harness: 'fake' },
+      (value) => received.push(value),
+      () => undefined,
+    )
+    expect(received).toEqual([
+      { type: 'turn_start', turnId: 'turn-1' },
+      { type: 'text_delta', turnId: 'turn-1', itemId: 'item-1', text: 'early' },
+    ])
+  })
+
   it('expires a cancelled request and forgets it', async () => {
     const fake = interactiveAdapter()
     const received: any[] = []
