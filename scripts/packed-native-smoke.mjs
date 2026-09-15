@@ -85,7 +85,7 @@ export async function packedNativeSmoke(releaseArgument) {
     )
     const sdkPath = await realpath(sidecarRequire.resolve('@cursor/sdk'))
     assert.ok(sdkPath.startsWith(sidecar + '/'))
-    const sdk = await import(pathToFileURL(sdkPath).href)
+    const sdk = sidecarRequire(sdkPath)
     assert.equal(typeof sdk.JsonlLocalAgentStore, 'function')
     const runtime = await import(
       pathToFileURL(join(sidecar, 'sidecar-runtime.mjs')).href
