@@ -101,7 +101,7 @@ test('answers a multi-select question on the phone viewport', async ({
     const panel = shell.getByRole('region', { name: 'Question from Forge' })
     await panel.getByRole('button', { name: 'Cheese' }).click()
     await panel.getByRole('button', { name: 'Mushrooms' }).click()
-    await panel.getByRole('button', { name: 'Confirm selection' }).click()
+    await panel.getByRole('button', { name: 'Submit' }).click()
     await expect(panel).toHaveCount(0)
   } finally {
     await stopProxiedForge(page, forge)

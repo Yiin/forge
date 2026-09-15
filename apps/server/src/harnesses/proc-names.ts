@@ -1,5 +1,20 @@
 import { opendir } from 'node:fs/promises'
 
+/**
+ * A /proc entry can vanish, or belong to a process this user cannot inspect,
+ * between one read and the next. Neither case ends the scan: skip that entry
+ * and keep going.
+ */
+export function isUninspectableProcEntry(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code
+  return (
+    code === 'ENOENT' ||
+    code === 'ESRCH' ||
+    code === 'EACCES' ||
+    code === 'EPERM'
+  )
+}
+
 /** Node can lose the rest of a Dirent batch when its fallback lstat races exit. */
 export async function readProcNames(
   path: string,
