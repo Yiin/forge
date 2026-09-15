@@ -149,7 +149,7 @@ export function createProject(
 export function createSession(
   db: Db,
   input: {
-    projectId: string
+    projectId?: string | null
     harness: string
     title: string
     cwd: string
@@ -167,7 +167,8 @@ export function createSession(
     now?: number
   },
 ) {
-  if (!getProject(db, input.projectId)) throw new Error('Project not found')
+  if (input.projectId && !getProject(db, input.projectId))
+    throw new Error('Project not found')
   const now = input.now ?? Date.now()
   const value = { id: id('ses_'), ...input, kind: input.kind ?? 'chat', now }
   db.prepare(
@@ -175,7 +176,7 @@ export function createSession(
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, ?, ?)`,
   ).run(
     value.id,
-    value.projectId,
+    value.projectId ?? null,
     value.harness,
     value.title,
     value.cwd,
@@ -216,8 +217,8 @@ export const getSession = (db: Db, sessionId: string) =>
 export const getActiveSession = (db: Db, sessionId: string) =>
   db
     .prepare(
-      `SELECT sessions.* FROM sessions JOIN projects ON projects.id = sessions.project_id
-       WHERE sessions.id = ? AND sessions.deleted_at IS NULL AND projects.deleted_at IS NULL`,
+      `SELECT sessions.* FROM sessions LEFT JOIN projects ON projects.id = sessions.project_id
+       WHERE sessions.id = ? AND sessions.deleted_at IS NULL AND (sessions.project_id IS NULL OR projects.deleted_at IS NULL)`,
     )
     .get(sessionId)
 

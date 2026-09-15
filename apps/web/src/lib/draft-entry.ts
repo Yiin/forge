@@ -104,7 +104,22 @@ export async function openNewDraft(
   const project =
     (view.scope !== 'all' && projects.find((item) => item.id === view.scope)) ||
     selectDraftProject(projects, sessions)
-  if (!project) return { kind: 'empty' }
+  if (!project) {
+    const listing = (await api.listDirectories().catch(() => null)) as {
+      path?: string
+    } | null
+    const targetPath = listing?.path
+    if (!targetPath) return { kind: 'empty' }
+    const draft = useDraftsStore
+      .getState()
+      .getOrCreate(undefined, undefined, undefined, targetPath)
+    await navigate({
+      to: '/draft/$draftId',
+      params: { draftId: draft.id },
+      replace: true,
+    })
+    return { kind: 'draft', draftId: draft.id }
+  }
   const draft = useDraftsStore.getState().getOrCreate(project.id)
   await navigate({
     to: '/draft/$draftId',

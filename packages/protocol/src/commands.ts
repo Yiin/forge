@@ -15,7 +15,7 @@ export const createProject = z.object({
 })
 export const archiveProject = z.object({ projectId: id })
 export const createSession = z.object({
-  projectId: id,
+  projectId: id.optional(),
   harness: z.string().min(1),
   cwd: z.string().min(1),
   title: z.string().optional(),
@@ -45,7 +45,8 @@ export const prompt = z.object({
 })
 export const promoteDraft = z.object({
   draftId: id,
-  projectId: id,
+  projectId: id.optional(),
+  targetPath: z.string().min(1).optional(),
   harness: z.string().min(1),
   text: z.string().min(1),
   attachmentIds: z.array(id).optional(),
