@@ -109,7 +109,7 @@ function NativeDetail({
             id: `subagent-${sessionId}-${childId}`,
             kind: 'subagent',
             title: 'Child transcript',
-            childSessionId: childId,
+            nativeChildId: childId,
           })
         }
       >

@@ -185,3 +185,9 @@ export const Message = z.object({
   createdAt: z.string(),
 })
 export type Message = z.infer<typeof Message>
+
+export const NativeChildPage = z.object({
+  messages: z.array(Message).max(200),
+  cursor: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
+})
