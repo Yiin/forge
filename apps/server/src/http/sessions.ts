@@ -37,18 +37,22 @@ export function sessionRoutes(
     const value = schema.safeParse(await c.req.json())
     if (!value.success) return c.json({ error: value.error.message }, 400)
     try {
-      const project = manager.database
-        .prepare(
-          'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
-        )
-        .get(value.data.projectId) as { path: string } | undefined
+      const project =
+        value.data.projectId &&
+        (manager.database
+          .prepare(
+            'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
+          )
+          .get(value.data.projectId) as { path: string } | undefined)
+      if (!value.data.projectId)
+        return c.json({ error: 'Filesystem sessions require promotion' }, 400)
       if (!project) return c.json({ error: 'Project not found' }, 404)
       return await withProjectActivity(
         manager.database,
-        value.data.projectId,
+        value.data.projectId!,
         async () => {
           const workspace = await manager.resolveWorkspace(
-            value.data.projectId,
+            value.data.projectId!,
             project.path,
             value.data.workspace,
           )

@@ -39,7 +39,8 @@ import { TerminalError } from '../terminals/error.js'
 type Db = DatabaseSync
 type DraftPromotionInput = {
   draftId: string
-  projectId: string
+  projectId?: string
+  targetPath?: string
   harness: string
   text: string
   attachmentIds?: string[]
@@ -49,11 +50,11 @@ type DraftPromotionInput = {
   workspace?: WorkspaceChoice
 }
 type PromotionOwner = {
-  releaseProject: () => void
+  releaseProject?: () => void
   attempt?: Promise<{ sessionId: string }>
   rollback?: {
     draftId: string
-    projectId: string
+    projectId?: string
     sessionId: string
     uploads?: UploadStore
     error: unknown
@@ -61,7 +62,7 @@ type PromotionOwner = {
 }
 export type SessionRow = {
   id: string
-  project_id: string
+  project_id: string | null
   harness: string
   account_id: string | null
   cwd: string
@@ -136,7 +137,7 @@ export class SessionManager {
   }
 
   create(input: {
-    projectId: string
+    projectId?: string | null
     harness: string
     cwd: string
     worktreePath?: string | null
@@ -147,6 +148,7 @@ export class SessionManager {
     retention?: 'permanent' | 'discardable'
     epicRunId?: string | null
     accountId?: string | null
+    targetPath?: string
   }) {
     const accountId = this.resolveAccount(input.harness, input.accountId)
     return createSession(this.db, {
@@ -798,7 +800,7 @@ export class SessionManager {
   ) {
     const owner = getActiveSession(this.db, id) as SessionRow | undefined
     if (!owner) throw new Error('Session not found')
-    return withProjectActivity(this.db, owner.project_id, async () => {
+    const run = async () => {
       let row = owner
       if (requestId) {
         const seen = this.db
@@ -956,7 +958,10 @@ export class SessionManager {
         })
       this.status(id, 'running')
       return { row, turnId, model, attachments }
-    })
+    }
+    return owner.project_id
+      ? withProjectActivity(this.db, owner.project_id, run)
+      : run()
   }
 
   async prompt(
@@ -1136,45 +1141,43 @@ export class SessionManager {
     uploads?: UploadStore,
   ) {
     const retained = this.promotions.get(requestId)
-    return withProjectActivity(
-      this.db,
-      retained?.rollback?.projectId ?? input.projectId,
-      async () => {
-        if (retained)
-          return (
-            retained.attempt ??
-            this.runPromotionAttempt(requestId, retained, () =>
-              this.rollbackDraftPromotion(retained),
-            )
+    const run = async () => {
+      if (retained)
+        return (
+          retained.attempt ??
+          this.runPromotionAttempt(requestId, retained, () =>
+            this.rollbackDraftPromotion(retained),
           )
-        // Idempotency keys on the promotion attempt (requestId), never on the
-        // draft id: drafts are reused across sessions, so a draft-scoped lookup
-        // would return a previous session and silently drop the new prompt.
-        const existing = this.db
-          .prepare(
-            'SELECT session_id FROM draft_promotions WHERE request_id = ?',
-          )
-          .get(requestId) as { session_id: string } | undefined
-        if (existing) {
-          if (!getActiveSession(this.db, existing.session_id))
-            throw new Error('Session not found')
-          return { sessionId: existing.session_id }
-        }
-        if (this.promotions.size >= (this.terminals?.limits.http ?? 32))
-          throw new TerminalError(
-            'capacity',
-            429,
-            'Draft promotion capacity reached',
-          )
-        const owner: PromotionOwner = {
-          releaseProject: acquireProjectActivity(this.db, input.projectId),
-        }
-        this.promotions.set(requestId, owner)
-        return this.runPromotionAttempt(requestId, owner, () =>
-          this.promoteDraftAttempt(input, requestId, uploads, owner),
         )
-      },
-    )
+      // Idempotency keys on the promotion attempt (requestId), never on the
+      // draft id: drafts are reused across sessions, so a draft-scoped lookup
+      // would return a previous session and silently drop the new prompt.
+      const existing = this.db
+        .prepare('SELECT session_id FROM draft_promotions WHERE request_id = ?')
+        .get(requestId) as { session_id: string } | undefined
+      if (existing) {
+        if (!getActiveSession(this.db, existing.session_id))
+          throw new Error('Session not found')
+        return { sessionId: existing.session_id }
+      }
+      if (this.promotions.size >= (this.terminals?.limits.http ?? 32))
+        throw new TerminalError(
+          'capacity',
+          429,
+          'Draft promotion capacity reached',
+        )
+      const owner: PromotionOwner = {
+        releaseProject: input.projectId
+          ? acquireProjectActivity(this.db, input.projectId)
+          : undefined,
+      }
+      this.promotions.set(requestId, owner)
+      return this.runPromotionAttempt(requestId, owner, () =>
+        this.promoteDraftAttempt(input, requestId, uploads, owner),
+      )
+    }
+    const projectId = retained?.rollback?.projectId ?? input.projectId
+    return projectId ? withProjectActivity(this.db, projectId, run) : run()
   }
 
   private runPromotionAttempt(
@@ -1189,7 +1192,7 @@ export class SessionManager {
         if (owner.attempt !== attempt) return
         owner.attempt = undefined
         if (!owner.rollback) {
-          owner.releaseProject()
+          owner.releaseProject?.()
           this.promotions.delete(requestId)
         }
       })
@@ -1203,17 +1206,23 @@ export class SessionManager {
     uploads: UploadStore | undefined,
     owner: PromotionOwner,
   ) {
-    const project = this.db
-      .prepare(
-        'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
-      )
-      .get(input.projectId) as { path: string } | undefined
-    if (!project) throw new Error('Project not found')
-    const workspace = await this.resolveWorkspace(
-      input.projectId,
-      project.path,
-      input.workspace,
-    )
+    const project = input.projectId
+      ? (this.db
+          .prepare(
+            'SELECT path FROM projects WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL',
+          )
+          .get(input.projectId) as { path: string } | undefined)
+      : undefined
+    if (input.projectId && !project) throw new Error('Project not found')
+    if (!input.projectId && !input.targetPath)
+      throw new Error('A filesystem target is required')
+    const workspace = input.projectId
+      ? await this.resolveWorkspace(
+          input.projectId,
+          project!.path,
+          input.workspace,
+        )
+      : { cwd: input.targetPath!, worktreePath: null, branch: null }
     const session = this.create({
       projectId: input.projectId,
       harness: input.harness,
@@ -1237,7 +1246,7 @@ export class SessionManager {
           .get(requestId) as { session_id: string }
         return { sessionId: winner.session_id }
       }
-      if (uploads)
+      if (uploads && input.projectId)
         await uploads.promoteDraft(input.draftId, session.id, input.projectId)
       await this.prompt(
         session.id,
@@ -1265,7 +1274,7 @@ export class SessionManager {
   private async rollbackDraftPromotion(owner: PromotionOwner): Promise<never> {
     const { draftId, projectId, sessionId, uploads, error } = owner.rollback!
     const rollback = async () => {
-      if (uploads)
+      if (uploads && projectId)
         await uploads.rollbackPromotion(draftId, sessionId, projectId)
       this.db
         .prepare('DELETE FROM draft_promotions WHERE session_id = ?')

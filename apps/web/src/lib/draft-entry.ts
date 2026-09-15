@@ -77,8 +77,14 @@ function activityTime(session: SessionSummary) {
   return value ? Date.parse(value) || 0 : 0
 }
 
+// The home route opens a draft on its own, so it must still be able to land on
+// the "add a project" screen. Only an explicit new-session action falls back to
+// a projectless filesystem target.
+export type NewDraftOptions = { allowFilesystemTarget?: boolean }
+
 export async function openNewDraft(
   navigate: NavigateFn,
+  options: NewDraftOptions = {},
 ): Promise<DraftEntryResult> {
   const [projectData, sessionData] = await Promise.all([
     api.listProjects(),
@@ -104,7 +110,23 @@ export async function openNewDraft(
   const project =
     (view.scope !== 'all' && projects.find((item) => item.id === view.scope)) ||
     selectDraftProject(projects, sessions)
-  if (!project) return { kind: 'empty' }
+  if (!project) {
+    if (!options.allowFilesystemTarget) return { kind: 'empty' }
+    const listing = (await api.listDirectories().catch(() => null)) as {
+      path?: string
+    } | null
+    const targetPath = listing?.path
+    if (!targetPath) return { kind: 'empty' }
+    const draft = useDraftsStore
+      .getState()
+      .getOrCreate(undefined, undefined, undefined, targetPath)
+    await navigate({
+      to: '/draft/$draftId',
+      params: { draftId: draft.id },
+      replace: true,
+    })
+    return { kind: 'draft', draftId: draft.id }
+  }
   const draft = useDraftsStore.getState().getOrCreate(project.id)
   await navigate({
     to: '/draft/$draftId',
