@@ -57,7 +57,13 @@ import {
   type ConfigState,
 } from './config.js'
 import { ptyHarness } from './pty/harness.js'
-import { acpHarness } from './acp/harness.js'
+import {
+  createCustomAcpAdapter,
+  createDevinAdapter,
+  createGeminiAdapter,
+  createGrokAdapter,
+  createHermesAdapter,
+} from './harnesses/acp/providers.js'
 import {
   HarnessAccountStore,
   accountKindForHarness,
@@ -329,8 +335,14 @@ export function startServer(
       throw new Error('Account does not belong to harness')
     const derived = account ? deriveAccountHarness(entry, account) : entry
     if (derived?.protocol === 'pty') return ptyHarness(derived)
-    if (derived?.protocol === 'acp')
-      return acpHarness(derived, { db, bus, questions, accountId })
+    if (derived?.protocol === 'acp') {
+      const deps = { db, bus, questions, accountId }
+      if (key === 'grok') return createGrokAdapter(derived, deps)
+      if (key === 'gemini') return createGeminiAdapter(derived, deps)
+      if (key === 'devin') return createDevinAdapter(derived, deps)
+      if (key === 'hermes') return createHermesAdapter(derived, deps)
+      return createCustomAcpAdapter(derived, deps)
+    }
     throw new Error(`Harness ${key} is not configured`)
   }
   const manager = new SessionManager(
@@ -364,6 +376,8 @@ export function startServer(
       ['kimi', unsupportedUsageProbe],
       ['opencode', unsupportedUsageProbe],
       ['grok', unsupportedUsageProbe],
+      ['devin', unsupportedUsageProbe],
+      ['hermes', unsupportedUsageProbe],
       ['pi', unsupportedUsageProbe],
     ]),
   })

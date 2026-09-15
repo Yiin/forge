@@ -96,6 +96,8 @@ export function defaultConfig(
     gemini: defaultEntry('Gemini', 'gemini', ['--experimental-acp']),
     opencode: defaultEntry('OpenCode', 'opencode', ['acp']),
     grok: defaultEntry('Grok', 'grok', ['agent', 'stdio']),
+    devin: defaultEntry('Devin', 'devin', ['acp']),
+    hermes: defaultEntry('Hermes', 'hermes', ['acp']),
     pi: defaultEntry('Pi', 'npx', ['-y', 'pi-acp']),
   }
   if (dev)
