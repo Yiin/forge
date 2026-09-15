@@ -1,4 +1,6 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { HarnessEvent, HarnessHandle } from '../types.js'
 import { deferred } from '../transport-test-helpers.js'
 import { createTypedAcpAdapter } from './runtime.js'
@@ -52,52 +54,106 @@ describe('installed SDK through the typed ACP runtime', () => {
       await f.cleanup(handle)
     }
   }, 15000)
-  test('loads all 70 SDK replay records before returning the confirmed handle', async () => {
-    const f = await fixture('resume-replay')
-    let handle: HarnessHandle | undefined
-    try {
-      const binding = {
-        provider: 'instance',
-        accountId: null,
-        cwd: f.session.cwd,
-        providerSessionId: 'sdk-resume',
+  test.each([false, true])(
+    'loads all 70 SDK replay records with held commit=%s',
+    async (hold) => {
+      const entered = deferred<void>(),
+        held = deferred<void>()
+      let first = true
+      const f = await fixture('resume-replay', async (transaction) => {
+        if (
+          hold &&
+          first &&
+          transaction.records.some((record) => record.value.kind === 'replay')
+        ) {
+          first = false
+          entered.resolve()
+          await held.promise
+        }
+      })
+      let handle: HarnessHandle | undefined
+      let loading: Promise<HarnessHandle> | undefined
+      try {
+        const binding = {
+          provider: 'instance',
+          accountId: null,
+          cwd: f.session.cwd,
+          providerSessionId: 'sdk-resume',
+        }
+        loading = createTypedAcpAdapter(f.deps).load!(
+          { ...f.session, binding },
+          (event) => f.events.push(event),
+        )
+        let settled = false
+        void loading.then(
+          () => {
+            settled = true
+          },
+          () => {
+            settled = true
+          },
+        )
+        if (hold) {
+          await entered.promise
+          await vi.waitFor(async () => {
+            const report = await readFile(
+              join(f.session.cwd, 'wire.jsonl'),
+              'utf8',
+            )
+            expect(
+              report
+                .split('\n')
+                .filter(Boolean)
+                .map((line) => JSON.parse(line))
+                .some((row) => row.event === 'replay_sent' && row.count === 70),
+            ).toBe(true)
+          })
+          expect(settled).toBe(false)
+          expect(f.failures).toEqual([])
+          held.resolve()
+        }
+        handle = await loading
+        expect(handle.binding).toEqual(binding)
+        const records = f.transactions.flatMap(
+          (transaction) => transaction.records,
+        )
+        const replay = records.filter(
+          (record) => record.value.kind === 'replay',
+        )
+        expect(replay).toHaveLength(70)
+        expect(
+          replay.map((record) =>
+            record.value.kind === 'replay' &&
+            record.value.event.type === 'text_delta'
+              ? record.value.event.text
+              : null,
+          ),
+        ).toEqual(Array.from({ length: 70 }, (_, i) => `History ${i}.`))
+        expect(
+          records.some(
+            (record) =>
+              record.value.kind === 'disposition' &&
+              record.value.status === 'replay_visible',
+          ),
+        ).toBe(true)
+        expect(
+          (await f.frames()).some((frame) => frame.method === 'session/new'),
+        ).toBe(false)
+        expect(
+          (await (await handle.prompt('after replay')).completion).status,
+        ).toBe('completed')
+        expect(f.failures).toEqual([])
+        await handle.kill()
+        f.deps.host.reserve('instance', 'processes', 8)()
+        f.deps.host.reserve('instance', 'retained', 128 * 1024 * 1024)()
+      } finally {
+        held.resolve()
+        if (loading) handle = await loading.catch(() => undefined)
+        await f.cleanup(handle)
       }
-      handle = await createTypedAcpAdapter(f.deps).load!(
-        { ...f.session, binding },
-        (event) => f.events.push(event),
-      )
-      expect(handle.binding).toEqual(binding)
-      const records = f.transactions.flatMap(
-        (transaction) => transaction.records,
-      )
-      const replay = records.filter((record) => record.value.kind === 'replay')
-      expect(replay).toHaveLength(70)
-      expect(
-        replay.map((record) =>
-          record.value.kind === 'replay' &&
-          record.value.event.type === 'text_delta'
-            ? record.value.event.text
-            : null,
-        ),
-      ).toEqual(Array.from({ length: 70 }, (_, i) => `History ${i}.`))
-      expect(
-        records.some(
-          (record) =>
-            record.value.kind === 'disposition' &&
-            record.value.status === 'replay_visible',
-        ),
-      ).toBe(true)
-      expect(
-        (await f.frames()).some((frame) => frame.method === 'session/new'),
-      ).toBe(false)
-      expect(
-        (await (await handle.prompt('after replay')).completion).status,
-      ).toBe('completed')
-      expect(f.failures).toEqual([])
-    } finally {
-      await f.cleanup(handle)
-    }
-  }, 15000)
+    },
+    15000,
+  )
   test.each(['allow', 'cancel'] as const)(
     'handles SDK permission with explicit %s',
     async (mode) => {

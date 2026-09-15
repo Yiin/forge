@@ -94,6 +94,7 @@ const connection = new AgentSideConnection(
               content: { type: 'text', text: `History ${index}.` },
             },
           })
+        report('replay_sent', { count: 70 })
       }
       return { modes: structuredClone(modes) }
     },
