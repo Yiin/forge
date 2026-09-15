@@ -8,7 +8,7 @@ import {
   resolveExecutable,
   type AcpLaunch,
 } from './profiles.js'
-import { createAcpDiscovery } from './discovery.js'
+import { closeAcpDiscovery, createAcpDiscovery } from './discovery.js'
 import { AcpResourceHost } from './limits.js'
 import { NativeProcess } from '../process.js'
 import * as native from '../process.js'
@@ -519,4 +519,72 @@ describe('dedicated ACP launch and discovery', () => {
       for (const call of await f.calls()) await expectStopped(call.pid)
     },
   )
+})
+
+it('fences a held original resolver and joins it without launching a process', async () => {
+  const f = await fixture('normal'),
+    host = new AcpResourceHost()
+  const entered = deferred<void>(),
+    held = deferred<string>()
+  vi.spyOn(profiles, 'resolveExecutable').mockImplementation(async () => {
+    entered.resolve()
+    return held.promise
+  })
+  const discovery = createAcpDiscovery('hermes', f.input, host)
+  const result = discovery.refresh(f.cwd)
+  await entered.promise
+  const closing = closeAcpDiscovery(host)
+  expect(closeAcpDiscovery(host)).toBe(closing)
+  let settled = false
+  void closing.then(() => {
+    settled = true
+  })
+  try {
+    await expect(discovery.refresh(f.cwd)).rejects.toThrow(
+      'discovery is closed',
+    )
+    expect((await result).status).toBe('failed')
+    expect(settled).toBe(false)
+    expect(() => host.reserve('instance', 'discovery', 4)).toThrow('limit')
+  } finally {
+    held.resolve(f.input.command)
+    await closing
+  }
+  expect(closeAcpDiscovery(host)).toBe(closing)
+  host.reserve('instance', 'discovery', 4)()
+  await expect(f.calls()).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
+it('retains failed live probe cleanup and retries only the original process', async () => {
+  const f = await fixture('held'),
+    host = new AcpResourceHost()
+  const original = NativeProcess.prototype.close
+  const owners = new Set<NativeProcess>()
+  const close = vi
+    .spyOn(NativeProcess.prototype, 'close')
+    .mockImplementation(function (this: NativeProcess) {
+      owners.add(this)
+      return Promise.reject(Error('original close refused'))
+    })
+  const discovery = createAcpDiscovery('hermes', f.input, host)
+  const result = discovery.refresh(f.cwd)
+  try {
+    await vi.waitFor(async () => expect(await f.calls()).toHaveLength(1))
+    await expect(closeAcpDiscovery(host)).rejects.toThrow(
+      'discovery cleanup failed',
+    )
+    expect((await result).status).toBe('failed')
+    expect(owners.size).toBe(1)
+    expect(() => host.reserve('instance', 'processes', 8)).toThrow('limit')
+    await expect(discovery.refresh(f.cwd)).rejects.toThrow(
+      'discovery is closed',
+    )
+  } finally {
+    close.mockImplementation(original)
+    await closeAcpDiscovery(host)
+  }
+  expect(await f.calls()).toHaveLength(1)
+  host.reserve('instance', 'processes', 8)()
+  host.reserve('instance', 'discovery', 4)()
+  for (const call of await f.calls()) await expectStopped(call.pid)
 })

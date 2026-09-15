@@ -1,3 +1,7 @@
+import {
+  nativeInteractionSchema,
+  type NativeInteraction,
+} from '@forge/protocol/ws'
 import type { DatabaseSync } from 'node:sqlite'
 import type { HarnessEvent } from '../harnesses/types.js'
 import type { HarnessItem } from './harness.js'
@@ -31,14 +35,70 @@ export class NativeInteractions {
   constructor(
     private readonly db: DatabaseSync,
     private readonly bus: EventBus,
-  ) {}
-  owns(sessionId: string, requestId: string) {
-    return Boolean(
-      this.db
-        .prepare(
-          "SELECT 1 FROM native_interactions WHERE session_id=? AND request_id=? AND json_extract(request,'$.native')=1",
+  ) {
+    // Request callbacks cannot survive a server restart.
+    const expired = db
+      .prepare(
+        "SELECT session_id, request_id FROM native_interactions WHERE status IN ('pending', 'replying')",
+      )
+      .all() as Array<{ session_id: string; request_id: string }>
+    if (!expired.length) return
+    const saved = []
+    db.exec('BEGIN')
+    try {
+      for (const request of expired) {
+        db.prepare(
+          "UPDATE native_interactions SET status='expired',updated_at=? WHERE session_id=? AND request_id=? AND status IN ('pending','replying')",
+        ).run(Date.now(), request.session_id, request.request_id)
+        const original = db
+          .prepare(
+            "SELECT turn_id FROM messages WHERE session_id=? AND type='ask_user_question' AND json_extract(content,'$.questionId')=? ORDER BY seq DESC LIMIT 1",
+          )
+          .get(request.session_id, request.request_id) as
+          { turn_id: string | null } | undefined
+        if (!original?.turn_id) continue
+        saved.push(
+          appendMessageInTransaction(db, {
+            sessionId: request.session_id,
+            turnId: original.turn_id,
+            itemId: crypto.randomUUID(),
+            role: 'user',
+            type: 'user_answer',
+            content: {
+              type: 'user_answer',
+              questionId: request.request_id,
+              expired: true,
+            },
+          }),
         )
-        .get(sessionId, requestId),
+      }
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+    for (const message of saved) publishAppendedMessage(bus, message)
+  }
+  listPending(sessionId: string): NativeInteraction[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM native_interactions WHERE session_id=? ORDER BY created_at, request_id',
+      )
+      .all(sessionId) as Array<Record<string, unknown>>
+    return rows.map((row) =>
+      nativeInteractionSchema.parse({
+        ...JSON.parse(String(row.request)),
+        status: row.status,
+        ...(row.runtime_generation
+          ? { runtimeGeneration: row.runtime_generation }
+          : {}),
+        ...(row.answer == null
+          ? {}
+          : { answer: JSON.parse(String(row.answer)) }),
+        createdAt: Number(row.created_at),
+        updatedAt: Number(row.updated_at),
+        expiresAt: Number(row.expires_at),
+      }),
     )
   }
   register(

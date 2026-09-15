@@ -5,7 +5,7 @@ import { migrate } from '../src/db/migrate.js'
 import { EventBus } from '../src/events/bus.js'
 import { UploadStore } from '../src/uploads/store.js'
 import { SessionManager } from '../src/sessions/manager.js'
-import { QuestionManager } from '../src/acp/questions.js'
+import { NativeInteractions } from '../src/sessions/native-interactions.js'
 
 describe('app wiring', () => {
   test('serves project, session and question routes together', async () => {
@@ -16,7 +16,7 @@ describe('app wiring', () => {
     ).run()
     const bus = new EventBus()
     const store = new UploadStore(db, { dataDir: '/tmp/forge-app-wiring', bus })
-    const questions = new QuestionManager({ db, bus })
+    const questions = new NativeInteractions(db, bus)
     const manager = new SessionManager(db, bus, () => ({
       spawn: async (_s, _i, onExit) => ({
         prompt: async () => onExit(new Error('none')),
@@ -92,6 +92,8 @@ describe('app wiring', () => {
     expect(await (await app.request('/api/sessions')).json()).toBeInstanceOf(
       Array,
     )
-    manager.close()
+    await manager.close()
+    await store.close()
+    db.close()
   })
 })

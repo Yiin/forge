@@ -153,3 +153,45 @@ it('rejects invalid answers without consuming the original request', async () =>
   expect(f.status()).toBe('pending')
   expect(f.callback).not.toHaveBeenCalled()
 })
+
+it('lists durable request states and expires restart requests without restoring callbacks', async () => {
+  const f = fixture()
+  expect(f.service.listPending(f.session)).toMatchObject([
+    {
+      questionId: 'original-request',
+      status: 'pending',
+      runtimeGeneration: 'original-generation',
+    },
+  ])
+  expect(f.service.listPending('foreign')).toEqual([])
+  const restarted = new NativeInteractions(f.db, new EventBus())
+  expect(restarted.listPending(f.session)).toMatchObject([
+    { questionId: 'original-request', status: 'expired' },
+  ])
+  await expect(
+    restarted.answerQuestion(f.session, 'original-request', {
+      answer: 'allow',
+    }),
+  ).rejects.toMatchObject({ status: 410 })
+  expect(f.callback).not.toHaveBeenCalled()
+  expect(
+    f.db
+      .prepare("SELECT turn_id,content FROM messages WHERE type='user_answer'")
+      .all(),
+  ).toEqual([
+    {
+      turn_id: 'turn',
+      content: JSON.stringify({
+        type: 'user_answer',
+        questionId: 'original-request',
+        expired: true,
+      }),
+    },
+  ])
+  new NativeInteractions(f.db, new EventBus())
+  expect(
+    f.db
+      .prepare("SELECT count(*) AS n FROM messages WHERE type='user_answer'")
+      .get(),
+  ).toEqual({ n: 1 })
+})
