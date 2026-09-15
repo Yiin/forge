@@ -21,6 +21,7 @@ import { EpicTriageCard } from './EpicTriageCard'
 import { useSessionsStore } from '../../stores/sessions'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
+import { NativeContentRow } from './NativeContentRow'
 
 const EMPTY_MESSAGES: never[] = []
 
@@ -185,6 +186,8 @@ function RenderItemContent({
   if (item.kind === 'plan') return <PlanCard item={item} />
   if (item.kind === 'attachment') return <AttachmentItem item={item} />
   if (item.kind === 'system') return <SystemItem item={item} />
+  if (item.kind === 'native')
+    return <NativeContentRow item={item} sessionId={sessionId} />
   if (item.kind === 'working') return <WorkingRow />
   return null
 }

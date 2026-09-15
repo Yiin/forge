@@ -50,6 +50,13 @@ function item(event: HarnessEvent): HarnessItem | undefined {
         turnId: event.turnId,
         itemId: event.itemId,
       })
+    case 'child_updated':
+    case 'content_block':
+    case 'file_change':
+    case 'source_reference':
+    case 'usage':
+    case 'usage_snapshot':
+      return make({ ...event })
     case 'plan':
       return make({
         type: 'plan',

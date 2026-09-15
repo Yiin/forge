@@ -12,6 +12,12 @@ import {
 } from '../src/harness.js'
 
 const fixtures = [
+  { type: 'content_block' },
+  { type: 'source_reference' },
+  { type: 'usage' },
+  { type: 'usage_snapshot' },
+  { type: 'file_change' },
+  { type: 'child_updated' },
   { type: 'text_delta', text: 'hello' },
   { type: 'thought_delta', text: 'thinking' },
   {
