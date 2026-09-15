@@ -65,11 +65,9 @@ function item(event: HarnessEvent): HarnessItem | undefined {
       return make({ ...event })
     case 'request_cancelled':
       return make({
-        type: 'ask_user_question',
+        type: 'user_answer',
         questionId: event.requestId,
-        requestStatus: 'expired',
-        source: 'ext',
-        turnId: undefined,
+        expired: true,
       })
     case 'plan':
       return make({
