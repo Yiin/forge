@@ -29,7 +29,12 @@ export function AskUserQuestionPanel({ sessionId }: { sessionId: string }) {
   const messages = useMessagesStore(
     (state) => state.bySession[sessionId] ?? EMPTY_MESSAGES,
   )
-  const request = pendingQuestionRequests(messages)[0]
+  const requests = pendingQuestionRequests(messages)
+  const request =
+    requests.find(
+      (item) =>
+        item.requestStatus === 'pending' || item.requestStatus === undefined,
+    ) ?? requests[0]
   if (!request) return null
   return (
     <QuestionCard
@@ -127,6 +132,7 @@ function QuestionCard({
     const onKeyDown = (event: KeyboardEvent) => {
       if (
         !question ||
+        settled ||
         sending ||
         event.metaKey ||
         event.ctrlKey ||
@@ -171,7 +177,7 @@ function QuestionCard({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [cancel, freeText, question, selectedIds, sending])
+  }, [cancel, freeText, question, selectedIds, sending, settled])
   if (!question) return null
   if (settled) {
     const statusText = {
@@ -245,14 +251,14 @@ function QuestionCard({
         disabled={sending}
         onChange={setAnswer}
       />
-      {question.allowFreeInput && (
+      {(question.allowFreeInput || question.options.length === 0) && (
         <Input
           aria-label="Additional answer"
           type={question.isSecret ? 'password' : 'text'}
           value={typeof selected === 'string' ? selected : freeText}
           onChange={(event) =>
             setAnswer(
-              question.multiSelect && selectedIds.length > 0
+              question.multiSelect && question.allowFreeInput
                 ? {
                     type: 'selected_with_text',
                     optionIds: selectedIds,
@@ -262,6 +268,19 @@ function QuestionCard({
             )
           }
           placeholder="Add your own answer"
+          onKeyDown={(event) => {
+            if (
+              event.key !== 'Enter' ||
+              event.nativeEvent.isComposing ||
+              sending ||
+              !canAdvance ||
+              (page === request.questions.length - 1 && !complete)
+            )
+              return
+            event.preventDefault()
+            if (page < request.questions.length - 1) setPage(page + 1)
+            else void submit()
+          }}
         />
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
@@ -351,11 +370,16 @@ function QuestionChoices({
             aria-pressed={question.multiSelect ? active : undefined}
             onClick={() => {
               if (question.multiSelect)
-                onChange(
-                  active
+                (() => {
+                  const optionIds = active
                     ? selected.filter((item) => item !== option.id)
-                    : [...selected.filter(Boolean), option.id!],
-                )
+                    : [...selected.filter(Boolean), option.id!]
+                  onChange(
+                    typeof value === 'object' && !Array.isArray(value)
+                      ? { ...value, optionIds }
+                      : optionIds,
+                  )
+                })()
               else onChange(option.id!)
             }}
           >

@@ -46,15 +46,18 @@ describe('durable native interactions', () => {
       }),
     ).toThrow('Unknown answer key')
     manager.answerQuestion(session.id, 'request-1', {
-      answers: { 'Name?': ['Ada'], 'Secret?': 'hidden' },
+      answers: { 'question-0': ['name'], 'question-1': 'hidden' },
     })
     await pending
     expect(manager.listPending(session.id)[0]).toMatchObject({
       status: 'submitted',
-      answer: { 'Name?': ['Ada'], 'Secret?': '[redacted]' },
+      answer: { 'question-0': ['name'], 'question-1': '[redacted]' },
     })
     expect(db.prepare('SELECT answer FROM native_interactions').get()).toEqual({
-      answer: JSON.stringify({ 'Name?': ['Ada'], 'Secret?': '[redacted]' }),
+      answer: JSON.stringify({
+        'question-0': ['name'],
+        'question-1': '[redacted]',
+      }),
     })
     expect(
       db
@@ -64,7 +67,7 @@ describe('durable native interactions', () => {
       content: JSON.stringify({
         type: 'user_answer',
         questionId: 'request-1',
-        answers: { 'Name?': ['Ada'], 'Secret?': '[redacted]' },
+        answers: { 'question-0': ['name'], 'question-1': '[redacted]' },
       }),
     })
     db.close()

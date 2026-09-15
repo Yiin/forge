@@ -43,6 +43,7 @@ export function pendingQuestionRequests(
             {
               question: content.question,
               options: (content.options ?? []).map((label) => ({ label })),
+              allowFreeInput: (content.options ?? []).length === 0,
             } as Question,
           ]
         : [])

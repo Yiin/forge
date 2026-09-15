@@ -21,6 +21,9 @@ export type PendingQuestion = {
     isSecret?: boolean
   }>
   source: 'permission' | 'ext'
+  toolName?: string
+  toolContext?: string
+  permissionScope?: 'once' | 'session'
   method?: string
   raw: Record<string, unknown>
 }
@@ -58,7 +61,7 @@ const object = (value: unknown): Record<string, unknown> =>
 
 const normalizeQuestions = (value: unknown): PendingQuestion['questions'] => {
   if (!Array.isArray(value)) return []
-  return value.flatMap((entry) => {
+  return value.flatMap((entry, questionIndex) => {
     const item = object(entry)
     const question =
       typeof item.question === 'string'
@@ -67,7 +70,7 @@ const normalizeQuestions = (value: unknown): PendingQuestion['questions'] => {
           ? item.prompt
           : undefined
     if (!question || !Array.isArray(item.options)) return []
-    const options = item.options.flatMap((option) => {
+    const options = item.options.flatMap((option, optionIndex) => {
       const value = object(option)
       const label =
         typeof value.label === 'string'
@@ -82,7 +85,10 @@ const normalizeQuestions = (value: unknown): PendingQuestion['questions'] => {
               ...(typeof value.description === 'string'
                 ? { description: value.description }
                 : {}),
-              ...(typeof value.id === 'string' ? { id: value.id } : {}),
+              id:
+                typeof value.id === 'string'
+                  ? value.id
+                  : `option-${questionIndex}-${optionIndex}`,
               ...(typeof value.value === 'string'
                 ? { value: value.value }
                 : {}),
@@ -92,7 +98,7 @@ const normalizeQuestions = (value: unknown): PendingQuestion['questions'] => {
     })
     return [
       {
-        ...(typeof item.id === 'string' ? { id: item.id } : {}),
+        id: typeof item.id === 'string' ? item.id : `question-${questionIndex}`,
         ...(typeof item.header === 'string' ? { header: item.header } : {}),
         question,
         options,
@@ -200,6 +206,11 @@ export class QuestionManager {
         question: question.questions[0].question,
         options: question.questions[0].options.map((option) => option.label),
         source: question.source,
+        ...(question.toolName ? { toolName: question.toolName } : {}),
+        ...(question.toolContext ? { toolContext: question.toolContext } : {}),
+        ...(question.permissionScope
+          ? { permissionScope: question.permissionScope }
+          : {}),
       },
     })
   }
@@ -272,7 +283,9 @@ export class QuestionManager {
     const secretIds = new Set(
       saved.questions
         .filter((question) => (question as { isSecret?: boolean }).isSecret)
-        .map((question) => question.question),
+        .flatMap((question) =>
+          question.id ? [question.id, question.question] : [question.question],
+        ),
     )
     if (!secretIds.size) return answer
     if (
@@ -294,13 +307,43 @@ export class QuestionManager {
   private validateAnswer(held: Held, answer: unknown) {
     if (typeof answer !== 'object' || answer === null || Array.isArray(answer))
       return
+    const answerMap = answer as Record<string, unknown>
     const allowed = new Set(
       held.questions.flatMap((question) =>
         question.id ? [question.id, question.question] : [question.question],
       ),
     )
-    const unknown = Object.keys(answer).find((key) => !allowed.has(key))
+    const unknown = Object.keys(answerMap).find((key) => !allowed.has(key))
     if (unknown) throw new QuestionError(400, `Unknown answer key: ${unknown}`)
+    for (const question of held.questions) {
+      const idKey =
+        question.id !== undefined && answerMap[question.id] !== undefined
+      const value = idKey
+        ? answerMap[question.id!]
+        : answerMap[question.question]
+      if (value === undefined)
+        throw new QuestionError(400, `Missing answer key: ${question.question}`)
+      if (!idKey) continue
+      const optionIds: unknown = Array.isArray(value)
+        ? value
+        : object(value).type === 'selected_with_text'
+          ? object(value).optionIds
+          : undefined
+      if (!Array.isArray(optionIds)) continue
+      if (
+        optionIds.some(
+          (optionId) =>
+            typeof optionId !== 'string' ||
+            !question.options.some((option) => option.id === optionId),
+        )
+      )
+        throw new QuestionError(400, `Invalid option for ${question.question}`)
+      if (!question.multiSelect && optionIds.length > 1)
+        throw new QuestionError(
+          400,
+          `Multiple options for ${question.question}`,
+        )
+    }
   }
   private hold(
     question: PendingQuestion,
@@ -349,15 +392,48 @@ export class QuestionManager {
       sessionId: request.sessionId,
       questions: questions.length
         ? questions
-        : [{ question: request.toolCall.title ?? 'Question', options: [] }],
+        : [
+            {
+              id: 'permission',
+              question: request.toolCall.title ?? 'Question',
+              options: request.options.map((option) => ({
+                id: option.optionId,
+                label: option.name,
+              })),
+            },
+          ],
       source: 'permission',
+      toolName: request.toolCall.title ?? undefined,
+      toolContext: JSON.stringify(request.toolCall.rawInput ?? null),
+      permissionScope: request.options.some(
+        (option) => option.kind === 'allow_always',
+      )
+        ? 'session'
+        : 'once',
       raw: request as unknown as Record<string, unknown>,
     }
     return this.hold(question, (value) => {
       if (value === undefined)
         return { outcome: { outcome: 'cancelled' as const } }
+      const values = object(value)
+      const answer = values.answers ?? values.answer ?? value
+      const answerValues = object(answer)
+      const first = Array.isArray(answer)
+        ? (answer as unknown[])[0]
+        : answer && typeof answer === 'object' && !Array.isArray(answer)
+          ? answerValues.optionIds
+            ? answer
+            : Object.values(answerValues)[0]
+          : answer
       return {
-        outcome: { outcome: 'selected' as const, optionId: String(value) },
+        outcome: {
+          outcome: 'selected' as const,
+          optionId: String(
+            first && typeof first === 'object'
+              ? object(first).optionIds?.[0]
+              : first,
+          ),
+        },
       }
     }) as Promise<acp.RequestPermissionResponse>
   }
@@ -377,9 +453,15 @@ export class QuestionManager {
           const value =
             values[entry.id ?? ''] ?? values[entry.question] ?? answer
           const combined = object(value)
-          const optionIds = Array.isArray(combined.optionIds)
-            ? new Set(combined.optionIds.map(String))
-            : undefined
+          const selectedIds = Array.isArray(combined.optionIds)
+            ? combined.optionIds.map(String)
+            : Array.isArray(value)
+              ? value.filter((item): item is string => typeof item === 'string')
+              : typeof value === 'string' &&
+                  entry.options.some((option) => option.id === value)
+                ? [value]
+                : undefined
+          const optionIds = selectedIds ? new Set(selectedIds) : undefined
           const labels = optionIds
             ? entry.options
                 .filter((option) => option.id && optionIds.has(option.id))
