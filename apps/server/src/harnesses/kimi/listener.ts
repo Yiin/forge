@@ -1,5 +1,5 @@
 import { open, readlink } from 'node:fs/promises'
-import { readProcNames } from '../proc-names.js'
+import { isUninspectableProcEntry, readProcNames } from '../proc-names.js'
 import { statIsRunningGroupMember } from '../process-group.js'
 import { KimiError } from './limits.js'
 
@@ -59,12 +59,7 @@ export async function ownedListener(
         pgid,
       )
     } catch (error) {
-      if (
-        ['ENOENT', 'ESRCH'].includes(
-          (error as NodeJS.ErrnoException).code ?? '',
-        )
-      )
-        continue
+      if (isUninspectableProcEntry(error)) continue
       throw error
     }
     if (!member) continue
@@ -75,12 +70,7 @@ export async function ownedListener(
         maximum: 4096,
       })
     } catch (error) {
-      if (
-        ['ENOENT', 'ESRCH'].includes(
-          (error as NodeJS.ErrnoException).code ?? '',
-        )
-      )
-        continue
+      if (isUninspectableProcEntry(error)) continue
       throw error
     }
     for (const fd of descriptors) {
@@ -88,7 +78,7 @@ export async function ownedListener(
       try {
         if (sockets.has(await readlink(`/proc/${name}/fd/${fd}`))) return true
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        if (!isUninspectableProcEntry(error)) throw error
       }
     }
   }
