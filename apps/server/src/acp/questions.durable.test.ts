@@ -97,8 +97,44 @@ describe('durable native interactions', () => {
       toolCallId: 'request-3',
       questions: [{ prompt: 'Continue?', options: [] }],
     })
+    void first.handleExtension('cursor/ask_question', {
+      sessionId: session.id,
+      toolCallId: 'request-4',
+      questions: [{ prompt: 'Continue again?', options: [] }],
+    })
+    db.prepare(
+      `UPDATE native_interactions SET status = 'replying' WHERE request_id = ?`,
+    ).run('request-4')
     const second = new QuestionManager({ db, now: () => 1001 })
     expect(second.listPending(session.id)[0].status).toBe('expired')
+    expect(
+      db
+        .prepare("SELECT content FROM messages WHERE type = 'user_answer'")
+        .all(),
+    ).toEqual([
+      {
+        content: JSON.stringify({
+          type: 'user_answer',
+          questionId: 'request-3',
+          expired: true,
+        }),
+      },
+      {
+        content: JSON.stringify({
+          type: 'user_answer',
+          questionId: 'request-4',
+          expired: true,
+        }),
+      },
+    ])
+    new QuestionManager({ db, now: () => 1002 })
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM messages WHERE type = 'user_answer'",
+        )
+        .get(),
+    ).toEqual({ count: 2 })
     db.close()
   })
 })

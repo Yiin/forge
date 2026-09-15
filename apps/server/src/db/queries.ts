@@ -30,71 +30,70 @@ export type AppendMessage = {
   eventBus?: EventBus
 }
 
-export function appendMessage(db: Db, input: AppendMessage) {
-  const eventBus = input.eventBus
+type SavedMessage = ReturnType<typeof messageRowSchema.parse> & { seq: number }
+
+function insertMessage(db: Db, input: AppendMessage): SavedMessage {
   const parsed = messageRowSchema.parse({
     ...input,
     createdAt: input.createdAt ?? Date.now(),
   })
-  // Messages are strictly append-only. No mutation SQL is allowed for this table.
-  db.exec('BEGIN')
-  let saved: ReturnType<typeof messageRowSchema.parse> & { seq: number }
-  try {
-    const result = db
-      .prepare(
-        `INSERT INTO messages
+  const result = db
+    .prepare(
+      `INSERT INTO messages
       (session_id, turn_id, item_id, role, type, content, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        parsed.sessionId,
-        parsed.turnId,
-        parsed.itemId,
-        parsed.role,
-        parsed.type,
-        json(parsed.content),
-        parsed.createdAt,
-      )
-    const seq = Number(result.lastInsertRowid)
-    db.prepare('UPDATE sessions SET last_activity_at = ? WHERE id = ?').run(
-      parsed.createdAt,
-      parsed.sessionId,
     )
-    if (parsed.type === 'turn_end') {
-      const rows = db
-        .prepare(
-          `SELECT item_id, seq, content FROM messages
+    .run(
+      parsed.sessionId,
+      parsed.turnId,
+      parsed.itemId,
+      parsed.role,
+      parsed.type,
+      json(parsed.content),
+      parsed.createdAt,
+    )
+  const seq = Number(result.lastInsertRowid)
+  db.prepare('UPDATE sessions SET last_activity_at = ? WHERE id = ?').run(
+    parsed.createdAt,
+    parsed.sessionId,
+  )
+  if (parsed.type === 'turn_end') {
+    const rows = db
+      .prepare(
+        `SELECT item_id, seq, content FROM messages
         WHERE session_id = ? AND turn_id = ? AND type = 'text_delta' ORDER BY seq`,
-        )
-        .all(parsed.sessionId, parsed.turnId) as Array<{
-        item_id: string
-        seq: number
-        content: string
-      }>
-      const text = rows
-        .map((row) => {
-          const value = JSON.parse(row.content) as unknown
-          return typeof value === 'string'
-            ? value
-            : ((value as { text?: string })?.text ?? '')
-        })
-        .join('')
-      if (text)
-        db.prepare(
-          'INSERT INTO messages_fts(rowid, text, item_id, seq) VALUES (?, ?, ?, ?)',
-        ).run(
-          rows[0]?.seq ?? seq,
-          text,
-          rows[0]?.item_id ?? parsed.itemId,
-          rows[0]?.seq ?? seq,
-        )
-    }
-    db.exec('COMMIT')
-    saved = { ...parsed, seq }
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
+      )
+      .all(parsed.sessionId, parsed.turnId) as Array<{
+      item_id: string
+      seq: number
+      content: string
+    }>
+    const text = rows
+      .map((row) => {
+        const value = JSON.parse(row.content) as unknown
+        return typeof value === 'string'
+          ? value
+          : ((value as { text?: string })?.text ?? '')
+      })
+      .join('')
+    if (text)
+      db.prepare(
+        'INSERT INTO messages_fts(rowid, text, item_id, seq) VALUES (?, ?, ?, ?)',
+      ).run(
+        rows[0]?.seq ?? seq,
+        text,
+        rows[0]?.item_id ?? parsed.itemId,
+        rows[0]?.seq ?? seq,
+      )
   }
+  return { ...parsed, seq }
+}
+
+export function publishAppendedMessage(
+  eventBus: EventBus | undefined,
+  saved: SavedMessage,
+) {
+  if (!eventBus) return
   eventBus?.publishPersisted({
     seq: saved.seq,
     sessionId: saved.sessionId,
@@ -109,6 +108,23 @@ export function appendMessage(db: Db, input: AppendMessage) {
       createdAt: new Date(saved.createdAt).toISOString(),
     },
   })
+}
+
+export function appendMessageInTransaction(db: Db, input: AppendMessage) {
+  return insertMessage(db, input)
+}
+
+export function appendMessage(db: Db, input: AppendMessage) {
+  let saved: SavedMessage
+  db.exec('BEGIN')
+  try {
+    saved = insertMessage(db, input)
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+  publishAppendedMessage(input.eventBus, saved)
   return saved
 }
 
