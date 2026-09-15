@@ -1,3 +1,4 @@
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useEffect, useRef, useState, useId } from 'react'
 import {
   ChevronLeft,
@@ -53,7 +54,7 @@ export function WorkspaceDock({
   target,
   projectId,
   onReviewComment,
-  mobile = false,
+  mobile: mobileOverride,
 }: {
   sessionId: string
   target: WorkspaceTarget
@@ -61,6 +62,8 @@ export function WorkspaceDock({
   onReviewComment?: (comment: ReviewComment) => void
   mobile?: boolean
 }) {
+  const detectedMobile = useIsMobile()
+  const mobile = mobileOverride ?? detectedMobile
   const tabPrefix = useId()
   const dock = useShellStore((state) => state.dock(sessionId))
   const width = useShellStore((state) => state.dockWidth)
@@ -189,7 +192,11 @@ export function WorkspaceDock({
             variant="ghost"
             size="icon-sm"
             className="pointer-coarse:size-11"
-            onClick={() => setTakeover(sessionId, false)}
+            onClick={() =>
+              transition(() =>
+                mobile ? closeDock(sessionId) : setTakeover(sessionId, false),
+              )
+            }
             aria-label="Return to conversation"
           >
             <ChevronLeft size={16} />

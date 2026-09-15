@@ -1781,3 +1781,110 @@ describe('shutdown preserves durable turn recovery', () => {
     },
   )
 })
+
+describe('intentional native lifetime retirement', () => {
+  it.each(['resume', 'cleanup-refused', 'shutdown', 'no-load'] as const)(
+    'joins original retirement before exact load: %s',
+    async (mode) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'retirement', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'retirement',
+        cwd: '/tmp',
+      })
+      let retired = false,
+        release!: () => void,
+        entered!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const closing = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      let refuse = mode === 'cleanup-refused'
+      const original: HarnessHandle = {
+        get requiresResume() {
+          return retired
+        },
+        prompt: vi.fn(async () => {}),
+        cancel() {},
+        async kill() {
+          entered()
+          await held
+          if (refuse) throw Error('original cleanup refused')
+        },
+      }
+      const replacement: HarnessHandle = {
+        prompt: vi.fn(async () => {}),
+        cancel() {},
+        kill() {},
+      }
+      const spawn = vi.fn(() => original)
+      const loadSession = vi.fn(async (saved) => {
+        expect(saved.providerSessionId).toBe('original-native-binding')
+        return { handle: replacement, proven: true }
+      })
+      const manager = new SessionManager(db, new EventBus(), () => ({
+        spawn,
+        capabilities: { loadSession: mode !== 'no-load' },
+        loadSession,
+      }))
+      try {
+        await manager.prompt(session.id, 'first')
+        await vi.waitFor(() =>
+          expect(
+            db
+              .prepare('SELECT status FROM sessions WHERE id=?')
+              .get(session.id),
+          ).toEqual({ status: 'idle' }),
+        )
+        db.prepare('UPDATE sessions SET provider_session_id=? WHERE id=?').run(
+          'original-native-binding',
+          session.id,
+        )
+        retired = true
+        await manager.prompt(session.id, 'next')
+        await closing
+        expect(loadSession).not.toHaveBeenCalled()
+        expect(original.prompt).toHaveBeenCalledTimes(1)
+        let closeSettled = false
+        const close =
+          mode === 'shutdown'
+            ? manager.close().then(() => {
+                closeSettled = true
+              })
+            : undefined
+        await Promise.resolve()
+        expect(closeSettled).toBe(false)
+        release()
+        if (close) await close
+        else
+          await vi.waitFor(() =>
+            expect(
+              db
+                .prepare('SELECT status FROM sessions WHERE id=?')
+                .get(session.id),
+            ).toEqual({ status: mode === 'resume' ? 'idle' : 'errored' }),
+          )
+        expect(spawn).toHaveBeenCalledTimes(1)
+        expect(loadSession).toHaveBeenCalledTimes(mode === 'resume' ? 1 : 0)
+        expect(replacement.prompt).toHaveBeenCalledTimes(
+          mode === 'resume' ? 1 : 0,
+        )
+        expect(
+          db
+            .prepare('SELECT provider_session_id FROM sessions WHERE id=?')
+            .get(session.id),
+        ).toEqual({ provider_session_id: 'original-native-binding' })
+      } finally {
+        refuse = false
+        release()
+        await manager.close()
+        db.close()
+      }
+    },
+  )
+})

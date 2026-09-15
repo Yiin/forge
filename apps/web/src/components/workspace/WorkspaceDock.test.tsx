@@ -3,9 +3,27 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { WorkspaceDock } from './WorkspaceDock'
 import { useShellStore } from '@/stores/shell'
+import { useIsMobile } from '@/hooks/use-mobile'
+vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: vi.fn(() => false) }))
+const transitions = vi.hoisted(() => ({
+  hold: false,
+  pending: null as null | (() => void),
+}))
 
 vi.mock('./WorkspaceFilesSurface', () => ({
-  WorkspaceFilesSurface: () => <div>Files ready</div>,
+  WorkspaceFilesSurface: ({
+    transitionRef,
+  }: {
+    transitionRef?: { current: ((action: () => void) => void) | null }
+  }) => {
+    if (transitionRef)
+      transitionRef.current = transitions.hold
+        ? (action) => {
+            transitions.pending = action
+          }
+        : null
+    return <div>Files ready</div>
+  },
 }))
 vi.mock('./TerminalSurface', () => ({ TerminalSurface: () => null }))
 vi.mock('./BrowserPreview', () => ({ BrowserPreview: () => null }))
@@ -14,7 +32,12 @@ vi.mock('./GitHistorySurface', () => ({ GitHistorySurface: () => null }))
 vi.mock('../chat/SubagentTranscript', () => ({
   SubagentTranscript: () => null,
 }))
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.mocked(useIsMobile).mockReturnValue(false)
+  transitions.hold = false
+  transitions.pending = null
+})
 
 it('opens a selected surface from the closed dock without a flex-width sibling', () => {
   const sessionId = 'closed-dock-test'
@@ -74,4 +97,39 @@ it('owns only tabs while keeping close actions and arrow navigation accessible',
       .getByRole('separator', { name: 'Resize workspace dock' })
       .getAttribute('aria-valuenow'),
   ).toBeTruthy()
+})
+
+it('detects the phone viewport and closes Return through the document guard', () => {
+  vi.mocked(useIsMobile).mockReturnValue(true)
+  transitions.hold = true
+  const id = 'automatic-phone-dock'
+  useShellStore
+    .getState()
+    .openDockTab(id, { id: 'files', kind: 'files', title: 'Files' })
+  render(<WorkspaceDock sessionId={id} projectId="p" target={{ cwd: null }} />)
+  const dock = screen.getByRole('complementary', { name: 'Workspace dock' })
+  expect(dock.style.width).toBe('')
+  expect(dock.classList.contains('fixed')).toBe(true)
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Return to conversation' }),
+  )
+  expect(useShellStore.getState().dock(id).open).toBe(true)
+  expect(transitions.pending).not.toBeNull()
+  transitions.pending!()
+  expect(useShellStore.getState().dock(id).open).toBe(false)
+})
+it('restores a desktop takeover without closing its dock', () => {
+  const id = 'desktop-return-dock'
+  useShellStore
+    .getState()
+    .openDockTab(id, { id: 'files', kind: 'files', title: 'Files' })
+  useShellStore.getState().setDockTakeover(id, true)
+  render(<WorkspaceDock sessionId={id} projectId="p" target={{ cwd: null }} />)
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Return to conversation' }),
+  )
+  expect(useShellStore.getState().dock(id)).toMatchObject({
+    open: true,
+    takeover: false,
+  })
 })

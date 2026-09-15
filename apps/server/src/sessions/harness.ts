@@ -38,6 +38,7 @@ export type PromptContent =
     }
 
 export type HarnessHandle = {
+  readonly requiresResume?: boolean
   prompt(content: string | PromptContent[]): Promise<void> | void
   steer?(...args: any[]): Promise<unknown> | unknown
   followUp?(...args: any[]): Promise<unknown> | unknown

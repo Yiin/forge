@@ -12,6 +12,7 @@ import { nativeHarness } from './native.js'
 
 describe('native session bridge', () => {
   it('keeps the provider completion authoritative and translates typed events', async () => {
+    let expired = false
     let emit!: (event: any) => void
     const completion = createCompletionHandle({
       completionId: 'completion-1',
@@ -32,6 +33,9 @@ describe('native session bridge', () => {
       spawn: async (_session: any, callback: any) => {
         emit = callback
         return {
+          get requiresResume() {
+            return expired
+          },
           binding: {
             provider: 'fake',
             accountId: null,
@@ -56,6 +60,9 @@ describe('native session bridge', () => {
       (value) => received.push(value),
       () => undefined,
     )
+    expect(handle.requiresResume).toBe(false)
+    expired = true
+    expect(handle.requiresResume).toBe(true)
     const delivered = Promise.resolve(handle.prompt('hello'))
     emit({ type: 'turn_started', turnId: 'turn-1' })
     emit({

@@ -983,6 +983,13 @@ export function createTypedAcpAdapter(
     )
     lifetimeTimer.unref?.()
     const handle: HarnessHandle = {
+      get requiresResume() {
+        return (
+          lifetimeExpired ||
+          rootCount >= 256 ||
+          Date.now() - createdAt >= 24 * 60 * 60 * 1000
+        )
+      },
       get binding() {
         return io.binding
       },
