@@ -13,11 +13,19 @@ export const fixture = fileURLToPath(
 )
 const owned = new Set<NativeProcess>()
 afterEach(async () => {
-  // Retire the registry first. A runtime that fails to close keeps its rejected
-  // close promise, so leaving it registered would fail every later test too.
-  const runtimes = [...owned]
-  owned.clear()
-  await Promise.all(runtimes.map((runtime) => runtime.close()))
+  const failures: unknown[] = []
+  for (const runtime of owned) {
+    try {
+      await runtime.close()
+      owned.delete(runtime)
+    } catch (error) {
+      // Keep failed owners registered. The next cleanup pass can retry them,
+      // and the failure remains visible instead of being silently discarded.
+      failures.push(error)
+    }
+  }
+  if (failures.length)
+    throw new AggregateError(failures, 'Native process cleanup failed')
 })
 
 export function deferred<T>() {
