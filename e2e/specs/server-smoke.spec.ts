@@ -44,6 +44,8 @@ test('creates a project and session, then replays streamed messages', async () =
       seq: number
       type: string
       role: string
+      itemId: string
+      turnId: string
       content: { text?: string }
     }> = []
     socket.onmessage = (event) => {
@@ -71,14 +73,26 @@ test('creates a project and session, then replays streamed messages', async () =
     expect(messages.map((message) => message.seq)).toEqual(
       [...messages].map((message) => message.seq).sort((a, b) => a - b),
     )
-    // The server folds a turn's streamed chunks into one durable item, so the
-    // assertion is on the assembled reply, not on a chunk count. The fixture
-    // echoes the prompt back.
     const reply = messages.filter(
       (message) => message.type === 'text_delta' && message.role === 'agent',
     )
-    expect(reply).toHaveLength(1)
-    expect(reply[0]?.content.text).toBe('hello')
+    expect(reply.map((message) => message.content.text)).toEqual([
+      'he',
+      'll',
+      'o',
+    ])
+    for (const message of reply) {
+      expect(message.itemId).toEqual(expect.any(String))
+      expect(message.itemId.length).toBeGreaterThan(0)
+      expect(message.turnId).toEqual(expect.any(String))
+      expect(message.turnId.length).toBeGreaterThan(0)
+    }
+    expect(new Set(reply.map((message) => message.itemId)).size).toBe(1)
+    expect(new Set(reply.map((message) => message.turnId)).size).toBe(1)
+    expect(new Set(messages.map((message) => message.seq)).size).toBe(
+      messages.length,
+    )
+    expect(reply.map((message) => message.content.text).join('')).toBe('hello')
   } finally {
     try {
       originalSocket?.close()

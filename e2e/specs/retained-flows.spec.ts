@@ -81,6 +81,11 @@ for (const flow of ['search', 'fork/archive'] as const)
       expect(
         (await api(forge, `/api/sessions/${branchId}`)).parentSessionId,
       ).toBe(session.id)
+      const openNavigation = page.getByRole('button', {
+        name: 'Open navigation',
+        exact: true,
+      })
+      if (await openNavigation.isVisible()) await openNavigation.click()
       await page
         .getByRole('button', { name: `Actions for ${branch.title}` })
         .click()
@@ -91,6 +96,7 @@ for (const flow of ['search', 'fork/archive'] as const)
         )
         .toBe('archived')
       await page.reload()
+      if (await openNavigation.isVisible()) await openNavigation.click()
       await page
         .getByRole('button', { name: `Actions for ${branch.title}` })
         .click()

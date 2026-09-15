@@ -194,7 +194,7 @@ export function SessionSidebar() {
   }
   const runningCount = active.filter((s) => s.status === 'running').length
   return (
-    <nav className="flex h-full flex-col gap-3 text-sm">
+    <nav className="flex h-full flex-col gap-3 text-sm [@media(max-height:480px)]:overflow-y-auto [@media(max-height:480px)]:[&>*]:shrink-0">
       <div className="flex items-center justify-between gap-2 px-1">
         <span className="text-lg font-semibold tracking-tight">forge</span>
         <div className="flex items-center gap-0.5">
@@ -370,7 +370,7 @@ export function SessionSidebar() {
           className="h-9 pl-8"
         />
       </div>
-      <ul className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+      <ul className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto [@media(max-height:480px)]:flex-none [@media(max-height:480px)]:overflow-visible">
         {active.length === 0 && settled.length === 0 && (
           <li className="flex flex-col items-start gap-1 px-2 py-3 text-muted-foreground">
             No sessions yet.
