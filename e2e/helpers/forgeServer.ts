@@ -36,6 +36,20 @@ type ForgeRoutePage = {
   ): Promise<void>
 }
 
+type ChildOwnership = {
+  close: Promise<{ code: number | null; signal: NodeJS.Signals | null }>
+  closed: boolean
+  cleanup?: Promise<void>
+}
+
+type ProxyState = {
+  pending: Set<Promise<void>>
+  controllers: Set<AbortController>
+}
+
+const childOwnership = new WeakMap<ChildProcess, ChildOwnership>()
+const proxyStates = new WeakMap<object, ProxyState>()
+
 /**
  * Point the app's `/api` calls at an isolated Forge server.
  *
@@ -48,37 +62,54 @@ export async function proxyForgeApi(
   page: ForgeRoutePage,
   forge: { baseUrl: string },
 ): Promise<void> {
+  const state: ProxyState = {
+    pending: new Set(),
+    controllers: new Set(),
+  }
+  proxyStates.set(page, state)
   await page.route('**/api/**', async (route) => {
-    const requestUrl = new URL(route.request().url())
-    const headers = { ...route.request().headers() }
-    // The response is re-served verbatim, so never invite a compressed one.
-    for (const key of ['host', 'accept-encoding', 'connection', 'referer'])
-      delete headers[key]
-    const response = await fetch(
-      `${forge.baseUrl}${requestUrl.pathname}${requestUrl.search}`,
-      {
-        method: route.request().method(),
-        headers,
-        body: route.request().postDataBuffer() ?? undefined,
-      },
-    )
-    // Read the body before the guard below, so a failed read still fails.
-    const body = Buffer.from(await response.arrayBuffer())
-    try {
-      await route.fulfill({
-        status: response.status,
-        headers: Object.fromEntries(response.headers),
-        body,
-      })
-    } catch (error) {
-      // A test can finish while the app still has a request in flight. Its
-      // route is torn down first, and answering it then is not a test failure.
-      const message = String(error)
-      if (
-        !message.includes('Route is already handled') &&
-        !message.includes('has been closed')
+    const controller = new AbortController()
+    state.controllers.add(controller)
+    const operation = (async () => {
+      const requestUrl = new URL(route.request().url())
+      const headers = { ...route.request().headers() }
+      // The response is re-served verbatim, so never invite a compressed one.
+      for (const key of ['host', 'accept-encoding', 'connection', 'referer'])
+        delete headers[key]
+      const response = await fetch(
+        `${forge.baseUrl}${requestUrl.pathname}${requestUrl.search}`,
+        {
+          method: route.request().method(),
+          headers,
+          body: route.request().postDataBuffer() ?? undefined,
+          signal: controller.signal,
+        },
       )
-        throw error
+      // Read the body before the guard below, so a failed read still fails.
+      const body = Buffer.from(await response.arrayBuffer())
+      try {
+        await route.fulfill({
+          status: response.status,
+          headers: Object.fromEntries(response.headers),
+          body,
+        })
+      } catch (error) {
+        // A test can finish while the app still has a request in flight. Its
+        // route is torn down first, and answering it then is not a test failure.
+        const message = String(error)
+        if (
+          !message.includes('Route is already handled') &&
+          !message.includes('has been closed')
+        )
+          throw error
+      }
+    })()
+    state.pending.add(operation)
+    try {
+      await operation
+    } finally {
+      state.pending.delete(operation)
+      state.controllers.delete(controller)
     }
   })
 }
@@ -91,6 +122,7 @@ export async function stopProxiedForge(
     stop(): Promise<void>
   },
 ): Promise<void> {
+  const state = proxyStates.get(page)
   let routeFailure: { error: unknown } | undefined
   let stopFailure: { error: unknown } | undefined
   try {
@@ -103,6 +135,8 @@ export async function stopProxiedForge(
       routeFailure = { error }
     }
   } finally {
+    for (const controller of state?.controllers ?? []) controller.abort()
+    await Promise.allSettled(state?.pending ?? [])
     try {
       await forge.stop()
     } catch (error) {
@@ -210,6 +244,7 @@ export async function launchForge(
       detached: true,
     },
   )
+  captureChildOwnership(child)
   const serverLog = resolve(tmpdir(), `forge-e2e-server-${child.pid}.log`)
   const logStream = (await import('node:fs')).createWriteStream(serverLog)
   let logClosed = false
@@ -336,18 +371,37 @@ export async function stopForge(
   remove = true,
   port?: number,
 ): Promise<void> {
-  const close = new Promise<{
-    code: number | null
-    signal: NodeJS.Signals | null
-  }>((resolve) => {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      resolve({ code: child.exitCode, signal: child.signalCode })
-      return
-    }
-    child.once('close', (code, signal) => resolve({ code, signal }))
-  })
+  const ownership = childOwnership.get(child) ?? captureChildOwnership(child)
+  if (ownership.cleanup) return ownership.cleanup
+  ownership.cleanup = stopOwnedForge(child, ownership, dataDir, remove, port)
+  return ownership.cleanup
+}
+
+function captureChildOwnership(child: ChildProcess): ChildOwnership {
+  const existing = childOwnership.get(child)
+  if (existing) return existing
+  const ownership: ChildOwnership = {
+    closed: false,
+    close: new Promise((resolve) => {
+      child.once('close', (code, signal) => {
+        ownership.closed = true
+        resolve({ code, signal })
+      })
+    }),
+  }
+  childOwnership.set(child, ownership)
+  return ownership
+}
+
+async function stopOwnedForge(
+  child: ChildProcess,
+  ownership: ChildOwnership,
+  dataDir: string | undefined,
+  remove: boolean,
+  port: number | undefined,
+): Promise<void> {
   const errors: unknown[] = []
-  if (child.pid) {
+  if (child.pid && !ownership.closed) {
     try {
       process.kill(-child.pid, 'SIGTERM')
     } catch {
@@ -356,10 +410,14 @@ export async function stopForge(
   }
   let result: { code: number | null; signal: NodeJS.Signals | null }
   try {
-    result = await bounded(close, 'Forge graceful shutdown timed out', 8_000)
+    result = await bounded(
+      ownership.close,
+      'Forge graceful shutdown timed out',
+      8_000,
+    )
   } catch (error) {
     errors.push(error)
-    if (child.pid) {
+    if (child.pid && !ownership.closed) {
       try {
         process.kill(-child.pid, 'SIGKILL')
       } catch (killError) {
@@ -368,7 +426,11 @@ export async function stopForge(
       }
     }
     try {
-      result = await bounded(close, 'Forge forced shutdown timed out', 3_000)
+      result = await bounded(
+        ownership.close,
+        'Forge forced shutdown timed out',
+        3_000,
+      )
     } catch (forcedError) {
       errors.push(forcedError)
       result = { code: child.exitCode, signal: child.signalCode }

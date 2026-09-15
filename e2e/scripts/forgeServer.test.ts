@@ -1,5 +1,6 @@
+import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { stopProxiedForge } from '../helpers/forgeServer.js'
+import { stopForge, stopProxiedForge } from '../helpers/forgeServer.js'
 
 describe('proxied Forge server cleanup', () => {
   // Waiting for handlers would hang on the harness-discovery requests the
@@ -70,5 +71,32 @@ describe('proxied Forge server cleanup', () => {
       name: 'AggregateError',
       errors: [routeError, stopError],
     })
+  })
+
+  it('waits for the original close event and coalesces repeated cleanup', async () => {
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: 0,
+      signalCode: null,
+      pid: 123,
+      kill: vi.fn(),
+    })
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true)
+    try {
+      const first = stopForge(child as never)
+      const second = stopForge(child as never)
+      let settled = false
+      void first.then(() => {
+        settled = true
+      })
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(settled).toBe(false)
+
+      child.emit('close', 0, null)
+      await expect(first).resolves.toBeUndefined()
+      await expect(second).resolves.toBeUndefined()
+      expect(kill).toHaveBeenCalledExactlyOnceWith(-123, 'SIGTERM')
+    } finally {
+      kill.mockRestore()
+    }
   })
 })
