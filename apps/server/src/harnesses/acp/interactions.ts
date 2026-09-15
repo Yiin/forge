@@ -49,6 +49,7 @@ export class AcpInteractions {
     private readonly options: {
       profile: string
       rpc: JsonlRpcTransport
+      transportGeneration: string
       journal: AcpJournal
       host: AcpResourceHost
       instanceId: string
@@ -145,7 +146,7 @@ export class AcpInteractions {
     const requestId = randomUUID()
     const prepared = this.prepare(native, owner, requestId)
     if (
-      native.runtimeGeneration !== owner.runtimeGeneration ||
+      native.runtimeGeneration !== this.options.transportGeneration ||
       native.signal.aborted
     )
       throw Error('Stale ACP interaction')

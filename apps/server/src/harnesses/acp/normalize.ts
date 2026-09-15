@@ -116,7 +116,7 @@ export class AcpNormalizer {
       },
     }
   }
-  private record(
+  record(
     subject: Subject,
     body: Body,
     sourceRefs: AcpRecordInput['sourceRefs'] = [],
@@ -546,6 +546,21 @@ export class AcpNormalizer {
       }
       state.active--
     }
+  }
+  itemId(subject: Subject, kind: 'thought' | 'assistant'): string | undefined {
+    return this.states
+      .get(digest(subject))
+      ?.items.get(
+        kind === 'thought' ? 'agent_thought_chunk' : 'agent_message_chunk',
+      )?.id
+  }
+  retireOwner(owner: Subject['owner']) {
+    const subjects = [...this.states.values()]
+      .filter((state) => digest(state.subject.owner) === digest(owner))
+      .map((state) => state.subject)
+    if (subjects.some((subject) => this.states.get(digest(subject))!.active))
+      throw Error('ACP content owner is active')
+    for (const subject of subjects) this.retire(subject)
   }
   retire(subject: Subject) {
     const key = digest(immutableData(subject)),

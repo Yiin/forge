@@ -209,7 +209,8 @@ export class AcpJournal {
   private readonly writerEpoch: string
   private readonly slots: Slot[] = []
   private readonly liveOwners = new Set<string>()
-  private readonly committedTerminals = new Set<string>()
+  private readonly committedOwners = new Set<string>()
+  private readonly terminalProofs = new Map<string, () => void>()
   private next: number
   private committedThrough: number
   private prefixHash: string
@@ -384,6 +385,36 @@ export class AcpJournal {
           'retained',
           bytes,
         )
+        if (
+          (slot.source.kind === 'terminal' && slot.owner.phase === 'live') ||
+          (slot.owner.phase === 'load_replay' &&
+            records.some(
+              (record) =>
+                record.value.kind === 'disposition' &&
+                ['replay_visible', 'replay_discarded'].includes(
+                  record.value.status,
+                ),
+            ))
+        ) {
+          const key = digest(slot.owner)
+          if (!this.terminalProofs.has(key)) {
+            try {
+              if (this.terminalProofs.size >= 4096)
+                throw Error('ACP terminal proof limit')
+              this.terminalProofs.set(
+                key,
+                this.options.host.reserve(
+                  this.options.instanceId,
+                  'retained',
+                  256,
+                ),
+              )
+            } catch (error) {
+              releaseBytes()
+              throw error
+            }
+          }
+        }
         slot.releaseBytes = releaseBytes
         slot.records = records
         slot.bytes = bytes
@@ -580,8 +611,18 @@ export class AcpJournal {
       for (const slot of selected) {
         this.bytes -= slot.bytes
         slot.releaseBytes?.()
-        if (slot.source.kind === 'terminal' && slot.owner.phase === 'live')
-          this.committedTerminals.add(digest(slot.owner))
+        if (
+          (slot.source.kind === 'terminal' && slot.owner.phase === 'live') ||
+          (slot.owner.phase === 'load_replay' &&
+            slot.records!.some(
+              (record) =>
+                record.value.kind === 'disposition' &&
+                ['replay_visible', 'replay_discarded'].includes(
+                  record.value.status,
+                ),
+            ))
+        )
+          this.committedOwners.add(digest(slot.owner))
         slot.resolve()
       }
     } catch {
@@ -599,7 +640,7 @@ export class AcpJournal {
     if (!this.failure) throw Error('ACP journal has no persistence failure')
     if (!this.liveOwners.has(digest(owner)))
       throw Error('Foreign ACP completion owner')
-    if (this.committedTerminals.has(digest(owner)))
+    if (this.committedOwners.has(digest(owner)))
       throw Error('ACP terminal is already acknowledged')
     const active = this.activeCommit
     const failure =
@@ -684,15 +725,23 @@ export class AcpJournal {
       Object.defineProperty(error, key, { value, enumerable: true })
     return error as CompletionPersistenceFailure
   }
-  retireOwner(owner: AcpLiveOwner) {
+  canRetireOwner(owner: AcpLiveOwner | AcpReplayOwner) {
+    const key = digest(owner)
+    return (
+      !this.closed &&
+      !this.failure &&
+      this.committedOwners.has(key) &&
+      !this.slots.some((slot) => digest(slot.owner) === key)
+    )
+  }
+  retireOwner(owner: AcpLiveOwner | AcpReplayOwner) {
     const key = digest(owner)
     if (
       this.failure ||
-      !this.committedTerminals.has(key) ||
+      !this.committedOwners.has(key) ||
       this.slots.some((slot) => digest(slot.owner) === key)
     )
       throw Error('ACP owner still has unsettled persistence')
-    this.committedTerminals.delete(key)
     this.liveOwners.delete(key)
   }
   async close() {
@@ -703,7 +752,9 @@ export class AcpJournal {
     await this.writer.close()
     for (const slot of this.slots) slot.releaseBytes?.()
     this.liveOwners.clear()
-    this.committedTerminals.clear()
+    this.committedOwners.clear()
+    for (const release of this.terminalProofs.values()) release()
+    this.terminalProofs.clear()
     this.slots.length = 0
     this.bytes = 0
   }

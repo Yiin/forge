@@ -96,7 +96,7 @@ function fixture(
   const rpc: JsonlRpcTransport = new JsonlRpcTransport({
     stdin,
     stdout,
-    runtimeGeneration: 'generation',
+    runtimeGeneration: 'private-transport',
     resources: host.transport('provider'),
     onIncoming(message): void | Promise<void> {
       if (message.type !== 'request') return
@@ -111,6 +111,7 @@ function fixture(
   })
   const retired = vi.fn()
   const interactions: AcpInteractions = new AcpInteractions({
+    transportGeneration: 'private-transport',
     profile: 'grok',
     rpc,
     journal,
