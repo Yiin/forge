@@ -10,6 +10,7 @@ export type GitOptions = {
   timeoutMs?: number
   maxOutputBytes?: number
   readOnly?: boolean
+  env?: NodeJS.ProcessEnv
 }
 
 /** Bounded streams stay separate for machine output. `output` preserves existing callers. */
@@ -29,9 +30,11 @@ export async function runGit(
       cwd,
       detached: group,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: options.readOnly
-        ? { ...process.env, GIT_OPTIONAL_LOCKS: '0' }
-        : process.env,
+      env: {
+        ...process.env,
+        ...(options.readOnly ? { GIT_OPTIONAL_LOCKS: '0' } : {}),
+        ...options.env,
+      },
     })
     const stdout: Buffer[] = [],
       stderr: Buffer[] = []
