@@ -456,14 +456,24 @@ export class QuestionManager {
             : undefined
           : first
       // The wire only accepts an option the agent offered. A bare approval
-      // answers with one of them directly. A question packed into a permission
-      // request does not, so a deliberate answer means proceed: send the
-      // narrowest allow the agent offered, and cancel when it offered none.
-      const offered = request.options.find(
-        (option) => option.optionId === selected,
-      )
+      // answers with one of them directly. Kimi packs its questions into
+      // rawInput and offers one allow per possible answer, so the chosen answer
+      // has to come back as that answer's own option, by name first and by
+      // position when the two lists line up. Anything else means the user
+      // deliberately answered, so send the narrowest allow, and cancel when the
+      // agent offered none.
+      const choices = question.questions.flatMap((entry) => entry.options)
+      const chosen = choices.findIndex((option) => option.id === selected)
       const proceed =
-        offered ??
+        request.options.find((option) => option.optionId === selected) ??
+        (chosen >= 0
+          ? (request.options.find(
+              (option) => option.name === choices[chosen].label,
+            ) ??
+            (request.options.length === choices.length
+              ? request.options[chosen]
+              : undefined))
+          : undefined) ??
         request.options.find((option) => option.kind === 'allow_once') ??
         request.options.find((option) => option.kind === 'allow_always') ??
         request.options.find((option) => option.kind.startsWith('allow'))
