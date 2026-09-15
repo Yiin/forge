@@ -4,7 +4,7 @@ import { WorkspaceBar } from '../components/chat/WorkspaceBar'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
-import { connectForgeSocket, normalizeMessage } from '../lib/socket'
+import { connectForgeSocket } from '../lib/socket'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore, type SessionSummary } from '../stores/sessions'
 import { PathSwitcher } from '../components/chat/PathSwitcher'
@@ -14,6 +14,7 @@ import { ChatLifecycle } from '../components/chat/ChatLifecycle'
 import type { ConnectionState } from '../lib/socket'
 import type { HarnessSelection } from '../components/chat/harness-picker-logic'
 import type { QueuedPrompt } from '@forge/protocol/session'
+import { SessionSnapshot } from '@forge/protocol/ws'
 import { WorkspaceDock } from '../components/workspace/WorkspaceDock'
 
 export function SessionRoute() {
@@ -149,11 +150,10 @@ export function SessionRoute() {
           .then((messagesResponse) =>
             messagesResponse.ok ? messagesResponse.json() : [],
           )
-          .then((messages: unknown) => {
-            if (!Array.isArray(messages)) return
-            useMessagesStore
-              .getState()
-              .loadMessages(sessionId, messages.map(normalizeMessage))
+          .then((snapshot: unknown) => {
+            const value = SessionSnapshot.safeParse(snapshot)
+            if (value.success)
+              useMessagesStore.getState().loadSnapshot(value.data)
           })
           .catch(() => undefined)
         void api

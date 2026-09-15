@@ -95,11 +95,19 @@ export function sessionRoutes(
       : c.json({ error: 'Session not found' }, 404)
   })
   app.get('/api/sessions/:id/messages', (c) => {
+    const sessionId = c.req.param('id')
+    const cursor = manager.database
+      .prepare('SELECT MAX(seq) AS seq FROM messages')
+      .get() as { seq?: number | null }
     const rows = manager.database
       .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY seq')
-      .all(c.req.param('id')) as Array<Record<string, unknown>>
-    return c.json(
-      rows.map((row) => ({
+      .all(sessionId) as Array<Record<string, unknown>>
+    return c.json({
+      type: 'sessionSnapshot',
+      sessionId,
+      cursor: Number(cursor.seq ?? 0),
+      queuedPrompts: manager.queuedPrompts(sessionId) ?? [],
+      messages: rows.map((row) => ({
         seq: row.seq,
         sessionId: row.session_id,
         turnId: row.turn_id,
@@ -112,7 +120,7 @@ export function sessionRoutes(
             : row.content,
         createdAt: new Date(Number(row.created_at)).toISOString(),
       })),
-    )
+    })
   })
   app.post('/api/sessions/:id/prompt', async (c) => {
     const value = promptSchema.safeParse({

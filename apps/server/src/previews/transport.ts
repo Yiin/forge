@@ -115,17 +115,21 @@ export function previewRoutes(manager: PreviewManager) {
     const suffix = c.req.path.slice(`/preview/${id}`.length) || '/'
     return proxyPreview(c.req.raw, manager, id, suffix)
   })
-  app.get('/api/previews', (c) =>
-    c.json({ targets: manager.list(c.req.query('sessionId')) }),
-  )
-  app.get('/api/previews/:id/reachability', async (c) => {
-    const target = manager.get(c.req.param('id'))
-    if (!target)
+  app.get('/api/previews', (c) => {
+    const sessionId = c.req.query('sessionId')
+    if (!sessionId)
       throw new PreviewError(
-        'preview_not_found',
-        'Preview target not found',
-        404,
+        'preview_forbidden',
+        'Session scope is required',
+        403,
       )
+    return c.json({ targets: manager.list(sessionId) })
+  })
+  app.get('/api/previews/:id/reachability', async (c) => {
+    const target = manager.assertSession(
+      c.req.param('id'),
+      c.req.query('sessionId') ?? '',
+    )
     return c.json({
       reachable: await manager.reachable(target.id),
       status: target.status,
@@ -133,6 +137,7 @@ export function previewRoutes(manager: PreviewManager) {
     })
   })
   app.delete('/api/previews/:id', (c) => {
+    manager.assertSession(c.req.param('id'), c.req.query('sessionId') ?? '')
     manager.remove(c.req.param('id'))
     return c.body(null, 204)
   })
