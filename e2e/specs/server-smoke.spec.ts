@@ -3,6 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { launchForge, type ForgeServer } from '../helpers/forgeServer.js'
 
+test.describe.configure({ retries: 0 })
+
 async function post<T>(url: string, body: unknown): Promise<T> {
   const response = await fetch(url, {
     method: 'POST',
