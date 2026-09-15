@@ -4,4 +4,8 @@ Run `bun e2e` from the repository root. Playwright starts Chromium with desktop 
 
 Add API or browser specs under `e2e/specs`. Use `launchForge()` in a `beforeEach` or fixture, and call `stop()` in cleanup. The helper returns `baseUrl` and `dataDir` for restart tests.
 
-`launchForge()` configures the full ACP fixture from `apps/server/test/fixtures/acp-mock-agent.ts` as `fake-acp-agent`. Pass `fakeAgentEnv` to enable scenarios such as `FORGE_MOCK_ASK_QUESTION`, `FORGE_MOCK_EMIT_TOOL_CALLS`, `FORGE_MOCK_EMIT_SUBAGENT`, and `FORGE_MOCK_OMIT_LOAD_SESSION_CAPABILITY`.
+`launchForge()` starts the normal Node server with an isolated SQLite database, account home, and config file. The config points the `mock` harness at the source-shaped protocol fixture in `apps/server/test/fixtures/acp-mock-agent.ts`.
+
+Pass `fakeAgentEnv` to enable scenarios such as `FORGE_MOCK_ASK_QUESTION`, `FORGE_MOCK_EMIT_TOOL_CALLS`, `FORGE_MOCK_EMIT_SUBAGENT`, and `FORGE_MOCK_OMIT_LOAD_SESSION_CAPABILITY`.
+
+Run a live fixture server with `bun e2e/scripts/launch-forge.ts`. Run browser tests with `bun e2e`.
