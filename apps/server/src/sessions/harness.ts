@@ -6,6 +6,7 @@ export type HarnessSession = {
   id: string
   cwd: string
   harness: string
+  accountId?: string | null
   providerSessionId?: string | null
 }
 
