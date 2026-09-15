@@ -399,6 +399,15 @@ async function observe(
   throw new Error('Fixture observation deadline')
 }
 
+async function waitForHostHttpBuffer(host: KimiHostOwner) {
+  const end = performance.now() + 5000
+  while (performance.now() < end) {
+    if (host.budget.count('hostHttpBufferBytes') === 0) return
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  throw new Error('Host HTTP buffer did not drain')
+}
+
 const coldTurn = (index: number) => ({
   kind: 'turn',
   turnId: `t${index}`,
@@ -828,6 +837,9 @@ describe('correction physical resources and source-shaped recovery', () => {
             ).then((value) => host.acquire(value, 'helper')),
           ),
         )
+        // Startup reserves five copies of the response ceiling. Wait for the
+        // guardian's separate release before admitting the next home.
+        await waitForHostHttpBuffer(host)
       }
       const baseline = host.budget.count('hostIpcBytes')
       expect(host.budget.count('hostGuardians')).toBe(4)
