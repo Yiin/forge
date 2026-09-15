@@ -7,8 +7,7 @@ export function uploadRoutes(store: UploadStore) {
   app.post('/api/drafts/:id/uploads', async (c) => {
     const input = uploadInitSchema.parse(await c.req.json())
     try {
-      const projectId = c.req.header('X-Project-Id')
-      if (!projectId) return c.json({ error: 'X-Project-Id is required' }, 400)
+      const projectId = c.req.header('X-Project-Id') ?? undefined
       return c.json(store.initDraft(c.req.param('id'), projectId, input), 201)
     } catch (error) {
       if (error instanceof RangeError)

@@ -1246,7 +1246,7 @@ export class SessionManager {
           .get(requestId) as { session_id: string }
         return { sessionId: winner.session_id }
       }
-      if (uploads && input.projectId)
+      if (uploads)
         await uploads.promoteDraft(input.draftId, session.id, input.projectId)
       await this.prompt(
         session.id,
@@ -1274,7 +1274,7 @@ export class SessionManager {
   private async rollbackDraftPromotion(owner: PromotionOwner): Promise<never> {
     const { draftId, projectId, sessionId, uploads, error } = owner.rollback!
     const rollback = async () => {
-      if (uploads && projectId)
+      if (uploads)
         await uploads.rollbackPromotion(draftId, sessionId, projectId)
       this.db
         .prepare('DELETE FROM draft_promotions WHERE session_id = ?')

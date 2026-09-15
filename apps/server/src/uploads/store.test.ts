@@ -24,7 +24,7 @@ async function fixture() {
   db.exec(
     `CREATE TABLE projects (id TEXT PRIMARY KEY, deleted_at INTEGER);
      CREATE TABLE sessions (
-       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'idle',
+       id TEXT PRIMARY KEY, project_id TEXT, status TEXT NOT NULL DEFAULT 'idle',
        deleted_at INTEGER
      );`,
   )
@@ -39,6 +39,44 @@ async function fixture() {
 }
 
 describe('UploadStore', () => {
+  it('promotes a projectless draft attachment into its filesystem session', async () => {
+    const { store, db, dir } = await fixture()
+    const draft = store.initDraft('draft:filesystem', undefined, {
+      filename: 'notes.txt',
+      mime: 'text/plain',
+      sizeBytes: 5,
+    })
+    await store.put(
+      draft.attachmentId,
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('hello'))
+          controller.close()
+        },
+      }),
+    )
+
+    await store.promoteDraft('draft:filesystem', 'filesystem-session')
+
+    const row = store.attachment(draft.attachmentId)
+    expect(row).toMatchObject({
+      session_id: 'filesystem-session',
+      draft_id: null,
+      project_id: null,
+      rel_path: expect.stringMatching(
+        /^sessions\/filesystem-session\/files\/att_.+-notes-txt$/,
+      ),
+    })
+    await expect(readFile(join(dir, row!.rel_path!), 'utf8')).resolves.toBe(
+      'hello',
+    )
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM attachments WHERE draft_id = ?')
+        .get('draft:filesystem'),
+    ).toEqual({ count: 0 })
+  })
+
   it('tombstones a project while retaining migrated session and epic records', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'forge-upload-migrated-'))
     const db = new DatabaseSync(':memory:')

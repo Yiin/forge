@@ -74,7 +74,7 @@ export class UploadStore {
     this.now = options.now ?? Date.now
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS attachments (
-        id TEXT PRIMARY KEY, session_id TEXT, project_id TEXT, filename TEXT NOT NULL,
+        id TEXT PRIMARY KEY, session_id TEXT, draft_id TEXT, project_id TEXT, filename TEXT NOT NULL,
         mime TEXT NOT NULL, size_bytes INTEGER NOT NULL, sha256 TEXT,
         rel_path TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL
       );
@@ -136,15 +136,18 @@ export class UploadStore {
 
   initDraft(
     draftId: string,
-    projectId: string,
+    projectId: string | undefined,
     input: { filename: string; mime: string; sizeBytes: number },
   ) {
     if (input.sizeBytes > MAX_UPLOAD_BYTES)
       throw new RangeError('Upload exceeds 1 GiB')
-    const project = this.db
-      .prepare('SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL')
-      .get(projectId)
-    if (!project) throw new Error('Project not found')
+    if (
+      projectId &&
+      !this.db
+        .prepare('SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL')
+        .get(projectId)
+    )
+      throw new Error('Project not found')
     const id = newId()
     this.db
       .prepare(
@@ -152,8 +155,8 @@ export class UploadStore {
       )
       .run(
         id,
-        draftId,
-        projectId,
+        draftId ?? null,
+        projectId ?? null,
         input.filename,
         input.mime,
         input.sizeBytes,
@@ -178,46 +181,46 @@ export class UploadStore {
           .get(row.session_id) as { project_id: string } | undefined)
       : undefined
     if (row.session_id && !session) throw new Error('Session not found')
-    const projectId = session?.project_id ?? row.project_id
-    if (!projectId) throw new Error('Session not found')
+    const projectId = session?.project_id ?? row.project_id ?? undefined
+    if (!projectId && !row.draft_id) throw new Error('Session not found')
     if (
+      projectId &&
       !this.db
         .prepare('SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL')
         .get(projectId)
     )
       throw new Error('Project not found')
-    this.activeUploads.set(
-      projectId,
-      (this.activeUploads.get(projectId) ?? 0) + 1,
-    )
-    try {
-      return await withProjectActivity(this.db, projectId, () =>
-        this.writeUpload(row, projectId, body),
+    if (projectId)
+      this.activeUploads.set(
+        projectId,
+        (this.activeUploads.get(projectId) ?? 0) + 1,
       )
+    try {
+      const write = () => this.writeUpload(row, projectId, body)
+      return await (projectId
+        ? withProjectActivity(this.db, projectId, write)
+        : write())
     } finally {
-      const remaining = this.activeUploads.get(projectId)! - 1
-      if (remaining) this.activeUploads.set(projectId, remaining)
-      else this.activeUploads.delete(projectId)
+      if (projectId) {
+        const remaining = this.activeUploads.get(projectId)! - 1
+        if (remaining) this.activeUploads.set(projectId, remaining)
+        else this.activeUploads.delete(projectId)
+      }
     }
   }
 
   private async writeUpload(
     row: UploadRow,
-    projectId: string,
+    projectId: string | undefined,
     body: ReadableStream<Uint8Array>,
   ) {
     const attachmentId = row.id
     const ownerId = row.session_id ?? row.draft_id
     if (!ownerId) throw new Error('Attachment owner not found')
     const safeName = `${attachmentId}-${toSafeFilename(row.filename)}`
-    const relPath = join(
-      'projects',
-      projectId,
-      'sessions',
-      ownerId,
-      'files',
-      safeName,
-    )
+    const relPath = projectId
+      ? join('projects', projectId, 'sessions', ownerId, 'files', safeName)
+      : join('drafts', ownerId, 'files', safeName)
     const absolutePath = join(this.options.dataDir, relPath)
     await mkdir(join(absolutePath, '..'), { recursive: true })
     const output = createWriteStream(absolutePath, { flags: 'wx' })
@@ -270,10 +273,15 @@ export class UploadStore {
       this.db.exec('BEGIN')
       let result: { lastInsertRowid: number | bigint }
       try {
-        const active = this.db
-          .prepare('SELECT 1 FROM projects WHERE id = ? AND deleted_at IS NULL')
-          .get(projectId)
-        if (!active) throw new Error('Project is being deleted')
+        if (
+          projectId &&
+          !this.db
+            .prepare(
+              'SELECT 1 FROM projects WHERE id = ? AND deleted_at IS NULL',
+            )
+            .get(projectId)
+        )
+          throw new Error('Project is being deleted')
         result = row.session_id
           ? message.run(
               row.session_id,
@@ -417,7 +425,8 @@ export class UploadStore {
   }
 
   private resolvePath(row: UploadRow) {
-    if (row.rel_path!.startsWith('projects/')) return row.rel_path!
+    if (/^(projects|drafts|sessions)\//.test(row.rel_path!))
+      return row.rel_path!
     const session = row.session_id
       ? (this.db
           .prepare('SELECT project_id FROM sessions WHERE id = ?')
@@ -433,8 +442,8 @@ export class UploadStore {
     )
   }
 
-  async promoteDraft(draftId: string, sessionId: string, projectId: string) {
-    return withProjectActivity(this.db, projectId, async () => {
+  async promoteDraft(draftId: string, sessionId: string, projectId?: string) {
+    const promote = async () => {
       const rows = this.db
         .prepare(
           "SELECT * FROM attachments WHERE draft_id = ? AND status = 'complete'",
@@ -445,14 +454,16 @@ export class UploadStore {
           ? join(this.options.dataDir, row.rel_path)
           : null
         const filename = `${row.id}-${toSafeFilename(row.filename)}`
-        const relPath = join(
-          'projects',
-          projectId,
-          'sessions',
-          sessionId,
-          'files',
-          filename,
-        )
+        const relPath = projectId
+          ? join(
+              'projects',
+              projectId,
+              'sessions',
+              sessionId,
+              'files',
+              filename,
+            )
+          : join('sessions', sessionId, 'files', filename)
         if (oldPath) {
           await mkdir(join(this.options.dataDir, relPath, '..'), {
             recursive: true,
@@ -465,18 +476,21 @@ export class UploadStore {
           .prepare(
             'UPDATE attachments SET session_id = ?, draft_id = NULL, project_id = ?, rel_path = ? WHERE id = ?',
           )
-          .run(sessionId, projectId, relPath, row.id)
+          .run(sessionId, projectId ?? null, relPath, row.id)
       }
       return rows.map((row) => row.id)
-    })
+    }
+    return projectId
+      ? withProjectActivity(this.db, projectId, promote)
+      : promote()
   }
 
   async rollbackPromotion(
     draftId: string,
     sessionId: string,
-    projectId: string,
+    projectId?: string,
   ) {
-    return withProjectActivity(this.db, projectId, async () => {
+    const rollback = async () => {
       const rows = this.db
         .prepare('SELECT * FROM attachments WHERE session_id = ?')
         .all(sessionId) as UploadRow[]
@@ -484,14 +498,21 @@ export class UploadStore {
         const oldPath = row.rel_path
           ? join(this.options.dataDir, row.rel_path)
           : null
-        const relPath = join(
-          'projects',
-          projectId,
-          'sessions',
-          draftId,
-          'files',
-          `${row.id}-${toSafeFilename(row.filename)}`,
-        )
+        const relPath = projectId
+          ? join(
+              'projects',
+              projectId,
+              'sessions',
+              draftId,
+              'files',
+              `${row.id}-${toSafeFilename(row.filename)}`,
+            )
+          : join(
+              'drafts',
+              draftId,
+              'files',
+              `${row.id}-${toSafeFilename(row.filename)}`,
+            )
         if (oldPath) {
           await mkdir(join(this.options.dataDir, relPath, '..'), {
             recursive: true,
@@ -504,9 +525,12 @@ export class UploadStore {
           .prepare(
             'UPDATE attachments SET session_id = NULL, draft_id = ?, rel_path = ?, project_id = ? WHERE id = ?',
           )
-          .run(draftId, relPath, projectId, row.id)
+          .run(draftId, relPath, projectId ?? null, row.id)
       }
-    })
+    }
+    return projectId
+      ? withProjectActivity(this.db, projectId, rollback)
+      : rollback()
   }
 
   async deleteSession(id: string) {
@@ -535,10 +559,9 @@ export class UploadStore {
     await rm(
       join(
         this.options.dataDir,
-        'projects',
-        session.project_id,
-        'sessions',
-        id,
+        session.project_id
+          ? join('projects', session.project_id, 'sessions', id)
+          : join('sessions', id),
       ),
       {
         recursive: true,
