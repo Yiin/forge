@@ -147,3 +147,55 @@ test('initialize admission waits for the returned startup HTTP buffer', async ()
   expect(budget.count('hostHttp')).toBe(0)
   expect(budget.count('hostTimers')).toBe(0)
 })
+
+test.each([
+  ['raw HTTP', { raw: true, maxBytes: 128 }, 'http'],
+  ['blob HTTP', { binary: Buffer.alloc(0), maxBytes: 128 }, 'blob_http'],
+  ['JSON HTTP', { maxBytes: 128 }, 'http_wire'],
+] as const)(
+  '%s uses the correct guardian HTTP buffer release behavior',
+  async (_label, options, expectedOp) => {
+    const budget = new KimiBudget(kimiLimits()),
+      calls: [Record<string, unknown>, boolean | undefined][] = [],
+      body = Buffer.from(
+        JSON.stringify({ code: 0, msg: 'ok', data: {}, request_id: 'request' }),
+      )
+    const server = Object.create(KimiServer.prototype) as KimiServer
+    Object.assign(server, {
+      hostBudget: budget,
+      stopped: false,
+      blobReleases: new Set(),
+      transfers: new Set(),
+      rpc: async (message: Record<string, unknown>, ...args: unknown[]) => {
+        calls.push([message, args[2] as boolean | undefined])
+        if (message.op === 'blob_read') return { data: body.toString('base64') }
+        if (message.op === 'http' || message.op === 'blob_http')
+          return {
+            blobId: 'blob',
+            sizeBytes: 0,
+            sha256:
+              'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+          }
+        if (message.op === 'http_wire')
+          return {
+            blobId: 'blob',
+            sizeBytes: body.length,
+            sha256: createHash('sha256').update(body).digest('hex'),
+            status: 200,
+            requestId: 'request',
+          }
+        return {}
+      },
+    })
+    await expect(
+      (server as unknown as { httpPhysical: Function }).httpPhysical(
+        'lane',
+        '/api/v1/config',
+        options,
+      ),
+    ).resolves.toBeDefined()
+    expect(calls.find(([message]) => message.op === expectedOp)?.[1]).toBe(
+      expectedOp !== 'http_wire',
+    )
+  },
+)
