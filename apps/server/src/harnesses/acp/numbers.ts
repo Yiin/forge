@@ -6,7 +6,10 @@ export type NumericToken = Readonly<{
 export type NumericCapture = Readonly<{ numbers: readonly NumericToken[] }>
 
 /** Captures number spellings before JSON.parse can round them. */
-export function captureNumbers(source: string): NumericCapture {
+export function captureNumbers(
+  source: string,
+  captureString?: (path: string, value: string) => void,
+): NumericCapture {
   let position = 0,
     nodes = 0,
     metadataBytes = 14
@@ -45,7 +48,8 @@ export function captureNumbers(source: string): NumericCapture {
     whitespace()
     const char = source[position]
     if (char === '"') {
-      string()
+      const scalar = string()
+      captureString?.(path, scalar)
       return
     }
     if (char === '{' || char === '[') {

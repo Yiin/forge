@@ -190,3 +190,56 @@ describe('physical submission ownership', () => {
     expect(wire.state.queuedBytes).toBe(0)
   })
 })
+
+it('registers the original RPC ID before synchronous peer response and refuses throwing registration', async () => {
+  const stdout = new PassThrough()
+  let registered: string | undefined
+  let writes = 0
+  const stdin = new Writable({
+    write(bytes, _encoding, done) {
+      writes++
+      const request = JSON.parse(bytes.toString())
+      expect(registered).toBe(request.id)
+      stdout.write(
+        JSON.stringify({ jsonrpc: '2.0', id: request.id, result: 'ok' }) + '\n',
+      )
+      done()
+    },
+  })
+  const transport = new JsonlRpcTransport({
+    stdin,
+    stdout,
+    runtimeGeneration: 'generation',
+    maxPendingRequests: 1,
+  })
+  cleanups.push(async () => {
+    transport.close()
+    stdin.destroy()
+    stdout.destroy()
+  })
+  const accepted = transport.requestWithSubmission(
+    'request',
+    {},
+    {
+      onHandoff(id) {
+        registered = id
+      },
+    },
+  )
+  expect(await accepted.response).toBe('ok')
+  expect((await accepted.submission).operationId).toBe(registered)
+  const refused = transport.requestWithSubmission(
+    'request',
+    {},
+    {
+      onHandoff(id) {
+        registered = id
+        throw Error('registration failed')
+      },
+    },
+  )
+  await expect(refused.response).rejects.toThrow('JSONL stdin write failed')
+  expect((await refused.submission).status).toBe('not_written')
+  expect(transport.state.pendingRequests).toBe(0)
+  expect(writes).toBe(1)
+})

@@ -62,6 +62,20 @@ describe('ACP exact numeric source', () => {
       ).toThrow()
     },
   )
+  it('captures string routing fields in the same validated source scan', () => {
+    const routing: Record<string, string> = {}
+    captureNumbers(
+      '{"params":{"sessionId":"original","_meta":{"promptId":"exact"}},"text":"unchanged"}',
+      (path, value) => {
+        if (path.startsWith('/params/')) routing[path] = value
+      },
+    )
+    expect(routing).toEqual({
+      '/params/sessionId': 'original',
+      '/params/_meta/promptId': 'exact',
+    })
+    expect(() => captureNumbers('{"id":"one","id":"two"}', () => {})).toThrow()
+  })
   it('charges JSON-escaped paths within the encoded source metadata limit', () => {
     const source = JSON.stringify({ ['\n'.repeat(32768)]: Array(20).fill(0) })
     expect(() => captureNumbers(source)).toThrow()
