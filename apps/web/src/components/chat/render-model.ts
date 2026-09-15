@@ -34,6 +34,16 @@ export type ChatRenderItem =
     }
   | { kind: 'answered-question'; id: string; question: string; answer: unknown }
   | {
+      kind: 'plan'
+      id: string
+      explanation?: string
+      steps: Array<{
+        id: string
+        title: string
+        status: 'pending' | 'running' | 'completed' | 'failed'
+      }>
+    }
+  | {
       kind: 'epic-triage'
       id: string
       card: Extract<Message['content'], { type: 'epic_triage' }>
@@ -232,6 +242,13 @@ export function toRenderModel(
       })
     } else if (content.type === 'epic_triage') {
       result.push({ kind: 'epic-triage', id: message.itemId, card: content })
+    } else if (content.type === 'plan') {
+      result.push({
+        kind: 'plan',
+        id: message.itemId,
+        explanation: content.explanation,
+        steps: content.steps,
+      })
     } else if (content.type === 'turn_interrupted') {
       result.push({
         kind: 'system',

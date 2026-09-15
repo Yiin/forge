@@ -1,64 +1,109 @@
-import { Check, Send } from 'lucide-react'
-import { useState } from 'react'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Send,
+  ShieldAlert,
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { api } from '../../lib/api'
-import { pendingQuestions, type PendingQuestion } from './question-logic'
+import {
+  pendingQuestionRequests,
+  type PendingQuestionRequest,
+  type Question,
+} from './question-logic'
 import { useMessagesStore } from '../../stores/messages'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 
 const EMPTY_MESSAGES: never[] = []
+type Answers = Record<string, string | string[]>
 
 export function AskUserQuestionPanel({ sessionId }: { sessionId: string }) {
   const messages = useMessagesStore(
     (state) => state.bySession[sessionId] ?? EMPTY_MESSAGES,
   )
-  const pending = pendingQuestions(messages)
-  const current = pending[0]
-  if (!current) return null
+  const request = pendingQuestionRequests(messages)[0]
+  if (!request) return null
   return (
     <QuestionCard
-      key={`${current.questionId}:${current.question.question}`}
+      key={request.requestId}
       sessionId={sessionId}
-      current={current}
-      remaining={pending.length}
+      request={request}
     />
   )
 }
 
 function QuestionCard({
   sessionId,
-  current,
-  remaining,
+  request,
 }: {
   sessionId: string
-  current: PendingQuestion
-  remaining: number
+  request: PendingQuestionRequest
 }) {
-  const { question } = current
-  const [selected, setSelected] = useState<string[]>([])
-  const [freeText, setFreeText] = useState('')
+  const storageKey = `forge:question:${sessionId}:${request.requestId}`
+  const [page, setPage] = useState(0)
+  const [answers, setAnswers] = useState<Answers>(() => readAnswers(storageKey))
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const multi = question.multiSelect === true
-  const options = question.options
-  const submit = async (answer: string | string[]) => {
-    if (
-      (!Array.isArray(answer) && !answer.trim()) ||
-      (Array.isArray(answer) && answer.length === 0)
+  const question = request.questions[page]!
+  const isPermission = request.source === 'permission'
+  const settled = request.requestStatus && request.requestStatus !== 'pending'
+  const setAnswer = (value: string | string[]) =>
+    setAnswers((current) => {
+      const next = { ...current, [question.id!]: value }
+      if (!question.isSecret) writeAnswers(storageKey, next)
+      return next
+    })
+  useEffect(() => {
+    document.getElementById('message-composer')?.blur()
+  }, [page])
+  if (!question) return null
+  if (settled) {
+    const statusText = {
+      pending: '',
+      replying: 'Reply is being delivered.',
+      submitted: 'Reply submitted.',
+      expired: 'This request expired after the session ended.',
+      uncertain:
+        'Reply status is uncertain. Reload to check the request state.',
+    }[request.requestStatus!]
+    return (
+      <section
+        className="ask-question-panel mx-auto mb-2 w-full max-w-3xl rounded-[20px] border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground"
+        aria-live="polite"
+      >
+        {statusText}
+      </section>
     )
-      return
+  }
+  const selected = answers[question.id!] ?? (question.multiSelect ? [] : '')
+  const canAdvance = question.multiSelect
+    ? Array.isArray(selected) && selected.length > 0
+    : String(selected).trim().length > 0
+  const complete = request.questions.every((item) => {
+    const answer = answers[item.id!]
+    return item.multiSelect
+      ? Array.isArray(answer) && answer.length > 0
+      : typeof answer === 'string' && answer.trim().length > 0
+  })
+  const submit = async () => {
+    if (!canAdvance) return
     setSending(true)
     setError(null)
     try {
       await api.answerQuestion({
         sessionId,
-        questionId: current.questionId,
-        ...(Array.isArray(answer) ? { answers: answer } : { answer }),
+        questionId: request.requestId,
+        answers,
       })
+      sessionStorage.removeItem(storageKey)
+      document.getElementById('message-composer')?.focus()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Answer failed')
-    } finally {
+      setError(
+        cause instanceof Error ? cause.message : 'Reply failed. Try again.',
+      )
       setSending(false)
     }
   }
@@ -66,121 +111,228 @@ function QuestionCard({
     setSending(true)
     setError(null)
     try {
-      await api.cancelQuestion({ sessionId, questionId: current.questionId })
+      await api.cancelQuestion({ sessionId, questionId: request.requestId })
+      sessionStorage.removeItem(storageKey)
+      document.getElementById('message-composer')?.focus()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Cancel failed')
-    } finally {
+      setError(
+        cause instanceof Error ? cause.message : 'Cancel failed. Try again.',
+      )
       setSending(false)
     }
   }
-  const choose = (label: string) => {
-    if (multi)
-      setSelected((items) =>
-        items.includes(label)
-          ? items.filter((item) => item !== label)
-          : [...items, label],
-      )
-    else void submit(label)
-  }
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (sending || event.metaKey || event.ctrlKey || event.altKey) return
+      if (/^[1-9]$/.test(event.key)) {
+        const option = question.options[Number(event.key) - 1]
+        if (option) {
+          event.preventDefault()
+          if (question.multiSelect) {
+            const values = Array.isArray(selected) ? selected : []
+            setAnswer(
+              values.includes(option.id!)
+                ? values.filter((value) => value !== option.id)
+                : [...values, option.id!],
+            )
+          } else setAnswer(option.id!)
+        }
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
+        void cancel()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [cancel, question, selected, sending])
   return (
     <section
       className="ask-question-panel mx-auto mb-2 w-full min-w-0 max-w-3xl space-y-3 rounded-[20px] border border-border/65 bg-muted/20 p-4"
-      aria-label="Question from Forge"
+      aria-label={
+        isPermission ? 'Tool permission request' : 'Question from Forge'
+      }
     >
-      <div className="flex items-center justify-between text-xs text-muted-foreground/65">
-        <span>{question.header ?? 'Forge asks'}</span>
-        {remaining > 1 && (
-          <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-[10px] font-medium text-muted-foreground/60 tabular-nums">
-            {remaining} questions
+      <div className="flex items-center justify-between text-xs text-muted-foreground/75">
+        <span className="flex items-center gap-2 font-medium">
+          {isPermission && <ShieldAlert className="size-4 text-amber-500" />}
+          {isPermission
+            ? 'Permission request'
+            : (question.header ?? 'Forge asks')}
+        </span>
+        {request.questions.length > 1 && (
+          <span aria-live="polite">
+            Question {page + 1} of {request.questions.length}
           </span>
         )}
       </div>
-      <h2 className="text-sm text-foreground/90">{question.question}</h2>
+      {isPermission && (
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-sm">
+          <p className="font-medium">
+            {request.toolName ?? 'A tool'} needs your approval
+          </p>
+          {request.toolContext && (
+            <p className="mt-1 whitespace-pre-wrap text-muted-foreground">
+              {request.toolContext}
+            </p>
+          )}
+          <p className="mt-2 text-xs text-muted-foreground">
+            Allow scope: {request.permissionScope ?? 'once'}
+          </p>
+        </div>
+      )}
+      <div>
+        <h2 className="text-sm font-medium text-foreground/90">
+          {question.question}
+        </h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Choose an answer, then continue.
+        </p>
+      </div>
       {error && (
         <p className="text-xs text-destructive" role="alert">
           {error}
         </p>
       )}
-      {options.length > 0 && (
-        <div className="space-y-1.5">
-          {options.map((option, index) => (
-            <button
-              type="button"
-              className={cn(
-                'group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25',
-                selected.includes(option.label)
-                  ? 'border-primary/30 bg-primary/8 text-foreground'
-                  : 'border-transparent bg-muted/22 text-foreground/85 hover:border-border/45 hover:bg-muted/34',
-                sending ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-              )}
-              key={option.label}
-              onClick={() => choose(option.label)}
-              disabled={sending}
-              aria-pressed={multi ? selected.includes(option.label) : undefined}
-            >
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="truncate text-sm font-medium">
-                  {option.label}
-                </span>
-                {option.description && (
-                  <span className="text-xs text-muted-foreground">
-                    {option.description}
-                  </span>
-                )}
-              </span>
-              {selected.includes(option.label) ? (
-                <Check className="size-3.5 shrink-0 text-primary" />
-              ) : index < 9 ? (
-                <kbd className="flex size-5 shrink-0 items-center justify-center rounded border border-border/50 bg-background/35 text-[11px] font-medium text-muted-foreground/70 tabular-nums transition-colors duration-150 group-hover:border-border/70 group-hover:text-muted-foreground">
-                  {index + 1}
-                </kbd>
-              ) : null}
-            </button>
-          ))}
-        </div>
+      <QuestionChoices
+        question={question}
+        value={selected}
+        disabled={sending}
+        onChange={setAnswer}
+      />
+      {question.allowFreeInput && (
+        <Input
+          aria-label="Additional answer"
+          type={question.isSecret ? 'password' : 'text'}
+          value={typeof selected === 'string' ? selected : ''}
+          onChange={(event) => setAnswer(event.target.value)}
+          placeholder="Add your own answer"
+        />
       )}
-      {(options.length === 0 || question.options.length === 0) && (
-        <div className="flex items-center gap-2">
-          <Input
-            aria-label="Answer"
-            value={freeText}
-            onChange={(event) => setFreeText(event.target.value)}
-            placeholder="Type your answer…"
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void submit(freeText)
-            }}
-          />
-          <Button
-            type="button"
-            size="icon"
-            onClick={() => void submit(freeText)}
-            disabled={sending || !freeText.trim()}
-            aria-label="Send answer"
-          >
-            <Send className="size-4" />
-          </Button>
-        </div>
-      )}
-      {multi && (
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
         <Button
           type="button"
-          className="w-full"
-          onClick={() => void submit(selected)}
-          disabled={sending || selected.length === 0}
+          variant="ghost"
+          size="sm"
+          onClick={cancel}
+          disabled={sending}
         >
-          Confirm selection
+          Cancel
         </Button>
-      )}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="text-muted-foreground"
-        onClick={() => void cancel()}
-        disabled={sending}
-      >
-        Cancel
-      </Button>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setPage(page - 1)}
+            disabled={sending || page === 0}
+          >
+            <ChevronLeft className="size-4" />
+            Back
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() =>
+              page < request.questions.length - 1
+                ? setPage(page + 1)
+                : void submit()
+            }
+            disabled={
+              sending ||
+              !canAdvance ||
+              (page === request.questions.length - 1 && !complete)
+            }
+          >
+            {page === request.questions.length - 1 ? (
+              <>
+                <Send className="size-4" />
+                Submit
+              </>
+            ) : (
+              <>
+                Next
+                <ChevronRight className="size-4" />
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
     </section>
   )
+}
+
+function QuestionChoices({
+  question,
+  value,
+  disabled,
+  onChange,
+}: {
+  question: Question
+  value: string | string[]
+  disabled: boolean
+  onChange: (value: string | string[]) => void
+}) {
+  const selected = Array.isArray(value) ? value : [value]
+  return (
+    <div className="space-y-1.5">
+      {question.options.map((option, index) => {
+        const active = selected.includes(option.id!)
+        return (
+          <button
+            key={option.id}
+            type="button"
+            className={cn(
+              'group flex min-h-11 w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/40',
+              active
+                ? 'border-primary/35 bg-primary/10'
+                : 'border-transparent bg-muted/25 hover:border-border/55 hover:bg-muted/40',
+            )}
+            disabled={disabled}
+            aria-pressed={question.multiSelect ? active : undefined}
+            onClick={() => {
+              if (question.multiSelect)
+                onChange(
+                  active
+                    ? selected.filter((item) => item !== option.id)
+                    : [...selected.filter(Boolean), option.id!],
+                )
+              else onChange(option.id!)
+            }}
+          >
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-sm font-medium">{option.label}</span>
+              {option.description && (
+                <span className="text-xs text-muted-foreground">
+                  {option.description}
+                </span>
+              )}
+            </span>
+            {active ? (
+              <Check className="size-4 shrink-0 text-primary" />
+            ) : index < 9 ? (
+              <kbd className="flex size-5 shrink-0 items-center justify-center rounded border text-[11px] tabular-nums">
+                {index + 1}
+              </kbd>
+            ) : null}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function readAnswers(key: string): Answers {
+  try {
+    const value = sessionStorage.getItem(key)
+    return value ? (JSON.parse(value) as Answers) : {}
+  } catch {
+    return {}
+  }
+}
+function writeAnswers(key: string, answers: Answers) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(answers))
+  } catch {
+    /* storage is optional */
+  }
 }
