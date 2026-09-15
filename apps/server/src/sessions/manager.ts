@@ -1,3 +1,4 @@
+import { NativeCleanupError } from '../harnesses/native-cleanup.js'
 import {
   appendMessage,
   appendMessageInTransaction,
@@ -259,11 +260,49 @@ export class SessionManager {
     })
   }
 
-  private async spawn(row: SessionRow) {
+  private readonly pendingStarts = new Set<Promise<void>>()
+  private assertOpen() {
+    if (this.closeWork) throw new Error('Session manager is closed')
+  }
+  private startOwned<T>(start: () => Promise<T>): Promise<T> {
+    this.assertOpen()
+    const work = Promise.resolve().then(() => {
+      this.assertOpen()
+      return start()
+    })
+    const settled = work.then(
+      () => undefined,
+      (error) => {
+        if (error instanceof NativeCleanupError) throw error
+      },
+    )
+    this.pendingStarts.add(settled)
+    void settled.then(
+      () => this.pendingStarts.delete(settled),
+      () => {
+        // Retain failed cleanup and its original retry callback through close.
+      },
+    )
+    return work
+  }
+  private async disposeLate(handle: HarnessHandle): Promise<never> {
+    try {
+      await handle.kill()
+    } catch {
+      throw new NativeCleanupError(async () => {
+        await handle.kill()
+      })
+    }
+    throw new Error('Session manager is closed')
+  }
+  private spawn(row: SessionRow) {
+    return this.startOwned(() => this.spawnOriginal(row))
+  }
+  private async spawnOriginal(row: SessionRow) {
     const generation = (this.generations.get(row.id) ?? 0) + 1
     this.generations.set(row.id, generation)
     const onItem = (item: HarnessItem) => {
-      if (this.generations.get(row.id) !== generation) return
+      if (this.closeWork || this.generations.get(row.id) !== generation) return
       const turnId = item.turnId ?? this.turns.get(row.id) ?? makeId('turn_')
       const itemId = item.itemId ?? makeId('item_')
       const { itemId: _itemId, turnId: _turnId, ...normalized } = item
@@ -293,7 +332,7 @@ export class SessionManager {
       }
     }
     const onExit = () => {
-      if (this.generations.get(row.id) !== generation) return
+      if (this.closeWork || this.generations.get(row.id) !== generation) return
       const turnId = this.turns.get(row.id)
       this.forgetHandle(row.id)
       if (turnId) this.finishTurn(row, turnId, new Error('Harness exited'))
@@ -304,6 +343,7 @@ export class SessionManager {
     }
     this.markAccountUsed(row.account_id)
     const process = this.factory(row.harness, row.account_id)
+    this.assertOpen()
     const session = {
       id: row.id,
       cwd: row.cwd,
@@ -316,6 +356,7 @@ export class SessionManager {
       if (!process.capabilities?.loadSession || !process.loadSession)
         throw new Error('Harness cannot resume the saved native session')
       const loaded = await process.loadSession(session, onItem, onExit)
+      if (this.closeWork) return this.disposeLate(loaded.handle)
       if (!loaded.proven) {
         await loaded.handle.kill()
         throw new Error('Provider session load was not proven')
@@ -324,6 +365,7 @@ export class SessionManager {
     } else {
       handle = await process.spawn(session, onItem, onExit)
     }
+    if (this.closeWork) return this.disposeLate(handle)
     this.rememberModels(row.id, handle.availableModels)
     this.handles.set(row.id, handle)
     this.handleHarnesses.set(row.id, row.harness)
@@ -340,13 +382,17 @@ export class SessionManager {
     )
   }
 
-  async recover(row: SessionRow, recap?: string) {
+  recover(row: SessionRow, recap?: string) {
+    return this.startOwned(() => this.recoverOriginal(row, recap))
+  }
+  private async recoverOriginal(row: SessionRow, recap?: string) {
     const generation = (this.generations.get(row.id) ?? 0) + 1
     this.generations.set(row.id, generation)
     const process = this.factory(row.harness, row.account_id)
+    this.assertOpen()
     const fallbackTurnId = makeId('turn_')
     const onItem = (item: HarnessItem) => {
-      if (this.generations.get(row.id) !== generation) return
+      if (this.closeWork || this.generations.get(row.id) !== generation) return
       const { itemId: _itemId, turnId: _turnId, ...content } = item
       appendMessage(this.db, {
         sessionId: row.id,
@@ -359,7 +405,7 @@ export class SessionManager {
       })
     }
     const onExit = () => {
-      if (this.generations.get(row.id) !== generation) return
+      if (this.closeWork || this.generations.get(row.id) !== generation) return
       this.forgetHandle(row.id)
       this.status(row.id, 'errored')
     }
@@ -383,9 +429,11 @@ export class SessionManager {
     if (canLoad) {
       try {
         result = await process.loadSession!(session, onItem, onExit)
+        if (this.closeWork) return this.disposeLate(result.handle)
         if (!result.proven)
           throw new Error('Provider session load was not proven')
       } catch (error) {
+        if (error instanceof NativeCleanupError) throw error
         // A failed native resume is not permission to create a replacement.
         // Keep the persisted binding and expose the provider failure instead.
         throw new Error(
@@ -396,8 +444,10 @@ export class SessionManager {
       if (!process.newSession)
         throw new Error('Harness cannot create a session')
       result = await process.newSession(session, onItem, onExit)
+      if (this.closeWork) return this.disposeLate(result.handle)
       if (!result.proven) throw new Error('New session was not proven')
     }
+    if (this.closeWork) return this.disposeLate(result.handle)
     this.rememberModels(
       row.id,
       result.availableModels ?? result.handle.availableModels,
@@ -436,6 +486,7 @@ export class SessionManager {
       if (error) waiter.reject(error)
       else waiter.resolve()
     }
+    if (this.closeWork) return
     if (!error) {
       this.status(row.id, 'idle')
       this.maybeTitle(row.id, row.title, this.firstPrompt.get(row.id) ?? '')
@@ -570,6 +621,7 @@ export class SessionManager {
   }
 
   async sendQueuedPromptNow(sessionId: string, promptId: string) {
+    this.assertOpen()
     const row = this.db
       .prepare('SELECT * FROM queued_prompts WHERE id = ? AND session_id = ?')
       .get(promptId, sessionId) as
@@ -694,6 +746,7 @@ export class SessionManager {
   }
 
   private async drainQueue(sessionId: string) {
+    if (this.closeWork) return
     if (this.queueBusy.has(sessionId) || this.turns.has(sessionId)) return
     const queued = this.db
       .prepare(
@@ -791,6 +844,7 @@ export class SessionManager {
     })
   }
   private scheduleReap(id: string) {
+    if (this.closeWork) return
     const old = this.reapTimers.get(id)
     if (old) clearTimeout(old)
     const timer = setTimeout(() => {
@@ -1006,6 +1060,7 @@ export class SessionManager {
     promptParts?: unknown[],
     revision?: number,
   ) {
+    this.assertOpen()
     if (delivery === 'immediate' && this.turns.has(id)) {
       const handle = this.handles.get(id)
       if (handle?.steer) {
@@ -1194,6 +1249,7 @@ export class SessionManager {
     content: import('./harness.js').PromptContent[],
   ) {
     try {
+      this.assertOpen()
       const result = handle.prompt(content)
       if (result && typeof result === 'object' && 'then' in result)
         void Promise.resolve(result).then(
@@ -1263,6 +1319,7 @@ export class SessionManager {
     requestId: string,
     uploads?: UploadStore,
   ) {
+    this.assertOpen()
     const retained = this.promotions.get(requestId)
     const run = async () => {
       if (retained)
@@ -1613,9 +1670,20 @@ export class SessionManager {
     for (const timer of this.reapTimers.values()) clearTimeout(timer)
     const original = [...this.handles.values()]
     this.closeWork = Promise.resolve().then(async () => {
-      const settled = await Promise.allSettled(
-        original.map((handle) => Promise.resolve().then(() => handle.kill())),
-      )
+      const settled = await Promise.allSettled([
+        ...original.map((handle) =>
+          Promise.resolve().then(() => handle.kill()),
+        ),
+        ...[...this.pendingStarts].map(async (start) => {
+          try {
+            await start
+          } catch (error) {
+            if (!(error instanceof NativeCleanupError)) throw error
+            await error.retryCleanup()
+            this.pendingStarts.delete(start)
+          }
+        }),
+      ])
       const failures = settled.filter(
         (result): result is PromiseRejectedResult =>
           result.status === 'rejected',

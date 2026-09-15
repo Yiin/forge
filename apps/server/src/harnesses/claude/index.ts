@@ -1,3 +1,4 @@
+import { closeNativeDiscovery } from '../native-cleanup.js'
 import { randomUUID } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import {
@@ -172,6 +173,94 @@ function accountId(value: string | null | undefined) {
     throw new Error('Claude account ID must be nonempty and normalized')
   return value
 }
+function launchEnvironment(
+  options: ClaudeAdapterOptions,
+  selected: string | null,
+) {
+  const env: NodeJS.ProcessEnv = { CLAUDECODE: undefined }
+  if (selected) for (const name of inheritedCredentials) env[name] = undefined
+  Object.assign(env, options.env)
+  env.CLAUDECODE = undefined
+  return env
+}
+
+export async function discoverClaude(
+  original: ClaudeAdapterOptions,
+  { cwd: requestedCwd, signal }: { cwd: string; signal: AbortSignal },
+): Promise<ClaudeCatalog> {
+  const options = {
+    ...original,
+    args: [...(original.args ?? [])],
+    env: { ...original.env },
+    secrets: [...(original.secrets ?? [])],
+  }
+  const selected = accountId(options.accountId)
+  if (selected && !options.env.CLAUDE_CONFIG_DIR?.trim())
+    throw new Error('Selected Claude account requires CLAUDE_CONFIG_DIR')
+  const args = [...launchArgs(options.args), '--no-session-persistence']
+  const env = { ...process.env, ...launchEnvironment(options, selected) }
+  const cwd = await realpath(requestedCwd)
+  if (!(await stat(cwd)).isDirectory())
+    throw new Error('Claude cwd must be a directory')
+  const { process: owner, value } = await NativeProcess.start(
+    {
+      command: options.command ?? 'claude',
+      args,
+      cwd,
+      env,
+      inheritEnv: false,
+      secrets: options.secrets,
+      signal: signal,
+      startupTimeoutMs: Math.min(
+        options.startupTimeoutMs ?? 15_000,
+        options.controlTimeoutMs ?? 15_000,
+      ),
+    },
+    async (process) => {
+      const requestId = `${randomUUID()}:${randomUUID()}`
+      let resolve!: (value: ClaudeCatalog) => void
+      let reject!: (error: unknown) => void
+      const result = new Promise<ClaudeCatalog>((yes, no) => {
+        resolve = yes
+        reject = no
+      })
+      let frames = 0
+      const transport = new JsonlTransport({
+        stdin: process.child.stdin,
+        stdout: process.child.stdout,
+        maxLineBytes: LIMITS.frameBytes,
+        onValue(value) {
+          if (++frames > 512)
+            throw new Error('Claude discovery frame limit exceeded')
+          const frame = object(value)
+          if (frame.type !== 'control_response') return
+          const response = object(frame.response)
+          if (response.request_id !== requestId) return
+          if (response.subtype !== 'success')
+            throw new Error('Claude discovery request failed')
+          resolve(parseCatalog(response.response))
+        },
+      })
+      process.ownTransport(transport)
+      void transport.done.then(reject)
+      void transport
+        .send(
+          {
+            type: 'control_request',
+            request_id: requestId,
+            request: { subtype: 'initialize' },
+          },
+          { signal: process.signal },
+        )
+        .catch(reject)
+      return result
+    },
+  )
+  await closeNativeDiscovery(() => owner.close())
+  if (signal.aborted) throw signal.reason
+  return value
+}
+
 export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): Omit<
   HarnessAdapter,
   'spawn' | 'load'
@@ -228,11 +317,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): Omit<
     args.push(
       ...(resume ? [`--resume=${nativeId}`] : ['--session-id', nativeId]),
     )
-    const env: NodeJS.ProcessEnv = { CLAUDECODE: undefined }
-    if (selected) for (const name of inheritedCredentials) env[name] = undefined
-    Object.assign(env, options.env)
-    // A parent CLI marker must never turn an owned child into a nested CLI session.
-    env.CLAUDECODE = undefined
+    const env = launchEnvironment(options, selected)
     const { value } = await NativeProcess.start(
       {
         command: options.command ?? 'claude',

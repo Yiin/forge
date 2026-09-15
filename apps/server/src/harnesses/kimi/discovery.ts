@@ -1,3 +1,4 @@
+import { closeNativeDiscovery, NativeCleanupError } from '../native-cleanup.js'
 import { randomUUID, createHash } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import type { ConfirmedNativeBinding, HarnessEvent } from '../types.js'
@@ -196,7 +197,14 @@ export async function discoverKimi(options: {
     authority = captureAuthority(options.authority, host.budget.limits)
   const effective = await effectiveAuthority(authority)
   options.signal.throwIfAborted()
-  const lease = await host.acquire(effective, 'helper')
+  const lease = await host.acquire(effective, 'helper').catch((error) => {
+    if (
+      error instanceof KimiError &&
+      error.code === 'kimi_home_cleanup_unproved'
+    )
+      throw new NativeCleanupError(host.cleanupHome(effective))
+    throw error
+  })
   try {
     const owned = await readCatalog(
       lease,
@@ -209,7 +217,8 @@ export async function discoverKimi(options: {
       owned.release()
     }
   } finally {
-    await lease.close()
+    const cleanup = () => lease.server.close()
+    await closeNativeDiscovery(() => lease.close(), cleanup)
   }
 }
 

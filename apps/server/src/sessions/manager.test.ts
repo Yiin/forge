@@ -1483,15 +1483,116 @@ describe('native steering admission', () => {
         expect(steer).toHaveBeenCalledTimes(1)
       } finally {
         release()
-        await manager.close()
-        await vi.waitFor(() =>
-          expect(
-            db.prepare('SELECT status FROM sessions WHERE id=?').get(session.id)
-              ?.status,
-          ).toBe('idle'),
-        )
-        db.close()
+        try {
+          await vi.waitFor(() =>
+            expect(
+              db
+                .prepare('SELECT status FROM sessions WHERE id=?')
+                .get(session.id)?.status,
+            ).toBe('idle'),
+          )
+        } finally {
+          await manager.close()
+          db.close()
+        }
       }
+    },
+  )
+})
+
+describe('manager startup shutdown ownership', () => {
+  it.each(['spawn', 'load', 'recover', 'refused', 'retry'] as const)(
+    'joins original pending %s and closes its late handle',
+    async (mode) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'test', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'Chat',
+        cwd: '/tmp',
+      })
+      if (mode === 'load' || mode === 'recover')
+        db.prepare(
+          'UPDATE sessions SET provider_session_id = ? WHERE id = ?',
+        ).run('original-native', session.id)
+      let resolveHandle!: (handle: HarnessHandle) => void
+      const held = new Promise<HarnessHandle>((resolve) => {
+        resolveHandle = resolve
+      })
+      let started!: () => void
+      const entered = new Promise<void>((resolve) => {
+        started = resolve
+      })
+      let releaseKill!: () => void
+      const killHeld = new Promise<void>((resolve) => {
+        releaseKill = resolve
+      })
+      let killEntered!: () => void
+      const killing = new Promise<void>((resolve) => {
+        killEntered = resolve
+      })
+      let kills = 0
+      let prompts = 0
+      const manager = new SessionManager(db, new EventBus(), () => ({
+        capabilities: { loadSession: true },
+        spawn: async () => {
+          started()
+          return held
+        },
+        loadSession: async () => {
+          started()
+          return { handle: await held, proven: true }
+        },
+      }))
+      const prompt = (
+        mode === 'recover'
+          ? manager.recover(
+              db
+                .prepare('SELECT * FROM sessions WHERE id = ?')
+                .get(session.id) as Parameters<SessionManager['recover']>[0],
+            )
+          : manager.prompt(session.id, 'first')
+      ).catch((error) => error)
+      await entered
+      const close = manager.close()
+      const closed = close.catch((error) => error)
+      expect(manager.close()).toBe(close)
+      let settled = false
+      void closed.then(() => {
+        settled = true
+      })
+      await expect(manager.prompt(session.id, 'late')).rejects.toThrow(
+        'Session manager is closed',
+      )
+      resolveHandle({
+        prompt: async () => {
+          prompts++
+        },
+        cancel: () => {},
+        kill: async () => {
+          kills++
+          killEntered()
+          await killHeld
+          if (mode === 'refused' || (mode === 'retry' && kills === 1))
+            throw Error('original cleanup refused')
+        },
+      })
+      await killing
+      expect(settled).toBe(false)
+      expect(prompts).toBe(0)
+      releaseKill()
+      const result = await closed
+      if (mode === 'refused') {
+        expect(result).toBeInstanceOf(AggregateError)
+        expect(result.errors[0].name).toBe('NativeCleanupError')
+        expect(manager.close()).toBe(close)
+      } else expect(result).toBeUndefined()
+      await prompt
+      expect(kills).toBe(mode === 'refused' || mode === 'retry' ? 2 : 1)
+      expect(prompts).toBe(0)
+      db.close()
     },
   )
 })

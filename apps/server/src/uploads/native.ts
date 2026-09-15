@@ -52,7 +52,10 @@ export function createNativeAttachmentLoader(
       if (JSON.stringify(query.get(attachmentId, sessionId)) !== snapshot)
         throw Error('Native attachment ownership changed')
     }
-    const inspect = async (read: boolean, revision?: string) => {
+    const inspect = async (
+      mode: 'metadata' | 'read' | 'verify',
+      revision?: string,
+    ) => {
       verifyRow()
       const chain = await WorkspacePath.open(
         root,
@@ -71,20 +74,35 @@ export function createNativeAttachmentLoader(
             (revision && current !== revision)
           )
             throw Error('Native attachment file changed')
-          if (!read) return { revision: current, bytes: undefined }
-          if (row.size_bytes > MAX_INLINE_IMAGE_BYTES)
+          if (mode === 'metadata')
+            return { revision: current, bytes: undefined }
+          if (mode === 'read' && row.size_bytes > MAX_INLINE_IMAGE_BYTES)
             throw Error('Native attachment read exceeds inline limit')
-          const bytes = Buffer.alloc(row.size_bytes + 1)
+          const bytes = Buffer.alloc(
+            mode === 'read'
+              ? row.size_bytes + 1
+              : Math.min(row.size_bytes + 1, 65536),
+          )
+          const hash = createHash('sha256')
           let offset = 0
-          while (offset < bytes.length) {
+          while (offset <= row.size_bytes) {
             signal.throwIfAborted()
             const result = await handle.read(
               bytes,
-              offset,
-              bytes.length - offset,
+              mode === 'read' ? offset : 0,
+              Math.min(
+                mode === 'read' ? bytes.length - offset : bytes.length,
+                row.size_bytes + 1 - offset,
+              ),
               offset,
             )
             if (!result.bytesRead) break
+            hash.update(
+              bytes.subarray(
+                mode === 'read' ? offset : 0,
+                (mode === 'read' ? offset : 0) + result.bytesRead,
+              ),
+            )
             offset += result.bytesRead
           }
           await chain.verify()
@@ -92,12 +110,13 @@ export function createNativeAttachmentLoader(
           if (
             offset !== row.size_bytes ||
             fileRevision(await handle.stat({ bigint: true })) !== current ||
-            createHash('sha256')
-              .update(bytes.subarray(0, offset))
-              .digest('hex') !== row.sha256
+            hash.digest('hex') !== row.sha256
           )
             throw Error('Native attachment contents changed')
-          return { revision: current, bytes: bytes.subarray(0, offset) }
+          return {
+            revision: current,
+            bytes: mode === 'read' ? bytes.subarray(0, offset) : undefined,
+          }
         } finally {
           await handle.close()
         }
@@ -105,14 +124,17 @@ export function createNativeAttachmentLoader(
         await chain.close()
       }
     }
-    const captured = await inspect(false)
+    const captured = await inspect('metadata')
     return {
       mime: row.mime,
       name: row.filename,
       path: join(root, row.rel_path),
       sizeBytes: row.size_bytes,
       sha256: row.sha256,
-      readBytes: async () => (await inspect(true, captured.revision)).bytes!,
+      readBytes: async () => (await inspect('read', captured.revision)).bytes!,
+      verifyBytes: async () => {
+        await inspect('verify', captured.revision)
+      },
     }
   }
 }

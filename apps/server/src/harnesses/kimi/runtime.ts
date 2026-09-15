@@ -1586,6 +1586,24 @@ export class KimiRuntime implements KimiHandle {
         if (existing && digest(existing) !== digest(root))
           throw new KimiError('kimi_tool_owner_conflict')
         if (!existing) {
+          await this.records.commit(
+            ['tool-owner', frame.epoch, frame.seq],
+            [
+              record(
+                this.records.scope,
+                'live-engine',
+                [frame.epoch, frame.seq, 'owner'],
+                'tool.owner',
+                {
+                  providerTurnId: String(payload.turnId),
+                  providerToolCallId: payload.toolCallId,
+                },
+                root,
+                agent,
+              ),
+            ],
+            [],
+          )
           this.retainState({ key, root })
         }
         this.toolOwners.set(

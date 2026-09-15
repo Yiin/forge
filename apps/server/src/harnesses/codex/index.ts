@@ -1,3 +1,4 @@
+import { NativeCleanupError } from '../native-cleanup.js'
 import { randomUUID } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
@@ -334,8 +335,16 @@ class CodexActivation implements HarnessHandle {
       )
       return this
     } catch (error) {
-      await this.retire(diagnosticError(error, this.options.secrets))
-      throw diagnosticError(error, this.options.secrets)
+      const safe =
+        error instanceof NativeCleanupError
+          ? error
+          : diagnosticError(error, this.options.secrets)
+      try {
+        await this.retire(safe)
+      } catch {
+        throw new NativeCleanupError(() => this.retire(safe))
+      }
+      throw safe
     }
   }
   prompt(

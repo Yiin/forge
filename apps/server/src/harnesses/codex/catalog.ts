@@ -1,3 +1,4 @@
+import { closeNativeDiscovery, NativeCleanupError } from '../native-cleanup.js'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { DispatchOptions } from '../types.js'
@@ -27,18 +28,20 @@ import {
   type CodexModel,
 } from './wire.js'
 
-export type CodexAdapterOptions = CodexLaunchOptions & {
+export type CodexDiscoveryOptions = CodexLaunchOptions & {
   secrets?: readonly string[]
   signal?: AbortSignal
   initialOptions?: DispatchOptions
+  startupTimeoutMs?: number
+  interruptGraceMs?: number
+  preparationTimeoutMs?: number
+}
+export type CodexAdapterOptions = CodexDiscoveryOptions & {
   loadAttachment: (
     sessionId: string,
     attachmentId: string,
     signal: AbortSignal,
   ) => Promise<{ mime: string; name: string; path: string; sizeBytes: number }>
-  startupTimeoutMs?: number
-  interruptGraceMs?: number
-  preparationTimeoutMs?: number
 }
 export type CodexConnection = {
   rpc: JsonlRpcTransport
@@ -53,7 +56,7 @@ export type CodexConnection = {
 
 /** One owned connection and one overall deadline, including canonical path preparation. */
 export async function connectCodex<T>(
-  input: CodexAdapterOptions,
+  input: CodexDiscoveryOptions,
   cwd: string,
   transaction: (connection: CodexConnection) => Promise<T>,
   incoming?: (message: JsonRpcIncoming, rpc: JsonlRpcTransport) => void,
@@ -227,6 +230,7 @@ export async function connectCodex<T>(
       },
     )
   } catch (error) {
+    if (error instanceof NativeCleanupError) throw error
     throw diagnosticError(error, secrets)
   } finally {
     clearTimeout(timer)
@@ -310,7 +314,7 @@ export async function readSkills(
 }
 
 export async function discoverCodex(
-  options: CodexAdapterOptions,
+  options: CodexDiscoveryOptions,
   request: { cwd: string; signal?: AbortSignal },
 ): Promise<CodexDiscovery> {
   let process: NativeProcess | undefined
@@ -373,6 +377,6 @@ export async function discoverCodex(
     )
     return result.value
   } finally {
-    await process?.close()
+    if (process) await closeNativeDiscovery(() => process!.close())
   }
 }
