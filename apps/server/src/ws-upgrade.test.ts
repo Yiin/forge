@@ -6,6 +6,7 @@ import { connect, type Socket } from 'node:net'
 import type { IncomingMessage, Server } from 'node:http'
 import { WebSocket } from 'ws'
 import { WebSocketUpgrades } from './ws-upgrade.js'
+import { RequestGuard } from './request-guard.js'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -19,8 +20,9 @@ function deferred() {
   return { promise, resolve }
 }
 async function fixture(maxOpening = 2, deadlineMs = 100) {
+  const guard = new RequestGuard()
   const app = new Hono(),
-    upgrades = new WebSocketUpgrades(app, maxOpening, deadlineMs)
+    upgrades = new WebSocketUpgrades(app, maxOpening, deadlineMs, guard)
   app.onError((_error, c) => c.text('Rejected', 500))
   const server = serve({
     fetch: app.fetch,
@@ -30,6 +32,7 @@ async function fixture(maxOpening = 2, deadlineMs = 100) {
   upgrades.install(server)
   await once(server, 'listening')
   const port = (server.address() as { port: number }).port
+  guard.bind(port)
   const clients = new Set<Socket | WebSocket>()
   const releases: Array<() => void> = []
   cleanup.push(async () => {

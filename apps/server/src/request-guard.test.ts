@@ -3,8 +3,91 @@ import { RequestGuard } from './request-guard.js'
 
 describe('Forge request guard', () => {
   const guard = new RequestGuard({ mode: 'loopback' })
+  guard.bind(3900)
   const request = (headers: HeadersInit = {}, method = 'POST') =>
     new Request('http://127.0.0.1:3900/api/projects', { method, headers })
+
+  it('refuses loopback requests before the listener binds', () => {
+    expect(new RequestGuard().check(request())).toBe(
+      'Request listener is not ready',
+    )
+    expect(() => new RequestGuard().bind(0)).toThrow('actual bound HTTP port')
+  })
+
+  it('accepts canonical browser authorities on HTTP port 80', () => {
+    const bound = new RequestGuard()
+    bound.bind(80)
+    expect(
+      bound.check(
+        new Request('http://localhost/api/health', {
+          headers: { host: 'localhost', origin: 'http://localhost' },
+        }),
+      ),
+    ).toBeUndefined()
+  })
+
+  it('does not derive an allowed browser Origin from an allowed backend Host', () => {
+    const explicit = new RequestGuard({
+      mode: 'explicit',
+      allowedOrigins: ['https://forge.example'],
+      allowedHostAuthorities: ['backend:8080'],
+    })
+    const incoming = {
+      host: 'backend:8080',
+      'content-type': 'application/json',
+    }
+    expect(
+      explicit.check(
+        new Request('http://backend:8080/api/projects', {
+          method: 'POST',
+          headers: { ...incoming, origin: 'http://backend:8080' },
+        }),
+        { mutation: true },
+      ),
+    ).toBe('Origin is not allowed')
+    expect(
+      explicit.check(
+        new Request('http://backend:8080/api/projects', {
+          method: 'POST',
+          headers: { ...incoming, origin: 'https://forge.example' },
+        }),
+        { mutation: true },
+      ),
+    ).toBeUndefined()
+  })
+
+  it.each([
+    'application/json-patch+json',
+    'application/json.bad',
+    'application/json, text/plain',
+    'text/plain',
+    'multipart/form-data',
+  ])('rejects %s for JSON mutations', (type) => {
+    expect(
+      guard.check(request({ 'content-type': type }), { mutation: true }),
+    ).toBe('JSON requests require application/json')
+  })
+
+  it('accepts JSON parameters but rejects malformed or missing browser metadata', () => {
+    expect(
+      guard.check(
+        request({ 'content-type': 'application/json; charset=utf-8' }),
+        { mutation: true },
+      ),
+    ).toBeUndefined()
+    expect(
+      guard.check(
+        request({
+          'content-type': 'application/json',
+          'sec-fetch-site': 'same-origin',
+        }),
+        { mutation: true },
+      ),
+    ).toBe('Browser mutations require Origin')
+    expect(
+      guard.check(request({ 'sec-fetch-site': 'same-origin, cross-site' })),
+    ).toBe('Fetch Metadata is not allowed')
+  })
 
   it('allows same-origin mutations and non-browser clients', () => {
     expect(

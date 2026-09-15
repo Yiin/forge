@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
-import { createApp, createEpicSessionAdapter } from '../src/index.js'
+import { createEpicSessionAdapter } from '../src/index.js'
+import { createTestApp as createApp } from './app-fixture.js'
 import { migrate } from '../src/db/migrate.js'
 import { createProject, createRun } from '../src/db/queries.js'
 import { EventBus } from '../src/events/bus.js'

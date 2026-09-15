@@ -22,17 +22,6 @@ function values(
   return value === null ? [] : [value]
 }
 
-function loopbackHost(host: string) {
-  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
-}
-
-function hostAuthority(authority: string) {
-  const separator = authority.lastIndexOf(':')
-  return separator > authority.indexOf(']')
-    ? authority.slice(0, separator)
-    : authority
-}
-
 export class RequestGuard {
   private readonly origins: Set<string>
   private readonly hosts: Set<string>
@@ -51,12 +40,15 @@ export class RequestGuard {
   }
 
   bind(port: number) {
+    if (this.bound || !Number.isSafeInteger(port) || port < 1 || port > 65535)
+      throw new Error('Request authority needs the actual bound HTTP port')
     if (this.access.mode === 'loopback') {
       this.hosts.clear()
       this.origins.clear()
       for (const host of ['localhost', '127.0.0.1', '[::1]']) {
         this.hosts.add(`${host}:${port}`)
         this.origins.add(`http://${host}:${port}`)
+        if (port === 80) this.hosts.add(host)
       }
     }
     this.bound = true
@@ -66,6 +58,8 @@ export class RequestGuard {
     request: Request,
     options: { mutation?: boolean; incoming?: IncomingMessage } = {},
   ) {
+    if (this.access.mode === 'loopback' && !this.bound)
+      return 'Request listener is not ready'
     const incoming = options.incoming
     for (const name of singletonHeaders)
       if (values(request, incoming, name).length > 1)
@@ -81,13 +75,7 @@ export class RequestGuard {
     } catch {
       return 'Host is not allowed'
     }
-    const hostAllowed =
-      this.access.mode === 'explicit'
-        ? this.hosts.has(parsedHost)
-        : this.bound
-          ? this.hosts.has(parsedHost)
-          : loopbackHost(hostAuthority(parsedHost))
-    if (!hostAllowed) return 'Host is not allowed'
+    if (!this.hosts.has(parsedHost)) return 'Host is not allowed'
 
     const origin = values(request, incoming, 'origin')[0]
     if (origin !== undefined) {
@@ -98,42 +86,40 @@ export class RequestGuard {
       } catch {
         return 'Origin is not allowed'
       }
-      let sameOrigin = false
-      try {
-        const url = new URL(request.url)
-        sameOrigin = parsedOrigin === `${url.protocol}//${parsedHost}`
-      } catch {
-        sameOrigin = false
-      }
-      const allowed = this.origins.has(parsedOrigin) || sameOrigin
-      if (!allowed) return 'Origin is not allowed'
+      if (!this.origins.has(parsedOrigin)) return 'Origin is not allowed'
     }
 
+    const site = values(request, incoming, 'sec-fetch-site')[0]?.toLowerCase()
     if (
-      values(request, incoming, 'sec-fetch-site').some(
-        (value) => value.toLowerCase() === 'cross-site',
-      )
+      site !== undefined &&
+      !['none', 'same-origin', 'same-site', 'cross-site'].includes(site)
     )
-      return 'Cross-site request is not allowed'
+      return 'Fetch Metadata is not allowed'
+    if (site === 'cross-site') return 'Cross-site request is not allowed'
+    if (options.mutation && site !== undefined && origin === undefined)
+      return 'Browser mutations require Origin'
 
     if (options.mutation) {
       const contentType = values(request, incoming, 'content-type')[0]
-      if (contentType?.toLowerCase().startsWith('text/plain'))
-        return 'JSON requests require application/json'
+        ?.split(';', 1)[0]
+        ?.trim()
+        .toLowerCase()
       const path = new URL(request.url).pathname
-      const rawUpload = /^\/api\/uploads\/[^/]+$/.test(path)
+      const rawUpload =
+        request.method.toUpperCase() === 'PUT' &&
+        /^\/api\/uploads\/[^/]+$/.test(path)
       if (rawUpload) {
-        if (!contentType || !/^application\/octet-stream\b/i.test(contentType))
+        if (contentType !== 'application/octet-stream')
           return 'Upload bytes require application/octet-stream'
       } else if (
         request.method.toUpperCase() !== 'DELETE' &&
         !bodylessMutation.test(path)
       ) {
-        if (!contentType || !/^application\/json\b/i.test(contentType))
+        if (contentType !== 'application/json')
           return 'JSON requests require application/json'
       } else if (
         contentType !== undefined &&
-        !/^application\/json\b/i.test(contentType)
+        contentType !== 'application/json'
       )
         return 'Unsupported request media type'
     }

@@ -155,8 +155,9 @@ export function createApp(
     const method = c.req.method.toUpperCase()
     const failure = requestGuard.check(c.req.raw, {
       mutation: method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS',
-      incoming: (c.env as { incoming?: import('node:http').IncomingMessage })
-        .incoming,
+      incoming: (
+        c.env as { incoming?: import('node:http').IncomingMessage } | undefined
+      )?.incoming,
     })
     if (failure) return c.json({ error: failure }, 403)
     if (method === 'OPTIONS') {

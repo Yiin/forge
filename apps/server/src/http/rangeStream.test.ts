@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApp } from '../index.js'
+import { createTestApp as createApp } from '../../test/app-fixture.js'
 import { UploadStore } from '../uploads/store.js'
 
 const resources: Array<{ db: DatabaseSync; store: UploadStore; dir: string }> =

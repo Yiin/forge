@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { createApp } from '../src/index.js'
+import { createTestApp as createApp } from './app-fixture.js'
 import { migrate } from '../src/db/migrate.js'
 import { EventBus } from '../src/events/bus.js'
 import { UploadStore } from '../src/uploads/store.js'
