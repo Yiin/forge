@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { open, opendir } from 'node:fs/promises'
 import {
+  INSPECTION_BATCH,
   groupHasRunningMember,
   waitForProcessGroupExit,
 } from './process-group.js'
@@ -47,13 +48,17 @@ describe('process inspection deadlines', () => {
         toFake: ['performance', 'setTimeout', 'clearTimeout'],
       })
       const blocked = gate()
-      let listed = false
+      // Two batches worth of members, so one bounded batch cannot cover them all.
+      const pending = Array.from(
+        { length: INSPECTION_BATCH * 2 },
+        (_, slot) => ({
+          name: String(42 + slot),
+        }),
+      )
       const directory = {
         read: vi.fn(async () => {
           if (stage === 'directory read') await blocked.wait()
-          if (listed) return null
-          listed = true
-          return { name: '42' }
+          return pending.shift() ?? null
         }),
         close: vi.fn(async () => {
           if (stage === 'directory close') await blocked.wait()
@@ -99,16 +104,57 @@ describe('process inspection deadlines', () => {
           file.read.mock.calls.length,
         ]).toEqual(scans)
         expect(directory.close).toHaveBeenCalledTimes(1)
-        expect(file.close).toHaveBeenCalledTimes(
-          ['opendir', 'directory read', 'directory close'].includes(stage)
-            ? 0
-            : 1,
-        )
-        if (stage === 'directory close') expect(open).not.toHaveBeenCalled()
+        // One bounded batch opens INSPECTION_BATCH handles and releases every
+        // one of them. Expiry never leaves a handle behind, and it never starts
+        // the second batch.
+        const opened = [
+          'opendir',
+          'directory read',
+          'directory close',
+        ].includes(stage)
+          ? 0
+          : INSPECTION_BATCH
+        expect(vi.mocked(open).mock.calls.length).toBe(opened)
+        expect(file.close).toHaveBeenCalledTimes(opened)
         expect(vi.getTimerCount()).toBe(0)
       } finally {
         blocked.release()
       }
+    },
+  )
+
+  // A member can exit between the listing and its own state read.
+  it.each(['ENOENT', 'ESRCH'])(
+    'keeps scanning after a member reports %s for its own state',
+    async (code) => {
+      const names = ['41', '42']
+      vi.mocked(opendir).mockResolvedValue({
+        read: vi.fn(async () => {
+          const name = names.shift()
+          return name ? { name } : null
+        }),
+        close: vi.fn(async () => {}),
+      } as never)
+      vi.mocked(open).mockImplementation(async (path) => {
+        if (path === '/proc/41/stat')
+          throw Object.assign(new Error(`${code}: open '${String(path)}'`), {
+            code,
+          })
+        return {
+          read: vi.fn(async (buffer: Buffer) => ({
+            bytesRead: buffer.write('42 (owned) S 1 42 0'),
+          })),
+          close: vi.fn(async () => {}),
+        } as never
+      })
+      await expect(
+        groupHasRunningMember(42, performance.now() + 1000),
+      ).resolves.toBe(true)
+      // The vanished member never stops the scan of its batch.
+      expect(vi.mocked(open).mock.calls.map(([path]) => path)).toEqual([
+        '/proc/41/stat',
+        '/proc/42/stat',
+      ])
     },
   )
 
