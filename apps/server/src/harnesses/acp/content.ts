@@ -137,7 +137,7 @@ export function createAcpContent(options: {
   const sessions = new Map<string, number>(),
     roots = new Map<
       string,
-      Totals & { authority: string; release: () => void }
+      Totals & { authority: string; active: boolean; release: () => void }
     >(),
     activeRoots = new Map<string, number>()
   const totals: Totals = { bytes: 0, sources: 0 }
@@ -243,7 +243,10 @@ export function createAcpContent(options: {
             throw Error('Foreign ACP content root')
           const root = prior ?? { bytes: 0, sources: 0 }
           if (
-            (!roots.has(key) && roots.size >= 128) ||
+            (!prior?.active &&
+              [...roots.values()].filter((root) => root.active).length >=
+                128) ||
+            (!prior && roots.size >= 512) ||
             bytes.byteLength > (source ? MiB : 10 * MiB) ||
             root.bytes + bytes.byteLength > 32 * MiB ||
             totals.bytes + bytes.byteLength > 128 * MiB ||
@@ -258,9 +261,10 @@ export function createAcpContent(options: {
               'retained',
               key.length * 2 + 128,
             )
-            roots.set(key, { ...root, authority, release })
+            roots.set(key, { ...root, authority, active: true, release })
           }
           const chargedRoot = roots.get(key)!
+          chargedRoot.active = true
           chargedRoot.bytes += bytes.byteLength
           totals.bytes += bytes.byteLength
           if (source) {
@@ -476,8 +480,7 @@ export function createAcpContent(options: {
         throw Error('Foreign ACP content root')
       if (activeRoots.has(key))
         throw Error('ACP content root still owns physical work')
-      roots.get(key)?.release()
-      roots.delete(key)
+      if (prior) prior.active = false
     },
     async retryCleanup() {
       for (const entry of cleanup) await discard(entry)

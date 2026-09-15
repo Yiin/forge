@@ -26,6 +26,14 @@ export async function sdkFixture(
     transactions: PrefixTransaction[] = [],
     failures: unknown[] = []
   let artifact = 0
+  let committedThrough = 0,
+    prefixHash = emptyPrefix('journal'),
+    writerLive = false
+  const writerOpens: Array<{
+    writerEpoch: string
+    committedThrough: number
+    prefixHash: string
+  }> = []
   const deps: AcpRuntimeDependencies = {
     profile: 'custom-acp',
     launch: {
@@ -38,21 +46,42 @@ export async function sdkFixture(
     host: new AcpResourceHost(),
     ingestion: {
       async open() {
+        if (writerLive)
+          throw Error('Test journal already has an original writer')
+        writerLive = true
+        const writerEpoch = `epoch-${writerOpens.length + 1}`
+        writerOpens.push({ writerEpoch, committedThrough, prefixHash })
+        let closed = false
         return {
           journalId: 'journal',
-          writerEpoch: 'epoch',
-          committedThrough: 0,
-          prefixHash: emptyPrefix('journal'),
+          writerEpoch,
+          committedThrough,
+          prefixHash,
           async commit(transaction) {
+            if (
+              closed ||
+              transaction.writerEpoch !== writerEpoch ||
+              transaction.afterOrdinal !== committedThrough ||
+              transaction.previousPrefixHash !== prefixHash
+            )
+              throw Error(
+                'Test journal rejected a stale or discontinuous transaction',
+              )
             transactions.push(transaction)
             await beforeCommit?.(transaction)
+            committedThrough = transaction.throughOrdinal
+            prefixHash = committedPrefix(transaction)
             return {
               transactionId: transaction.transactionId,
-              throughOrdinal: transaction.throughOrdinal,
-              prefixHash: committedPrefix(transaction),
+              throughOrdinal: committedThrough,
+              prefixHash,
             }
           },
-          async close() {},
+          async close() {
+            if (closed) return
+            closed = true
+            writerLive = false
+          },
         }
       },
     },
@@ -92,6 +121,7 @@ export async function sdkFixture(
     deps,
     events,
     transactions,
+    writerOpens,
     failures,
     session: { id: 'session', provider: 'instance', cwd: directory },
     async frames() {

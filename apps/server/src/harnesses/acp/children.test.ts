@@ -72,6 +72,7 @@ function frame(
     fallbackOwner,
     exclusiveSubmittedRoot: true,
     wireOrdinal: ++ordinal,
+    transportGeneration: 'generation',
     rootForPrompt: (id) =>
       id === 'root' ? root() : id === 'next' ? root('next') : null,
     ...extra,
@@ -122,6 +123,22 @@ const devin = (
   },
 })
 describe('ACP exact child intervals', () => {
+  it('retains private transport evidence without changing the public owner generation', () => {
+    const c = children()
+    const f = frame(grok('spawned', 'attempt'), root(), undefined, {
+      transportGeneration: 'private-one',
+    })
+    publish(c, f)
+    const history = c.snapshot()
+    expect(history.intervals[0]).toMatchObject({
+      sourceGeneration: 'private-one',
+      owner: { runtimeGeneration: root().runtimeGeneration },
+    })
+    const restored = children('grok', history)
+    expect(restored.snapshot()).toEqual(history)
+    c.close()
+    restored.close()
+  })
   it('attributes first use only with exclusive submitted parent proof', () => {
     const c = children()
     expect(

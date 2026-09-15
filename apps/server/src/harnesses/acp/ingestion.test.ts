@@ -462,6 +462,62 @@ describe('ACP ordered durable prefix', () => {
       await journal.close()
     }
   })
+  it('retains retirement proof across late observations and completed replay segments', async () => {
+    const host = new AcpResourceHost(),
+      gate = deferred<void>(),
+      entered = deferred<void>()
+    let held = false
+    const journal = new AcpJournal(
+      writer(async (tx) => {
+        if (held) {
+          entered.resolve()
+          await gate.promise
+        }
+        return ack(tx)
+      }),
+      { ...options(), host },
+    )
+    try {
+      const original = owner()
+      await journal.append(
+        original,
+        { kind: 'disposition', status: 'ignored' },
+        'terminal',
+      )
+      journal.retireOwner(original)
+      held = true
+      const late = journal.reserve(original, source)
+      late.finish(records)
+      await entered.promise
+      expect(journal.canRetireOwner(original)).toBe(false)
+      gate.resolve()
+      await late.committed
+      expect(journal.canRetireOwner(original)).toBe(true)
+      journal.retireOwner(original)
+      held = false
+      const { runId: _run, turnId: _turn, ...base } = original
+      for (let index = 0; index < 129; index++) {
+        const replay = {
+          ...base,
+          phase: 'load_replay' as const,
+          loadId: String(index),
+          requestedNativeSessionId: 'native',
+        }
+        const ticket = journal.reserve(replay, source)
+        expect(journal.canRetireOwner(replay)).toBe(false)
+        ticket.finish([
+          { value: { kind: 'disposition', status: 'replay_visible' } },
+        ])
+        await ticket.committed
+        expect(journal.canRetireOwner(replay)).toBe(true)
+        journal.retireOwner(replay)
+      }
+    } finally {
+      gate.resolve()
+      await journal.close()
+    }
+    host.reserve('provider', 'retained', 128 * 1024 * 1024)()
+  })
   it('retires acknowledged terminal owners across more than 256 turns without retiring pending owners', async () => {
     const journal = new AcpJournal(
       writer(async (transaction) => ack(transaction)),

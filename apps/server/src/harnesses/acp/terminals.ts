@@ -1,4 +1,8 @@
-import { randomUUID } from 'node:crypto'
+import type { AcpTerminalHistory } from './terminal-history.js'
+export {
+  createAcpTerminalHistory,
+  type AcpTerminalHistory,
+} from './terminal-history.js'
 import { lstat, realpath } from 'node:fs/promises'
 import { isAbsolute, relative } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
@@ -77,6 +81,8 @@ type Operation = {
 export async function createAcpTerminals(options: {
   session: HarnessSession
   runtimeGeneration: string
+  transportGeneration: string
+  history: AcpTerminalHistory
   binding(): ConfirmedNativeBinding | null
   rpc: JsonlRpcTransport
   host: AcpResourceHost
@@ -88,7 +94,10 @@ export async function createAcpTerminals(options: {
   commandDeadlineMs?: number
   expiryMs?: number
 }) {
-  const { rpc, host, instanceId, runtimeGeneration } = options
+  const { rpc, host, instanceId, runtimeGeneration, transportGeneration } =
+    options
+  const history = options.history
+  history.assert(host, instanceId, runtimeGeneration)
   const session = immutableData(options.session)
   const account = immutableData(options.account)
   const capturedBinding = options.binding
@@ -104,7 +113,11 @@ export async function createAcpTerminals(options: {
   ])
     if (!Number.isSafeInteger(value) || value! < 1 || value! > max!)
       throw Error('Invalid ACP terminal deadline')
-  if (!runtimeGeneration || session.provider !== instanceId)
+  if (
+    !runtimeGeneration ||
+    !transportGeneration ||
+    session.provider !== instanceId
+  )
     throw Error('Invalid ACP terminal authority')
   const owners = runtimeOwners.get(host) ?? new Set<string>()
   runtimeOwners.set(host, owners)
@@ -118,14 +131,12 @@ export async function createAcpTerminals(options: {
       : account.kind !== 'native-default'
   )
     throw Error('Invalid ACP terminal account')
-  const releaseRegistry = host.reserve(instanceId, 'retained', 4 * MiB)
   owners.add(runtimeKey)
   let ownsRuntime = true
   const releaseRuntime = () => {
     if (!ownsRuntime) return
     ownsRuntime = false
     owners.delete(runtimeKey)
-    releaseRegistry()
   }
   let releaseSetup: () => void
   try {
@@ -161,9 +172,7 @@ export async function createAcpTerminals(options: {
     })
   const { root, expected } = await initialized.promise
   const records = new Map<string, RecordOwner>()
-  const retired = new Map<string, string>()
   const operations = new Set<Operation>()
-  let metadataBytes = 0
   let live = 0,
     retained = 0,
     waiters = 0,
@@ -189,7 +198,7 @@ export async function createAcpTerminals(options: {
     record.releaseOutput()
     retained -= record.limit
     records.delete(record.id)
-    retired.set(record.id, record.scope)
+    history.retire(record.id, record.scope)
   }
   function cleanup(record: RecordOwner): Promise<void> {
     if (record.cleanup) return record.cleanup
@@ -307,29 +316,25 @@ export async function createAcpTerminals(options: {
     if (!Number.isSafeInteger(requested) || requested < 0)
       throw Error('Invalid ACP terminal output limit')
     const limit = Math.min(requested, MiB)
-    if (
-      live >= 4 ||
-      records.size >= 32 ||
-      retired.size + records.size >= 4096 ||
-      retained + limit > 4 * MiB
-    )
+    if (live >= 4 || records.size >= 32 || retained + limit > 4 * MiB)
       throw Error('ACP terminal capacity')
     const metadataCharge = 4 * Buffer.byteLength(canonical(owner)) + 1024
-    if (metadataBytes + metadataCharge > 4 * MiB)
-      throw Error('ACP terminal metadata capacity')
     const releases: (() => void)[] = []
-    let releaseOutput: () => void
+    let releaseOutput: (() => void) | undefined
+    let id: string
     try {
       releases.push(host.reserve(instanceId, 'terminals'))
       releases.push(host.reserve(instanceId, 'processes'))
       releases.push(host.reserve(instanceId, 'descriptors', 33))
       releaseOutput = host.reserve(instanceId, 'retained', 6 * limit + 65536)
+      id = history.admit(scope(owner), metadataCharge)
     } catch (error) {
       releases.forEach((end) => end())
+      releaseOutput?.()
       throw error
     }
     const record: RecordOwner = {
-      id: randomUUID(),
+      id,
       owner,
       scope: scope(owner),
       chunks: [],
@@ -344,7 +349,6 @@ export async function createAcpTerminals(options: {
       releaseProcess: () => releases.forEach((end) => end()),
       releaseOutput,
     }
-    metadataBytes += metadataCharge
     live++
     retained += limit
     records.set(record.id, record)
@@ -425,7 +429,7 @@ export async function createAcpTerminals(options: {
     if (!record) {
       if (
         (method === 'terminal/kill' || method === 'terminal/release') &&
-        retired.get(input.terminalId) === scope(owner)
+        history.isRetired(input.terminalId, scope(owner))
       )
         return {}
       throw Error('ACP terminal ID is stale')
@@ -492,7 +496,7 @@ export async function createAcpTerminals(options: {
         !binding ||
         owner.phase !== 'live' ||
         canonical(owner.account) !== canonical(account) ||
-        original.runtimeGeneration !== runtimeGeneration ||
+        original.runtimeGeneration !== transportGeneration ||
         owner.runtimeGeneration !== runtimeGeneration ||
         owner.sessionId !== session.id ||
         owner.providerInstanceId !== instanceId ||
@@ -603,7 +607,6 @@ export async function createAcpTerminals(options: {
         )
         const failed = results.find((result) => result.status === 'rejected')
         if (failed?.status === 'rejected') throw failed.reason
-        retired.clear()
         releaseRuntime()
       })
       .finally(() => {

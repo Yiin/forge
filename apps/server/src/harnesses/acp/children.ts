@@ -16,6 +16,7 @@ export type AcpChildAdmission = Readonly<{
   fallbackOwner: AcpRecordOwner
   exclusiveSubmittedRoot: boolean
   wireOrdinal: number
+  transportGeneration: string
   rootForPrompt(id: string): AcpLiveOwner | null
 }>
 export type AcpChildInterval = Readonly<{
@@ -418,7 +419,7 @@ export class AcpChildren {
         ...(evidence.attemptId ? { attemptId: evidence.attemptId } : {}),
         childId: randomUUID(),
         intervalId: randomUUID(),
-        sourceGeneration: owner.runtimeGeneration,
+        sourceGeneration: admission.transportGeneration,
         spawnOrdinal: selection.wireOrdinal,
         description: '',
         closed: false,
@@ -573,7 +574,12 @@ export class AcpChildren {
   context(
     params: unknown,
     admission: AcpChildAdmission,
-  ): { owner: AcpLiveOwner; childId: string; intervalId: string } | null {
+  ): {
+    owner: AcpLiveOwner
+    childId: string
+    intervalId: string
+    childSessionId?: string
+  } | null {
     if (this.closed) throw Error('ACP child registry closed')
     const selected = this.selections.get(admission)
     if (!selected?.owner) return null
@@ -586,6 +592,7 @@ export class AcpChildren {
           owner: interval.owner,
           childId: interval.childId,
           intervalId: interval.intervalId,
+          childSessionId: interval.childSessionId,
         })
       : null
   }
@@ -609,11 +616,11 @@ export class AcpChildren {
   }
   private add(interval: AcpChildInterval) {
     validateOwner(interval.owner)
+    boundedId(interval.sourceGeneration)
     if (interval.owner.providerInstanceId !== this.options.instanceId)
       throw Error('Foreign ACP child registry')
     if (
       interval.owner.phase !== 'live' ||
-      interval.sourceGeneration !== interval.owner.runtimeGeneration ||
       interval.parentSessionId !== interval.owner.binding.providerSessionId ||
       typeof interval.closed !== 'boolean' ||
       !Number.isSafeInteger(interval.spawnOrdinal) ||

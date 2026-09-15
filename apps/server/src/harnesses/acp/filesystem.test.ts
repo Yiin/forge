@@ -71,7 +71,7 @@ async function fixture(
   const rpc = new JsonlRpcTransport({
     stdin,
     stdout,
-    runtimeGeneration: extra.runtimeGeneration ?? 'generation',
+    runtimeGeneration: extra.transportGeneration ?? 'transport-generation',
     maxLineBytes: 16 * 1024 * 1024,
     maxQueuedBytes: 32 * 1024 * 1024,
     onIncoming(message) {
@@ -89,6 +89,7 @@ async function fixture(
     session: { id: 'session', provider: 'instance', cwd: root },
     binding: () => binding,
     runtimeGeneration: extra.runtimeGeneration ?? 'generation',
+    transportGeneration: extra.transportGeneration ?? 'transport-generation',
     rpc,
     host,
     instanceId: 'instance',

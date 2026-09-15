@@ -133,6 +133,10 @@ describe('ACP durable content', () => {
     )
     expect(store.put).toHaveBeenCalledTimes(4)
     content.retireRoot(subject.owner)
+    await expect(content.block(subject, image, signal())).rejects.toThrow(
+      'byte limit',
+    )
+    expect(store.put).toHaveBeenCalledTimes(4)
     await content.close()
   })
   it('coalesces synchronous same-owner cleanup reentry', async () => {

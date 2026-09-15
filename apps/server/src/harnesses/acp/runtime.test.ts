@@ -11,6 +11,8 @@ import {
   type AcpRuntimeDependencies,
 } from './runtime.js'
 import { AcpResourceHost } from './limits.js'
+import { AcpConnection, type AcpConnectionOptions } from './connection.js'
+import { captureNumbers } from './numbers.js'
 import {
   committedPrefix,
   emptyPrefix,
@@ -119,14 +121,14 @@ describe('typed ACP root runtime', () => {
     f.deps.host = new AcpResourceHost({ processes: [1, 1] })
     const services = f.deps.services
     let restore: (() => void) | undefined, handle: HarnessHandle | undefined
-    f.deps.services = async (io) => {
+    f.deps.services = async (io, history) => {
       const spy = vi.spyOn(io, 'retireProcess').mockImplementation(async () => {
         entered.resolve()
         await gate.promise
         throw Error('original cleanup refused')
       })
       restore = () => spy.mockRestore()
-      return services(io)
+      return services(io, history)
     }
     try {
       handle = await createTypedAcpAdapter(f.deps).spawn(session, (event) =>
@@ -227,7 +229,9 @@ describe('typed ACP root runtime', () => {
       })
       expect(() => handle!.prompt(input)).toThrow('resource limit')
       expect(inspected).toBe(false)
-      expect(() => handle!.prompt('\u0000'.repeat(2 * 1024 * 1024 - 1024))).toThrow('resource limit')
+      expect(() =>
+        handle!.prompt('\u0000'.repeat(2 * 1024 * 1024 - 1024)),
+      ).toThrow('resource limit')
       release()
       release = undefined
       const receipt = await handle.prompt('after refusal')
@@ -285,6 +289,192 @@ describe('typed ACP root runtime', () => {
       ).toBe(true)
     } finally {
       await f.cleanup()
+    }
+  })
+  it('does not lend the new root authority to an earlier captured chunk owner', async () => {
+    const f = await fixture(),
+      entered = deferred<void>(),
+      gate = deferred<void>()
+    f.deps.profile = 'grok'
+    f.deps.grokRail = 'public'
+    f.deps.launch = {
+      ...f.deps.launch,
+      command: fileURLToPath(
+        new URL('./__fixtures__/provider-agent.mjs', import.meta.url),
+      ),
+      args: ['agent', 'stdio'],
+      env: { ...f.deps.launch.env, FORGE_ACP_TEST_SCENARIO: 'grok-responses' },
+    }
+    let route!: AcpConnectionOptions['route'],
+      earlier!: Parameters<AcpConnectionOptions['route']>[1],
+      newer!: Parameters<AcpConnectionOptions['route']>[1],
+      transport = ''
+    const originalOpen = AcpConnection.open
+    const openSpy = vi
+      .spyOn(AcpConnection, 'open')
+      .mockImplementation((options, ...args) => {
+        route = options.route
+        return originalOpen.call(AcpConnection, options, ...args)
+      })
+    const service = f.deps.services
+    f.deps.services = async (io, history) => {
+      const call = io.call.bind(io)
+      let prompts = 0
+      vi.spyOn(io, 'call').mockImplementation(
+        (method, params, owner, options) => {
+          const result = call(method, params, owner, options)
+          if (method === 'session/prompt') {
+            if (++prompts === 1) {
+              earlier = owner
+              transport = io.transportGeneration
+            } else {
+              newer = owner
+              return {
+                ...result,
+                response: result.response.then(async (value) => {
+                  entered.resolve()
+                  await gate.promise
+                  return value
+                }),
+              }
+            }
+          }
+          return result
+        },
+      )
+      return service(io, history)
+    }
+    let handle: HarnessHandle | undefined
+    try {
+      handle = await createTypedAcpAdapter(f.deps).spawn(session, () => {})
+      const first = await handle.prompt('first')
+      await first.completion
+      const second = await handle.prompt('second')
+      await entered.promise
+      // These bytes retained the first read owner before their admission paused.
+      const wire = JSON.stringify({
+        method: '_x.ai/session/update',
+        params: {
+          sessionId:
+            earlier.phase === 'live' ? earlier.binding.providerSessionId : '',
+          update: {
+            sessionUpdate: 'subagent_spawned',
+            subagent_id: 'late-child',
+            child_session_id: 'child',
+            parent_session_id:
+              earlier.phase === 'live' ? earlier.binding.providerSessionId : '',
+          },
+        },
+      })
+      const strings: Record<string, string> = {}
+      const numbers = captureNumbers(wire, (path, value) => {
+        strings[path] = value
+      })
+      const selected = route(strings, earlier, numbers, 1000, transport)
+      expect(('owner' in selected ? selected.owner : selected).phase).toBe(
+        'control',
+      )
+      const redirected = JSON.parse(wire)
+      redirected.params.update.message_id = 'native-one'
+      const redirectedStrings: Record<string, string> = {}
+      const redirectedNumbers = captureNumbers(
+        JSON.stringify(redirected),
+        (path, value) => {
+          redirectedStrings[path] = value
+        },
+      )
+      const redirectedOwner = route(
+        redirectedStrings,
+        newer,
+        redirectedNumbers,
+        1001,
+        transport,
+      )
+      expect(
+        ('owner' in redirectedOwner ? redirectedOwner.owner : redirectedOwner)
+          .phase,
+      ).toBe('control')
+      gate.resolve()
+      await second.completion
+    } finally {
+      gate.resolve()
+      openSpy.mockRestore()
+      await f.cleanup(handle)
+    }
+  })
+  it.each([false, true])(
+    'retires lifetime-expired resources after accepted work settles: active=%s',
+    async (active) => {
+      const entered = deferred<void>(),
+        gate = deferred<void>()
+      const f = await fixture('normal', async (tx) => {
+        if (
+          active &&
+          tx.records.some(
+            (record) =>
+              record.value.kind === 'event' &&
+              record.value.event.type === 'turn_completed',
+          )
+        ) {
+          entered.resolve()
+          await gate.promise
+        }
+      })
+      f.deps.host = new AcpResourceHost({ processes: [1, 1] })
+      const timerSpy = vi.spyOn(globalThis, 'setTimeout')
+      let handle: HarnessHandle | undefined, restore: (() => void) | undefined
+      try {
+        handle = await createTypedAcpAdapter(f.deps).spawn(session, (event) =>
+          f.events.push(event),
+        )
+        const receipt = active ? await handle.prompt('accepted') : undefined
+        if (active) await entered.promise
+        const callback = timerSpy.mock.calls.find(
+          (call) => Number(call[1]) > 23 * 60 * 60 * 1000,
+        )![0] as () => void
+        const clock = vi
+          .spyOn(Date, 'now')
+          .mockReturnValue(Date.now() + 24 * 60 * 60 * 1000 + 60000)
+        restore = () => clock.mockRestore()
+        callback()
+        if (active) {
+          expect(() => f.deps.host.reserve('instance', 'processes')).toThrow(
+            'limit',
+          )
+          gate.resolve()
+          expect(await receipt!.completion).toMatchObject({
+            status: 'completed',
+          })
+        }
+        await vi.waitFor(() => f.deps.host.reserve('instance', 'processes')())
+        await handle.kill()
+        f.deps.host.reserve('instance', 'retained', 128 * 1024 * 1024)()
+      } finally {
+        gate.resolve()
+        restore?.()
+        timerSpy.mockRestore()
+        await f.cleanup(handle)
+      }
+    },
+  )
+  it('refuses new roots after the public handle reaches its age limit', async () => {
+    const f = await fixture()
+    let handle: HarnessHandle | undefined
+    const now = Date.now()
+    let restore: (() => void) | undefined
+    try {
+      handle = await createTypedAcpAdapter(f.deps).spawn(session, (event) =>
+        f.events.push(event),
+      )
+      const clock = vi
+        .spyOn(Date, 'now')
+        .mockReturnValue(now + 24 * 60 * 60 * 1000 + 60000)
+      restore = () => clock.mockRestore()
+      expect(() => handle!.prompt('expired')).toThrow('prompt limit')
+      expect(f.events).toEqual([])
+    } finally {
+      restore?.()
+      await f.cleanup(handle)
     }
   })
   it('returns typed receipts and waits for the required terminal prefix', async () => {

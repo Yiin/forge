@@ -52,6 +52,7 @@ type Call = {
   release?: () => void
 }
 export type AcpConnectionOptions = {
+  initialPolicy?: 'manual' | 'yolo'
   profile: AcpProfile
   launch: AcpLaunch
   host: AcpResourceHost
@@ -66,6 +67,7 @@ export type AcpConnectionOptions = {
     fallback: AcpRecordOwner,
     numbers: NumericCapture,
     wireOrdinal: number,
+    transportGeneration: string,
   ):
     | AcpRecordOwner
     | { owner: AcpRecordOwner; childAdmission: AcpChildAdmission }
@@ -142,11 +144,20 @@ export class AcpConnection {
   readonly account: AccountScope
   readonly launch: AcpLaunch
   readonly session: HarnessSession
-  readonly control: AcpControlOwner
+  private controlOwner: AcpControlOwner
+  get control() {
+    return this.controlOwner
+  }
   readonly journal: AcpJournal
-  readonly rpc: JsonlRpcTransport
-  readonly process: NativeProcess
-  private readonly calls = new Map<string, Call>()
+  private transportRpc!: JsonlRpcTransport
+  get rpc() {
+    return this.transportRpc
+  }
+  private transportProcess!: NativeProcess
+  get process() {
+    return this.transportProcess
+  }
+  private calls = new Map<string, Call>()
   private current: AcpRecordOwner
   private confirmed: ConfirmedNativeBinding | null = null
   private capabilities: {
@@ -159,6 +170,16 @@ export class AcpConnection {
   }
   private wireOrdinal = 0
   private closing?: Promise<void>
+  private replacing?: {
+    policy: 'manual' | 'yolo'
+    promise: Promise<AcpConnection>
+  }
+  private readonly retiring = new WeakSet<NativeProcess>()
+  private candidate?: { runtime?: NativeProcess; release(): void }
+  private currentTransportGeneration = ''
+  get transportGeneration() {
+    return this.currentTransportGeneration
+  }
   private constructor(
     private readonly options: AcpConnectionOptions,
     session: HarnessSession,
@@ -166,21 +187,40 @@ export class AcpConnection {
     journal: AcpJournal,
     runtime: NativeProcess,
     control: AcpControlOwner,
-    private readonly releaseProcess: () => void,
+    private releaseProcess: () => void,
+    private readonly controller: AbortController,
   ) {
     this.session = session
     this.launch = launch
-    this.control = control
+    this.controlOwner = control
     this.generation = control.runtimeGeneration
     this.account = control.account
     this.current = control
     this.journal = journal
-    this.process = runtime
     this.catalog = new AcpCatalog(options.profile)
-    this.rpc = new JsonlRpcTransport({
+    this.attach(runtime, control, releaseProcess)
+  }
+  private attach(
+    runtime: NativeProcess,
+    control: AcpControlOwner,
+    releaseProcess: () => void,
+  ) {
+    const options = this.options,
+      launch = this.launch,
+      journal = this.journal
+    const transportGeneration = randomUUID(),
+      calls = new Map<string, Call>()
+    this.currentTransportGeneration = transportGeneration
+    this.calls = calls
+    this.transportProcess = runtime
+    this.controlOwner = control
+    this.current = control
+    this.releaseProcess = releaseProcess
+    this.candidate = undefined
+    this.transportRpc = new JsonlRpcTransport({
       stdin: runtime.child.stdin,
       stdout: runtime.child.stdout,
-      runtimeGeneration: this.generation,
+      runtimeGeneration: transportGeneration,
       maxLineBytes: 16 * 1024 * 1024,
       maxQueuedFrames: 32,
       maxQueuedBytes: 32 * 1024 * 1024,
@@ -216,7 +256,7 @@ export class AcpConnection {
               path === '/method' ||
               (path.startsWith('/params/') &&
                 path.split('/').length <= 7 &&
-                /\/(sessionId|session_id|parent_session_id|child_session_id|subagent_id|agentId|parentAgentId|attempt_id|parent_prompt_id|prompt_id|promptId|type|sessionUpdate|toolCallId)$/.test(
+                /\/(sessionId|session_id|parent_session_id|child_session_id|subagent_id|agentId|parentAgentId|attempt_id|parent_prompt_id|prompt_id|promptId|message_id|type|sessionUpdate|toolCallId)$/.test(
                   path,
                 ))
             ) {
@@ -228,7 +268,7 @@ export class AcpConnection {
           })
           const response =
             strings['/method'] === undefined
-              ? this.calls.get(strings['/id'] ?? '')
+              ? calls.get(strings['/id'] ?? '')
               : undefined
           const wireOrdinal = ++this.wireOrdinal
           const routing =
@@ -238,6 +278,7 @@ export class AcpConnection {
               readContext as AcpRecordOwner,
               numbers,
               wireOrdinal,
+              transportGeneration,
             )
           const owner = 'owner' in routing ? routing.owner : routing
           const childAdmission =
@@ -265,7 +306,7 @@ export class AcpConnection {
             const ticket = journal.reserve(owner, {
               kind: 'native',
               producerTicket: randomUUID(),
-              transportGeneration: this.generation,
+              transportGeneration,
               wireOrdinal,
             })
             const frame: AcpFrame = {
@@ -309,7 +350,7 @@ export class AcpConnection {
           typeof value.id !== 'string'
         )
           return
-        const call = this.calls.get(value.id),
+        const call = calls.get(value.id),
           frame = this.frame(ownership)
         if (call?.active && !call.frame && frame) {
           frame.claimed = true
@@ -342,7 +383,8 @@ export class AcpConnection {
     runtime.ownTransport(this.rpc)
     void runtime.done
       .then((reason) => {
-        if (!this.closing) options.failure(reason)
+        if (!this.retiring.has(runtime) && !this.closing)
+          options.failure(reason)
       })
       .catch(() => {})
   }
@@ -368,6 +410,8 @@ export class AcpConnection {
     response: Promise<{ value: unknown; frame: AcpFrame }>
     submission: Promise<SubmissionEvidence>
   } {
+    const calls = this.calls,
+      rpc = this.rpc
     const captured = immutableData(owner)
     const release = this.options.host.reserve(
       this.launch.providerInstanceId,
@@ -377,10 +421,10 @@ export class AcpConnection {
     let id: string | undefined
     let request: ReturnType<JsonlRpcTransport['requestWithSubmission']>
     try {
-      request = this.rpc.requestWithSubmission(method, params, {
+      request = rpc.requestWithSubmission(method, params, {
         ...options,
         onHandoff: (requestId) => {
-          if (this.calls.size >= 4096)
+          if (calls.size >= 4096)
             throw Error('ACP original call identity limit reached')
           call.release = this.options.host.reserve(
             this.launch.providerInstanceId,
@@ -388,19 +432,19 @@ export class AcpConnection {
             Buffer.byteLength(JSON.stringify(captured)) + 256,
           )
           id = requestId
-          this.calls.set(requestId, call)
+          calls.set(requestId, call)
           options.onHandoff?.(requestId)
         },
       })
     } catch (error) {
       release()
-      if (id) this.calls.delete(id)
+      if (id) calls.delete(id)
       call.release?.()
       throw error
     }
     void request.submission.then((evidence) => {
       if (evidence.status === 'not_written') {
-        if (id) this.calls.delete(id)
+        if (id) calls.delete(id)
         call.release?.()
       }
     })
@@ -437,23 +481,76 @@ export class AcpConnection {
     return value
   }
   async retireProcess(): Promise<void> {
-    await this.process.close()
-    this.releaseProcess()
-    for (const call of this.calls.values()) call.release?.()
-    this.calls.clear()
+    const runtime = this.process,
+      calls = this.calls,
+      release = this.releaseProcess,
+      candidate = this.candidate
+    this.retiring.add(runtime)
+    await runtime.close()
+    release()
+    for (const call of calls.values()) call.release?.()
+    calls.clear()
+    if (candidate) {
+      await candidate.runtime?.close()
+      candidate.release()
+      if (this.candidate === candidate) this.candidate = undefined
+    }
+  }
+  replace(initialPolicy: 'manual' | 'yolo'): Promise<AcpConnection> {
+    if (
+      !['manual', 'yolo'].includes(initialPolicy) ||
+      this.closing ||
+      !this.confirmed
+    )
+      return Promise.reject(Error('ACP connection cannot be replaced'))
+    if (this.replacing) {
+      if (this.replacing.policy !== initialPolicy)
+        return Promise.reject(Error('ACP replacement policy differs'))
+      return this.replacing.promise
+    }
+    const promise = Promise.resolve()
+      .then(async () => {
+        await this.retireProcess()
+        if (this.closing || this.controller.signal.aborted)
+          throw Error('ACP connection is closing')
+        return AcpConnection.openOwned(
+          { ...this.options, initialPolicy },
+          { ...this.session, binding: this.confirmed },
+          true,
+          this,
+        )
+      })
+      .finally(() => {
+        this.replacing = undefined
+      })
+    this.replacing = { policy: initialPolicy, promise }
+    return promise
   }
   close(): Promise<void> {
-    this.closing ??= (async () => {
+    this.closing ??= Promise.resolve().then(async () => {
+      await this.replacing?.promise.catch(() => {})
       await this.retireProcess()
       await this.journal.close()
-    })()
+    })
+    this.controller.abort()
     return this.closing
   }
-  static async open(
+  static open(
     options: AcpConnectionOptions,
     input: HarnessSession,
     load: boolean,
   ): Promise<AcpConnection> {
+    return this.openOwned(options, input, load)
+  }
+  private static async openOwned(
+    options: AcpConnectionOptions,
+    input: HarnessSession,
+    load: boolean,
+    existing?: AcpConnection,
+  ): Promise<AcpConnection> {
+    const initialPolicy = options.initialPolicy ?? 'manual'
+    if (!['manual', 'yolo'].includes(initialPolicy))
+      throw Error('Invalid ACP initial policy')
     if (load && !acpProviderDescriptors[options.profile].load)
       throw Error('load_replay_unsupported')
     const launch = captureLaunch(options.profile, options.launch),
@@ -490,46 +587,50 @@ export class AcpConnection {
       sessionId: session.id,
       providerInstanceId: launch.providerInstanceId,
       account,
-      runtimeGeneration: randomUUID(),
+      runtimeGeneration: existing?.generation ?? randomUUID(),
       startupId: randomUUID(),
       expectedBinding: expected,
     })
-    const controller = new AbortController()
-    const opened = await openWriter(
-      options,
-      immutableData({
-        sessionId: session.id,
-        providerInstanceId: launch.providerInstanceId,
-        account,
-        expectedBinding: expected,
-      }),
-      controller,
-    )
+    const controller = existing?.controller ?? new AbortController()
+    controller.signal.throwIfAborted()
     let journal: AcpJournal
-    try {
-      journal = new AcpJournal(opened.writer, {
-        host: options.host,
-        instanceId: launch.providerInstanceId,
-        onFailure: () => {
-          controller.abort()
-          options.failure(Error('ACP ingestion failed'))
-        },
-        commitMs: options.controlMs,
-      })
-    } catch (error) {
-      void Promise.resolve()
-        .then(() => opened.writer.close())
-        .then(opened.release)
-        .catch((cleanupError) => {
-          try {
-            options.failure(cleanupError)
-          } catch {
-            /* Keep the original writer lease. */
-          }
+    if (existing) journal = existing.journal
+    else {
+      const opened = await openWriter(
+        options,
+        immutableData({
+          sessionId: session.id,
+          providerInstanceId: launch.providerInstanceId,
+          account,
+          expectedBinding: expected,
+        }),
+        controller,
+      )
+      try {
+        journal = new AcpJournal(opened.writer, {
+          host: options.host,
+          instanceId: launch.providerInstanceId,
+          onFailure: () => {
+            controller.abort()
+            options.failure(Error('ACP ingestion failed'))
+          },
+          commitMs: options.controlMs,
         })
-      throw error
+      } catch (error) {
+        void Promise.resolve()
+          .then(() => opened.writer.close())
+          .then(opened.release)
+          .catch((cleanupError) => {
+            try {
+              options.failure(cleanupError)
+            } catch {
+              /* Keep the original writer lease. */
+            }
+          })
+        throw error
+      }
+      opened.release()
     }
-    opened.release()
     let releaseProcess: () => void
     try {
       releaseProcess = options.host.reserve(
@@ -537,19 +638,22 @@ export class AcpConnection {
         'processes',
       )
     } catch (error) {
-      await journal.close()
+      if (!existing) await journal.close()
       throw error
     }
+    if (existing) existing.candidate = { release: releaseProcess }
     let connection: AcpConnection | undefined
     let created: NativeProcess | undefined
     try {
       const executable = await resolveExecutable(launch)
       if (!executable) throw Error('ACP executable is missing')
+      controller.signal.throwIfAborted()
       const started = await startNativeProcess(
         {
           command: executable,
           onCreated: (runtime) => {
             created = runtime
+            if (existing?.candidate) existing.candidate.runtime = runtime
           },
           args: [...launch.args],
           cwd,
@@ -560,15 +664,20 @@ export class AcpConnection {
           startupTimeoutMs: options.controlMs ?? 15000,
         },
         async (runtime) => {
-          connection = new AcpConnection(
-            options,
-            { ...session, cwd },
-            launch,
-            journal,
-            runtime,
-            control,
-            releaseProcess,
-          )
+          if (existing) {
+            existing.attach(runtime, control, releaseProcess)
+            connection = existing
+          } else
+            connection = new AcpConnection(
+              options,
+              { ...session, cwd },
+              launch,
+              journal,
+              runtime,
+              control,
+              releaseProcess,
+              controller,
+            )
           const clientCapabilities = (await options.prepareClient?.(
             connection,
           )) ?? {
@@ -615,7 +724,12 @@ export class AcpConnection {
                 mcpServers: [],
                 ...(load ? { sessionId: expected!.providerSessionId } : {}),
                 ...(options.profile === 'grok'
-                  ? { _meta: { yoloMode: false, autoMode: false } }
+                  ? {
+                      _meta: {
+                        yoloMode: initialPolicy === 'yolo',
+                        autoMode: false,
+                      },
+                    }
                   : {}),
               },
               owner,
@@ -687,11 +801,14 @@ export class AcpConnection {
       )
       return started.value
     } catch (error) {
-      if (connection) await connection.close()
-      else {
+      if (connection) {
+        if (existing) await connection.retireProcess()
+        else await connection.close()
+      } else {
         if (created) await created.close()
         releaseProcess()
-        await journal.close()
+        if (existing) existing.candidate = undefined
+        else await journal.close()
       }
       throw error
     }
