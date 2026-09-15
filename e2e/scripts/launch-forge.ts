@@ -1,6 +1,6 @@
 import { launchForge } from '../helpers/forgeServer.js'
 
-const forge = await launchForge()
+const forge = await launchForge({ frontendOrigin: null })
 console.log(`FORGE_URL=${forge.baseUrl} FORGE_DATA_DIR=${forge.dataDir}`)
 
 let stopping = false

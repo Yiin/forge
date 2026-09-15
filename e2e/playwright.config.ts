@@ -1,8 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
-import { devServerOrigin, devServerPort } from './helpers/devServer.js'
+import { devServerOrigin } from './helpers/devServer.js'
 
-const port = devServerPort()
 const origin = devServerOrigin()
 
 export default defineConfig({
@@ -12,12 +11,6 @@ export default defineConfig({
   // Targeted stability runs disable retries to expose first-attempt failures.
   retries: 1,
   reporter: 'line',
-  webServer: {
-    command: `bun run --cwd ../apps/web dev --host 127.0.0.1 --port ${port}`,
-    url: origin,
-    reuseExistingServer: false,
-    timeout: 30_000,
-  },
   use: { baseURL: origin, trace: 'on-first-retry' },
   projects: [
     {

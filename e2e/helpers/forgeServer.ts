@@ -12,6 +12,7 @@ export type ForgeServer = {
   stop: () => Promise<void>
 }
 export type LaunchOptions = {
+  frontendOrigin?: string | null
   env?: Record<string, string>
   dataDir?: string
   fakeAgentEnv?: Record<string, string>
@@ -185,8 +186,12 @@ export async function launchForge(
     mkdir(dataHome, { recursive: true }),
     mkdir(runtimeHome, { recursive: true }),
   ])
+  const frontendOrigin =
+    options.frontendOrigin === undefined
+      ? devServerOrigin()
+      : options.frontendOrigin
   const origins = [
-    devServerOrigin(),
+    ...(frontendOrigin ? [frontendOrigin] : []),
     `http://127.0.0.1:${port}`,
     `http://localhost:${port}`,
   ]
