@@ -8,6 +8,14 @@ const subagent = z.object({
   status: z.enum(['running', 'completed', 'failed', 'unknown']),
 })
 export const MessageContent = z.discriminatedUnion('type', [
+  // Native passthrough rows retain provider-neutral event fields. Their
+  // detailed validation happens at the harness boundary.
+  z.object({ type: z.literal('content_block') }).catchall(z.unknown()),
+  z.object({ type: z.literal('source_reference') }).catchall(z.unknown()),
+  z.object({ type: z.literal('usage') }).catchall(z.unknown()),
+  z.object({ type: z.literal('usage_snapshot') }).catchall(z.unknown()),
+  z.object({ type: z.literal('file_change') }).catchall(z.unknown()),
+  z.object({ type: z.literal('child_updated') }).catchall(z.unknown()),
   z.object({ type: z.literal('text_delta'), text: z.string() }),
   z.object({ type: z.literal('thought_delta'), text: z.string() }),
   z.object({
@@ -121,6 +129,12 @@ export const MessageContent = z.discriminatedUnion('type', [
 ])
 export type MessageContent = z.infer<typeof MessageContent>
 export const messageContentTypes = [
+  'content_block',
+  'source_reference',
+  'usage',
+  'usage_snapshot',
+  'file_change',
+  'child_updated',
   'text_delta',
   'thought_delta',
   'tool_call',
