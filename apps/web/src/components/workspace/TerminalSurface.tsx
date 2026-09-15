@@ -1,61 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus, RefreshCw, X } from 'lucide-react'
 import {
-  terminalEventSchema,
+  terminalDescriptorSchema,
   terminalCollectionSchema,
   type TerminalDescriptor,
 } from '@forge/protocol/terminal'
 import { Button } from '../ui/button'
+import { TerminalView } from './TerminalView'
 
 type Target = {
   cwd: string | null
   workspaceId?: string | null
   workspaceRevision?: number | null
 }
-
-function socketUrl(path: string) {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}${path}`
-}
-
-function decode(value: string) {
-  const bytes = Uint8Array.from(atob(value), (character) =>
-    character.charCodeAt(0),
-  )
-  return new TextDecoder().decode(bytes)
-}
-
-function ansi(value: string) {
-  const parts = value.split(/(\x1b\[[0-9;]*m)/g)
-  let color = ''
-  return parts.map((part, index) => {
-    const match = /^\x1b\[([0-9;]*)m$/.exec(part)
-    if (match) {
-      const code = match[1] ?? ''
-      color =
-        code === '31'
-          ? 'text-red-300'
-          : code === '32'
-            ? 'text-green-200'
-            : code === '33'
-              ? 'text-yellow-200'
-              : code === '34'
-                ? 'text-blue-300'
-                : code === '35'
-                  ? 'text-fuchsia-300'
-                  : code === '36'
-                    ? 'text-cyan-200'
-                    : ''
-      return null
-    }
-    return (
-      <span key={index} className={color}>
-        {part}
-      </span>
-    )
-  })
-}
-
 export function TerminalSurface({
   sessionId,
   target,
@@ -65,191 +22,215 @@ export function TerminalSurface({
 }) {
   const [terminals, setTerminals] = useState<TerminalDescriptor[]>([])
   const [activeId, setActiveId] = useState<string>()
-  const [output, setOutput] = useState<Record<string, string>>({})
   const [error, setError] = useState<string>()
   const [creating, setCreating] = useState(false)
+  const [revision, setRevision] = useState(0)
+  const [renaming, setRenaming] = useState<string>()
+  const [title, setTitle] = useState('')
   const active = terminals.find((terminal) => terminal.id === activeId)
-  const cursors = useRef<Record<string, number>>({})
-  const sockets = useRef<Record<string, WebSocket>>({})
-
-  const open = useCallback(
-    (terminal: TerminalDescriptor) => {
-      sockets.current[terminal.id]?.close()
-      const cursor = cursors.current[terminal.id] ?? 0
-      const socket = new WebSocket(
-        socketUrl(
-          `/api/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(terminal.id)}/events?afterSeq=${cursor}`,
-        ),
-      )
-      sockets.current[terminal.id] = socket
-      socket.onmessage = (message) => {
-        let value: unknown
-        try {
-          value = JSON.parse(String(message.data))
-        } catch {
-          return
-        }
-        const parsed = terminalEventSchema.safeParse(value)
-        if (!parsed.success) return
-        const event = parsed.data
-        if (event.type === 'snapshot') {
-          setTerminals((items) =>
-            items.map((item) =>
-              item.id === terminal.id ? event.descriptor : item,
-            ),
-          )
-          return
-        }
-        cursors.current[terminal.id] = Math.max(
-          cursors.current[terminal.id] ?? 0,
-          event.seq,
-        )
-        if (event.type === 'data')
-          setOutput((items) => ({
-            ...items,
-            [terminal.id]: (items[terminal.id] ?? '') + decode(event.data),
-          }))
-        if (event.type === 'exit')
-          setTerminals((items) =>
-            items.map((item) =>
-              item.id === terminal.id
-                ? {
-                    ...item,
-                    state: 'exited',
-                    exitCode: event.exitCode,
-                    signal: event.signal,
-                    outputComplete: event.outputComplete,
-                    cleanup: event.cleanup,
-                  }
-                : item,
-            ),
-          )
-      }
-      socket.onclose = () => {
-        if (sockets.current[terminal.id] === socket)
-          delete sockets.current[terminal.id]
-      }
-    },
-    [sessionId],
-  )
-
-  const load = useCallback(async () => {
+  const operations = useRef(new Set<AbortController>())
+  const generation = useRef(0)
+  const creatingRef = useRef(false)
+  const listing = useRef(0)
+  const endpoint = `/api/sessions/${encodeURIComponent(sessionId)}/terminals`
+  const request = async (path = '', method = 'GET', body?: unknown) => {
+    if (operations.current.size >= 16)
+      throw Error('Too many terminal requests are pending.')
+    const controller = new AbortController()
+    operations.current.add(controller)
     try {
-      const response = await fetch(
-        `/api/sessions/${encodeURIComponent(sessionId)}/terminals`,
-      )
-      const value = terminalCollectionSchema.parse(await response.json())
-      setTerminals(value.terminals)
-      if (value.terminals[0] && !activeId) setActiveId(value.terminals[0].id)
-      value.terminals.forEach(open)
-      setError(undefined)
-    } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : 'Could not load terminals',
-      )
+      const response = await fetch(`${endpoint}${path}`, {
+        method,
+        signal: controller.signal,
+        headers: body ? { 'content-type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      })
+      if (!response.ok)
+        throw Error(`Terminal request failed (${response.status})`)
+      return response.status === 204 ? null : await response.json()
+    } finally {
+      operations.current.delete(controller)
     }
-  }, [open, sessionId])
-
+  }
+  const load = async () => {
+    const requestId = ++listing.current
+    const owner = generation.current
+    try {
+      const value = terminalCollectionSchema.parse(await request())
+      if (owner !== generation.current) return
+      if (value.terminals.some((terminal) => terminal.sessionId !== sessionId))
+        throw Error('Terminal session owner changed')
+      if (requestId !== listing.current) return
+      setTerminals(value.terminals)
+      setActiveId((current) =>
+        value.terminals.some((terminal) => terminal.id === current)
+          ? current
+          : value.terminals[0]?.id,
+      )
+      setError(undefined)
+      setRevision((value) => value + 1)
+    } catch (cause) {
+      if (owner === generation.current)
+        setError(
+          cause instanceof Error ? cause.message : 'Could not load terminals',
+        )
+    }
+  }
   useEffect(() => {
+    generation.current += 1
+    setTerminals([])
+    setActiveId(undefined)
+    creatingRef.current = false
+    setCreating(false)
     void load()
-    return () =>
-      Object.values(sockets.current).forEach((socket) => socket.close())
-  }, [load])
-
+    return () => {
+      generation.current += 1
+      for (const operation of operations.current) operation.abort()
+    }
+  }, [sessionId])
   const create = async () => {
-    if (!target.workspaceId || !target.workspaceRevision || creating) return
+    if (!target.workspaceId || !target.workspaceRevision || creatingRef.current)
+      return
+    const owner = generation.current
+    creatingRef.current = true
     setCreating(true)
     try {
-      const response = await fetch(
-        `/api/sessions/${encodeURIComponent(sessionId)}/terminals`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            expectedWorkspaceId: target.workspaceId,
-            expectedWorkspaceRevision: target.workspaceRevision,
-            cols: 100,
-            rows: 30,
-          }),
-        },
+      const terminal = terminalDescriptorSchema.parse(
+        await request('', 'POST', {
+          expectedWorkspaceId: target.workspaceId,
+          expectedWorkspaceRevision: target.workspaceRevision,
+        }),
       )
-      const terminal = (await response.json()) as TerminalDescriptor
-      if (!response.ok)
-        throw new Error(
-          (terminal as unknown as { error?: { message?: string } }).error
-            ?.message ?? 'Could not create terminal',
-        )
-      cursors.current[terminal.id] = 0
-      setTerminals((items) => [...items, terminal])
+      if (owner !== generation.current) return
+      if (terminal.sessionId !== sessionId)
+        throw Error('Terminal session owner changed')
+      listing.current += 1
+      setTerminals((items) => [
+        ...items.filter((item) => item.id !== terminal.id),
+        terminal,
+      ])
       setActiveId(terminal.id)
-      open(terminal)
+      setError(undefined)
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : 'Could not create terminal',
-      )
+      if (owner === generation.current)
+        setError(
+          cause instanceof Error ? cause.message : 'Could not create terminal',
+        )
     } finally {
-      setCreating(false)
+      if (owner === generation.current) {
+        creatingRef.current = false
+        setCreating(false)
+      }
     }
   }
-
-  const send = (data: string) => {
-    if (!active) return
-    void fetch(
-      `/api/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(active.id)}/input`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ data }),
-      },
-    ).catch(() => setError('Terminal input failed'))
-  }
-
-  const resize = useCallback(
-    (cols: number, rows: number) => {
-      if (!active) return
-      void fetch(
-        `/api/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(active.id)}/resize`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ cols, rows }),
-        },
-      )
-    },
-    [active, sessionId],
-  )
-
   const close = async (terminal: TerminalDescriptor) => {
-    await fetch(
-      `/api/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(terminal.id)}`,
-      { method: 'DELETE' },
-    )
-    sockets.current[terminal.id]?.close()
-    setTerminals((items) => items.filter((item) => item.id !== terminal.id))
-    if (activeId === terminal.id)
-      setActiveId(terminals.find((item) => item.id !== terminal.id)?.id)
+    const owner = generation.current
+    try {
+      await request(`/${encodeURIComponent(terminal.id)}`, 'DELETE')
+      if (owner !== generation.current) return
+      listing.current += 1
+      setTerminals((items) => items.filter((item) => item.id !== terminal.id))
+      setActiveId((current) =>
+        current === terminal.id
+          ? terminals.find((item) => item.id !== terminal.id)?.id
+          : current,
+      )
+    } catch (cause) {
+      if (owner === generation.current)
+        setError(
+          cause instanceof Error ? cause.message : 'Terminal cleanup failed',
+        )
+    }
   }
-
+  const rename = async (terminal: TerminalDescriptor) => {
+    const owner = generation.current
+    try {
+      const updated = terminalDescriptorSchema.parse(
+        await request(`/${encodeURIComponent(terminal.id)}`, 'PATCH', {
+          title,
+        }),
+      )
+      if (owner !== generation.current) return
+      listing.current += 1
+      setTerminals((items) =>
+        items.map((item) => (item.id === terminal.id ? updated : item)),
+      )
+      setRenaming(undefined)
+    } catch (cause) {
+      if (owner === generation.current)
+        setError(
+          cause instanceof Error ? cause.message : 'Terminal rename failed',
+        )
+    }
+  }
   return (
     <section
-      className="flex h-full min-h-0 flex-col bg-black text-green-200"
+      className="flex h-full min-h-0 min-w-0 flex-col bg-black"
       aria-label="Terminal surface"
     >
       <div
-        className="flex min-h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-white/15 bg-background px-2 text-foreground"
+        className="flex min-h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-background px-2 text-foreground"
         role="tablist"
         aria-label="Terminal tabs"
       >
-        {terminals.map((terminal) => (
+        {terminals.map((terminal, index) => (
           <div key={terminal.id} className="flex shrink-0 items-center">
-            <button
-              role="tab"
-              aria-selected={terminal.id === activeId}
-              className="pointer-coarse:min-h-11 px-3 text-xs"
-              onClick={() => setActiveId(terminal.id)}
-            >
-              {terminal.title}
-            </button>
+            {renaming === terminal.id ? (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void rename(terminal)
+                }}
+              >
+                <input
+                  aria-label="Terminal title"
+                  autoFocus
+                  className="w-32 bg-background px-2 text-sm"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') setRenaming(undefined)
+                  }}
+                />
+              </form>
+            ) : (
+              <button
+                role="tab"
+                aria-selected={terminal.id === activeId}
+                className="pointer-coarse:min-h-11 px-3 text-xs"
+                title="Double-click or press F2 to rename. Alt+Left/Right reorders."
+                onClick={() => setActiveId(terminal.id)}
+                onDoubleClick={() => {
+                  setRenaming(terminal.id)
+                  setTitle(terminal.title)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'F2') {
+                    event.preventDefault()
+                    setRenaming(terminal.id)
+                    setTitle(terminal.title)
+                  }
+                  if (
+                    event.altKey &&
+                    (event.key === 'ArrowLeft' || event.key === 'ArrowRight')
+                  ) {
+                    event.preventDefault()
+                    const next = index + (event.key === 'ArrowLeft' ? -1 : 1)
+                    if (next >= 0 && next < terminals.length)
+                      setTerminals((items) => {
+                        const result = [...items]
+                        ;[result[index], result[next]] = [
+                          result[next],
+                          result[index],
+                        ]
+                        return result
+                      })
+                  }
+                }}
+              >
+                {terminal.title}
+              </button>
+            )}
             <button
               className="pointer-coarse:size-11 p-2 text-muted-foreground"
               aria-label={`Close ${terminal.title}`}
@@ -263,7 +244,9 @@ export function TerminalSurface({
           variant="ghost"
           size="icon-sm"
           className="pointer-coarse:size-11"
-          disabled={!target.cwd || creating}
+          disabled={
+            !target.workspaceId || !target.workspaceRevision || creating
+          }
           onClick={() => void create()}
           aria-label="Create terminal"
         >
@@ -272,7 +255,7 @@ export function TerminalSurface({
         <Button
           variant="ghost"
           size="icon-sm"
-          className="pointer-coarse:size-11 text-foreground"
+          className="pointer-coarse:size-11"
           onClick={() => void load()}
           aria-label="Reconnect terminals"
         >
@@ -281,79 +264,54 @@ export function TerminalSurface({
       </div>
       {error && (
         <div
-          className="shrink-0 border-b border-red-400/40 bg-red-950/40 px-3 py-2 text-xs text-red-200"
           role="alert"
+          className="shrink-0 bg-destructive/10 px-3 py-2 text-xs text-destructive"
         >
           {error}
         </div>
       )}
       {!target.cwd ? (
-        <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+        <p className="p-6 text-sm text-muted-foreground">
           No workspace is attached to this session.
-        </div>
+        </p>
       ) : !active ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-sm text-muted-foreground">
           <p>No terminal is open.</p>
           <Button
             variant="outline"
-            className="pointer-coarse:min-h-11"
             onClick={() => void create()}
-            disabled={creating}
+            disabled={
+              creating || !target.workspaceId || !target.workspaceRevision
+            }
           >
             Open terminal
           </Button>
         </div>
       ) : (
-        <TerminalView
-          value={output[active.id] ?? ''}
-          onInput={send}
-          onResize={resize}
-        />
+        <>
+          <TerminalView
+            key={`${sessionId}:${active.id}:${revision}`}
+            sessionId={sessionId}
+            terminal={active}
+            onError={setError}
+            onDescriptor={(updated) =>
+              setTerminals((items) =>
+                items.map((item) => (item.id === updated.id ? updated : item)),
+              )
+            }
+          />
+          {active.state !== 'running' && (
+            <p
+              role="status"
+              className="shrink-0 px-3 py-1 text-xs text-muted-foreground"
+            >
+              Terminal {active.state}
+              {active.exitCode !== null ? ` (${active.exitCode})` : ''}
+              {active.cleanup === 'unknown' ? '. Cleanup is unconfirmed.' : ''}
+            </p>
+          )}
+        </>
       )}
     </section>
-  )
-}
-
-function TerminalView({
-  value,
-  onInput,
-  onResize,
-}: {
-  value: string
-  onInput: (value: string) => void
-  onResize: (cols: number, rows: number) => void
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    ref.current?.focus()
-  }, [])
-  useEffect(() => {
-    onResize(100, 30)
-  }, [onResize])
-  return (
-    <div
-      ref={ref}
-      role="textbox"
-      aria-label="Terminal input"
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault()
-          onInput('\r')
-        } else if (event.key === 'Backspace') {
-          event.preventDefault()
-          onInput('\u007f')
-        } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey)
-          onInput(event.key)
-      }}
-      onPaste={(event) => {
-        event.preventDefault()
-        onInput(event.clipboardData.getData('text'))
-      }}
-      className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap border-0 bg-black p-3 font-mono text-sm leading-5 text-green-200 outline-none"
-      spellCheck={false}
-    >
-      {value ? ansi(value) : ' '}
-    </div>
   )
 }
