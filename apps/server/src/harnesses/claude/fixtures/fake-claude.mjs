@@ -37,9 +37,17 @@ assert.equal(argv.includes('--dangerously-skip-permissions'), false)
 assert.equal(argv.includes('--continue'), false)
 assert.equal(argv.includes('--fork-session'), false)
 const resume = options.find((arg) => arg.startsWith('--resume='))?.slice(9)
-const session = resume ?? options[options.indexOf('--session-id') + 1]
-assert.match(session, /^[a-zA-Z0-9-]+$/)
-assert.equal(options.includes('--session-id'), !resume)
+const session = spec.discovery
+  ? undefined
+  : (resume ?? options[options.indexOf('--session-id') + 1])
+if (spec.discovery) {
+  assert.equal(options.includes('--no-session-persistence'), true)
+  assert.equal(options.includes('--session-id'), false)
+  assert.equal(resume, undefined)
+} else {
+  assert.match(session, /^[a-zA-Z0-9-]+$/)
+  assert.equal(options.includes('--session-id'), !resume)
+}
 if (spec.resume) assert.equal(resume, spec.resume)
 if (spec.cwd) assert.equal(process.cwd(), spec.cwd)
 for (const arg of spec.args ?? []) assert(argv.includes(arg))
@@ -182,7 +190,7 @@ try {
         response: catalog,
       },
     })
-    if (!spec.invalidCatalog) {
+    if (!spec.invalidCatalog && !spec.discovery) {
       const thinking = await next()
       subset(thinking, {
         type: 'control_request',

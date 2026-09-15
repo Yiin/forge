@@ -1,3 +1,4 @@
+import { closeNativeDiscovery } from './native-cleanup.js'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -385,7 +386,7 @@ async function directory(path: string) {
 }
 async function ownedEnvironment(
   options: OpenCodeAdapterOptions,
-  session: HarnessSession,
+  session: Pick<HarnessSession, 'provider' | 'accountId' | 'cwd'>,
   inherited: NodeJS.ProcessEnv,
   limits: OpenCodeLimits,
 ) {
@@ -468,6 +469,194 @@ async function ownedEnvironment(
     bound(authority, limits.authorityBytes, 'Native launch authority')
   }
   return env
+}
+
+async function readOpenCodeModels(
+  http: OpenCodeHttp,
+  limits: OpenCodeLimits,
+  deadline: number,
+): Promise<OpenCodeDiscovery['models']> {
+  const providers = object(
+    (
+      await http.request('/provider', 'GET', undefined, {
+        metadata: true,
+        deadline,
+      })
+    ).value,
+  )
+  const connected = new Set(
+    array(providers.connected ?? [], limits.providerCount).map((id) =>
+      string(id),
+    ),
+  )
+  const extracted: OpenCodeDiscovery['models'][number][] = []
+  for (const raw of array(providers.all, limits.providerCount)) {
+    const provider = object(raw)
+    const providerID = string(provider.id)
+    for (const [modelKey, rawModel] of Object.entries(
+      object(provider.models),
+    )) {
+      if (extracted.length >= limits.modelCount)
+        throw fault('CAPACITY', 'Native model catalog exceeds its count limit')
+      const model = object(rawModel)
+      const modelID = string(model.id ?? modelKey)
+      if (model.providerID !== undefined && model.providerID !== providerID)
+        throw fault('PROTOCOL', 'Native model provider does not match')
+      const variants = Object.keys(object(model.variants ?? {}))
+      if (variants.length > limits.variantCount)
+        throw fault('CAPACITY', 'Native model has too many variants')
+      variants.forEach((variant) => string(variant))
+      const input = Object.entries(object(object(model.capabilities).input))
+        .filter(([, supported]) => supported === true)
+        .map(([kind]) => string(kind))
+      const context = object(model.limit).context
+      if (
+        context !== undefined &&
+        (typeof context !== 'number' ||
+          !Number.isSafeInteger(context) ||
+          context < 0)
+      )
+        throw fault('PROTOCOL', 'Native model has an invalid context limit')
+      extracted.push({
+        id: `${providerID}/${modelID}`,
+        displayName: string(model.name, 4096),
+        providerID,
+        modelID,
+        connected: connected.has(providerID),
+        variants,
+        input,
+        ...(context !== undefined ? { contextWindow: context as number } : {}),
+      })
+    }
+  }
+  return freeze(extracted)
+}
+async function waitOpenCodeHealth(
+  http: OpenCodeHttp,
+  limits: OpenCodeLimits,
+  deadline: number,
+  signal: AbortSignal,
+) {
+  for (;;) {
+    if (signal.aborted) throw signal.reason
+    try {
+      const health = object(
+        (
+          await http.request('/global/health', 'GET', undefined, {
+            deadline: Math.min(deadline, performance.now() + limits.healthMs),
+          })
+        ).value,
+      )
+      if (health.healthy !== true)
+        throw fault('HEALTH', 'Native server is not healthy')
+      if (health.version !== '1.18.26')
+        throw fault(
+          'VERSION_UNSUPPORTED',
+          'Native OpenCode version is unsupported',
+        )
+      break
+    } catch (error) {
+      if (
+        error instanceof OpenCodeError &&
+        error.code === 'OPENCODE_VERSION_UNSUPPORTED'
+      )
+        throw error
+      if (performance.now() >= deadline)
+        throw fault('STARTUP_TIMEOUT', 'Native startup deadline expired')
+      await delay(
+        Math.min(limits.healthPollMs, deadline - performance.now()),
+        undefined,
+        { signal: signal },
+      )
+    }
+  }
+}
+export async function discoverOpenCode(
+  input: OpenCodeAdapterOptions,
+  { cwd: requestedCwd, signal }: { cwd: string; signal: AbortSignal },
+): Promise<OpenCodeDiscovery['models']> {
+  const limits = limitsOf(input.limits),
+    options = copyOptions(input, limits),
+    inherited = { ...process.env }
+  const cwd = await directory(requestedCwd)
+  const deadline = performance.now() + limits.startupMs
+  const inspect = async (
+    origin: string,
+    auth: { username: string; password: string } | undefined,
+    signal: AbortSignal,
+  ) => {
+    const authorization = auth
+      ? `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString('base64')}`
+      : undefined
+    const http = new OpenCodeHttp(origin, cwd, authorization, limits, [
+      ...(options.secrets ?? []),
+      ...(auth ? [auth.password, authorization!] : []),
+    ])
+    const abort = () => http.close()
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) abort()
+    try {
+      await waitOpenCodeHealth(http, limits, deadline, signal)
+      const models = await readOpenCodeModels(http, limits, deadline)
+      if (signal.aborted) throw signal.reason
+      bound(models, limits.discoveryBytes, 'Native model catalog')
+      return models
+    } finally {
+      signal.removeEventListener('abort', abort)
+      http.close()
+    }
+  }
+  if (options.server.mode === 'attached') {
+    if (
+      options.server.scope.cwd !== cwd ||
+      options.server.scope.provider !== options.provider ||
+      options.server.scope.accountId !== options.accountId
+    )
+      throw fault('SCOPE_MISMATCH', 'Attached native scope does not match')
+    return inspect(options.server.origin, options.server.auth, signal)
+  }
+  const env = await ownedEnvironment(
+    options,
+    { provider: options.provider, accountId: options.accountId, cwd },
+    inherited,
+    limits,
+  )
+  const auth = {
+    username: 'forge',
+    password: randomBytes(32).toString('base64url'),
+  }
+  const secrets = [
+    ...(options.secrets ?? []),
+    auth.password,
+    Buffer.from(`forge:${auth.password}`).toString('base64'),
+    ...(options.server.nativeLaunch?.credentialEnvironment.flatMap((entry) =>
+      entry.value ? [entry.value] : [],
+    ) ?? []),
+  ]
+  const { process: owner, value } = await startNativeProcess(
+    {
+      command: options.server.executable,
+      args: [...serveArgs],
+      cwd,
+      env: {
+        ...env,
+        OPENCODE_SERVER_USERNAME: auth.username,
+        OPENCODE_SERVER_PASSWORD: auth.password,
+      },
+      inheritEnv: false,
+      secrets,
+      signal: signal,
+      startupTimeoutMs: Math.max(1, Math.ceil(deadline - performance.now())),
+      stderrLimit: limits.diagnosticBytes,
+    },
+    async (owner) => {
+      const origin = await ownedOrigin(owner, limits, secrets)
+      return inspect(origin, auth, owner.signal)
+    },
+  )
+  await closeNativeDiscovery(() => owner.close())
+  if (signal.aborted) throw signal.reason
+  return value
 }
 
 export function createOpenCodeAdapter(
@@ -1066,45 +1255,12 @@ class OpenCodeRuntime {
         ...(auth ? [auth.password, authorization!] : []),
       ],
     )
-    for (;;) {
-      this.live()
-      try {
-        const health = object(
-          (
-            await this.http.request('/global/health', 'GET', undefined, {
-              deadline: Math.min(
-                this.startupDeadline,
-                performance.now() + this.limits.healthMs,
-              ),
-            })
-          ).value,
-        )
-        if (health.healthy !== true)
-          throw fault('HEALTH', 'Native server is not healthy')
-        if (health.version !== '1.18.26')
-          throw fault(
-            'VERSION_UNSUPPORTED',
-            'Native OpenCode version is unsupported',
-          )
-        break
-      } catch (error) {
-        if (
-          error instanceof OpenCodeError &&
-          error.code === 'OPENCODE_VERSION_UNSUPPORTED'
-        )
-          throw error
-        if (performance.now() >= this.startupDeadline)
-          throw fault('STARTUP_TIMEOUT', 'Native startup deadline expired')
-        await delay(
-          Math.min(
-            this.limits.healthPollMs,
-            this.startupDeadline - performance.now(),
-          ),
-          undefined,
-          { signal: this.controller.signal },
-        )
-      }
-    }
+    await waitOpenCodeHealth(
+      this.http,
+      this.limits,
+      this.startupDeadline,
+      this.controller.signal,
+    )
     const native = object(
       (
         await this.http.request(
@@ -1222,65 +1378,7 @@ class OpenCodeRuntime {
   private async discover(deadline: number, commandsOnly = false) {
     let models = this.catalog.models
     if (!commandsOnly) {
-      const providers = object(
-        (
-          await this.http.request('/provider', 'GET', undefined, {
-            metadata: true,
-            deadline,
-          })
-        ).value,
-      )
-      const connected = new Set(
-        array(providers.connected ?? [], this.limits.providerCount).map((id) =>
-          string(id),
-        ),
-      )
-      const extracted: OpenCodeDiscovery['models'][number][] = []
-      for (const raw of array(providers.all, this.limits.providerCount)) {
-        const provider = object(raw)
-        const providerID = string(provider.id)
-        for (const [modelKey, rawModel] of Object.entries(
-          object(provider.models),
-        )) {
-          if (extracted.length >= this.limits.modelCount)
-            throw fault(
-              'CAPACITY',
-              'Native model catalog exceeds its count limit',
-            )
-          const model = object(rawModel)
-          const modelID = string(model.id ?? modelKey)
-          if (model.providerID !== undefined && model.providerID !== providerID)
-            throw fault('PROTOCOL', 'Native model provider does not match')
-          const variants = Object.keys(object(model.variants ?? {}))
-          if (variants.length > this.limits.variantCount)
-            throw fault('CAPACITY', 'Native model has too many variants')
-          variants.forEach((variant) => string(variant))
-          const input = Object.entries(object(object(model.capabilities).input))
-            .filter(([, supported]) => supported === true)
-            .map(([kind]) => string(kind))
-          const context = object(model.limit).context
-          if (
-            context !== undefined &&
-            (typeof context !== 'number' ||
-              !Number.isSafeInteger(context) ||
-              context < 0)
-          )
-            throw fault('PROTOCOL', 'Native model has an invalid context limit')
-          extracted.push({
-            id: `${providerID}/${modelID}`,
-            displayName: string(model.name, 4096),
-            providerID,
-            modelID,
-            connected: connected.has(providerID),
-            variants,
-            input,
-            ...(context !== undefined
-              ? { contextWindow: context as number }
-              : {}),
-          })
-        }
-      }
-      models = extracted
+      models = await readOpenCodeModels(this.http, this.limits, deadline)
     }
     const agents = array(
       (

@@ -1,3 +1,4 @@
+import { NativeCleanupError } from '../native-cleanup.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { access, realpath, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
@@ -286,11 +287,7 @@ export class KimiServer {
       try {
         await server.close()
       } catch {
-        throw new KimiError(
-          'kimi_home_cleanup_unproved',
-          'Kimi home cleanup remains unproved',
-          true,
-        )
+        throw new NativeCleanupError(() => server.close())
       }
       throw error
     }

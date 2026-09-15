@@ -1,3 +1,4 @@
+import { closeNativeDiscovery } from '../native-cleanup.js'
 import { randomUUID, createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
 import { mkdir, lstat, open, unlink } from 'node:fs/promises'
@@ -115,9 +116,11 @@ async function readReservation(
   }
 }
 export function discoverCursor(
-  options: CursorAdapterOptions,
+  options: Omit<CursorAdapterOptions, 'sink' | 'loadAttachment'>,
   cwd: string,
+  signal?: AbortSignal,
 ): Promise<{ readiness: CursorReadiness; catalog: CursorCatalogState }> {
+  signal?.throwIfAborted()
   const limits = cursorLimits(options.limits),
     launch = captureLaunch(options.selected, options.stateRoot, limits)
   invariant(cwd === realpathSync(cwd), 'cursor_session_authority')
@@ -182,8 +185,13 @@ export function discoverCursor(
       sandbox: 'not-checked',
     }
     let catalog: CursorCatalogState = { status: 'unloaded', items: [] }
+    const abort = () => {
+      void container.close().catch(() => {})
+    }
     try {
       const ready = await container.start()
+      signal?.throwIfAborted()
+      signal?.addEventListener('abort', abort, { once: true })
       readiness = ready.readiness as CursorReadiness
       try {
         const response = await container.wire!.request('models')
@@ -201,10 +209,14 @@ export function discoverCursor(
           },
         }
       }
+      signal?.throwIfAborted()
       return { readiness, catalog }
     } finally {
-      await container.close()
-      await rm(directory, { recursive: true, force: true })
+      signal?.removeEventListener('abort', abort)
+      await closeNativeDiscovery(async () => {
+        await container.close()
+        await rm(directory, { recursive: true, force: true })
+      })
     }
   })()
 }
@@ -944,7 +956,11 @@ class CursorHandle implements HarnessHandle {
     }
     const model = validateModel(
       {
-        id: work.input!.options.model ?? this.model?.id ?? '',
+        id:
+          work.input!.options.model ??
+          this.model?.id ??
+          this.catalog[0]?.id ??
+          '',
         ...(work.input!.options.nativeModelParams
           ? { params: work.input!.options.nativeModelParams }
           : {}),

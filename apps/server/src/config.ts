@@ -87,19 +87,28 @@ export function defaultConfig(
   dev = process.env.NODE_ENV !== 'production',
 ): ForgeConfig {
   const harness: Record<string, HarnessConfig> = {
-    'claude-code-acp': defaultEntry('Claude Code ACP', 'npx', [
-      '@zed-industries/claude-code-acp',
-    ]),
-    'codex-acp': defaultEntry('Codex ACP', 'npx', [
-      '@zed-industries/codex-acp',
-    ]),
-    kimi: defaultEntry('Kimi', 'kimi', ['acp']),
+    'claude-code-acp': {
+      ...defaultEntry('Claude Code', 'claude', []),
+      adapterKind: 'native',
+    },
+    'codex-acp': {
+      ...defaultEntry('Codex', 'codex', []),
+      adapterKind: 'native',
+    },
+    kimi: { ...defaultEntry('Kimi', 'kimi', []), adapterKind: 'native' },
+    opencode: {
+      ...defaultEntry('OpenCode', 'opencode', []),
+      adapterKind: 'native',
+    },
+    pi: { ...defaultEntry('Pi', 'pi', []), adapterKind: 'native' },
+    cursor: {
+      ...defaultEntry('Cursor', process.execPath, []),
+      adapterKind: 'native',
+    },
     gemini: defaultEntry('Gemini', 'gemini', ['--experimental-acp']),
-    opencode: defaultEntry('OpenCode', 'opencode', ['acp']),
     grok: defaultEntry('Grok', 'grok', ['agent', 'stdio']),
     devin: defaultEntry('Devin', 'devin', ['acp']),
     hermes: defaultEntry('Hermes', 'hermes', ['acp']),
-    pi: defaultEntry('Pi', 'npx', ['-y', 'pi-acp']),
   }
   if (dev)
     harness.mock = {
@@ -280,7 +289,7 @@ export function loadConfigSync(path?: string): ForgeConfig {
     }
     result[key] = {
       ...checked.data,
-      enabled: commandAvailable(checked.data.command),
+      enabled: checked.data.enabled && commandAvailable(checked.data.command),
     }
   }
   const checked = forgeConfigSchema.safeParse({
@@ -313,6 +322,9 @@ const configBody = (config: ForgeConfig) => ({
 })
 
 const nativeHarnesses = new Set([
+  'claude',
+  'claude-code',
+  'codex',
   'claude-code-acp',
   'codex-acp',
   'kimi',
@@ -328,14 +340,52 @@ function inferredAdapterKind(key: string, entry: HarnessConfig) {
   return 'custom' as const
 }
 
-/** Convert an old config without changing its executable cutover semantics. */
+/** Preserve configured IDs while replacing the exact shipped ACP wrapper commands. */
+function nativeEntry(key: string, entry: HarnessConfig): HarnessConfig {
+  const adapterKind = inferredAdapterKind(key, entry)
+  if (adapterKind !== 'native') return { ...entry, adapterKind }
+  const args = JSON.stringify(entry.args)
+  const wrappers: Record<
+    string,
+    { command: string; args: string[]; native: string }
+  > = {
+    'claude-code-acp': {
+      command: 'npx',
+      args: ['@zed-industries/claude-code-acp'],
+      native: 'claude',
+    },
+    'codex-acp': {
+      command: 'npx',
+      args: ['@zed-industries/codex-acp'],
+      native: 'codex',
+    },
+    pi: { command: 'npx', args: ['-y', 'pi-acp'], native: 'pi' },
+    kimi: { command: 'kimi', args: ['acp'], native: 'kimi' },
+    opencode: { command: 'opencode', args: ['acp'], native: 'opencode' },
+  }
+  const wrapper = wrappers[key]
+  if (
+    wrapper &&
+    entry.command === wrapper.command &&
+    args === JSON.stringify(wrapper.args)
+  )
+    return {
+      ...entry,
+      adapterKind,
+      command: wrapper.native,
+      args: [],
+      name: entry.name?.replace(/ ACP$/, ''),
+    }
+  return { ...entry, adapterKind }
+}
+
 export function convertConfig(config: ForgeConfig): ForgeConfig {
   return {
     ...config,
     harness: Object.fromEntries(
       Object.entries(config.harness).map(([key, entry]) => [
         key,
-        { ...entry, adapterKind: inferredAdapterKind(key, entry) },
+        nativeEntry(key, entry),
       ]),
     ),
   }

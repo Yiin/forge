@@ -1143,39 +1143,28 @@ describe('Cursor adapter through real Node wire and sidecar runtime', () => {
     }
   })
   it('discovers models without creating a session and preserves verified metadata when catalog access fails', async () => {
-    const { sink, reservations } = recordingSink(),
-      resources = createCursorResources(),
+    const resources = createCursorResources(),
       base = selected()
     const successful = await discoverCursor(
       {
         selected: base,
         stateRoot,
         resources,
-        sink,
-        loadAttachment: async () => {
-          throw new Error('no attachment')
-        },
       },
       root,
     )
     expect(successful.readiness.auth).toBe('verified')
     expect(successful.catalog.status).toBe('ready')
-    expect(reservations.size).toBe(0)
     const failed = await discoverCursor(
       {
         selected: { ...base, accountEnv: { TEST_SCENARIO: 'catalog-error' } },
         stateRoot,
         resources,
-        sink,
-        loadAttachment: async () => {
-          throw new Error('no attachment')
-        },
       },
       root,
     )
     expect(failed.readiness.auth).toBe('verified')
     expect(failed.catalog).toMatchObject({ status: 'failed', items: [] })
-    expect(reservations.size).toBe(0)
   })
   it('fails an uncommitted or failed sealed prefix without a resend', async () => {
     for (const mode of ['stale-seal', 'failed-flush']) {

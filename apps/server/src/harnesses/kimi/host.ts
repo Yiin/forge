@@ -1,3 +1,4 @@
+import { NativeCleanupError } from '../native-cleanup.js'
 import { randomUUID } from 'node:crypto'
 import {
   KimiBudget,
@@ -112,7 +113,10 @@ export class KimiHostOwner implements KimiHost {
             if (server.cleanupProved) this.releaseHome(entry)
           }),
         (error) => {
-          if (!(error instanceof KimiError && error.uncertain))
+          if (
+            !(error instanceof NativeCleanupError) &&
+            !(error instanceof KimiError && error.uncertain)
+          )
             this.releaseHome(entry)
         },
       )
@@ -214,6 +218,12 @@ export class KimiHostOwner implements KimiHost {
       },
     }
   }
+  cleanupHome(authority: EffectiveAuthority): () => Promise<void> {
+    const home = this.homes.get(authority.home.path)
+    if (!home || !sameAuthority(home.authority, authority))
+      throw new KimiError('kimi_home_cleanup_unproved')
+    return () => this.stopHome(home)
+  }
   private releaseHome(home: Home) {
     if (this.homes.get(home.authority.home.path) !== home) return
     for (const release of home.residents.values()) release()
@@ -225,7 +235,14 @@ export class KimiHostOwner implements KimiHost {
     this.homes.delete(home.authority.home.path)
   }
   private stopHome(home: Home) {
-    home.stopping ??= home.server.then((server) => server.close())
+    home.stopping ??= home.server.then(
+      (server) => server.close(),
+      async (error) => {
+        if (!(error instanceof NativeCleanupError)) throw error
+        await error.retryCleanup()
+        this.releaseHome(home)
+      },
+    )
     return home.stopping
   }
   async close() {

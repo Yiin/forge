@@ -64,9 +64,14 @@ import {
 } from './config.js'
 import { ptyHarness } from './pty/harness.js'
 import { acpHarness } from './acp/harness.js'
+import { createNativeAttachmentLoader } from './uploads/native.js'
 import { nativeHarness } from './sessions/native.js'
+import { NativeInteractions } from './sessions/native-interactions.js'
+import { discoverNativeModels } from './sessions/native-models.js'
+import { NativeCleanupError } from './harnesses/native-cleanup.js'
 import {
   createProductionNativeAdapter,
+  createNativeResources,
   harnessTransport,
 } from './sessions/native-factory.js'
 import {
@@ -160,6 +165,7 @@ export function createApp(
   workspaceFiles?: WorkspaceFiles,
   requestGuard = new RequestGuard(configState?.current.terminalAccess),
   previews?: PreviewManager,
+  nativeInteractions?: NativeInteractions,
 ) {
   const app = new Hono()
   app.use('*', async (c, next) => {
@@ -241,7 +247,7 @@ export function createApp(
     app.route('/', serverConfigRoutes())
     if (previews) app.route('/', previewRoutes(previews))
   }
-  if (questions) app.route('/', questionRoutes(questions))
+  if (questions) app.route('/', questionRoutes(questions, nativeInteractions))
   if (status) app.route('/', workspaceRoutes(status.db, uploadStore))
   if (runner && status)
     app.route(
@@ -381,30 +387,46 @@ export function startServer(port?: number): ServerType {
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
   const questions = new ServerQuestionManager({ db, bus })
+  const nativeInteractions = new NativeInteractions(db, bus)
   const configState: ConfigState = { current: config, path: configPath }
   const accountStore = new HarnessAccountStore(db)
+  const nativeResources = createNativeResources()
+  const loadNativeAttachment = createNativeAttachmentLoader(db, dataDir)
   const factory: HarnessFactory = (key, accountId) => {
     const entry = configState.current.harness[key]
     if (!entry) throw new Error(`Harness ${key} is not configured`)
     const account = accountId ? accountStore.get(accountId) : undefined
     if (account && account.harnessKey !== key)
       throw new Error('Account does not belong to harness')
-    const derived = account ? deriveAccountHarness(entry, account) : entry
+    const transport = harnessTransport(key, entry)
+    const derived =
+      transport === 'native'
+        ? entry
+        : account
+          ? deriveAccountHarness(entry, account)
+          : entry
     const adapter =
-      harnessTransport(key, derived) === 'native'
+      transport === 'native'
         ? createProductionNativeAdapter(key, {
-            command: derived.command,
-            args: derived.args,
-            env: derived.env,
-            accountId: account?.id,
+            entry,
+            account,
+            db,
+            dataDir,
+            uploads: uploadStore,
+            resources: nativeResources,
+            loadAttachment: loadNativeAttachment,
           })
         : undefined
     if (adapter)
-      return nativeHarness(adapter, (sessionId, providerSessionId) => {
-        db.prepare(
-          'UPDATE sessions SET provider_session_id = ? WHERE id = ?',
-        ).run(providerSessionId, sessionId)
-      })
+      return nativeHarness(
+        adapter,
+        (sessionId, providerSessionId) => {
+          db.prepare(
+            'UPDATE sessions SET provider_session_id = ? WHERE id = ?',
+          ).run(providerSessionId, sessionId)
+        },
+        nativeInteractions,
+      )
     if (derived?.protocol === 'pty') return ptyHarness(derived)
     if (derived?.protocol === 'acp')
       return acpHarness(derived, { db, bus, questions, accountId })
@@ -455,49 +477,51 @@ export function startServer(port?: number): ServerType {
       ['pi', unsupportedUsageProbe],
     ]),
   })
+  const modelRefreshes = new Map<
+    string,
+    { controller: AbortController; promise: Promise<void> }
+  >()
+  let modelRefreshStopped = false
   const refreshModels = (accountId: string, signal?: AbortSignal) => {
+    const previous = modelRefreshes.get(accountId)
+    if (previous) return previous.promise
+    if (modelRefreshStopped || signal?.aborted || modelRefreshes.size >= 8)
+      return
     const account = accountStore.get(accountId)
     const entry = account && configState.current.harness[account.harnessKey]
     if (!account || !entry || entry.adapterKind !== 'native') return
-    void refreshAccountModels(db, {
-      accountId,
-      harnessKey: account.harnessKey,
-      signal,
-      probe: async (probeSignal) => {
-        if (probeSignal.aborted)
-          throw new Error('native model discovery cancelled')
-        const harnessProcess = factory(account.harnessKey, accountId)
-        if (!harnessProcess.newSession) return []
-        const started = harnessProcess.newSession(
-          {
-            id: `model-probe-${accountId}`,
-            cwd: globalThis.process.cwd(),
-            harness: account.harnessKey,
-          },
-          () => undefined,
-          () => undefined,
-        )
-        const aborted = new Promise<never>((_, reject) => {
-          if (probeSignal.aborted) {
-            reject(new Error('native model discovery cancelled'))
-            return
-          }
-          probeSignal.addEventListener(
-            'abort',
-            () => reject(new Error('native model discovery cancelled')),
-            { once: true },
-          )
+    const controller = new AbortController()
+    const abort = () => controller.abort(signal?.reason)
+    signal?.addEventListener('abort', abort, { once: true })
+    const promise = Promise.resolve().then(async () => {
+      try {
+        await refreshAccountModels(db, {
+          accountId,
+          harnessKey: account.harnessKey,
+          signal: controller.signal,
+          probe: (probeSignal) =>
+            discoverNativeModels({
+              key: account.harnessKey,
+              entry,
+              account,
+              dataDir,
+              resources: nativeResources,
+              cwd: process.cwd(),
+              signal: probeSignal,
+            }),
         })
-        void started
-          .then(async (result) => {
-            if (probeSignal.aborted) await result.handle.kill()
-          })
-          .catch(() => undefined)
-        const result = await Promise.race([started, aborted])
-        await result.handle.kill()
-        return result.availableModels ?? result.handle.availableModels ?? []
-      },
+      } finally {
+        signal?.removeEventListener('abort', abort)
+      }
     })
+    modelRefreshes.set(accountId, { controller, promise })
+    void promise.then(
+      () => modelRefreshes.delete(accountId),
+      () => {
+        // Failed cleanup retains the original operation for shutdown.
+      },
+    )
+    return promise
   }
   const harnessHealth = createHarnessHealthReader({ db, configState, manager })
   // Settle persisted turns before exposing the port. Respawn work continues
@@ -527,6 +551,8 @@ export function startServer(port?: number): ServerType {
     refreshModels,
     workspaceFiles,
     requestGuard,
+    undefined,
+    nativeInteractions,
   )
   const previews = new PreviewManager(
     workspaceFiles.targets,
@@ -567,6 +593,9 @@ export function startServer(port?: number): ServerType {
   const shutdown = new ServerShutdown(
     server as Server,
     () => {
+      modelRefreshStopped = true
+      for (const operation of modelRefreshes.values())
+        operation.controller.abort()
       terminals.stopAccepting()
       terminalRequests.stopAccepting()
       upgrades.stopAccepting()
@@ -597,6 +626,27 @@ export function startServer(port?: number): ServerType {
         'WebSocket cleanup is unknown',
       )
   })
+  shutdown.addCleanupHook(() => manager.close())
+  shutdown.addCleanupHook(async () => {
+    const results = await Promise.allSettled(
+      [...modelRefreshes.entries()].map(async ([accountId, operation]) => {
+        try {
+          await operation.promise
+        } catch (error) {
+          if (!(error instanceof NativeCleanupError)) throw error
+          await error.retryCleanup()
+          if (modelRefreshes.get(accountId) === operation)
+            modelRefreshes.delete(accountId)
+        }
+      }),
+    )
+    const failures = results
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason)
+    if (failures.length)
+      throw new AggregateError(failures, 'Native model cleanup failed')
+  })
+  shutdown.addCleanupHook(() => nativeResources.close())
   shutdown.addCleanupHook(() => workspaceFiles.close())
   shutdown.addCleanupHook(() => previews.close())
   shutdown.addCleanupHook(() => {
@@ -606,7 +656,6 @@ export function startServer(port?: number): ServerType {
     loginManager.close()
     usagePoller.stop()
     uploadStore.close()
-    manager.close()
   })
   process.on('SIGTERM', shutdown.signal)
   process.on('SIGINT', shutdown.signal)

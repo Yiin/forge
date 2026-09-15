@@ -59,13 +59,37 @@ describe('resolveRunConfig', () => {
 })
 
 describe('default harness configuration', () => {
-  test('classifies legacy entries without changing their commands', () => {
+  test('keeps explicit disabled native providers disabled after reload', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-config-disabled-'))
+    try {
+      const path = join(root, 'forge.toml')
+      const config = defaultConfig(false)
+      config.harness.cursor = {
+        ...config.harness.cursor,
+        command: process.execPath,
+        enabled: false,
+      }
+      saveConfigSync(path, config)
+      expect(loadConfigSync(path).harness.cursor.enabled).toBe(false)
+      config.harness.cursor = {
+        ...config.harness.cursor,
+        command: join(root, 'absent-provider'),
+        enabled: true,
+      }
+      saveConfigSync(path, config)
+      expect(loadConfigSync(path).harness.cursor.enabled).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('classifies native defaults with direct provider commands', () => {
     const config = defaultConfig(false)
     const converted = convertConfig(config)
     expect(converted.harness.kimi).toMatchObject({
       adapterKind: 'native',
       command: 'kimi',
-      args: ['acp'],
+      args: [],
     })
     expect(converted.harness.grok.adapterKind).toBe('custom')
   })
@@ -141,20 +165,21 @@ describe('default harness configuration', () => {
     expect(defaultConfig(true).harness).toHaveProperty('mock')
   })
 
-  test('includes the Pi ACP adapter harness', () => {
+  test('includes the native Pi harness', () => {
     expect(defaultConfig(false).harness.pi).toMatchObject({
       name: 'Pi',
-      command: 'npx',
-      args: ['-y', 'pi-acp'],
+      command: 'pi',
+      args: [],
+      adapterKind: 'native',
       protocol: 'acp',
     })
   })
 
-  test('includes the native OpenCode ACP harness', () => {
+  test('includes the native OpenCode harness', () => {
     expect(defaultConfig(false).harness.opencode).toMatchObject({
       name: 'OpenCode',
       command: 'opencode',
-      args: ['acp'],
+      args: [],
       protocol: 'acp',
     })
   })
@@ -200,12 +225,13 @@ describe('default harness configuration', () => {
       'claude-code-acp',
       'codex-acp',
       'kimi',
-      'gemini',
       'opencode',
+      'pi',
+      'cursor',
+      'gemini',
       'grok',
       'devin',
       'hermes',
-      'pi',
     ])
     expect(
       reconcileConfig(

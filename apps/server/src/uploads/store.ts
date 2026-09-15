@@ -30,6 +30,13 @@ type UploadRow = {
   created_at: number
 }
 
+export type NativeUpload = {
+  attachmentId: string
+  sessionId: string
+  filename: string
+  projectId: string | null
+}
+
 export type UploadStoreOptions = {
   dataDir: string
   bus?: EventBus
@@ -112,8 +119,8 @@ export class UploadStore {
       throw new RangeError('Upload exceeds 1 GiB')
     const session = this.db
       .prepare(
-        `SELECT sessions.project_id FROM sessions JOIN projects ON projects.id = sessions.project_id
-         WHERE sessions.id = ? AND sessions.deleted_at IS NULL AND projects.deleted_at IS NULL`,
+        `SELECT sessions.project_id FROM sessions LEFT JOIN projects ON projects.id = sessions.project_id
+         WHERE sessions.id = ? AND sessions.deleted_at IS NULL AND (sessions.project_id IS NULL OR (projects.id IS NOT NULL AND projects.deleted_at IS NULL))`,
       )
       .get(sessionId) as { project_id: string } | undefined
     if (!session) throw new Error('Session not found')
@@ -166,7 +173,55 @@ export class UploadStore {
     return { attachmentId: id, putUrl: `/api/uploads/${id}` }
   }
 
-  async put(attachmentId: string, body: ReadableStream<Uint8Array> | null) {
+  initNative(
+    sessionId: string,
+    input: { filename: string; mime: string; sizeBytes: number },
+  ): NativeUpload {
+    const upload = this.init(sessionId, input)
+    const session = this.db
+      .prepare('SELECT project_id FROM sessions WHERE id=?')
+      .get(sessionId) as { project_id: string | null }
+    return {
+      attachmentId: upload.attachmentId,
+      sessionId,
+      filename: input.filename,
+      projectId: session.project_id,
+    }
+  }
+
+  async discardNative(upload: NativeUpload) {
+    const row = this.db
+      .prepare('SELECT session_id, filename FROM attachments WHERE id=?')
+      .get(upload.attachmentId) as
+      { session_id: string; filename: string } | undefined
+    if (
+      row &&
+      (row.session_id !== upload.sessionId || row.filename !== upload.filename)
+    )
+      throw new Error('Native attachment cleanup owner changed')
+    const name = `${upload.attachmentId}-${toSafeFilename(upload.filename)}`
+    const path = upload.projectId
+      ? join(
+          this.options.dataDir,
+          'projects',
+          upload.projectId,
+          'sessions',
+          upload.sessionId,
+          'files',
+          name,
+        )
+      : join(this.options.dataDir, 'sessions', upload.sessionId, 'files', name)
+    await rm(path, { force: true })
+    this.db
+      .prepare('DELETE FROM attachments WHERE id=? AND session_id=?')
+      .run(upload.attachmentId, upload.sessionId)
+  }
+
+  async put(
+    attachmentId: string,
+    body: ReadableStream<Uint8Array> | null,
+    publishUserMessage = true,
+  ) {
     if (!body) throw new Error('Upload body is required')
     const row = this.db
       .prepare('SELECT * FROM attachments WHERE id = ?')
@@ -175,14 +230,15 @@ export class UploadStore {
     const session = row.session_id
       ? (this.db
           .prepare(
-            `SELECT sessions.project_id FROM sessions JOIN projects ON projects.id = sessions.project_id
-             WHERE sessions.id = ? AND sessions.deleted_at IS NULL AND projects.deleted_at IS NULL`,
+            `SELECT sessions.project_id FROM sessions LEFT JOIN projects ON projects.id = sessions.project_id
+             WHERE sessions.id = ? AND sessions.deleted_at IS NULL AND (sessions.project_id IS NULL OR (projects.id IS NOT NULL AND projects.deleted_at IS NULL))`,
           )
           .get(row.session_id) as { project_id: string } | undefined)
       : undefined
     if (row.session_id && !session) throw new Error('Session not found')
     const projectId = session?.project_id ?? row.project_id ?? undefined
-    if (!projectId && !row.draft_id) throw new Error('Session not found')
+    if (!projectId && !row.draft_id && !session)
+      throw new Error('Session not found')
     if (
       projectId &&
       !this.db
@@ -196,7 +252,8 @@ export class UploadStore {
         (this.activeUploads.get(projectId) ?? 0) + 1,
       )
     try {
-      const write = () => this.writeUpload(row, projectId, body)
+      const write = () =>
+        this.writeUpload(row, projectId, body, publishUserMessage)
       return await (projectId
         ? withProjectActivity(this.db, projectId, write)
         : write())
@@ -213,6 +270,7 @@ export class UploadStore {
     row: UploadRow,
     projectId: string | undefined,
     body: ReadableStream<Uint8Array>,
+    publishUserMessage: boolean,
   ) {
     const attachmentId = row.id
     const ownerId = row.session_id ?? row.draft_id
@@ -220,7 +278,7 @@ export class UploadStore {
     const safeName = `${attachmentId}-${toSafeFilename(row.filename)}`
     const relPath = projectId
       ? join('projects', projectId, 'sessions', ownerId, 'files', safeName)
-      : join('drafts', ownerId, 'files', safeName)
+      : join(row.session_id ? 'sessions' : 'drafts', ownerId, 'files', safeName)
     const absolutePath = join(this.options.dataDir, relPath)
     await mkdir(join(absolutePath, '..'), { recursive: true })
     const output = createWriteStream(absolutePath, { flags: 'wx' })
@@ -282,24 +340,25 @@ export class UploadStore {
             .get(projectId)
         )
           throw new Error('Project is being deleted')
-        result = row.session_id
-          ? message.run(
-              row.session_id,
-              attachmentId,
-              attachmentId,
-              'user',
-              'attachment_ref',
-              JSON.stringify({
+        result =
+          row.session_id && publishUserMessage
+            ? message.run(
+                row.session_id,
                 attachmentId,
-                relPath,
-                filename: row.filename,
-                mime: row.mime,
-                sizeBytes: received,
-                sha256,
-              }),
-              this.now(),
-            )
-          : { lastInsertRowid: 0 }
+                attachmentId,
+                'user',
+                'attachment_ref',
+                JSON.stringify({
+                  attachmentId,
+                  relPath,
+                  filename: row.filename,
+                  mime: row.mime,
+                  sizeBytes: received,
+                  sha256,
+                }),
+                this.now(),
+              )
+            : { lastInsertRowid: 0 }
         this.db
           .prepare(
             'UPDATE attachments SET status = ?, sha256 = ?, rel_path = ?, size_bytes = ? WHERE id = ?',

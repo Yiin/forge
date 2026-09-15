@@ -1,3 +1,4 @@
+import { NativeCleanupError } from '../harnesses/native-cleanup.js'
 import type {
   ModelCatalog,
   ModelEntry,
@@ -86,7 +87,9 @@ export async function refreshAccountModels(
   let timer: ReturnType<typeof setTimeout> | undefined
   const controller = new AbortController()
   const abortExternal = () => controller.abort()
+  if (input.signal?.aborted) controller.abort()
   input.signal?.addEventListener('abort', abortExternal, { once: true })
+  let work: Promise<ModelEntry[]> | undefined
   try {
     if (controller.signal.aborted)
       throw new Error('native model discovery cancelled')
@@ -96,7 +99,9 @@ export async function refreshAccountModels(
         reject(new Error(`model probe timed out after ${timeoutMs}ms`))
       }, timeoutMs)
     })
-    const models = await Promise.race([input.probe(controller.signal), timeout])
+    work = Promise.resolve().then(() => input.probe(controller.signal))
+    const models = await Promise.race([work, timeout])
+    controller.signal.throwIfAborted()
     if (timer) clearTimeout(timer)
     if (!models.length) return previous
     const next = {
@@ -111,6 +116,15 @@ export async function refreshAccountModels(
   } catch (error) {
     controller.abort()
     if (timer) clearTimeout(timer)
+    // A logical timeout cannot turn a later physical cleanup failure into cached success.
+    if (work) {
+      try {
+        await work
+      } catch (physical) {
+        if (physical instanceof NativeCleanupError) throw physical
+      }
+    }
+    if (error instanceof NativeCleanupError) throw error
     recordModelProbeFailure(
       db,
       previous,
