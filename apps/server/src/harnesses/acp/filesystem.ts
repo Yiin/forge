@@ -122,24 +122,33 @@ export async function createAcpFilesystem(options: {
   async function discardTemporary(operation: Operation) {
     const temp = operation.temporary
     if (!temp) return
-    const before = await temp.handle.stat({ bigint: true })
-    const bytes = await readBounded(temp.handle, MiB)
-    const after = await temp.handle.stat({ bigint: true })
-    const current = await lstat(temp.path, { bigint: true }).catch(
-      (error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return null
-        throw error
-      },
+    const releaseBuffer = host.reserve(
+      instanceId,
+      'filesystemBytes',
+      temp.expected.length + 1,
     )
-    if (
-      current &&
-      (!bytes.equals(temp.expected) ||
-        fileRevision(before) !== fileRevision(after) ||
-        fileRevision(current) !== fileRevision(after))
-    )
-      throw Error('ACP temporary cleanup ownership changed')
-    if (current) await unlink(temp.path)
-    operation.temporary = undefined
+    try {
+      const before = await temp.handle.stat({ bigint: true })
+      const bytes = await readBounded(temp.handle, temp.expected.length)
+      const after = await temp.handle.stat({ bigint: true })
+      const current = await lstat(temp.path, { bigint: true }).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return null
+          throw error
+        },
+      )
+      if (
+        current &&
+        (!bytes.equals(temp.expected) ||
+          fileRevision(before) !== fileRevision(after) ||
+          fileRevision(current) !== fileRevision(after))
+      )
+        throw Error('ACP temporary cleanup ownership changed')
+      if (current) await unlink(temp.path)
+      operation.temporary = undefined
+    } finally {
+      releaseBuffer()
+    }
   }
   function cleanup(operation: Operation): Promise<void> {
     if (operation.cleanup) return operation.cleanup
@@ -212,7 +221,12 @@ export async function createAcpFilesystem(options: {
       throw Error('ACP file changed during open')
     await hooks.beforeRead?.(handle)
     operation.controller.signal.throwIfAborted()
-    const bytes = await readBounded(handle, MiB, operation.controller.signal)
+    if (info.size > BigInt(MiB)) throw Error('ACP file content limit')
+    const size = Number(info.size)
+    operation.releases.push(
+      host.reserve(instanceId, 'filesystemBytes', size + 1),
+    )
+    const bytes = await readBounded(handle, size, operation.controller.signal)
     operation.controller.signal.throwIfAborted()
     if (bytes.length > MiB) throw Error('ACP file content limit')
     if (
@@ -274,6 +288,9 @@ export async function createAcpFilesystem(options: {
     }
     operation.temporary = temporary
     operation.controller.signal.throwIfAborted()
+    operation.releases.push(
+      host.reserve(instanceId, 'filesystemBytes', Buffer.byteLength(content)),
+    )
     const bytes = Buffer.from(content, 'utf8')
     let written = 0
     while (written < bytes.length) {
@@ -291,7 +308,10 @@ export async function createAcpFilesystem(options: {
     await handle.sync()
     operation.controller.signal.throwIfAborted()
     const staged = await handle.stat({ bigint: true })
-    const actual = await readBounded(handle, MiB)
+    operation.releases.push(
+      host.reserve(instanceId, 'filesystemBytes', bytes.length + 1),
+    )
+    const actual = await readBounded(handle, bytes.length)
     if (
       !actual.equals(bytes) ||
       fileRevision(staged) !==
@@ -367,8 +387,6 @@ export async function createAcpFilesystem(options: {
       const releases: (() => void)[] = []
       try {
         releases.push(host.reserve(instanceId, 'filesystem'))
-        releases.push(host.reserve(instanceId, 'descriptors', 34))
-        releases.push(host.reserve(instanceId, 'filesystemBytes', 2 * MiB))
         releases.push(host.reserve(instanceId, 'retained', 8 * MiB))
       } catch (error) {
         for (const end of releases) end()
@@ -452,6 +470,13 @@ export async function createAcpFilesystem(options: {
             (!Number.isSafeInteger(request.limit) || request.limit < 1)
           )
             throw Error('ACP file line range')
+          current.releases.push(
+            host.reserve(
+              instanceId,
+              'descriptors',
+              relative.split('/').length + 1,
+            ),
+          )
           current.controller.signal.throwIfAborted()
           const chain = await WorkspacePath.open(
             root,

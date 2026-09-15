@@ -42,7 +42,7 @@ async function fixture(
     sessionId: 'session',
     providerInstanceId: 'instance',
     account: { kind: 'native-default', configurationId: 'config' },
-    runtimeGeneration: 'generation',
+    runtimeGeneration: extra.runtimeGeneration ?? 'generation',
     runId: 'run',
     turnId: 'turn',
     binding,
@@ -71,7 +71,7 @@ async function fixture(
   const rpc = new JsonlRpcTransport({
     stdin,
     stdout,
-    runtimeGeneration: 'generation',
+    runtimeGeneration: extra.runtimeGeneration ?? 'generation',
     maxLineBytes: 16 * 1024 * 1024,
     maxQueuedBytes: 32 * 1024 * 1024,
     onIncoming(message) {
@@ -88,7 +88,7 @@ async function fixture(
   const helper = await createAcpFilesystem({
     session: { id: 'session', provider: 'instance', cwd: root },
     binding: () => binding,
-    runtimeGeneration: 'generation',
+    runtimeGeneration: extra.runtimeGeneration ?? 'generation',
     rpc,
     host,
     instanceId: 'instance',
@@ -465,4 +465,81 @@ describe('ACP workspace filesystem callbacks', () => {
       await f.close()
     }
   })
+})
+
+test('eight shallow held reads fit shared resources while a ninth callback is refused', async () => {
+  const host = new AcpResourceHost()
+  const releaseReads = deferred<void>()
+  const entered = Array.from({ length: 8 }, () => deferred<void>())
+  const fixtures: Awaited<ReturnType<typeof fixture>>[] = []
+  const calls: ReturnType<Awaited<ReturnType<typeof fixture>>['call']>[] = []
+  try {
+    for (let index = 0; index < 9; index++) {
+      fixtures.push(
+        await fixture({
+          host,
+          runtimeGeneration: `generation-${index}`,
+          hooks: {
+            async beforeRead() {
+              entered[index]?.resolve()
+              await releaseReads.promise
+            },
+          },
+        }),
+      )
+      await writeFile(join(fixtures[index]!.root, 'file'), 'small')
+    }
+    for (let index = 0; index < 8; index++) {
+      calls.push(fixtures[index]!.call('fs/read_text_file', { path: 'file' }))
+      await entered[index]!.promise
+    }
+    const blocked = fixtures[8]!.call('fs/read_text_file', { path: 'file' })
+    expect(await blocked.response).toHaveProperty('error')
+    await blocked.completed
+    releaseReads.resolve()
+    for (const call of calls) {
+      expect(await call.response).toHaveProperty('result.content', 'small')
+      await call.completed
+    }
+  } finally {
+    releaseReads.resolve()
+    await Promise.all(fixtures.map((value) => value.close()))
+  }
+})
+
+test('a small read charges its sentinel buffer through physical reply settlement', async () => {
+  const host = new AcpResourceHost({ filesystemBytes: [8, 8] })
+  const f = await fixture({ host }, true)
+  try {
+    await writeFile(join(f.root, 'file'), 'small')
+    const call = f.call('fs/read_text_file', { path: 'file' })
+    expect(await call.response).toHaveProperty('result.content', 'small')
+    expect(() => host.reserve('instance', 'filesystemBytes', 3)).toThrow(
+      'resource limit',
+    )
+    f.releaseReply()
+    await call.completed
+    const release = host.reserve('instance', 'filesystemBytes', 8)
+    release()
+  } finally {
+    await f.close()
+  }
+})
+
+test('growth after the captured file size fails instead of returning a clipped prefix', async () => {
+  const f = await fixture({
+    hooks: {
+      async beforeRead() {
+        await writeFile(join(f.root, 'file'), 'larger content')
+      },
+    },
+  })
+  try {
+    await writeFile(join(f.root, 'file'), 'small')
+    const call = f.call('fs/read_text_file', { path: 'file' })
+    expect(await call.response).toHaveProperty('error')
+    await call.completed
+  } finally {
+    await f.close()
+  }
 })

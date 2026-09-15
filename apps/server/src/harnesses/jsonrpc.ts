@@ -384,7 +384,7 @@ export class JsonlRpcTransport {
     return { logical, submission: write.submission }
   }
 
-  private isLiveRequest(request: JsonRpcRequest): boolean {
+  isLiveRequest(request: JsonRpcRequest): boolean {
     return (
       !!request &&
       !this.reason &&
