@@ -112,7 +112,7 @@ describe('one Node WebSocket upgrade dispatcher', () => {
     await vi.waitFor(() => expect(upgrades.resourceState().openings).toBe(0))
   })
 
-  it('releases malformed handshakes and preserves original duplicate raw headers', async () => {
+  it('rejects malformed handshakes before route registration', async () => {
     const { app, upgrades, raw } = await fixture()
     const released = vi.fn(),
       observed: string[][] = []
@@ -128,9 +128,9 @@ describe('one Node WebSocket upgrade dispatcher', () => {
     )
     await once(client.socket, 'close')
     await vi.waitFor(() => expect(upgrades.resourceState().openings).toBe(0))
-    expect(released).toHaveBeenCalledTimes(1)
-    expect(observed[0]!.filter((value) => value === 'Origin')).toHaveLength(2)
-    expect(client.text()).toContain('400')
+    expect(released).not.toHaveBeenCalled()
+    expect(observed).toHaveLength(0)
+    expect(client.text()).toContain('403')
   })
 
   it('dispatches the existing session socket and bounded terminal socket through one listener', async () => {

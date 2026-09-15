@@ -76,6 +76,7 @@ import { codexUsageProbe } from './accounts/probes/codex.js'
 import { claudeUsageProbe } from './accounts/probes/claude.js'
 import { refreshAccountModels } from './accounts/models.js'
 import { pruneWorktreesForRepositories } from './git/worktrees.js'
+import { RequestGuard } from './request-guard.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -149,6 +150,34 @@ export function createApp(
   workspaceFiles?: WorkspaceFiles,
 ) {
   const app = new Hono()
+  const requestGuard = new RequestGuard(configState?.current.terminalAccess)
+  app.use('*', async (c, next) => {
+    const method = c.req.method.toUpperCase()
+    const failure = requestGuard.check(c.req.raw, {
+      mutation: method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS',
+      incoming: (c.env as { incoming?: import('node:http').IncomingMessage })
+        .incoming,
+    })
+    if (failure) return c.json({ error: failure }, 403)
+    if (method === 'OPTIONS') {
+      const origin = c.req.header('origin')
+      return new Response(null, {
+        status: 204,
+        headers: origin
+          ? {
+              'access-control-allow-origin': origin,
+              'access-control-allow-methods':
+                'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS',
+              'access-control-allow-headers':
+                c.req.header('access-control-request-headers') ??
+                'content-type',
+              vary: 'Origin',
+            }
+          : undefined,
+      })
+    }
+    await next()
+  })
 
   if (status) app.route('/', statusRoutes(status))
   else app.get('/api/health', (c) => c.json({ ok: true, version }))
@@ -450,6 +479,7 @@ export function startServer(port?: number): ServerType {
     app,
     terminals.limits.http,
     terminals.limits.requestDeadlineMs,
+    new RequestGuard(config.terminalAccess),
   )
   app.get('/ws', websocketRoute(upgrades.upgradeWebSocket, db, bus))
   app.route(

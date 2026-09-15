@@ -9,6 +9,7 @@ import {
 import type { Hono } from 'hono'
 import { defineWebSocketHelper, WSContext, type WSEvents } from 'hono/ws'
 import type { NodeWebSocket } from '@hono/node-ws'
+import { RequestGuard } from './request-guard.js'
 
 type Registration = {
   events: WSEvents<WebSocket>
@@ -51,6 +52,7 @@ export class WebSocketUpgrades {
     private readonly app: Hono,
     private readonly maxOpening = 32,
     private readonly deadlineMs = 6000,
+    private readonly requestGuard = new RequestGuard(),
   ) {
     this.upgradeWebSocket = defineWebSocketHelper<
       WebSocket,
@@ -88,6 +90,17 @@ export class WebSocketUpgrades {
       const terminal =
         /^\/api\/sessions\/[^/]+\/terminals\/[^/]+\/events$/.test(path ?? '')
       if (path !== '/ws' && !terminal) return this.reject(socket, 404)
+      const guard = this.requestGuard.check(
+        new Request(
+          `http://${request.headers.host ?? 'forge.invalid'}${request.url ?? '/'}`,
+          {
+            method: 'GET',
+            headers: request.headers as HeadersInit,
+          },
+        ),
+        { incoming: request },
+      )
+      if (guard) return this.reject(socket, 403)
       const controller = new AbortController()
       const owner: Opening = {
         request,
