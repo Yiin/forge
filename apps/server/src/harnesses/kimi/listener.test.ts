@@ -11,6 +11,9 @@ const listed: string[] = []
 /** Whether other members report as gone when their state is read, and how many did. */
 let stateGone = false
 let unread = 0
+/** Whether other members refuse their descriptor links, and how many did. */
+let linksDenied = false
+let denied = 0
 // A group member can exit between its state read and its descriptor scan. Real
 // races are rare, so refuse the descriptor directory the same way the kernel does.
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -34,6 +37,18 @@ vi.mock('node:fs/promises', async (importOriginal) => {
           )
         : actual.opendir(path, ...rest)
     },
+    readlink: (path: string, ...rest: never[]) => {
+      const member = /^\/proc\/(\d+)\/fd\/\d+$/.exec(path)
+      if (!linksDenied || !member || Number(member[1]) === process.pid)
+        return actual.readlink(path, ...rest)
+      denied++
+      return Promise.reject(
+        Object.assign(
+          new Error(`EACCES: permission denied, readlink '${path}'`),
+          { code: 'EACCES', syscall: 'readlink', path },
+        ),
+      )
+    },
     open: (path: string, ...rest: never[]) => {
       const member = /^\/proc\/(\d+)\/stat$/.exec(path)
       if (!stateGone || !member || Number(member[1]) === process.pid)
@@ -55,6 +70,8 @@ afterEach(async () => {
   refused = 0
   stateGone = false
   unread = 0
+  linksDenied = false
+  denied = 0
   listed.splice(0)
   for (const server of servers.splice(0))
     await new Promise<void>((resolve) => server.close(() => resolve()))
@@ -109,6 +126,16 @@ test('keeps scanning past a member that exits before its state read', async () =
   ).resolves.toBe(true)
   // Every other process on the host reported gone, so the scan really skipped.
   expect(unread).toBeGreaterThan(0)
+})
+
+test('keeps scanning past a descriptor this user cannot read', async () => {
+  const port = await listen()
+  linksDenied = true
+  await expect(
+    ownedListener(port, await processGroup(), performance.now() + 10_000),
+  ).resolves.toBe(true)
+  // Another user's process can share the scan without sharing its descriptors.
+  expect(denied).toBeGreaterThan(0)
 })
 
 test('reports a foreign listener when every owned member exits mid-scan', async () => {
