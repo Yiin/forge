@@ -47,9 +47,12 @@ describe('process inspection deadlines', () => {
         toFake: ['performance', 'setTimeout', 'clearTimeout'],
       })
       const blocked = gate()
+      let listed = false
       const directory = {
         read: vi.fn(async () => {
           if (stage === 'directory read') await blocked.wait()
+          if (listed) return null
+          listed = true
           return { name: '42' }
         }),
         close: vi.fn(async () => {
@@ -97,8 +100,11 @@ describe('process inspection deadlines', () => {
         ]).toEqual(scans)
         expect(directory.close).toHaveBeenCalledTimes(1)
         expect(file.close).toHaveBeenCalledTimes(
-          ['opendir', 'directory read'].includes(stage) ? 0 : 1,
+          ['opendir', 'directory read', 'directory close'].includes(stage)
+            ? 0
+            : 1,
         )
+        if (stage === 'directory close') expect(open).not.toHaveBeenCalled()
         expect(vi.getTimerCount()).toBe(0)
       } finally {
         blocked.release()
