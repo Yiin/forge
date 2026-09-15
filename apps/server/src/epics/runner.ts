@@ -57,7 +57,14 @@ type Db = {
 }
 export type WorkerSession = {
   id: string
-  prompt(text: string, delivery?: 'immediate' | 'turn-boundary'): Promise<void>
+  prompt(
+    text: string,
+    delivery?: 'immediate' | 'turn-boundary',
+    options?: {
+      model?: string
+      configOptions?: Record<string, string | boolean>
+    },
+  ): Promise<void>
   cancel(): Promise<void>
 }
 export type SessionManager = {
@@ -91,7 +98,11 @@ type IterationResult = {
   beadId: string
   worktreePath: string
 }
-export type ProviderHop = { harness: string; model?: string }
+export type ProviderHop = {
+  harness: string
+  model?: string
+  configOptions?: Record<string, string | boolean>
+}
 export type AttemptAccount = {
   id: string
   harnessKey: string
@@ -250,15 +261,20 @@ async function runPromptAttempts(
           value.cwd,
           value.branch,
         ),
+        undefined,
+        { model: next.model, configOptions: next.configOptions },
       )
       return { session, iteration }
     } catch (error) {
       promptError = error
       const detectedAt = Date.now()
       const decision = classifyPromptFailure(error, detectedAt)
-      if (!decision.recordCooldown) exhaustedHarnesses.add(next.harness)
+      const match = detectProviderError(errorMessage(error))
+      // Tool and transcript errors belong to this worker. Only a structured
+      // provider failure may move the attempt to another configured hop.
+      if (!match) break
+      if (match.category === 'unavailable') exhaustedHarnesses.add(next.harness)
       if (decision.recordCooldown && next.accountId) {
-        const match = detectProviderError(errorMessage(error))
         recordLimit(db, {
           accountId: next.accountId,
           kind: decision.category!,
