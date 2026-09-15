@@ -62,11 +62,17 @@ export async function proxyForgeApi(
         body: route.request().postDataBuffer() ?? undefined,
       },
     )
-    await route.fulfill({
-      status: response.status,
-      headers: Object.fromEntries(response.headers),
-      body: Buffer.from(await response.arrayBuffer()),
-    })
+    try {
+      await route.fulfill({
+        status: response.status,
+        headers: Object.fromEntries(response.headers),
+        body: Buffer.from(await response.arrayBuffer()),
+      })
+    } catch (error) {
+      // A test can finish while the app still has a request in flight. Its
+      // route is torn down first, and answering it then is not a test failure.
+      if (!/already handled|closed/i.test(String(error))) throw error
+    }
   })
 }
 
