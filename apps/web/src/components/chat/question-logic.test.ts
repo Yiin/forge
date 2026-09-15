@@ -1,6 +1,6 @@
 import type { Message } from '@forge/protocol/message'
 import { describe, expect, it } from 'vitest'
-import { pendingQuestions } from './question-logic'
+import { pendingQuestionRequests, pendingQuestions } from './question-logic'
 
 const question = (
   type: Message['type'],
@@ -57,5 +57,54 @@ describe('pendingQuestions', () => {
       2,
     )
     expect(pendingQuestions([ask, cancelled])).toEqual([])
+  })
+
+  it('keeps grouped question and option identities when labels repeat', () => {
+    const ask = question(
+      'ask_user_question',
+      {
+        type: 'ask_user_question',
+        questionId: 'request-1',
+        questions: [
+          {
+            id: 'first',
+            question: 'Pick a target',
+            options: [
+              { id: 'one', label: 'Same' },
+              { id: 'two', label: 'Same' },
+            ],
+          },
+          {
+            id: 'second',
+            question: 'Pick a target',
+            options: [{ id: 'three', label: 'Same' }],
+          },
+        ],
+      },
+      1,
+    )
+
+    expect(pendingQuestionRequests([ask])).toEqual([
+      expect.objectContaining({
+        requestId: 'request-1',
+        questions: [
+          expect.objectContaining({
+            id: 'first',
+            options: [
+              { id: 'one', label: 'Same' },
+              { id: 'two', label: 'Same' },
+            ],
+          }),
+          expect.objectContaining({
+            id: 'second',
+            options: [{ id: 'three', label: 'Same' }],
+          }),
+        ],
+      }),
+    ])
+    expect(pendingQuestions([ask]).map((item) => item.questionId)).toEqual([
+      'request-1',
+      'request-1',
+    ])
   })
 })

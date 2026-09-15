@@ -59,7 +59,6 @@ export function WorkspaceDock({
   const closeTab = useShellStore((state) => state.closeDockTab)
   const selectTab = useShellStore((state) => state.setActiveDockTab)
   const [adding, setAdding] = useState(false)
-  const [selectedCommit, setSelectedCommit] = useState<string>()
   const drag = useRef<{ x: number; width: number } | null>(null)
 
   useEffect(() => {
@@ -109,13 +108,13 @@ export function WorkspaceDock({
       sessionId={sessionId}
       projectId={projectId}
       onReviewComment={onReviewComment}
-      commit={selectedCommit}
+      commit={active.commit}
       onCommit={(sha) => {
-        setSelectedCommit(sha)
         openTab(sessionId, {
           id: `commit-${sha}`,
           kind: 'diff',
           title: `Commit ${sha.slice(0, 7)}`,
+          commit: sha,
         })
       }}
     />

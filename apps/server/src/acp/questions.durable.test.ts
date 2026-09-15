@@ -46,15 +46,18 @@ describe('durable native interactions', () => {
       }),
     ).toThrow('Unknown answer key')
     manager.answerQuestion(session.id, 'request-1', {
-      answers: { 'Name?': ['Ada'], 'Secret?': 'hidden' },
+      answers: { 'question-0': ['name'], 'question-1': 'hidden' },
     })
     await pending
     expect(manager.listPending(session.id)[0]).toMatchObject({
       status: 'submitted',
-      answer: { 'Name?': ['Ada'], 'Secret?': '[redacted]' },
+      answer: { 'question-0': ['name'], 'question-1': '[redacted]' },
     })
     expect(db.prepare('SELECT answer FROM native_interactions').get()).toEqual({
-      answer: JSON.stringify({ 'Name?': ['Ada'], 'Secret?': '[redacted]' }),
+      answer: JSON.stringify({
+        'question-0': ['name'],
+        'question-1': '[redacted]',
+      }),
     })
     expect(
       db
@@ -64,7 +67,7 @@ describe('durable native interactions', () => {
       content: JSON.stringify({
         type: 'user_answer',
         questionId: 'request-1',
-        answers: { 'Name?': ['Ada'], 'Secret?': '[redacted]' },
+        answers: { 'question-0': ['name'], 'question-1': '[redacted]' },
       }),
     })
     db.close()
@@ -96,6 +99,241 @@ describe('durable native interactions', () => {
     })
     const second = new QuestionManager({ db, now: () => 1001 })
     expect(second.listPending(session.id)[0].status).toBe('expired')
+    db.close()
+  })
+})
+
+describe('ACP permission requests', () => {
+  const permission = (
+    sessionId: string,
+    rawInput: unknown,
+    title = 'Run command',
+  ) =>
+    ({
+      sessionId,
+      toolCall: { toolCallId: 'tool-1', title, rawInput },
+      options: [
+        { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
+        {
+          kind: 'allow_always',
+          name: 'Allow always',
+          optionId: 'allow-always',
+        },
+        { kind: 'reject_once', name: 'Reject once', optionId: 'reject-once' },
+      ],
+    }) as unknown as Parameters<QuestionManager['handlePermission']>[0]
+
+  it('keeps a question that arrived on the permission method a question', async () => {
+    const { db, session } = fixture()
+    const manager = new QuestionManager({ db, now: () => 1000 })
+    const pending = manager.handlePermission(
+      permission(
+        session.id,
+        {
+          questions: [
+            {
+              question: 'Pick one',
+              options: [{ label: 'First' }, { label: 'Second' }],
+            },
+          ],
+        },
+        'AskUserQuestion',
+      ),
+    )
+    const request = manager.listPending(session.id)[0]
+    expect(request).toMatchObject({ source: 'permission' })
+    expect(request.toolName).toBeUndefined()
+    expect(request.toolContext).toBeUndefined()
+    expect(request.permissionScope).toBeUndefined()
+    expect(request.questions[0].question).toBe('Pick one')
+
+    // The wire only accepts an option the agent offered, never a Forge id.
+    const optionId = request.questions[0].options[1].id!
+    expect(optionId).not.toBe('allow-once')
+    manager.answerQuestion(session.id, request.questionId, {
+      answers: { [request.questions[0].id ?? 'question-0']: [optionId] },
+    })
+    expect(await pending).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once' },
+    })
+    db.close()
+  })
+
+  it('keeps a bare tool approval a tool approval and replays its own option', async () => {
+    const { db, session } = fixture()
+    const manager = new QuestionManager({ db, now: () => 1000 })
+    const pending = manager.handlePermission(
+      permission(session.id, { command: 'rm -rf /' }),
+    )
+    const request = manager.listPending(session.id)[0]
+    expect(request).toMatchObject({
+      source: 'permission',
+      toolName: 'Run command',
+      toolContext: JSON.stringify({ command: 'rm -rf /' }),
+      permissionScope: 'session',
+    })
+    manager.answerQuestion(session.id, request.questionId, {
+      answers: { permission: ['reject-once'] },
+    })
+    expect(await pending).toEqual({
+      outcome: { outcome: 'selected', optionId: 'reject-once' },
+    })
+    db.close()
+  })
+
+  it('cancels when the agent offered nothing to allow', async () => {
+    const { db, session } = fixture()
+    const manager = new QuestionManager({ db, now: () => 1000 })
+    const request = permission(session.id, {
+      questions: [
+        {
+          question: 'Pick one',
+          options: [{ label: 'First' }, { label: 'Second' }],
+        },
+      ],
+    })
+    // One option, named for neither answer: nothing maps and nothing allows.
+    request.options = [
+      { kind: 'reject_once', name: 'Reject once', optionId: 'reject-once' },
+    ]
+    const pending = manager.handlePermission(request)
+    const held = manager.listPending(session.id)[0]
+    manager.answerQuestion(session.id, held.questionId, {
+      answers: {
+        [held.questions[0].id ?? 'question-0']: [
+          held.questions[0].options[0].id!,
+        ],
+      },
+    })
+    expect(await pending).toEqual({ outcome: { outcome: 'cancelled' } })
+    db.close()
+  })
+})
+
+describe('Kimi-shaped permission questions', () => {
+  // Kimi sends toolCall.title AskUserQuestion with one allow_once option per
+  // answer. See docs/research/acp-capability-matrix.md.
+  const kimi = (sessionId: string) =>
+    ({
+      sessionId,
+      toolCall: {
+        toolCallId: 'tool-1',
+        title: 'AskUserQuestion',
+        rawInput: {
+          questions: [
+            {
+              header: 'Task',
+              question: 'What should I work on?',
+              options: [
+                { label: 'A demo task' },
+                { label: 'Nothing, just testing' },
+                { label: 'Pick ready beads work' },
+              ],
+            },
+          ],
+        },
+      },
+      options: [
+        { kind: 'allow_once', name: 'A demo task', optionId: 'answer-1' },
+        {
+          kind: 'allow_once',
+          name: 'Nothing, just testing',
+          optionId: 'answer-2',
+        },
+        {
+          kind: 'allow_once',
+          name: 'Pick ready beads work',
+          optionId: 'answer-3',
+        },
+      ],
+    }) as unknown as Parameters<QuestionManager['handlePermission']>[0]
+
+  it('returns the answer the user chose, not the first allow', async () => {
+    const { db, session } = fixture()
+    const manager = new QuestionManager({ db, now: () => 1000 })
+    const pending = manager.handlePermission(kimi(session.id))
+    const held = manager.listPending(session.id)[0]
+    manager.answerQuestion(session.id, held.questionId, {
+      answers: {
+        [held.questions[0].id ?? 'question-0']: [
+          held.questions[0].options[1].id!,
+        ],
+      },
+    })
+    expect(await pending).toEqual({
+      outcome: { outcome: 'selected', optionId: 'answer-2' },
+    })
+    db.close()
+  })
+
+  it('falls back to position when the agent names its options differently', async () => {
+    const { db, session } = fixture()
+    const manager = new QuestionManager({ db, now: () => 1000 })
+    const request = kimi(session.id)
+    request.options = request.options.map((option, index) => ({
+      ...option,
+      name: `Option ${index + 1}`,
+    }))
+    const pending = manager.handlePermission(request)
+    const held = manager.listPending(session.id)[0]
+    manager.answerQuestion(session.id, held.questionId, {
+      answers: {
+        [held.questions[0].id ?? 'question-0']: [
+          held.questions[0].options[2].id!,
+        ],
+      },
+    })
+    expect(await pending).toEqual({
+      outcome: { outcome: 'selected', optionId: 'answer-3' },
+    })
+    db.close()
+  })
+})
+
+describe('questions against a plain approval triple', () => {
+  it('never answers a third choice with the agent reject option', async () => {
+    const { db, session } = fixture()
+    const manager = new QuestionManager({ db, now: () => 1000 })
+    const request = {
+      sessionId: session.id,
+      toolCall: {
+        toolCallId: 'tool-1',
+        title: 'AskUserQuestion',
+        rawInput: {
+          questions: [
+            {
+              question: 'Pick one',
+              options: [
+                { label: 'First' },
+                { label: 'Second' },
+                { label: 'Third' },
+              ],
+            },
+          ],
+        },
+      },
+      options: [
+        { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
+        {
+          kind: 'allow_always',
+          name: 'Allow always',
+          optionId: 'allow-always',
+        },
+        { kind: 'reject_once', name: 'Reject once', optionId: 'reject-once' },
+      ],
+    } as unknown as Parameters<QuestionManager['handlePermission']>[0]
+    const pending = manager.handlePermission(request)
+    const held = manager.listPending(session.id)[0]
+    manager.answerQuestion(session.id, held.questionId, {
+      answers: {
+        [held.questions[0].id ?? 'question-0']: [
+          held.questions[0].options[2].id!,
+        ],
+      },
+    })
+    expect(await pending).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once' },
+    })
     db.close()
   })
 })

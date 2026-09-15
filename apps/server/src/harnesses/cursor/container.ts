@@ -330,7 +330,9 @@ export async function retireContainer(
     !row.InvocationID || row.InvocationID === identity.invocation,
     'cursor_container_invocation_changed',
   )
-  if (row.InvocationID) {
+  // A retired service can retain its invocation after systemd clears ControlGroup.
+  // An empty group grants no stop authority; prove the captured group retired below.
+  if (row.InvocationID && row.ControlGroup !== '') {
     invariant(
       row.ControlGroup === identity.cgroup,
       'cursor_container_cgroup_changed',

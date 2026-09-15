@@ -23,6 +23,7 @@ export type DockTab = {
   title: string
   path?: string
   childSessionId?: string
+  commit?: string
 }
 
 export type SessionDockState = {

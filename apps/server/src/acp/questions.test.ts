@@ -30,12 +30,14 @@ describe('ACP user question classification', () => {
       toolCallId: 'cursor-tool',
       questions: [
         {
+          id: 'scope',
           prompt: 'Scope?',
           options: [{ id: 'workspace', label: 'Workspace' }],
         },
       ],
     })
     expect(cursor?.questions[0]).toEqual({
+      id: 'scope',
       question: 'Scope?',
       options: [{ label: 'Workspace', id: 'workspace' }],
     })
