@@ -18,6 +18,7 @@
   "scripts": {
     "build:cursor-sidecar": "bun scripts/build-cursor-sidecar.ts",
     "package:release": "node scripts/package-release.mjs",
+    "smoke:packed-native": "node scripts/packed-native-smoke.mjs",
     "postinstall": "node scripts/install-native.mjs",
     "native:build": "node scripts/build-node-pty.mjs",
     "native:check": "node scripts/check-node-pty.mjs",
