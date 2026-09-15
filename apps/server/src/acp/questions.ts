@@ -400,6 +400,7 @@ export class QuestionManager {
   }
   handlePermission(
     request: acp.RequestPermissionRequest,
+    forgeSessionId = request.sessionId,
   ): Promise<acp.RequestPermissionResponse> {
     const questions = normalizeQuestions(
       object(request.toolCall.rawInput).questions,
@@ -409,7 +410,7 @@ export class QuestionManager {
     // so only the bare form gets the tool name, context and allow scope.
     const question: PendingQuestion = {
       questionId: id(),
-      sessionId: request.sessionId,
+      sessionId: forgeSessionId,
       source: 'permission',
       raw: request as unknown as Record<string, unknown>,
       ...(questions.length
@@ -490,8 +491,13 @@ export class QuestionManager {
   handleExtension(
     method: string,
     params: Record<string, unknown>,
+    forgeSessionId?: string,
   ): Promise<Record<string, unknown>> | undefined {
-    const question = classifyQuestion(method, params)
+    const classified = classifyQuestion(method, params)
+    const question =
+      classified && forgeSessionId
+        ? { ...classified, sessionId: forgeSessionId }
+        : classified
     if (!question) return undefined
     if (
       method !== 'cursor/ask_question' &&

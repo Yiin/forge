@@ -32,6 +32,26 @@ describe('session workspace dock state', () => {
     expect(useShellStore.getState().dock('one')).toEqual(DEFAULT_DOCK_STATE)
   })
 
+  it('keeps commit identity on each history tab', () => {
+    const store = useShellStore.getState()
+    store.openDockTab('one', {
+      id: 'commit-first',
+      kind: 'diff',
+      title: 'Commit first',
+      commit: 'first',
+    })
+    store.openDockTab('one', {
+      id: 'commit-second',
+      kind: 'diff',
+      title: 'Commit second',
+      commit: 'second',
+    })
+    expect(useShellStore.getState().dock('one').tabs).toEqual([
+      expect.objectContaining({ id: 'commit-first', commit: 'first' }),
+      expect.objectContaining({ id: 'commit-second', commit: 'second' }),
+    ])
+  })
+
   it('clamps global width and preserves it when a session closes', () => {
     const store = useShellStore.getState()
     store.setDockWidth(1)

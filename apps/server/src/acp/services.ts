@@ -100,6 +100,7 @@ export type AcpServicesOptions = {
   logger?: Logger
   isUserQuestion?: (request: acp.RequestPermissionRequest) => boolean
   questionManager?: QuestionManager
+  forgeSessionId?: string
 }
 
 export type AcpServices = ClientHandlers & {
@@ -117,7 +118,10 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
       const checked = permissionRequest.parse(request)
       if (options.isUserQuestion?.(request) ?? isUserQuestion(request)) {
         if (options.questionManager)
-          return options.questionManager.handlePermission(request)
+          return options.questionManager.handlePermission(
+            request,
+            options.forgeSessionId,
+          )
         return { outcome: { outcome: 'cancelled' } }
       }
       logger.debug('Auto-granted ACP permission', checked.toolCall.title)
@@ -245,7 +249,11 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
       return {}
     },
     onExtRequest: async (method, params) => {
-      const question = options.questionManager?.handleExtension(method, params)
+      const question = options.questionManager?.handleExtension(
+        method,
+        params,
+        options.forgeSessionId,
+      )
       if (question) return question
       throw acp.RequestError.methodNotFound(method)
     },

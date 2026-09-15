@@ -116,6 +116,39 @@ export class ForgeApi {
       `/api/projects/${encodeURIComponent(projectId)}/git/branches${suffix}`,
     )
   }
+  gitDiff(
+    projectId: string,
+    params: {
+      cwd?: string
+      sessionId?: string
+      scope?: 'working' | 'branch' | 'latest-turn' | 'commit'
+      baseRef?: string
+      commit?: string
+    } = {},
+  ) {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params))
+      if (value !== undefined) query.set(key, String(value))
+    return this.get(
+      `/api/projects/${encodeURIComponent(projectId)}/git/diff?${query}`,
+    )
+  }
+  gitHistory(
+    projectId: string,
+    params: {
+      cwd?: string
+      sessionId?: string
+      cursor?: string
+      limit?: number
+    } = {},
+  ) {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params))
+      if (value !== undefined) query.set(key, String(value))
+    return this.get(
+      `/api/projects/${encodeURIComponent(projectId)}/git/history?${query}`,
+    )
+  }
   listWorktrees(projectId: string) {
     return this.get(
       `/api/projects/${encodeURIComponent(projectId)}/git/worktrees`,

@@ -5,6 +5,8 @@ import { ownedListener } from './listener.js'
 
 /** Which group members report as gone when their descriptors are scanned. */
 let vanished: 'none' | 'every member' | 'other members' = 'none'
+/** The code the kernel refuses a vanished member's descriptor directory with. */
+let refusal: 'ENOENT' | 'EACCES' = 'ENOENT'
 let refused = 0
 /** Every directory the scan listed. */
 const listed: string[] = []
@@ -31,8 +33,12 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       return gone
         ? Promise.reject(
             Object.assign(
-              new Error(`ENOENT: no such file or directory, opendir '${path}'`),
-              { code: 'ENOENT', syscall: 'opendir', path },
+              new Error(
+                refusal === 'EACCES'
+                  ? `EACCES: permission denied, opendir '${path}'`
+                  : `ENOENT: no such file or directory, opendir '${path}'`,
+              ),
+              { code: refusal, syscall: 'opendir', path },
             ),
           )
         : actual.opendir(path, ...rest)
@@ -67,6 +73,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 const servers: Server[] = []
 afterEach(async () => {
   vanished = 'none'
+  refusal = 'ENOENT'
   refused = 0
   stateGone = false
   unread = 0
@@ -118,6 +125,18 @@ test('keeps scanning past a member that exits before its descriptor scan', async
   expect(refused).toBeGreaterThan(0)
 })
 
+// An exiting member keeps its /proc entry but loses its access check, so the
+// kernel refuses its descriptor directory with EACCES rather than ENOENT.
+test('keeps scanning past a member whose descriptor directory refuses access', async () => {
+  const port = await listen()
+  vanished = 'other members'
+  refusal = 'EACCES'
+  await expect(
+    ownedListener(port, await processGroup(), performance.now() + 10_000),
+  ).resolves.toBe(true)
+  expect(refused).toBeGreaterThan(0)
+})
+
 test('keeps scanning past a member that exits before its state read', async () => {
   const port = await listen()
   stateGone = true
@@ -136,6 +155,15 @@ test('keeps scanning past a descriptor this user cannot read', async () => {
   ).resolves.toBe(true)
   // Another user's process can share the scan without sharing its descriptors.
   expect(denied).toBeGreaterThan(0)
+})
+
+test('reports a foreign listener when every owned member refuses access', async () => {
+  const port = await listen()
+  vanished = 'every member'
+  refusal = 'EACCES'
+  await expect(
+    ownedListener(port, await processGroup(), performance.now() + 10_000),
+  ).rejects.toMatchObject({ code: 'kimi_foreign_listener' })
 })
 
 test('reports a foreign listener when every owned member exits mid-scan', async () => {
