@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { open, opendir } from 'node:fs/promises'
+import { open, readdir } from 'node:fs/promises'
 import {
   INSPECTION_BATCH,
   groupHasRunningMember,
   waitForProcessGroupExit,
 } from './process-group.js'
 
-vi.mock('node:fs/promises', () => ({ open: vi.fn(), opendir: vi.fn() }))
+vi.mock('node:fs/promises', () => ({ open: vi.fn(), readdir: vi.fn() }))
 
 function gate() {
   let release!: () => void
@@ -34,29 +34,13 @@ afterEach(() => {
 })
 
 describe('process inspection deadlines', () => {
-  it.each([
-    'opendir',
-    'directory read',
-    'open',
-    'file read',
-    'file close',
-    'directory close',
-  ])(
+  it.each(['readdir', 'open', 'file read', 'file close'])(
     'bounds a pending %s and only releases resources after expiry',
     async (stage) => {
       vi.useFakeTimers({
         toFake: ['performance', 'setTimeout', 'clearTimeout'],
       })
       const blocked = gate()
-      const directory = {
-        read: vi.fn(async () => {
-          if (stage === 'directory read') await blocked.wait()
-          return { name: '42' }
-        }),
-        close: vi.fn(async () => {
-          if (stage === 'directory close') await blocked.wait()
-        }),
-      }
       const file = {
         read: vi.fn(async (buffer: Buffer) => {
           if (stage === 'file read') await blocked.wait()
@@ -67,9 +51,11 @@ describe('process inspection deadlines', () => {
           if (stage === 'file close') await blocked.wait()
         }),
       }
-      vi.mocked(opendir).mockImplementation(async () => {
-        if (stage === 'opendir') await blocked.wait()
-        return directory as never
+      vi.mocked(readdir).mockImplementation(async () => {
+        if (stage === 'readdir') await blocked.wait()
+        return Array.from({ length: INSPECTION_BATCH * 2 }, (_, slot) =>
+          String(42 + slot),
+        ) as never
       })
       vi.mocked(open).mockImplementation(async () => {
         if (stage === 'open') await blocked.wait()
@@ -83,25 +69,21 @@ describe('process inspection deadlines', () => {
       try {
         expect(await result).toBe('Native process cleanup timed out')
         const scans = [
-          vi.mocked(opendir).mock.calls.length,
-          directory.read.mock.calls.length,
+          vi.mocked(readdir).mock.calls.length,
           vi.mocked(open).mock.calls.length,
           file.read.mock.calls.length,
         ]
         blocked.release()
         await vi.advanceTimersByTimeAsync(0)
         expect([
-          vi.mocked(opendir).mock.calls.length,
-          directory.read.mock.calls.length,
+          vi.mocked(readdir).mock.calls.length,
           vi.mocked(open).mock.calls.length,
           file.read.mock.calls.length,
         ]).toEqual(scans)
-        expect(directory.close).toHaveBeenCalledTimes(1)
         // One bounded batch opens INSPECTION_BATCH handles and releases every
-        // one of them. Expiry never leaves a handle behind.
-        const opened = ['opendir', 'directory read'].includes(stage)
-          ? 0
-          : INSPECTION_BATCH
+        // one of them. Expiry never leaves a handle behind, and it never starts
+        // the second batch.
+        const opened = stage === 'readdir' ? 0 : INSPECTION_BATCH
         expect(vi.mocked(open).mock.calls.length).toBe(opened)
         expect(file.close).toHaveBeenCalledTimes(opened)
         expect(vi.getTimerCount()).toBe(0)
@@ -111,20 +93,51 @@ describe('process inspection deadlines', () => {
     },
   )
 
+  // A member can exit between the listing and its own state read.
+  it.each(['ENOENT', 'ESRCH'])(
+    'keeps scanning after a member reports %s for its own state',
+    async (code) => {
+      const file = {
+        read: vi.fn(async (buffer: Buffer) => ({
+          bytesRead: buffer.write('42 (owned) S 1 42 0'),
+        })),
+        close: vi.fn(async () => {}),
+      }
+      vi.mocked(readdir).mockResolvedValue(['41', '42', 'net'] as never)
+      vi.mocked(open).mockImplementation(async (path) => {
+        if (path === '/proc/41/stat')
+          throw Object.assign(new Error(`${code}: open '${String(path)}'`), {
+            code,
+          })
+        return file as never
+      })
+      await expect(
+        groupHasRunningMember(42, performance.now() + 1000),
+      ).resolves.toBe(true)
+      // The vanished member never stops the scan, and /proc/net is not a member.
+      expect(vi.mocked(open).mock.calls.map(([path]) => path)).toEqual([
+        '/proc/41/stat',
+        '/proc/42/stat',
+      ])
+      // Names only. Asking for Dirents makes Node lstat every exiting task,
+      // and one such failure drops the rest of that readdir batch.
+      expect(vi.mocked(readdir).mock.calls).toEqual([['/proc']])
+    },
+  )
+
   it('does not start inspection when its deadline has passed', async () => {
     await expect(
       groupHasRunningMember(42, performance.now() - 1),
     ).rejects.toThrow('cleanup timed out')
-    expect(opendir).not.toHaveBeenCalled()
+    expect(readdir).not.toHaveBeenCalled()
   })
 
   it('does not probe or signal the group after a late inspection completes', async () => {
     vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] })
     const blocked = gate()
-    const directory = { close: vi.fn(async () => {}), read: vi.fn() }
-    vi.mocked(opendir).mockImplementation(async () => {
+    vi.mocked(readdir).mockImplementation(async () => {
       await blocked.wait()
-      return directory as never
+      return ['42'] as never
     })
     const kill = vi.spyOn(process, 'kill').mockReturnValue(true)
     const result = waitForProcessGroupExit(42, performance.now() + 20).catch(
@@ -138,8 +151,7 @@ describe('process inspection deadlines', () => {
       blocked.release()
       await vi.advanceTimersByTimeAsync(0)
       expect(kill.mock.calls).toEqual([[-42, 0]])
-      expect(directory.read).not.toHaveBeenCalled()
-      expect(directory.close).toHaveBeenCalledOnce()
+      expect(open).not.toHaveBeenCalled()
     } finally {
       blocked.release()
     }

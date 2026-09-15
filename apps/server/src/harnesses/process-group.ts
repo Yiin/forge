@@ -1,4 +1,4 @@
-import { opendir, open } from 'node:fs/promises'
+import { open, readdir } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
 
 export function signalProcessGroup(pid: number, signal: NodeJS.Signals | 0) {
@@ -60,41 +60,31 @@ export async function groupHasRunningMember(pid: number, deadline: number) {
   }
   const inspect = async () => {
     check()
-    const directory = await opendir('/proc')
-    try {
+    /**
+     * Read names, never Dirents. /proc reports a task that is exiting as
+     * DT_UNKNOWN, and Node resolves that type with a second lstat which fails
+     * once the task is gone. One such entry aborts the whole readdir batch it
+     * arrived in, so the listing would silently lose its remaining members.
+     */
+    const names = await readdir('/proc')
+    check()
+    const members = names.filter((name) => /^\d+$/.test(name))
+    if (members.length > 65_536)
+      throw new Error('Native process inspection limit reached')
+    const buffers = Array.from({ length: INSPECTION_BATCH }, () =>
+      Buffer.alloc(4096),
+    )
+    for (let start = 0; start < members.length; start += INSPECTION_BATCH) {
       check()
-      const buffers = Array.from({ length: INSPECTION_BATCH }, () =>
-        Buffer.alloc(4096),
+      const batch = await Promise.all(
+        members
+          .slice(start, start + INSPECTION_BATCH)
+          .map((name, slot) => isRunningMember(name, buffers[slot]!)),
       )
-      const batch: string[] = []
-      let reads = 0
-      let exhausted = false
-      while (!exhausted) {
-        while (batch.length < INSPECTION_BATCH) {
-          check()
-          const entry = await directory.read()
-          check()
-          if (!entry) {
-            exhausted = true
-            break
-          }
-          if (!/^\d+$/.test(entry.name)) continue
-          if (++reads > 65_536)
-            throw new Error('Native process inspection limit reached')
-          batch.push(entry.name)
-        }
-        const members = await Promise.all(
-          batch
-            .splice(0)
-            .map((name, slot) => isRunningMember(name, buffers[slot]!)),
-        )
-        check()
-        if (members.includes(true)) return true
-      }
-      return false
-    } finally {
-      await directory.close()
+      check()
+      if (batch.includes(true)) return true
     }
+    return false
   }
   check()
   let timer: ReturnType<typeof setTimeout> | undefined

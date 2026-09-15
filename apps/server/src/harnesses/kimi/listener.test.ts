@@ -6,14 +6,19 @@ import { ownedListener } from './listener.js'
 /** Which group members report as gone when their descriptors are scanned. */
 let vanished: 'none' | 'every member' | 'other members' = 'none'
 let refused = 0
-
+/** Every directory the scan listed, with the options it asked for. */
+const listed: [string, unknown][] = []
+/** Whether other members report as gone when their state is read, and how many did. */
+let stateGone = false
+let unread = 0
 // A group member can exit between its state read and its descriptor scan. Real
 // races are rare, so refuse the descriptor directory the same way the kernel does.
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return {
     ...actual,
-    opendir: (path: string, ...rest: never[]) => {
+    readdir: (path: string, ...rest: never[]) => {
+      listed.push([path, (rest as unknown[])[0]])
       const member = /^\/proc\/(\d+)\/fd$/.exec(path)
       const gone =
         member &&
@@ -27,7 +32,19 @@ vi.mock('node:fs/promises', async (importOriginal) => {
               { code: 'ENOENT', syscall: 'scandir', path },
             ),
           )
-        : actual.opendir(path, ...rest)
+        : actual.readdir(path, ...rest)
+    },
+    open: (path: string, ...rest: never[]) => {
+      const member = /^\/proc\/(\d+)\/stat$/.exec(path)
+      if (!stateGone || !member || Number(member[1]) === process.pid)
+        return actual.open(path, ...rest)
+      unread++
+      return Promise.reject(
+        Object.assign(
+          new Error(`ENOENT: no such file or directory, open '${path}'`),
+          { code: 'ENOENT', syscall: 'open', path },
+        ),
+      )
     },
   }
 })
@@ -36,6 +53,9 @@ const servers: Server[] = []
 afterEach(async () => {
   vanished = 'none'
   refused = 0
+  stateGone = false
+  unread = 0
+  listed.splice(0)
   for (const server of servers.splice(0))
     await new Promise<void>((resolve) => server.close(() => resolve()))
 })
@@ -64,6 +84,10 @@ test('accepts a listening socket held by an owned group member', async () => {
   await expect(
     ownedListener(port, await processGroup(), performance.now() + 10_000),
   ).resolves.toBe(true)
+  // Names only. Asking for Dirents makes Node lstat every exiting task, and one
+  // such failure drops the rest of that readdir batch.
+  expect(listed[0]).toEqual(['/proc', undefined])
+  expect(listed.every(([, options]) => options === undefined)).toBe(true)
 })
 
 test('keeps scanning past a member that exits before its descriptor scan', async () => {
@@ -74,6 +98,16 @@ test('keeps scanning past a member that exits before its descriptor scan', async
   ).resolves.toBe(true)
   // The runner and its worker share one group, so the scan really did skip one.
   expect(refused).toBeGreaterThan(0)
+})
+
+test('keeps scanning past a member that exits before its state read', async () => {
+  const port = await listen()
+  stateGone = true
+  await expect(
+    ownedListener(port, await processGroup(), performance.now() + 10_000),
+  ).resolves.toBe(true)
+  // Every other process on the host reported gone, so the scan really skipped.
+  expect(unread).toBeGreaterThan(0)
 })
 
 test('reports a foreign listener when every owned member exits mid-scan', async () => {
