@@ -284,6 +284,7 @@ export function createEpicSessionAdapter(manager: SessionManager) {
             undefined,
             undefined,
             delivery,
+            true,
           ),
         cancel: async () => {
           await manager.interrupt(session.id)
