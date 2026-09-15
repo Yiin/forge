@@ -58,6 +58,32 @@ function toolCallId(message: Message): string | undefined {
   return undefined
 }
 
+type MessageIndex = {
+  byItemId: Map<string, number>
+  byToolCallId: Map<string, number>
+}
+
+const messageIndexes = new WeakMap<Message[], MessageIndex>()
+
+function indexMessages(items: Message[]): MessageIndex {
+  const existing = messageIndexes.get(items)
+  if (existing) return existing
+  const index: MessageIndex = {
+    byItemId: new Map(),
+    byToolCallId: new Map(),
+  }
+  for (let position = 0; position < items.length; position++) {
+    const item = items[position]!
+    if (!index.byItemId.has(item.itemId))
+      index.byItemId.set(item.itemId, position)
+    const toolId = toolCallId(item)
+    if (toolId && !index.byToolCallId.has(toolId))
+      index.byToolCallId.set(toolId, position)
+  }
+  messageIndexes.set(items, index)
+  return index
+}
+
 export function foldEvent(
   state: Pick<MessagesState, 'bySession' | 'lastSeq'> &
     Partial<Pick<MessagesState, 'pendingBySession'>>,
@@ -66,24 +92,36 @@ export function foldEvent(
   if (event.seq <= state.lastSeq) return state
   const items = state.bySession[event.sessionId] ?? []
   const pending = state.pendingBySession?.[event.sessionId] ?? []
+  const index = indexMessages(items)
   // Fold by itemId first. Older rows can lack the server-generated itemId,
   // so use the ACP toolCallId for lifecycle updates and results.
-  let index = event.msg.itemId
-    ? items.findIndex((item) => item.itemId === event.msg.itemId)
+  let itemIndex = event.msg.itemId
+    ? (index.byItemId.get(event.msg.itemId) ?? -1)
     : -1
   if (
-    index < 0 &&
+    itemIndex < 0 &&
     (event.msg.content.type === 'tool_update' ||
       event.msg.content.type === 'tool_result')
   ) {
     const id = toolCallId(event.msg)
-    if (id) index = items.findIndex((item) => toolCallId(item) === id)
+    if (id) itemIndex = index.byToolCallId.get(id) ?? -1
   }
-  const nextItems = [...items]
-  if (index < 0) nextItems.push(event.msg)
-  else nextItems[index] = foldMessage(nextItems[index], event.msg)
+  if (itemIndex < 0) {
+    itemIndex = items.length
+    items.push(event.msg)
+  } else {
+    items[itemIndex] = foldMessage(items[itemIndex]!, event.msg)
+  }
+  if (!index.byItemId.has(event.msg.itemId))
+    index.byItemId.set(event.msg.itemId, itemIndex)
+  const toolId = toolCallId(event.msg)
+  if (toolId && !index.byToolCallId.has(toolId))
+    index.byToolCallId.set(toolId, itemIndex)
   return {
-    bySession: { ...state.bySession, [event.sessionId]: nextItems },
+    // The item array is append-only and is updated in place. This avoids a
+    // full session copy for every replayed delta. Consumers subscribe to the
+    // record, which is replaced here, so they still observe each update.
+    bySession: { ...state.bySession, [event.sessionId]: items },
     pendingBySession: {
       ...state.pendingBySession,
       [event.sessionId]: pending.filter(
