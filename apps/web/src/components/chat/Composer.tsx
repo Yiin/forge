@@ -586,6 +586,33 @@ export function Composer({
                       textarea.current?.focus()
                     })
                   }}
+                  onMove={(id, direction) => {
+                    const index = queued.findIndex((item) => item.id === id)
+                    const target = index + direction
+                    if (index < 0 || target < 0 || target >= queued.length)
+                      return
+                    const next = [...queued]
+                    ;[next[index], next[target]] = [next[target], next[index]]
+                    useMessagesStore.getState().setQueued(sessionId, next)
+                    void api
+                      .reorderQueued(
+                        sessionId,
+                        next.map((item) => item.id),
+                      )
+                      .catch(() => {
+                        useMessagesStore.getState().setQueued(sessionId, queued)
+                      })
+                  }}
+                  onSendNow={(id) => {
+                    void api
+                      .sendQueuedNow(sessionId, id)
+                      .then(() => {
+                        useMessagesStore.getState().removeQueued(sessionId, id)
+                      })
+                      // The server republishes the queue, so a refused send
+                      // needs no local rollback.
+                      .catch(() => undefined)
+                  }}
                 />
                 <p className="px-2 pt-1 text-xs text-muted-foreground">
                   Sends when the current turn ends.

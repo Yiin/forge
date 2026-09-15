@@ -204,6 +204,20 @@ export class ForgeApi {
       { text },
     )
   }
+  reorderQueued(sessionId: string, promptIds: string[]) {
+    return this.request(
+      'PUT',
+      `/api/sessions/${encodeURIComponent(sessionId)}/queued/order`,
+      { promptIds },
+    )
+  }
+  sendQueuedNow(sessionId: string, promptId: string) {
+    return this.post(
+      `/api/sessions/${encodeURIComponent(sessionId)}/queued/${encodeURIComponent(promptId)}/send-now`,
+      null,
+      {},
+    )
+  }
   promoteDraft(input: PromoteDraft, requestId: string) {
     return this.post(
       `/api/drafts/${encodeURIComponent(input.draftId)}/promote`,
