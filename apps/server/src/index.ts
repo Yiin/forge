@@ -276,20 +276,21 @@ export function createEpicSessionAdapter(manager: SessionManager) {
       const session = manager.create(input)
       const worker: WorkerSession = {
         id: session.id,
-        prompt: (text, delivery) =>
-          manager.prompt(
+        prompt: async (text, delivery, options) => {
+          await manager.prompt(
             session.id,
             text,
             undefined,
             undefined,
             undefined,
             undefined,
+            options?.model,
             undefined,
-            undefined,
-            undefined,
+            options?.configOptions,
             delivery,
             true,
-          ),
+          )
+        },
         cancel: async () => {
           await manager.interrupt(session.id)
           await manager.discard(session.id)

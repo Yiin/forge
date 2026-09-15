@@ -17,6 +17,35 @@ describe('epic runner account attempts', () => {
     ])
   })
 
+  it('keeps role-policy native options with each provider attempt', () => {
+    expect(
+      planAttempts(
+        [
+          {
+            harness: 'claude',
+            model: 'sonnet',
+            configOptions: { permissionMode: 'manual' },
+          },
+        ],
+        accounts,
+        new Set(),
+      ),
+    ).toEqual([
+      {
+        harness: 'claude',
+        model: 'sonnet',
+        configOptions: { permissionMode: 'manual' },
+        accountId: 'claude-a',
+      },
+      {
+        harness: 'claude',
+        model: 'sonnet',
+        configOptions: { permissionMode: 'manual' },
+        accountId: 'claude-b',
+      },
+    ])
+  })
+
   it('skips blocked accounts and fully blocked harnesses', () => {
     expect(planAttempts(hops, accounts, new Set(['claude-a']))).toEqual([
       { harness: 'claude', accountId: 'claude-b' },

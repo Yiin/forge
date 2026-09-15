@@ -12,6 +12,7 @@ export type PendingQuestion = {
   questionId: string
   sessionId: string
   questions: Array<{
+    id?: string
     header?: string
     question: string
     options: QuestionOption[]
@@ -91,6 +92,7 @@ const normalizeQuestions = (value: unknown): PendingQuestion['questions'] => {
     })
     return [
       {
+        ...(typeof item.id === 'string' ? { id: item.id } : {}),
         ...(typeof item.header === 'string' ? { header: item.header } : {}),
         question,
         options,
@@ -292,7 +294,11 @@ export class QuestionManager {
   private validateAnswer(held: Held, answer: unknown) {
     if (typeof answer !== 'object' || answer === null || Array.isArray(answer))
       return
-    const allowed = new Set(held.questions.map((question) => question.question))
+    const allowed = new Set(
+      held.questions.flatMap((question) =>
+        question.id ? [question.id, question.question] : [question.question],
+      ),
+    )
     const unknown = Object.keys(answer).find((key) => !allowed.has(key))
     if (unknown) throw new QuestionError(400, `Unknown answer key: ${unknown}`)
   }
@@ -365,11 +371,31 @@ export class QuestionManager {
       if (value === undefined) return { outcome: 'cancelled' }
       const answer = typeof value === 'object' ? value : { answer: value }
       if (method === 'cursor/ask_question') return { answers: answer }
+      const values = object(answer)
       const answers = Object.fromEntries(
-        question.questions.map((entry) => [
-          entry.question,
-          Array.isArray(answer) ? answer : [String(answer)],
-        ]),
+        question.questions.map((entry) => {
+          const value =
+            values[entry.id ?? ''] ?? values[entry.question] ?? answer
+          const combined = object(value)
+          const optionIds = Array.isArray(combined.optionIds)
+            ? new Set(combined.optionIds.map(String))
+            : undefined
+          const labels = optionIds
+            ? entry.options
+                .filter((option) => option.id && optionIds.has(option.id))
+                .map((option) => option.label)
+            : []
+          const text =
+            typeof combined.text === 'string' ? combined.text : undefined
+          return [
+            entry.question,
+            optionIds
+              ? [...labels, ...(text ? [text] : [])]
+              : Array.isArray(value)
+                ? value
+                : [String(value)],
+          ]
+        }),
       )
       return { outcome: 'accepted', answers }
     }) as Promise<Record<string, unknown>>

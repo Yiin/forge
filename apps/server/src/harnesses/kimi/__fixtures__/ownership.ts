@@ -1,4 +1,5 @@
-import { appendFile, readFile, opendir, open } from 'node:fs/promises'
+import { appendFile, readFile, open } from 'node:fs/promises'
+import { readProcNames } from '../../proc-names.js'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { expect } from 'vitest'
@@ -50,44 +51,43 @@ export async function finishFixtureHomes(homes: string[]) {
   // One completed scan covers every original group after all guardians close.
   const groups = new Set(peers.map((peer) => peer.pid as number)),
     running = new Set<number>(),
-    directory = await opendir('/proc'),
     buffer = Buffer.alloc(4096),
     end = performance.now() + 5000
-  let inspected = 0
-  try {
-    for await (const entry of directory) {
+  const names = await readProcNames('/proc', {
+    maximum: 65536,
+    check() {
       if (performance.now() >= end)
         throw new Error('Fixture group inspection deadline')
-      if (!/^\d+$/.test(entry.name)) continue
-      if (++inspected > 65536)
-        throw new Error('Fixture process inspection limit')
+    },
+    limitError: () => new Error('Fixture process inspection limit'),
+  })
+  let inspected = 0
+  for (const name of names) {
+    if (performance.now() >= end)
+      throw new Error('Fixture group inspection deadline')
+    inspected++
+    try {
+      const file = await open(`/proc/${name}/stat`, 'r')
       try {
-        const file = await open(`/proc/${entry.name}/stat`, 'r')
-        try {
-          const { bytesRead } = await file.read(buffer, 0, buffer.length, 0)
-          if (bytesRead === buffer.length)
-            throw new Error('Fixture process stat limit')
-          const value = buffer.toString('utf8', 0, bytesRead)
-          const fields = value.slice(value.lastIndexOf(')') + 2).split(' ')
-          const group = Number(fields[2])
-          if (groups.has(group) && fields[0] !== 'Z' && fields[0] !== 'X')
-            running.add(group)
-        } finally {
-          await file.close()
-        }
-      } catch (error) {
-        if (
-          !['ENOENT', 'ESRCH'].includes(
-            (error as NodeJS.ErrnoException).code ?? '',
-          )
-        )
-          throw error
+        const { bytesRead } = await file.read(buffer, 0, buffer.length, 0)
+        if (bytesRead === buffer.length)
+          throw new Error('Fixture process stat limit')
+        const value = buffer.toString('utf8', 0, bytesRead)
+        const fields = value.slice(value.lastIndexOf(')') + 2).split(' ')
+        const group = Number(fields[2])
+        if (groups.has(group) && fields[0] !== 'Z' && fields[0] !== 'X')
+          running.add(group)
+      } finally {
+        await file.close()
       }
+    } catch (error) {
+      if (
+        !['ENOENT', 'ESRCH'].includes(
+          (error as NodeJS.ErrnoException).code ?? '',
+        )
+      )
+        throw error
     }
-  } finally {
-    await directory.close().catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== 'ERR_DIR_CLOSED') throw error
-    })
   }
   await fixtureEvidence('runner.group_scan', {
     inspected,

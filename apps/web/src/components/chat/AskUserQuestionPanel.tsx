@@ -18,7 +18,12 @@ import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 
 const EMPTY_MESSAGES: never[] = []
-type Answers = Record<string, string | string[]>
+type SelectedWithText = {
+  type: 'selected_with_text'
+  optionIds: string[]
+  text: string
+}
+type Answers = Record<string, string | string[] | SelectedWithText>
 
 export function AskUserQuestionPanel({ sessionId }: { sessionId: string }) {
   const messages = useMessagesStore(
@@ -44,46 +49,43 @@ function QuestionCard({
 }) {
   const storageKey = `forge:question:${sessionId}:${request.requestId}`
   const [page, setPage] = useState(0)
-  const [answers, setAnswers] = useState<Answers>(() => readAnswers(storageKey))
+  const [answers, setAnswers] = useState<Answers>(() =>
+    readAnswers(storageKey, request.questions),
+  )
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const question = request.questions[page]!
   const isPermission = request.source === 'permission'
   const settled = request.requestStatus && request.requestStatus !== 'pending'
-  const setAnswer = (value: string | string[]) =>
+  const setAnswer = (value: string | string[] | SelectedWithText) =>
     setAnswers((current) => {
       const next = { ...current, [question.id!]: value }
-      if (!question.isSecret) writeAnswers(storageKey, next)
+      writeAnswers(storageKey, next, request.questions)
       return next
     })
   useEffect(() => {
     document.getElementById('message-composer')?.blur()
   }, [page])
-  if (!question) return null
-  if (settled) {
-    const statusText = {
-      pending: '',
-      replying: 'Reply is being delivered.',
-      submitted: 'Reply submitted.',
-      expired: 'This request expired after the session ended.',
-      uncertain:
-        'Reply status is uncertain. Reload to check the request state.',
-    }[request.requestStatus!]
-    return (
-      <section
-        className="ask-question-panel mx-auto mb-2 w-full max-w-3xl rounded-[20px] border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground"
-        aria-live="polite"
-      >
-        {statusText}
-      </section>
-    )
-  }
-  const selected = answers[question.id!] ?? (question.multiSelect ? [] : '')
-  const canAdvance = question.multiSelect
-    ? Array.isArray(selected) && selected.length > 0
-    : String(selected).trim().length > 0
+  const selected =
+    answers[question?.id ?? ''] ?? (question?.multiSelect ? [] : '')
+  const selectedIds = Array.isArray(selected)
+    ? selected
+    : typeof selected === 'object'
+      ? selected.optionIds
+      : []
+  const freeText =
+    typeof selected === 'object' && !Array.isArray(selected)
+      ? selected.text
+      : ''
+  const canAdvance = question
+    ? question.multiSelect
+      ? selectedIds.length > 0 || freeText.trim().length > 0
+      : String(selected).trim().length > 0
+    : false
   const complete = request.questions.every((item) => {
     const answer = answers[item.id!]
+    if (answer && typeof answer === 'object' && !Array.isArray(answer))
+      return answer.optionIds.length > 0 || answer.text.trim().length > 0
     return item.multiSelect
       ? Array.isArray(answer) && answer.length > 0
       : typeof answer === 'string' && answer.trim().length > 0
@@ -123,17 +125,42 @@ function QuestionCard({
   }
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (sending || event.metaKey || event.ctrlKey || event.altKey) return
+      if (
+        !question ||
+        sending ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey
+      )
+        return
+      const target = event.target
+      if (
+        event.isComposing ||
+        (target instanceof HTMLElement &&
+          (target.isContentEditable ||
+            target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.tagName === 'SELECT'))
+      )
+        return
       if (/^[1-9]$/.test(event.key)) {
         const option = question.options[Number(event.key) - 1]
         if (option) {
           event.preventDefault()
           if (question.multiSelect) {
-            const values = Array.isArray(selected) ? selected : []
+            const values = selectedIds
             setAnswer(
-              values.includes(option.id!)
-                ? values.filter((value) => value !== option.id)
-                : [...values, option.id!],
+              question.allowFreeInput && freeText
+                ? {
+                    type: 'selected_with_text',
+                    optionIds: values.includes(option.id!)
+                      ? values.filter((value) => value !== option.id)
+                      : [...values, option.id!],
+                    text: freeText,
+                  }
+                : values.includes(option.id!)
+                  ? values.filter((value) => value !== option.id)
+                  : [...values, option.id!],
             )
           } else setAnswer(option.id!)
         }
@@ -144,7 +171,26 @@ function QuestionCard({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [cancel, question, selected, sending])
+  }, [cancel, freeText, question, selectedIds, sending])
+  if (!question) return null
+  if (settled) {
+    const statusText = {
+      pending: '',
+      replying: 'Reply is being delivered.',
+      submitted: 'Reply submitted.',
+      expired: 'This request expired after the session ended.',
+      uncertain:
+        'Reply status is uncertain. Reload to check the request state.',
+    }[request.requestStatus!]
+    return (
+      <section
+        className="ask-question-panel mx-auto mb-2 w-full max-w-3xl rounded-[20px] border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground"
+        aria-live="polite"
+      >
+        {statusText}
+      </section>
+    )
+  }
   return (
     <section
       className="ask-question-panel mx-auto mb-2 w-full min-w-0 max-w-3xl space-y-3 rounded-[20px] border border-border/65 bg-muted/20 p-4"
@@ -203,8 +249,18 @@ function QuestionCard({
         <Input
           aria-label="Additional answer"
           type={question.isSecret ? 'password' : 'text'}
-          value={typeof selected === 'string' ? selected : ''}
-          onChange={(event) => setAnswer(event.target.value)}
+          value={typeof selected === 'string' ? selected : freeText}
+          onChange={(event) =>
+            setAnswer(
+              question.multiSelect && selectedIds.length > 0
+                ? {
+                    type: 'selected_with_text',
+                    optionIds: selectedIds,
+                    text: event.target.value,
+                  }
+                : event.target.value,
+            )
+          }
           placeholder="Add your own answer"
         />
       )}
@@ -268,11 +324,15 @@ function QuestionChoices({
   onChange,
 }: {
   question: Question
-  value: string | string[]
+  value: string | string[] | SelectedWithText
   disabled: boolean
-  onChange: (value: string | string[]) => void
+  onChange: (value: string | string[] | SelectedWithText) => void
 }) {
-  const selected = Array.isArray(value) ? value : [value]
+  const selected = Array.isArray(value)
+    ? value
+    : typeof value === 'object'
+      ? value.optionIds
+      : [value]
   return (
     <div className="space-y-1.5">
       {question.options.map((option, index) => {
@@ -321,18 +381,34 @@ function QuestionChoices({
   )
 }
 
-function readAnswers(key: string): Answers {
+function readAnswers(key: string, questions: Question[]): Answers {
   try {
     const value = sessionStorage.getItem(key)
-    return value ? (JSON.parse(value) as Answers) : {}
+    return value ? sanitizeAnswers(JSON.parse(value) as Answers, questions) : {}
   } catch {
     return {}
   }
 }
-function writeAnswers(key: string, answers: Answers) {
+function writeAnswers(key: string, answers: Answers, questions: Question[]) {
   try {
-    sessionStorage.setItem(key, JSON.stringify(answers))
+    sessionStorage.setItem(
+      key,
+      JSON.stringify(sanitizeAnswers(answers, questions)),
+    )
   } catch {
     /* storage is optional */
   }
+}
+
+function sanitizeAnswers(answers: Answers, questions: Question[]): Answers {
+  const secretIds = new Set(
+    questions
+      .filter((question) => question.isSecret)
+      .map((question) => question.id),
+  )
+  return Object.fromEntries(
+    Object.entries(answers).filter(
+      ([questionId]) => !secretIds.has(questionId),
+    ),
+  )
 }
