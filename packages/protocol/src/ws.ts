@@ -1,6 +1,27 @@
 import { z } from 'zod'
 import { Message } from './message.js'
 import { queuedPromptSchema } from './session.js'
+
+export const nativeInteractionSchema = z.object({
+  questionId: z.string().min(1),
+  sessionId: z.string().min(1),
+  questions: z.array(z.unknown()),
+  source: z.enum(['permission', 'ext']),
+  status: z.enum([
+    'pending',
+    'replying',
+    'submitted',
+    'cancelled',
+    'expired',
+    'uncertain',
+  ]),
+  runtimeGeneration: z.string().optional(),
+  answer: z.unknown().optional(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  expiresAt: z.number(),
+})
+export type NativeInteraction = z.infer<typeof nativeInteractionSchema>
 export const SubscribeFrame = z.object({
   type: z.literal('subscribe'),
   sessions: z.union([z.array(z.string()), z.literal('all')]),
@@ -17,7 +38,7 @@ export const SessionSnapshot = z
     messages: z.array(Message),
     queuedPrompts: z.array(queuedPromptSchema).optional(),
     commands: z.array(z.unknown()).optional(),
-    requests: z.array(z.unknown()).optional(),
+    requests: z.array(nativeInteractionSchema).optional(),
     usage: z.unknown().optional(),
   })
   .superRefine((snapshot, ctx) => {

@@ -100,6 +100,7 @@ test('initialize admission waits for the returned startup HTTP buffer', async ()
     sockets: new Map(),
     pending: new Map(),
     httpReleases: new Map(),
+    httpReleaseWaiters: new Map(),
     ordinal: 0,
     ipc: {
       send: async (value: Record<string, unknown>) => {
@@ -113,8 +114,9 @@ test('initialize admission waits for the returned startup HTTP buffer', async ()
       { resolve(value: unknown): void; release(): void; reject(): void }
     >
     httpReleases: Map<string, () => void>
+    httpReleaseWaiters: Map<string, { resolve(): void }>
   }
-  const startup = server.rpc({ op: 'initialize' }, 5000)
+  const startup = server.rpc({ op: 'initialize' }, 5000, false, true)
   let settled = false
   void startup.then(
     () => {
@@ -135,8 +137,11 @@ test('initialize admission waits for the returned startup HTTP buffer', async ()
   // The guardian answered, but its 'http_released' line has not arrived yet.
   expect(settled).toBe(false)
   expect(budget.count('hostHttpBufferBytes')).toBe(startupReservation)
+  // Replay the parent's 'http_released' branch for this id.
   internals.httpReleases.get(id)!()
   internals.httpReleases.delete(id)
+  internals.httpReleaseWaiters.get(id)!.resolve()
+  internals.httpReleaseWaiters.delete(id)
   await expect(startup).resolves.toEqual({ ok: true })
   expect(budget.count('hostHttpBufferBytes')).toBe(0)
   expect(budget.count('hostHttp')).toBe(0)

@@ -463,8 +463,11 @@ export class TerminalManager {
       if (error instanceof TerminalError) throw error
       if (error instanceof WorkspaceError && error.status === 409)
         throw new TerminalError('workspace_changed', 409, 'Workspace changed')
-      if (error instanceof WorkspaceError && error.status === 404)
+      if (error instanceof WorkspaceError && error.status === 404) {
+        // The session can disappear after the initial owner check.
+        this.owner(sessionId, true)
         throw new TerminalError('not_found', 404, 'Workspace target not found')
+      }
       throw new TerminalError('unavailable', 503, 'Terminal startup failed')
     } finally {
       clearTimeout(timer)

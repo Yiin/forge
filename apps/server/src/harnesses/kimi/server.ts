@@ -76,6 +76,10 @@ export class KimiServer {
   private readonly ipc: JsonlTransport
   private readonly pending = new Map<string, Pending>()
   private readonly httpReleases = new Map<string, () => void>()
+  private readonly httpReleaseWaiters = new Map<
+    string,
+    { resolve: () => void; reject: (error: Error) => void }
+  >()
   private readonly transfers = new Set<Promise<unknown>>()
   private readonly socketReleases = new Map<string, () => void>()
   private readonly blobReleases = new Set<() => void>()
@@ -116,6 +120,9 @@ export class KimiServer {
         this.pending.clear()
         for (const release of this.httpReleases.values()) release()
         this.httpReleases.clear()
+        for (const waiter of this.httpReleaseWaiters.values())
+          waiter.reject(this.failure ?? new KimiError('kimi_server_closed'))
+        this.httpReleaseWaiters.clear()
         for (const release of this.socketReleases.values()) release()
         this.socketReleases.clear()
         for (const release of this.blobReleases) release()
@@ -164,6 +171,8 @@ export class KimiServer {
             )
             this.httpReleases.get(id)?.()
             this.httpReleases.delete(id)
+            this.httpReleaseWaiters.get(id)?.resolve()
+            this.httpReleaseWaiters.delete(id)
             return
           }
           if (message.type === 'frame') {
@@ -266,6 +275,8 @@ export class KimiServer {
             limits: guardianLimits(hostBudget.limits),
           },
           hostBudget.limits.startupMs + hostBudget.limits.shutdownMs,
+          false,
+          true,
         )
       } finally {
         releaseUtility()
@@ -300,6 +311,7 @@ export class KimiServer {
     message: Record<string, unknown>,
     ms = this.hostBudget.limits.guardianControlMs,
     physicalOnly = false,
+    waitForRelease = false,
   ): Promise<unknown> {
     if (this.stopped || (this.failure && message.op !== 'close'))
       return Promise.reject(this.failure ?? new KimiError('kimi_server_closed'))
@@ -364,15 +376,14 @@ export class KimiServer {
       throw error
     }
     const id = `ipc-${++this.ordinal}`
-    let markReleased = () => {}
-    const returned = new Promise<void>((resolve) => {
-      markReleased = resolve
-    })
-    if (isHttp)
-      this.httpReleases.set(id, () => {
-        release()
-        markReleased()
-      })
+    let released = Promise.resolve()
+    if (isHttp) {
+      this.httpReleases.set(id, release)
+      if (waitForRelease)
+        released = new Promise<void>((resolve, reject) =>
+          this.httpReleaseWaiters.set(id, { resolve, reject }),
+        )
+    }
     let written: Promise<void> = Promise.resolve()
     const response = new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, {
@@ -401,20 +412,14 @@ export class KimiServer {
           return reply.value
         })
       : response
-    // The guardian returns the startup HTTP buffer in a separate 'http_released'
-    // line after its 'result'. Admission must not report a started server while
-    // that reservation still stands, or the next startup is refused for bytes
-    // the host has already finished with.
-    const settled =
-      message.op === 'initialize'
-        ? physical.then(async (value) => {
-            await returned
-            return value
-          })
-        : physical
-    return (physicalOnly ? settled : deadline(settled, ms)).finally(
-      releaseTimer,
-    )
+    const complete = waitForRelease
+      ? Promise.all([physical, released]).then(([value]) => value)
+      : physical
+    return (physicalOnly ? complete : deadline(complete, ms))
+      .finally(releaseTimer)
+      .finally(() => {
+        if (waitForRelease) this.httpReleaseWaiters.delete(id)
+      })
   }
   async http(
     lane: string,

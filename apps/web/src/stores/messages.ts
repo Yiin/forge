@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { Ephemeral, ServerEvent } from '@forge/protocol/events'
 import type { Message, MessageContent } from '@forge/protocol/message'
 import type { QueuedPrompt } from '@forge/protocol/session'
-import type { SessionSnapshot } from '@forge/protocol/ws'
+import type { NativeInteraction, SessionSnapshot } from '@forge/protocol/ws'
 
 export type TimelineItem = Message
 export type VolatileEvent = Ephemeral
@@ -21,7 +21,7 @@ type MessagesState = {
   snapshotCursorBySession: Record<string, number>
   snapshotStateBySession: Record<
     string,
-    { commands?: unknown[]; requests?: unknown[]; usage?: unknown }
+    { commands?: unknown[]; requests?: NativeInteraction[]; usage?: unknown }
   >
   seenSeqs: Set<number>
   liveEventsBySession: Record<string, Message[]>

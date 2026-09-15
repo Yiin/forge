@@ -1,4 +1,5 @@
 import * as acp from '@agentclientprotocol/sdk'
+import type { NativeInteraction as WireInteraction } from '@forge/protocol/ws'
 import { appendMessage } from '../db/queries.js'
 import type { EventBus } from '../events/bus.js'
 
@@ -27,8 +28,10 @@ export type PendingQuestion = {
   method?: string
   raw: Record<string, unknown>
 }
-export type NativeInteractionStatus =
-  'pending' | 'replying' | 'submitted' | 'cancelled' | 'expired' | 'uncertain'
+// The snapshot ships these rows, so the wire schema owns the status set. A
+// status added here but not there would fail SessionSnapshot parsing at
+// runtime instead of failing the build.
+export type NativeInteractionStatus = WireInteraction['status']
 export type NativeInteraction = PendingQuestion & {
   status: NativeInteractionStatus
   runtimeGeneration?: string
