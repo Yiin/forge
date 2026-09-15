@@ -159,7 +159,13 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
       index.byItemId.set(message.itemId, result.length - 1)
       if (tool !== undefined && !index.byToolCallId.has(tool))
         index.byToolCallId.set(tool, result.length - 1)
-    } else result[at] = foldMessage(result[at]!, message)
+    } else {
+      // A fold adopts the incoming identity, so index it too. The scan this
+      // replaced matched later rows against the folded row, not the original.
+      result[at] = foldMessage(result[at]!, message)
+      index.byItemId.set(message.itemId, at)
+      if (tool !== undefined) index.byToolCallId.set(tool, at)
+    }
   }
   return result.sort((left, right) => left.seq - right.seq)
 }
