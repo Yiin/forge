@@ -2,6 +2,10 @@ import { Hono } from 'hono'
 import type { DatabaseSync } from 'node:sqlite'
 import { resolve } from 'node:path'
 import { gitStatus, listRefs } from '../git/repo.js'
+import { gitDiff, gitContent, latestTurnDiff } from '../git/diff.js'
+import { gitHistory } from '../git/history.js'
+import { latestTurnSnapshot } from '../git/turnSnapshots.js'
+import { WorkspaceTargets } from '../workspace/target.js'
 import {
   deleteMergedTemporaryBranch,
   listWorktrees,
@@ -19,9 +23,14 @@ import {
   worktreeListResponseSchema,
 } from '@forge/protocol/git'
 
-export function gitRoutes(options: { db: DatabaseSync; dataDir: string }) {
+export function gitRoutes(options: {
+  db: DatabaseSync
+  dataDir: string
+  targets?: WorkspaceTargets
+}) {
   const { db, dataDir } = options
   const app = new Hono()
+  const targets = options.targets ?? new WorkspaceTargets(db)
   const project = (id: string) =>
     db
       .prepare(
@@ -45,6 +54,19 @@ export function gitRoutes(options: { db: DatabaseSync; dataDir: string }) {
           status: 400 as const,
         }
   }
+  const targetCwd = async (
+    projectId: string,
+    sessionId: string | undefined,
+  ) => {
+    if (!sessionId) return cwdFor(projectId, undefined)
+    const workspace = await targets.resolve({ kind: 'session', sessionId })
+    if (workspace.projectId !== projectId)
+      return {
+        error: 'Session does not belong to this project' as const,
+        status: 400 as const,
+      }
+    return { cwd: workspace.cwd, workspace }
+  }
   app.get('/api/projects/:id/git/status', async (c) => {
     const result = await cwdFor(c.req.param('id'), c.req.query('cwd'))
     if ('error' in result) return c.json({ error: result.error }, result.status)
@@ -59,6 +81,86 @@ export function gitRoutes(options: { db: DatabaseSync; dataDir: string }) {
       cursor: Number(c.req.query('cursor') ?? 0),
     })
     return c.json(gitRefsPageSchema.parse(page))
+  })
+  app.get('/api/projects/:id/git/diff', async (c) => {
+    try {
+      const scope = c.req.query('scope') ?? 'working'
+      if (!['working', 'branch', 'latest-turn', 'commit'].includes(scope))
+        return c.json({ error: 'Invalid diff scope' }, 400)
+      const resolved = await targetCwd(
+        c.req.param('id'),
+        c.req.query('sessionId'),
+      )
+      if ('error' in resolved)
+        return c.json({ error: resolved.error }, resolved.status)
+      const result =
+        scope === 'latest-turn'
+          ? await latestTurnDiff({
+              cwd: resolved.cwd,
+              snapshot: latestTurnSnapshot(db, c.req.query('sessionId') ?? ''),
+            })
+          : await gitDiff({
+              cwd: resolved.cwd,
+              scope: scope as 'working' | 'branch' | 'commit',
+              baseRef: c.req.query('baseRef'),
+              commit: c.req.query('commit'),
+            })
+      return c.json(result)
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        400,
+      )
+    }
+  })
+  app.get('/api/projects/:id/git/history', async (c) => {
+    try {
+      const resolved = await targetCwd(
+        c.req.param('id'),
+        c.req.query('sessionId'),
+      )
+      if ('error' in resolved)
+        return c.json({ error: resolved.error }, resolved.status)
+      return c.json(
+        await gitHistory({
+          cwd: resolved.cwd,
+          cursor: c.req.query('cursor'),
+          limit: Number(c.req.query('limit') ?? 50),
+        }),
+      )
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        400,
+      )
+    }
+  })
+  app.get('/api/projects/:id/git/content', async (c) => {
+    try {
+      const resolved = await targetCwd(
+        c.req.param('id'),
+        c.req.query('sessionId'),
+      )
+      if ('error' in resolved)
+        return c.json({ error: resolved.error }, resolved.status)
+      const path = c.req.query('path')
+      const side = c.req.query('side')
+      if (!path || (side !== 'old' && side !== 'new'))
+        return c.json({ error: 'path and side are required' }, 400)
+      return c.json(
+        await gitContent({
+          cwd: resolved.cwd,
+          path,
+          side,
+          revision: c.req.query('revision'),
+        }),
+      )
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        400,
+      )
+    }
   })
   app.get('/api/projects/:id/git/worktrees', async (c) => {
     const row = project(c.req.param('id'))

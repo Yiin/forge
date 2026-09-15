@@ -578,9 +578,13 @@ export function Composer({
                     })
                   }}
                   onEdit={(item: QueuedPrompt) => {
-                    update(item.text)
-                    textarea.current?.focus()
-                    void api.patchQueued(sessionId, item.id, item.text)
+                    void api.deleteQueued(sessionId, item.id).then(() => {
+                      useMessagesStore
+                        .getState()
+                        .removeQueued(sessionId, item.id)
+                      update(item.text)
+                      textarea.current?.focus()
+                    })
                   }}
                   onMove={(id, direction) => {
                     const index = queued.findIndex((item) => item.id === id)
@@ -600,9 +604,14 @@ export function Composer({
                       })
                   }}
                   onSendNow={(id) => {
-                    void api.sendQueuedNow(sessionId, id).then(() => {
-                      useMessagesStore.getState().removeQueued(sessionId, id)
-                    })
+                    void api
+                      .sendQueuedNow(sessionId, id)
+                      .then(() => {
+                        useMessagesStore.getState().removeQueued(sessionId, id)
+                      })
+                      // The server republishes the queue, so a refused send
+                      // needs no local rollback.
+                      .catch(() => undefined)
                   }}
                 />
                 <p className="px-2 pt-1 text-xs text-muted-foreground">

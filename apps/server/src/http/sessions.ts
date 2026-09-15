@@ -132,6 +132,10 @@ export function sessionRoutes(
         value.data.clientItemId,
         value.data.configOptions,
         value.data.delivery,
+        false,
+        value.data.reviewReferences,
+        value.data.promptParts,
+        value.data.revision,
       )
       return c.json({ ok: true })
     } catch (error) {
@@ -156,9 +160,9 @@ export function sessionRoutes(
   app.patch('/api/sessions/:id/queued/:promptId', async (c) => {
     const value = z
       .object({
-        text: z.string().min(1),
-        attachmentIds: z.array(z.string()).optional(),
+        text: z.string(),
         revision: z.number().int().nonnegative().optional(),
+        attachmentIds: z.array(z.string()).optional(),
       })
       .safeParse(await c.req.json())
     if (!value.success) return c.json({ error: value.error.message }, 400)
@@ -166,8 +170,8 @@ export function sessionRoutes(
       c.req.param('id'),
       c.req.param('promptId'),
       value.data.text,
-      value.data.attachmentIds,
       value.data.revision,
+      value.data.attachmentIds,
     )
     return prompt ? c.json(prompt) : c.json({ error: 'Not found' }, 404)
   })

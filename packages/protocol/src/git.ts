@@ -50,3 +50,77 @@ export const removeWorktreeRequestSchema = z.object({
   force: z.boolean().optional(),
 })
 export type Worktree = z.infer<typeof worktreeSchema>
+
+export const gitDiffScopeSchema = z.enum([
+  'working',
+  'branch',
+  'latest-turn',
+  'commit',
+])
+export const gitDiffLineSchema = z.object({
+  type: z.enum(['context', 'addition', 'deletion', 'meta']),
+  text: z.string(),
+  oldLine: z.number().int().nullable(),
+  newLine: z.number().int().nullable(),
+})
+export const gitDiffHunkSchema = z.object({
+  oldStart: z.number().int(),
+  oldCount: z.number().int(),
+  newStart: z.number().int(),
+  newCount: z.number().int(),
+  lines: z.array(gitDiffLineSchema),
+})
+export const gitDiffFileSchema = z.object({
+  oldPath: z.string().nullable(),
+  newPath: z.string().nullable(),
+  status: z.enum([
+    'added',
+    'modified',
+    'deleted',
+    'renamed',
+    'copied',
+    'binary',
+    'submodule',
+  ]),
+  hunks: z.array(gitDiffHunkSchema),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  oldMode: z.string().nullable(),
+  newMode: z.string().nullable(),
+  contentTruncated: z.boolean(),
+})
+export const gitDiffSchema = z.object({
+  scope: gitDiffScopeSchema,
+  files: z.array(gitDiffFileSchema),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+  revision: z.string(),
+  unavailable: z.boolean().optional(),
+  unavailableReason: z.string().optional(),
+})
+export const gitContentSchema = z.object({
+  path: z.string(),
+  side: z.enum(['old', 'new']),
+  text: z.string().nullable(),
+  binary: z.boolean(),
+  truncated: z.boolean(),
+  revision: z.string(),
+})
+export const gitHistoryCommitSchema = z.object({
+  sha: z.string(),
+  parents: z.array(z.string()),
+  refs: z.array(z.string()),
+  author: z.string(),
+  date: z.string(),
+  subject: z.string(),
+})
+export const gitHistoryPageSchema = z.object({
+  commits: z.array(gitHistoryCommitSchema),
+  nextCursor: z.string().nullable(),
+  revision: z.string(),
+})
+export type GitDiff = z.infer<typeof gitDiffSchema>
+export type GitDiffFile = z.infer<typeof gitDiffFileSchema>
+export type GitContent = z.infer<typeof gitContentSchema>
+export type GitHistoryPage = z.infer<typeof gitHistoryPageSchema>

@@ -26,6 +26,8 @@ export type PromptContent =
 
 export type HarnessHandle = {
   prompt(content: string | PromptContent[]): Promise<void> | void
+  steer?(...args: any[]): Promise<unknown> | unknown
+  followUp?(...args: any[]): Promise<unknown> | unknown
   cancel(): Promise<void> | void
   kill(): Promise<void> | void
   setModel?(modelId: string): Promise<void> | void

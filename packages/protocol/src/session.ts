@@ -36,8 +36,17 @@ export const queuedPromptSchema = z.object({
   sessionId: z.string(),
   text: z.string(),
   createdAt: z.number().int(),
-  attachmentIds: z.array(z.string()).optional(),
   revision: z.number().int().nonnegative().optional(),
+  order: z.number().int().nonnegative().optional(),
+  attachmentIds: z.array(z.string()).optional(),
+  promptParts: z.array(z.unknown()).optional(),
+  reviewReferences: z.array(z.unknown()).optional(),
+  model: z.string().nullable().optional(),
+  configOptions: z
+    .record(z.string(), z.union([z.string(), z.boolean()]))
+    .nullable()
+    .optional(),
+  deliveryState: z.enum(['queued', 'leased', 'failed']).optional(),
 })
 
 export type QueuedPrompt = z.infer<typeof queuedPromptSchema>

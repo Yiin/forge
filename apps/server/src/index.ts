@@ -205,7 +205,11 @@ export function createApp(
     app.route('/', skillRoutes(uploadStore.database))
     app.route(
       '/',
-      gitRoutes({ db: uploadStore.database, dataDir: uploadStore.dataDir }),
+      gitRoutes({
+        db: uploadStore.database,
+        dataDir: uploadStore.dataDir,
+        targets: workspaceFiles?.targets,
+      }),
     )
     app.route('/', fsBrowseRoutes())
     app.route('/', searchRoutes(uploadStore.database))

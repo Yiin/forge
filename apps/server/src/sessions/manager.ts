@@ -431,15 +431,13 @@ export class SessionManager {
   private queuedPromptRows(sessionId: string) {
     return this.db
       .prepare(
-        'SELECT id, session_id, text, attachment_ids, revision, created_at FROM queued_prompts WHERE session_id = ? ORDER BY position, created_at, id',
+        'SELECT * FROM queued_prompts WHERE session_id = ? ORDER BY order_index, created_at, id',
       )
       .all(sessionId) as Array<{
       id: string
       session_id: string
       text: string
       created_at: number
-      attachment_ids: string | null
-      revision: number
     }>
   }
 
@@ -448,16 +446,30 @@ export class SessionManager {
     session_id: string
     text: string
     created_at: number
-    attachment_ids?: string | null
     revision?: number
+    order_index?: number
+    attachment_ids?: string | null
+    prompt_parts?: string | null
+    review_references?: string | null
+    model?: string | null
+    config_options?: string | null
+    delivery_state?: 'queued' | 'leased' | 'failed'
   }): QueuedPrompt {
     return {
       id: row.id,
       sessionId: row.session_id,
       text: row.text,
       createdAt: Number(row.created_at),
-      attachmentIds: row.attachment_ids ? JSON.parse(row.attachment_ids) : [],
       revision: Number(row.revision ?? 0),
+      order: Number(row.order_index ?? 0),
+      attachmentIds: row.attachment_ids ? JSON.parse(row.attachment_ids) : [],
+      promptParts: row.prompt_parts ? JSON.parse(row.prompt_parts) : [],
+      reviewReferences: row.review_references
+        ? JSON.parse(row.review_references)
+        : [],
+      model: row.model ?? null,
+      configOptions: row.config_options ? JSON.parse(row.config_options) : null,
+      deliveryState: row.delivery_state ?? 'queued',
     }
   }
 
@@ -490,40 +502,30 @@ export class SessionManager {
     sessionId: string,
     promptId: string,
     text: string,
-    attachmentIds?: string[],
     revision?: number,
+    attachmentIds?: string[],
   ) {
-    const where =
-      revision === undefined
-        ? 'id = ? AND session_id = ?'
-        : 'id = ? AND session_id = ? AND revision = ?'
-    const args =
-      revision === undefined
-        ? [promptId, sessionId]
-        : [promptId, sessionId, revision]
+    const expected = revision ?? 0
     const result = this.db
       .prepare(
-        `UPDATE queued_prompts SET text = ?, attachment_ids = COALESCE(?, attachment_ids), revision = revision + 1 WHERE ${where}`,
+        `UPDATE queued_prompts
+         SET text = ?, attachment_ids = COALESCE(?, attachment_ids),
+             revision = revision + 1, delivery_state = 'queued', lease_id = NULL,
+             lease_until = NULL
+         WHERE id = ? AND session_id = ? AND revision = ?`,
       )
       .run(
         text,
         attachmentIds ? JSON.stringify(attachmentIds) : null,
-        ...args,
+        promptId,
+        sessionId,
+        expected,
       ) as { changes?: number }
     if (!result.changes) return undefined
     this.publishQueuedPrompts(sessionId)
     const row = this.db
-      .prepare(
-        'SELECT id, session_id, text, attachment_ids, revision, created_at FROM queued_prompts WHERE id = ?',
-      )
-      .get(promptId) as {
-      id: string
-      session_id: string
-      text: string
-      created_at: number
-      attachment_ids: string | null
-      revision: number
-    }
+      .prepare('SELECT * FROM queued_prompts WHERE id = ? AND session_id = ?')
+      .get(promptId, sessionId) as Parameters<typeof this.queuedPrompt>[0]
     return this.queuedPrompt(row)
   }
 
@@ -537,11 +539,11 @@ export class SessionManager {
     const known = new Set(existing.map((row) => row.id))
     if (promptIds.some((id) => !known.has(id))) return undefined
     const update = this.db.prepare(
-      'UPDATE queued_prompts SET position = ?, revision = revision + 1 WHERE id = ? AND session_id = ?',
+      'UPDATE queued_prompts SET order_index = ? WHERE id = ? AND session_id = ?',
     )
     this.db.exec('BEGIN')
     try {
-      promptIds.forEach((id, position) => update.run(position, id, sessionId))
+      promptIds.forEach((id, index) => update.run(index, id, sessionId))
       this.db.exec('COMMIT')
     } catch (error) {
       this.db.exec('ROLLBACK')
@@ -561,38 +563,102 @@ export class SessionManager {
           model: string | null
           config_options: string | null
           client_item_id: string | null
+          prompt_parts: string | null
+          review_references: string | null
+          revision: number
         }
       | undefined
     if (!row) return false
     const activeTurn = this.turns.get(sessionId)
-    const stopped = activeTurn
-      ? new Promise<void>((resolve) => {
-          this.turnWaiters.set(`${sessionId}:${activeTurn}`, {
-            resolve,
-            reject: resolve,
-          })
-        })
-      : undefined
-    await this.interrupt(sessionId)
-    if (stopped) await stopped
-    const deleted = this.db
-      .prepare('DELETE FROM queued_prompts WHERE id = ? AND session_id = ?')
-      .run(promptId, sessionId) as { changes?: number }
-    if (!deleted.changes) return false
+    // Interrupting a turn whose harness is still spawning is a no-op, so the
+    // wait below would run for the whole turn. Refuse instead of hanging.
+    if (activeTurn && !this.handles.get(sessionId))
+      throw new Error('Session is still starting')
+    const leaseId = makeId('lease_')
+    const claimed = this.db
+      .prepare(
+        `UPDATE queued_prompts SET delivery_state = 'leased', lease_id = ?,
+         lease_until = ? WHERE id = ? AND session_id = ? AND revision = ? AND
+         (delivery_state <> 'leased' OR lease_until IS NULL OR lease_until < ?)`,
+      )
+      .run(
+        leaseId,
+        Date.now() + 60_000,
+        promptId,
+        sessionId,
+        row.revision,
+        Date.now(),
+      ) as { changes?: number }
+    if (!claimed.changes)
+      throw new Error('Queued prompt is already being delivered')
     this.publishQueuedPrompts(sessionId)
-    await this.prompt(
-      sessionId,
-      row.text,
-      makeId('queue_now_'),
-      row.attachment_ids ? JSON.parse(row.attachment_ids) : undefined,
-      undefined,
-      undefined,
-      row.model ?? undefined,
-      row.client_item_id ?? undefined,
-      row.config_options ? JSON.parse(row.config_options) : undefined,
-      'immediate',
-    )
-    return true
+    // Hold the drain lock so the interrupted turn does not deliver the queue
+    // head while this prompt takes its place.
+    this.queueBusy.add(sessionId)
+    try {
+      const stopped = activeTurn
+        ? new Promise<void>((resolve) => {
+            // Chain any waiter already registered for this turn. Replacing it
+            // would strand a caller that awaits turn completion.
+            const key = `${sessionId}:${activeTurn}`
+            const waiting = this.turnWaiters.get(key)
+            this.turnWaiters.set(key, {
+              resolve: () => {
+                waiting?.resolve()
+                resolve()
+              },
+              reject: (error) => {
+                waiting?.reject(error)
+                resolve()
+              },
+            })
+          })
+        : undefined
+      await this.interrupt(sessionId)
+      if (stopped) await stopped
+      // The wait is unbounded, so the lease may have expired and been taken
+      // over by a second send now. Re-assert it before delivering.
+      const held = this.db
+        .prepare(
+          'UPDATE queued_prompts SET lease_until = ? WHERE id = ? AND lease_id = ?',
+        )
+        .run(Date.now() + 60_000, promptId, leaseId) as { changes?: number }
+      if (!held.changes) throw new Error('Queued prompt was taken over')
+      await this.prompt(
+        sessionId,
+        row.text,
+        makeId('queue_now_'),
+        row.attachment_ids ? JSON.parse(row.attachment_ids) : undefined,
+        undefined,
+        undefined,
+        row.model ?? undefined,
+        row.client_item_id ?? undefined,
+        row.config_options ? JSON.parse(row.config_options) : undefined,
+        'immediate',
+        false,
+        row.review_references ? JSON.parse(row.review_references) : undefined,
+        row.prompt_parts ? JSON.parse(row.prompt_parts) : undefined,
+        row.revision,
+      )
+      // Delete only after delivery, as drainQueue does, so a failed prompt
+      // stays recoverable instead of vanishing.
+      const deleted = this.db
+        .prepare('DELETE FROM queued_prompts WHERE id = ? AND lease_id = ?')
+        .run(promptId, leaseId) as { changes?: number }
+      if (deleted.changes) this.publishQueuedPrompts(sessionId)
+      return true
+    } catch (error) {
+      const released = this.db
+        .prepare(
+          `UPDATE queued_prompts SET delivery_state = 'failed', lease_id = NULL,
+           lease_until = NULL WHERE id = ? AND lease_id = ?`,
+        )
+        .run(promptId, leaseId) as { changes?: number }
+      if (released.changes) this.publishQueuedPrompts(sessionId)
+      throw error
+    } finally {
+      this.queueBusy.delete(sessionId)
+    }
   }
 
   async drainQueuedPrompt(sessionId: string) {
@@ -603,9 +669,12 @@ export class SessionManager {
     if (this.queueBusy.has(sessionId) || this.turns.has(sessionId)) return
     const queued = this.db
       .prepare(
-        'SELECT * FROM queued_prompts WHERE session_id = ? AND lease_id IS NULL ORDER BY position, created_at, id LIMIT 1',
+        `SELECT * FROM queued_prompts
+         WHERE session_id = ? AND (delivery_state = 'queued' OR
+           (delivery_state = 'leased' AND (lease_until IS NULL OR lease_until < ?)))
+         ORDER BY order_index, created_at, id LIMIT 1`,
       )
-      .get(sessionId) as
+      .get(sessionId, Date.now()) as
       | {
           id: string
           text: string
@@ -613,18 +682,34 @@ export class SessionManager {
           model: string | null
           config_options: string | null
           client_item_id: string | null
+          prompt_parts: string | null
+          review_references: string | null
+          revision: number
+          order_index: number
+          delivery_state: 'queued' | 'leased' | 'failed'
         }
       | undefined
     if (!queued) return
     this.queueBusy.add(sessionId)
+    const leaseId = makeId('lease_')
     try {
-      const lease = makeId('lease_')
       const leased = this.db
         .prepare(
-          'UPDATE queued_prompts SET lease_id = ? WHERE id = ? AND lease_id IS NULL',
+          `UPDATE queued_prompts SET delivery_state = 'leased', lease_id = ?,
+           lease_until = ? WHERE id = ? AND revision = ? AND
+           (delivery_state = 'queued' OR (delivery_state = 'leased' AND lease_until < ?))`,
         )
-        .run(lease, queued.id) as { changes?: number }
+        .run(
+          leaseId,
+          Date.now() + 30_000,
+          queued.id,
+          queued.revision,
+          Date.now(),
+        ) as {
+        changes?: number
+      }
       if (!leased.changes) return
+      this.publishQueuedPrompts(sessionId)
       await this.prompt(
         sessionId,
         queued.text,
@@ -636,11 +721,24 @@ export class SessionManager {
         queued.client_item_id ?? undefined,
         queued.config_options ? JSON.parse(queued.config_options) : undefined,
         'immediate',
+        false,
+        queued.review_references
+          ? JSON.parse(queued.review_references)
+          : undefined,
+        queued.prompt_parts ? JSON.parse(queued.prompt_parts) : undefined,
+        queued.revision,
       )
       this.db
         .prepare('DELETE FROM queued_prompts WHERE id = ? AND lease_id = ?')
-        .run(queued.id, lease)
-      this.publishQueuedPrompts(sessionId)
+        .run(queued.id, leaseId)
+    } catch (error) {
+      this.db
+        .prepare(
+          `UPDATE queued_prompts SET delivery_state = 'failed', lease_id = NULL,
+           lease_until = NULL WHERE id = ? AND lease_id = ?`,
+        )
+        .run(queued.id, leaseId)
+      throw error
     } finally {
       this.queueBusy.delete(sessionId)
     }
@@ -692,6 +790,9 @@ export class SessionManager {
     clientItemId?: string,
     configOptions?: Record<string, string | boolean>,
     delivery?: 'immediate' | 'turn-boundary',
+    reviewReferences?: unknown[],
+    promptParts?: unknown[],
+    revision?: number,
   ) {
     const owner = getActiveSession(this.db, id) as SessionRow | undefined
     if (!owner) throw new Error('Session not found')
@@ -716,8 +817,9 @@ export class SessionManager {
         this.db
           .prepare(
             `INSERT INTO queued_prompts
-           (id, session_id, text, attachment_ids, model, config_options, client_item_id, request_id, position, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, session_id, text, attachment_ids, model, config_options, client_item_id,
+            request_id, prompt_parts, review_references, revision, order_index, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             makeId('queued_'),
@@ -728,27 +830,19 @@ export class SessionManager {
             configOptions ? JSON.stringify(configOptions) : null,
             clientItemId ?? null,
             requestId ?? null,
+            promptParts ? JSON.stringify(promptParts) : null,
+            reviewReferences ? JSON.stringify(reviewReferences) : null,
+            revision ?? 0,
             Number(
               (
                 this.db
                   .prepare(
-                    'SELECT COALESCE(MAX(position), -1) AS position FROM queued_prompts WHERE session_id = ?',
+                    'SELECT COALESCE(MAX(order_index), -1) + 1 AS next_order FROM queued_prompts WHERE session_id = ?',
                   )
-                  .get(id) as { position: number }
-              ).position,
-            ) + 1,
-            Math.max(
-              Date.now(),
-              Number(
-                (
-                  this.db
-                    .prepare(
-                      'SELECT COALESCE(MAX(created_at), 0) AS created_at FROM queued_prompts WHERE session_id = ?',
-                    )
-                    .get(id) as { created_at: number }
-                ).created_at,
-              ) + 1,
+                  .get(id) as { next_order: number }
+              ).next_order,
             ),
+            Date.now(),
           )
         this.publishQueuedPrompts(id)
         return
@@ -848,15 +942,16 @@ export class SessionManager {
           })
         }
       }
-      appendMessage(this.db, {
-        sessionId: id,
-        turnId,
-        itemId: clientItemId ?? makeId('item_'),
-        role: 'user',
-        type: 'text_delta',
-        content: { type: 'text_delta', text } as never,
-        eventBus: this.bus,
-      })
+      if (text)
+        appendMessage(this.db, {
+          sessionId: id,
+          turnId,
+          itemId: clientItemId ?? makeId('item_'),
+          role: 'user',
+          type: 'text_delta',
+          content: { type: 'text_delta', text } as never,
+          eventBus: this.bus,
+        })
       this.status(id, 'running')
       return { row, turnId, model, attachments }
     })
@@ -874,7 +969,19 @@ export class SessionManager {
     configOptions?: Record<string, string | boolean>,
     delivery?: 'immediate' | 'turn-boundary',
     waitForCompletion = false,
+    reviewReferences?: unknown[],
+    promptParts?: unknown[],
+    revision?: number,
   ) {
+    if (delivery === 'immediate' && this.turns.has(id)) {
+      const handle = this.handles.get(id)
+      if (handle?.steer) {
+        if (!text && !(attachmentIds?.length || promptParts?.length))
+          throw new Error('Native steering requires text or content')
+        await handle.steer(text)
+        return
+      }
+    }
     const accepted = await this.acceptPrompt(
       id,
       text,
@@ -886,6 +993,9 @@ export class SessionManager {
       clientItemId,
       configOptions,
       delivery,
+      reviewReferences,
+      promptParts,
+      revision,
     )
     if (!accepted) return
     const completion = waitForCompletion
@@ -938,10 +1048,9 @@ export class SessionManager {
       const dispatchText = /^\$[a-z0-9][a-z0-9-]*(?=\s|$)/.test(text)
         ? await rewriteSkillInvocation(row.cwd, text)
         : text
-      this.runPrompt(handle, row, accepted.turnId, [
-        ...accepted.attachments,
-        { kind: 'text', text: dispatchText },
-      ])
+      const content = [...accepted.attachments]
+      if (dispatchText) content.push({ kind: 'text', text: dispatchText })
+      this.runPrompt(handle, row, accepted.turnId, content)
     })().catch((error: unknown) =>
       this.failPrompt(accepted.row, accepted.turnId, error),
     )
