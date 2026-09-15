@@ -40,11 +40,37 @@ type MessagesState = {
   reset: () => void
 }
 
+function itemKey(message: Message): string {
+  const content = message.content
+  const channel =
+    content.type === 'content_snapshot'
+      ? content.contentType
+      : content.type === 'text_delta'
+        ? 'text'
+        : content.type === 'thought_delta'
+          ? 'thought'
+          : ''
+  return JSON.stringify([
+    message.turnId,
+    message.itemId,
+    'childId' in content ? content.childId : null,
+    channel,
+  ])
+}
+
 function foldMessage(existing: Message, incoming: Message): Message {
   const current = existing.content
   const next = incoming.content
   let content: MessageContent = next
-  if (
+  if (next.type === 'content_snapshot')
+    content = { ...current, ...next } as MessageContent
+  else if (
+    current.type === 'content_snapshot' &&
+    ((current.contentType === 'text' && next.type === 'text_delta') ||
+      (current.contentType === 'thought' && next.type === 'thought_delta'))
+  )
+    content = { ...current, text: current.text + next.text }
+  else if (
     (current.type === 'text_delta' && next.type === 'text_delta') ||
     (current.type === 'thought_delta' && next.type === 'thought_delta')
   )
@@ -63,7 +89,11 @@ function toolCallId(message: Message): string | undefined {
     message.content.type === 'tool_update' ||
     message.content.type === 'tool_result'
   )
-    return message.content.toolCallId
+    return JSON.stringify([
+      message.turnId,
+      'childId' in message.content ? message.content.childId : null,
+      message.content.toolCallId,
+    ])
   return undefined
 }
 
@@ -83,8 +113,8 @@ function indexMessages(items: Message[]): MessageIndex {
   }
   for (let position = 0; position < items.length; position++) {
     const item = items[position]!
-    if (!index.byItemId.has(item.itemId))
-      index.byItemId.set(item.itemId, position)
+    if (!index.byItemId.has(itemKey(item)))
+      index.byItemId.set(itemKey(item), position)
     const toolId = toolCallId(item)
     if (toolId && !index.byToolCallId.has(toolId))
       index.byToolCallId.set(toolId, position)
@@ -94,7 +124,7 @@ function indexMessages(items: Message[]): MessageIndex {
 }
 
 function sameItem(left: Message, right: Message): boolean {
-  if (left.itemId === right.itemId) return true
+  if (itemKey(left) === itemKey(right)) return true
   const leftTool = toolCallId(left)
   return leftTool !== undefined && leftTool === toolCallId(right)
 }
@@ -136,8 +166,8 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
   const seqs = new Set<number>()
   for (const [position, item] of result.entries()) {
     seqs.add(item.seq)
-    if (!index.byItemId.has(item.itemId))
-      index.byItemId.set(item.itemId, position)
+    if (!index.byItemId.has(itemKey(item)))
+      index.byItemId.set(itemKey(item), position)
     const itemTool = toolCallId(item)
     if (itemTool !== undefined && !index.byToolCallId.has(itemTool))
       index.byToolCallId.set(itemTool, position)
@@ -151,19 +181,19 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
     seqs.add(message.seq)
     const tool = toolCallId(message)
     const at =
-      index.byItemId.get(message.itemId) ??
+      index.byItemId.get(itemKey(message)) ??
       (tool === undefined ? undefined : index.byToolCallId.get(tool)) ??
       -1
     if (at < 0) {
       result.push(message)
-      index.byItemId.set(message.itemId, result.length - 1)
+      index.byItemId.set(itemKey(message), result.length - 1)
       if (tool !== undefined && !index.byToolCallId.has(tool))
         index.byToolCallId.set(tool, result.length - 1)
     } else {
       // A fold adopts the incoming identity, so index it too. The scan this
       // replaced matched later rows against the folded row, not the original.
       result[at] = foldMessage(result[at]!, message)
-      index.byItemId.set(message.itemId, at)
+      index.byItemId.set(itemKey(message), at)
       if (tool !== undefined) index.byToolCallId.set(tool, at)
     }
   }
@@ -215,7 +245,7 @@ export function foldEvent(
   // Fold by itemId first. Older rows can lack the server-generated itemId,
   // so use the ACP toolCallId for lifecycle updates and results.
   let itemIndex = event.msg.itemId
-    ? (index.byItemId.get(event.msg.itemId) ?? -1)
+    ? (index.byItemId.get(itemKey(event.msg)) ?? -1)
     : -1
   if (
     itemIndex < 0 &&
@@ -231,8 +261,8 @@ export function foldEvent(
   } else {
     items[itemIndex] = foldMessage(items[itemIndex]!, event.msg)
   }
-  if (!index.byItemId.has(event.msg.itemId))
-    index.byItemId.set(event.msg.itemId, itemIndex)
+  if (!index.byItemId.has(itemKey(event.msg)))
+    index.byItemId.set(itemKey(event.msg), itemIndex)
   const toolId = toolCallId(event.msg)
   if (toolId && !index.byToolCallId.has(toolId))
     index.byToolCallId.set(toolId, itemIndex)

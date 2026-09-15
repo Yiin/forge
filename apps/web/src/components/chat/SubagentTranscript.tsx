@@ -6,19 +6,24 @@ import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
 import { ActivityStack } from './ActivityStack'
 import { AttachmentItem } from './TranscriptItems'
+import { NativeContentRow } from './NativeContentRow'
 
 export function SubagentTranscript({
   messages,
   messagesVersion,
   skills = [],
+  nativeChildId,
+  sessionId,
 }: {
   messages: Message[]
   messagesVersion: number
   skills?: string[]
+  nativeChildId?: string
+  sessionId?: string
 }) {
   const items = useMemo(
-    () => toRenderModel(messages),
-    [messages, messagesVersion],
+    () => toRenderModel(messages, false, [], [], nativeChildId),
+    [messages, messagesVersion, nativeChildId],
   )
   return (
     <div
@@ -29,10 +34,31 @@ export function SubagentTranscript({
         {(item: ChatRenderItem) => {
           if (item.kind === 'message')
             return <MessageRow key={item.id} item={item} skills={skills} />
+          if (item.kind === 'plan')
+            return (
+              <section
+                aria-label="Plan"
+                className="whitespace-pre-wrap text-sm"
+              >
+                {item.explanation}
+              </section>
+            )
+          if (item.kind === 'native')
+            return (
+              <NativeContentRow
+                key={item.id}
+                item={item}
+                sessionId={sessionId}
+              />
+            )
           if (item.kind === 'tool')
-            return <ToolCallRow key={item.id} item={item} />
+            return (
+              <ToolCallRow key={item.id} item={item} sessionId={sessionId} />
+            )
           if (item.kind === 'activity')
-            return <ActivityStack key={item.id} item={item} />
+            return (
+              <ActivityStack key={item.id} item={item} sessionId={sessionId} />
+            )
           if (item.kind === 'attachment')
             return <AttachmentItem key={item.id} item={item} />
           if (item.kind === 'answered-question')
