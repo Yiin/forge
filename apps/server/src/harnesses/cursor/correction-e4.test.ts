@@ -94,34 +94,32 @@ vi.mock('./container.js', async (importOriginal) => {
         )
         return result
       }
+      private endReceipt: Promise<void> | undefined
       override async close() {
         await super.close()
-        if (
-          fixture.ends.some(
-            (entry) => entry.generation === this.owner.generation,
-          )
-        )
-          return
-        const receipt = {
-          generation: this.owner.generation,
-          retirement: JSON.parse(
-            await readFile(
-              join(dirname(this.sdkDirectory), 'writer-fence.json.retired'),
-              'utf8',
+        // Concurrent close callers retain one original write and its failure.
+        return (this.endReceipt ??= Promise.resolve().then(async () => {
+          const receipt = {
+            generation: this.owner.generation,
+            retirement: JSON.parse(
+              await readFile(
+                join(dirname(this.sdkDirectory), 'writer-fence.json.retired'),
+                'utf8',
+              ),
             ),
-          ),
-          pipesDestroyed: [
-            this.process!.child.stdin.destroyed,
-            this.process!.child.stdout.destroyed,
-            this.process!.child.stderr.destroyed,
-          ],
-        }
-        fixture.ends.push(receipt)
-        await writeFile(
-          `/var/tmp/forge-comet-cursor-review-correction-e4-${this.owner.generation}-end.json`,
-          JSON.stringify(receipt),
-          { flag: 'wx' },
-        )
+            pipesDestroyed: [
+              this.process!.child.stdin.destroyed,
+              this.process!.child.stdout.destroyed,
+              this.process!.child.stderr.destroyed,
+            ],
+          }
+          await writeFile(
+            `/var/tmp/forge-comet-cursor-review-correction-e4-${this.owner.generation}-end.json`,
+            JSON.stringify(receipt),
+            { flag: 'wx' },
+          )
+          fixture.ends.push(receipt)
+        }))
       }
     },
   }
@@ -516,6 +514,9 @@ it('keeps blocked guardian forwarding and a held parent sink bounded until their
   )
   fixture.pause = true
   fixture.paused = false
+  let bodyFailed = false,
+    cleanupFailed = false
+  let bodyError: unknown, cleanupError: unknown
   try {
     const receipt = await handle.prompt('blocked output', {
       permissionMode: 'auto',
@@ -541,12 +542,43 @@ it('keeps blocked guardian forwarding and a held parent sink bounded until their
       (records.find((record) => record.kind === 'terminal')!.payload as any)
         .result.length,
     ).toBe(cursorLimits().itemBytes)
+  } catch (error) {
+    bodyFailed = true
+    bodyError = error
+    console.error('CURSOR_E4_BODY_FAILURE', error)
   } finally {
     fixture.current?.process?.child.stdout.resume()
     held.resolve()
-    await handle.kill()
-    fixture.pause = false
+    try {
+      const original = fixture.current
+      // Exercise concurrent receipt capture after the same physical close.
+      const closes = await Promise.allSettled([
+        handle.kill(),
+        original.close(),
+        original.close(),
+      ])
+      const failed = closes.find((result) => result.status === 'rejected')
+      if (failed?.status === 'rejected') {
+        cleanupFailed = true
+        cleanupError = failed.reason
+        console.error('CURSOR_E4_CLEANUP_FAILURE', failed.reason)
+      } else {
+        expect(
+          fixture.ends.filter(
+            (entry) => entry.generation === original.owner.generation,
+          ),
+        ).toHaveLength(1)
+      }
+    } catch (error) {
+      cleanupFailed = true
+      cleanupError = error
+      console.error('CURSOR_E4_CLEANUP_FAILURE', error)
+    } finally {
+      fixture.pause = false
+    }
   }
+  if (bodyFailed) throw bodyError
+  if (cleanupFailed) throw cleanupError
   expect(
     Object.values(resources.snapshot()).every((value) => value === 0),
   ).toBe(true)
