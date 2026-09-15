@@ -404,30 +404,35 @@ export class QuestionManager {
     const questions = normalizeQuestions(
       object(request.toolCall.rawInput).questions,
     )
+    // A request that carries its own questions is a question, even though it
+    // arrived on the permission method. Only the bare form is a tool approval,
+    // so only the bare form gets the tool name, context and allow scope.
     const question: PendingQuestion = {
       questionId: id(),
       sessionId: request.sessionId,
-      questions: questions.length
-        ? questions
-        : [
-            {
-              id: 'permission',
-              question: request.toolCall.title ?? 'Question',
-              options: request.options.map((option) => ({
-                id: option.optionId,
-                label: option.name,
-              })),
-            },
-          ],
       source: 'permission',
-      toolName: request.toolCall.title ?? undefined,
-      toolContext: JSON.stringify(request.toolCall.rawInput ?? null),
-      permissionScope: request.options.some(
-        (option) => option.kind === 'allow_always',
-      )
-        ? 'session'
-        : 'once',
       raw: request as unknown as Record<string, unknown>,
+      ...(questions.length
+        ? { questions }
+        : {
+            questions: [
+              {
+                id: 'permission',
+                question: request.toolCall.title ?? 'Question',
+                options: request.options.map((option) => ({
+                  id: option.optionId,
+                  label: option.name,
+                })),
+              },
+            ],
+            toolName: request.toolCall.title ?? undefined,
+            toolContext: JSON.stringify(request.toolCall.rawInput ?? null),
+            permissionScope: request.options.some(
+              (option) => option.kind === 'allow_always',
+            )
+              ? ('session' as const)
+              : ('once' as const),
+          }),
     }
     return this.hold(question, (value) => {
       if (value === undefined)
@@ -450,10 +455,23 @@ export class QuestionManager {
             ? optionIds[0]
             : undefined
           : first
+      // The wire only accepts an option the agent offered. A bare approval
+      // answers with one of them directly. A question packed into a permission
+      // request does not, so a deliberate answer means proceed: send the
+      // narrowest allow the agent offered, and cancel when it offered none.
+      const offered = request.options.find(
+        (option) => option.optionId === selected,
+      )
+      const proceed =
+        offered ??
+        request.options.find((option) => option.kind === 'allow_once') ??
+        request.options.find((option) => option.kind === 'allow_always') ??
+        request.options.find((option) => option.kind.startsWith('allow'))
+      if (!proceed) return { outcome: { outcome: 'cancelled' as const } }
       return {
         outcome: {
           outcome: 'selected' as const,
-          optionId: String(selected),
+          optionId: proceed.optionId,
         },
       }
     }) as Promise<acp.RequestPermissionResponse>

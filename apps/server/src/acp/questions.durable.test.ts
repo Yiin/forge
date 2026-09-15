@@ -102,3 +102,104 @@ describe('durable native interactions', () => {
     db.close()
   })
 })
+
+describe('ACP permission requests', () => {
+  const permission = (
+    sessionId: string,
+    rawInput: unknown,
+    title = 'Run command',
+  ) =>
+    ({
+      sessionId,
+      toolCall: { toolCallId: 'tool-1', title, rawInput },
+      options: [
+        { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
+        {
+          kind: 'allow_always',
+          name: 'Allow always',
+          optionId: 'allow-always',
+        },
+        { kind: 'reject_once', name: 'Reject once', optionId: 'reject-once' },
+      ],
+    }) as unknown as Parameters<QuestionManager['handlePermission']>[0]
+
+  it('keeps a question that arrived on the permission method a question', async () => {
+    const { db, session } = fixture()
+    const manager = new QuestionManager({ db, now: () => 1000 })
+    const pending = manager.handlePermission(
+      permission(
+        session.id,
+        {
+          questions: [
+            {
+              question: 'Pick one',
+              options: [{ label: 'First' }, { label: 'Second' }],
+            },
+          ],
+        },
+        'AskUserQuestion',
+      ),
+    )
+    const request = manager.listPending(session.id)[0]
+    expect(request).toMatchObject({ source: 'permission' })
+    expect(request.toolName).toBeUndefined()
+    expect(request.toolContext).toBeUndefined()
+    expect(request.permissionScope).toBeUndefined()
+    expect(request.questions[0].question).toBe('Pick one')
+
+    // The wire only accepts an option the agent offered, never a Forge id.
+    const optionId = request.questions[0].options[1].id!
+    expect(optionId).not.toBe('allow-once')
+    manager.answerQuestion(session.id, request.questionId, {
+      answers: { [request.questions[0].id ?? 'question-0']: [optionId] },
+    })
+    expect(await pending).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once' },
+    })
+    db.close()
+  })
+
+  it('keeps a bare tool approval a tool approval and replays its own option', async () => {
+    const { db, session } = fixture()
+    const manager = new QuestionManager({ db, now: () => 1000 })
+    const pending = manager.handlePermission(
+      permission(session.id, { command: 'rm -rf /' }),
+    )
+    const request = manager.listPending(session.id)[0]
+    expect(request).toMatchObject({
+      source: 'permission',
+      toolName: 'Run command',
+      toolContext: JSON.stringify({ command: 'rm -rf /' }),
+      permissionScope: 'session',
+    })
+    manager.answerQuestion(session.id, request.questionId, {
+      answers: { permission: ['reject-once'] },
+    })
+    expect(await pending).toEqual({
+      outcome: { outcome: 'selected', optionId: 'reject-once' },
+    })
+    db.close()
+  })
+
+  it('cancels when the agent offered nothing to allow', async () => {
+    const { db, session } = fixture()
+    const manager = new QuestionManager({ db, now: () => 1000 })
+    const request = permission(session.id, {
+      questions: [{ question: 'Pick one', options: [{ label: 'First' }] }],
+    })
+    request.options = [
+      { kind: 'reject_once', name: 'Reject once', optionId: 'reject-once' },
+    ]
+    const pending = manager.handlePermission(request)
+    const held = manager.listPending(session.id)[0]
+    manager.answerQuestion(session.id, held.questionId, {
+      answers: {
+        [held.questions[0].id ?? 'question-0']: [
+          held.questions[0].options[0].id!,
+        ],
+      },
+    })
+    expect(await pending).toEqual({ outcome: { outcome: 'cancelled' } })
+    db.close()
+  })
+})

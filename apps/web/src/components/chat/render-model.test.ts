@@ -306,4 +306,36 @@ describe('chat render model', () => {
       },
     ])
   })
+
+  it('separates an expired request from a cancelled one', () => {
+    const ask = message(
+      {
+        type: 'ask_user_question',
+        questionId: 'q9',
+        question: 'Pick one',
+        options: ['First'],
+      },
+      { itemId: 'ask' },
+    )
+    const expired = toRenderModel([
+      ask,
+      message(
+        { type: 'user_answer', questionId: 'q9', expired: true },
+        { itemId: 'answer', seq: 2, role: 'user' },
+      ),
+    ])
+    expect(expired.at(-1)).toMatchObject({
+      kind: 'answered-question',
+      question: 'Pick one',
+      answer: 'Expired',
+    })
+    const cancelled = toRenderModel([
+      ask,
+      message(
+        { type: 'user_answer', questionId: 'q9', cancelled: true },
+        { itemId: 'answer', seq: 2, role: 'user' },
+      ),
+    ])
+    expect(cancelled.at(-1)).toMatchObject({ answer: 'Cancelled' })
+  })
 })

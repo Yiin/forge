@@ -243,12 +243,14 @@ export function toRenderModel(
         kind: 'answered-question',
         id: message.itemId,
         question: questions.get(content.questionId) ?? 'Question',
-        answer: content.cancelled
-          ? 'Cancelled'
-          : answerWithLabels(
-              questionOptions.get(content.questionId),
-              content.answers ?? content.answer,
-            ),
+        answer: content.expired
+          ? 'Expired'
+          : content.cancelled
+            ? 'Cancelled'
+            : answerWithLabels(
+                questionOptions.get(content.questionId),
+                content.answers ?? content.answer,
+              ),
       })
     } else if (content.type === 'epic_triage') {
       result.push({ kind: 'epic-triage', id: message.itemId, card: content })

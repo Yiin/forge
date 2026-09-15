@@ -69,6 +69,9 @@ export const MessageContent = z.discriminatedUnion('type', [
     answer: z.string().optional(),
     answers: z.unknown().optional(),
     cancelled: z.boolean().optional(),
+    // A request the user never answered ran out of time. That is not the same
+    // as a cancellation, and the transcript has to say which one happened.
+    expired: z.boolean().optional(),
   }),
   z.object({
     type: z.literal('attachment_ref'),

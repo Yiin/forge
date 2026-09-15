@@ -72,7 +72,10 @@ function QuestionCard({
   const [error, setError] = useState<string | null>(null)
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const question = request.questions[page]!
-  const isPermission = request.source === 'permission'
+  // A tool approval carries an allow scope. A question that merely arrived on
+  // the permission method does not, and must not wear the approval chrome.
+  const isPermission =
+    request.source === 'permission' && request.permissionScope !== undefined
   const settled = request.requestStatus && request.requestStatus !== 'pending'
   const setAnswer = (value: string | string[] | SelectedWithText): Answers => {
     const next = { ...answers, [question.id!]: value }
@@ -286,7 +289,9 @@ function QuestionCard({
         disabled={sending}
         onChange={(value) => {
           const next = setAnswer(value)
-          if (!question.multiSelect) advanceAfterSelect(next)
+          // A permission still needs a deliberate submit, the same way the
+          // numbered-key path above refuses to advance on a single choice.
+          if (!question.multiSelect && !isPermission) advanceAfterSelect(next)
         }}
       />
       {(question.allowFreeInput || question.options.length === 0) && (
