@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 import { PassThrough, Writable } from 'node:stream'
 import { JsonlTransport } from '../jsonl.js'
 import {
@@ -68,12 +68,41 @@ import {
   finishFixtureHomes,
 } from './__fixtures__/ownership.js'
 
+const guardianFixture = vi.hoisted(() => ({
+  artifact: '',
+  runtime: '',
+  entry: '',
+}))
+vi.mock('node:child_process', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:child_process')>()
+  return {
+    ...original,
+    spawn: ((command, args, options) => {
+      if (Array.isArray(args) && args[0] === guardianFixture.artifact) {
+        if (args.length !== 2 || !guardianFixture.runtime)
+          throw new Error('Invalid fixture guardian launch')
+        return original.spawn(
+          command,
+          [guardianFixture.entry, args[0], guardianFixture.runtime, args[1]!],
+          options ?? {},
+        )
+      }
+      return Reflect.apply(original.spawn, original, [command, args, options])
+    }) as typeof original.spawn,
+  }
+})
+
 const root = fileURLToPath(new URL('../../../../../', import.meta.url))
 const peer = fileURLToPath(new URL('./__fixtures__/peer.mjs', import.meta.url))
 const owned: string[] = [],
   hosts: KimiHost[] = []
 const pendingFixtureCallbacks = new Set<() => void>()
 beforeAll(async () => {
+  guardianFixture.runtime = await temp()
+  guardianFixture.artifact = join(root, 'dist/kimi-guardian.js')
+  guardianFixture.entry = fileURLToPath(
+    new URL('./__fixtures__/guardian.mjs', import.meta.url),
+  )
   await chmod(peer, 0o755)
   await promisify(execFile)('bun', ['run', 'build:kimi-guardian'], {
     cwd: root,
@@ -3689,4 +3718,25 @@ describe('10. Storage and hard limits', () => {
     expect(budget.count('sinkCalls')).toBe(0)
     await host.close()
   })
+})
+
+test('registers fixture homes in the owned runtime directory', async () => {
+  const fixture = await setup()
+  try {
+    const registry = JSON.parse(
+      await readFile(
+        join(guardianFixture.runtime, 'forge-kimi/registry.json'),
+        'utf8',
+      ),
+    )
+    expect(
+      Object.values(registry.homes).some(
+        (entry) =>
+          (entry as { home: { path: string } }).home.path ===
+          fixture.selected.account.homePath,
+      ),
+    ).toBe(true)
+  } finally {
+    await fixture.handle.kill()
+  }
 })
