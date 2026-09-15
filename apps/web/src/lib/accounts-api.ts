@@ -1,3 +1,4 @@
+import { forgeConfigSchema } from '@forge/protocol/config'
 import {
   harnessAccountSnapshotSchema,
   type HarnessAccount,
@@ -72,6 +73,7 @@ export type HarnessPickerEntry = {
   name: string
   enabled: boolean
   protocol: 'acp' | 'pty'
+  adapterKind?: 'native' | 'acp' | 'pty' | 'custom'
 }
 
 export { harnessAccountSnapshotSchema }
@@ -169,15 +171,18 @@ export class AccountsApi {
   }
 
   async listHarnesses(): Promise<HarnessPickerEntry[]> {
-    const health = harnessHealthResponseSchema.parse(
-      await this.get<unknown>('/api/harnesses/health'),
+    const config = forgeConfigSchema.shape.harness.parse(
+      await this.get<unknown>('/api/harnesses'),
     )
-    return health.map(({ key, name, enabled, protocol }) => ({
-      key,
-      name,
-      enabled,
-      protocol,
-    }))
+    return Object.entries(config).map(
+      ([key, { name, enabled, protocol, adapterKind }]) => ({
+        key,
+        name,
+        enabled,
+        protocol,
+        adapterKind,
+      }),
+    )
   }
 
   private async healthByAccountId() {

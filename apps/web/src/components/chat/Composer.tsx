@@ -266,13 +266,20 @@ export function Composer({
       })
   }, [draftMode, sessionId, sending])
   const [harnesses, setHarnesses] = useState<
-    Array<{ key: string; name?: string; enabled?: boolean }>
+    Array<{
+      key: string
+      name?: string
+      enabled?: boolean
+      protocol?: 'acp' | 'pty'
+      adapterKind?: 'native' | 'acp' | 'pty' | 'custom'
+    }>
   >(harness ? [{ key: harness }] : [])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [accountSnapshots, setAccountSnapshots] = useState<
     HarnessAccountSnapshot[]
   >([])
   const [accountsLoaded, setAccountsLoaded] = useState(false)
+  const [harnessesLoaded, setHarnessesLoaded] = useState(false)
   useEffect(() => {
     const requestedAccountId = selection.accountId
     modelRequestAccount.current = requestedAccountId
@@ -302,7 +309,10 @@ export function Composer({
   useEffect(() => {
     void accountsApi
       .listHarnesses()
-      .then(setHarnesses)
+      .then((next) => {
+        setHarnesses(next)
+        setHarnessesLoaded(true)
+      })
       .catch(() => undefined)
   }, [])
   useEffect(() => {
@@ -323,9 +333,10 @@ export function Composer({
   const harnessOptions = buildHarnessOptions(harnesses, accounts, Date.now())
   const showHarnessPicker =
     harnessOptions.length > 0 || (!accountsLoaded && Boolean(selection.harness))
-  const selected = accountsLoaded
-    ? defaultSelection(harnessOptions, selection)
-    : selection
+  const selected =
+    accountsLoaded && harnessesLoaded
+      ? defaultSelection(harnessOptions, selection)
+      : selection
   useEffect(() => {
     if (
       selected.harness !== selection.harness ||
@@ -333,6 +344,9 @@ export function Composer({
     )
       setSelection(selected)
   }, [selected, selection])
+  const canSelectWithoutAccount = harnessOptions.some(
+    (option) => option.harness === selected.harness && option.accountOptional,
+  )
   const update = (
     value: string,
     cursor = textarea.current?.selectionStart ?? value.length,
@@ -446,7 +460,7 @@ export function Composer({
       sending ||
       submitting.current ||
       (!value && !hasAttachments) ||
-      (accountsLoaded && !selected.accountId) ||
+      (accountsLoaded && !selected.accountId && !canSelectWithoutAccount) ||
       !canSendUploads(uploads)
     )
       return
@@ -515,7 +529,7 @@ export function Composer({
     !sending &&
     hasContent &&
     canSendUploads(uploads) &&
-    Boolean(selected.accountId || !accountsLoaded)
+    Boolean(selected.accountId || canSelectWithoutAccount || !accountsLoaded)
   const stopping = running && onInterrupt && !hasContent
   const accountSnapshot = accountSnapshots.find(
     (snapshot) => snapshot.accountId === selected.accountId,
@@ -765,20 +779,30 @@ export function Composer({
                     value={
                       selection.accountId
                         ? `${selection.harness}:${selection.accountId}`
-                        : ''
+                        : selection.harness
                     }
-                    items={harnessOptions.flatMap((option) =>
-                      option.accounts.map((account) => ({
+                    items={harnessOptions.flatMap((option) => [
+                      ...(option.accountOptional
+                        ? [
+                            {
+                              value: option.harness,
+                              label: option.accounts.length
+                                ? `${option.label} default`
+                                : option.label,
+                            },
+                          ]
+                        : []),
+                      ...option.accounts.map((account) => ({
                         value: `${option.harness}:${account.id}`,
                         label: account.label,
                       })),
-                    )}
+                    ])}
                     onValueChange={(value) => {
                       if (value === null) return
                       const separator = value.indexOf(':')
                       const picked =
                         separator < 0
-                          ? { harness: value }
+                          ? { harness: value, accountId: undefined }
                           : {
                               harness: value.slice(0, separator),
                               accountId: value.slice(separator + 1),
@@ -803,6 +827,13 @@ export function Composer({
                       {harnessOptions.map((option) => (
                         <SelectGroup key={option.harness}>
                           <SelectLabel>{option.label}</SelectLabel>
+                          {option.accountOptional && (
+                            <SelectItem value={option.harness}>
+                              {option.accounts.length
+                                ? `${option.label} default`
+                                : option.label}
+                            </SelectItem>
+                          )}
                           {option.accounts.map((account) => (
                             <SelectItem
                               key={`${option.harness}:${account.id}`}

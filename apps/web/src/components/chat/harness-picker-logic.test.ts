@@ -113,3 +113,44 @@ describe('harness picker logic', () => {
     })
   })
 })
+
+it('offers accountless ACP and PTY without inventing account rows', () => {
+  const options = buildHarnessOptions(
+    [
+      { key: 'grok', adapterKind: 'acp' },
+      { key: 'qa-acp', adapterKind: 'custom' },
+      { key: 'shell', protocol: 'pty' },
+      { key: 'claude', adapterKind: 'native' },
+    ],
+    [],
+    0,
+  )
+  expect(options.map((option) => option.harness)).toEqual([
+    'grok',
+    'qa-acp',
+    'shell',
+  ])
+  expect(options.every((option) => option.accounts.length === 0)).toBe(true)
+  expect(
+    defaultSelection(options, { harness: 'qa-acp', model: 'native' }),
+  ).toEqual({ harness: 'qa-acp', model: 'native' })
+  expect(defaultSelection(options, { harness: '' })).toEqual({
+    harness: 'grok',
+  })
+})
+it('retains an explicitly selected account for ACP and requires native account isolation', () => {
+  const options = buildHarnessOptions(
+    [
+      { key: 'grok', adapterKind: 'acp' },
+      { key: 'claude', adapterKind: 'native' },
+    ],
+    [account({ harness: 'grok', id: 'grok-selected' }), account()],
+    0,
+  )
+  expect(
+    defaultSelection(options, { harness: 'grok', accountId: 'grok-selected' }),
+  ).toEqual({ harness: 'grok', accountId: 'grok-selected' })
+  expect(
+    defaultSelection(options, { harness: 'claude', accountId: 'main' }),
+  ).toEqual({ harness: 'claude', accountId: 'main' })
+})

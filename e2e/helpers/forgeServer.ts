@@ -5,6 +5,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { devServerOrigin } from './devServer.js'
+import { acpProviderDescriptors } from '../../apps/server/src/harnesses/acp/profiles.js'
 
 export type ForgeServer = {
   baseUrl: string
@@ -14,6 +15,11 @@ export type ForgeServer = {
 export type LaunchOptions = {
   preview?: boolean
   fakeNative?: { kind: 'claude'; directory: string }
+  fakeAcp?: {
+    profile: 'custom' | 'grok'
+    scenario: 'media' | 'late-child-retirement' | 'plan-updates'
+    directory: string
+  }
   frontendOrigin?: string | null
   env?: Record<string, string>
   dataDir?: string
@@ -167,15 +173,32 @@ export async function launchForge(
     throw new Error('e2e data directory must be under tmpdir')
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
   const native = options.fakeNative
-  const harnessKey = native?.kind ?? 'mock'
+  const typed = options.fakeAcp
+  if (native && typed) throw Error('Choose one synthetic provider')
+  const harnessKey =
+    native?.kind ??
+    (typed ? (typed.profile === 'custom' ? 'qa-acp' : 'grok') : 'mock')
+  const adapterKind = native
+    ? 'native'
+    : typed?.profile === 'grok'
+      ? 'acp'
+      : 'custom'
   const fakeAgent = resolve(
     root,
-    native
-      ? 'apps/server/src/harnesses/claude/fixtures/fake-claude.mjs'
-      : 'apps/server/test/fixtures/acp-mock-agent.ts',
+    typed
+      ? `apps/server/src/harnesses/acp/__fixtures__/${typed.profile === 'custom' ? 'sdk-agent' : 'provider-agent'}.mjs`
+      : native
+        ? 'apps/server/src/harnesses/claude/fixtures/fake-claude.mjs'
+        : 'apps/server/test/fixtures/acp-mock-agent.ts',
   )
   const fakeAgentEnv = {
     ...options.fakeAgentEnv,
+    ...(typed
+      ? {
+          FORGE_ACP_TEST_REPORT: resolve(typed.directory, 'wire.jsonl'),
+          FORGE_ACP_TEST_SCENARIO: typed.scenario,
+        }
+      : {}),
     ...(native ? { FORGE_CLAUDE_FIXTURE: native.directory } : {}),
   }
   const repeat = options.env?.FORGE_E2E_REPLY_REPEAT
@@ -228,9 +251,9 @@ export async function launchForge(
       `[harness.${harnessKey}]`,
       `name = ${JSON.stringify(native ? 'E2E native Claude fixture' : 'E2E ACP fixture')}`,
       'protocol = "acp"',
-      `command = ${JSON.stringify(native ? 'node' : 'bun')}`,
-      `args = [${JSON.stringify(fakeAgent)}]`,
-      `adapterKind = ${JSON.stringify(native ? 'native' : 'acp')}`,
+      `command = ${JSON.stringify(typed ? fakeAgent : native ? 'node' : 'bun')}`,
+      `args = ${JSON.stringify(typed ? (typed.profile === 'grok' ? acpProviderDescriptors.grok.args : []) : [fakeAgent])}`,
+      `adapterKind = ${JSON.stringify(adapterKind)}`,
       'enabled = true',
       // `env` is required by the harness schema, so the table is never optional.
       // Omitting it when there are no knobs stops the server from booting.
@@ -307,9 +330,8 @@ export async function launchForge(
   }
   const baseUrl = `http://127.0.0.1:${port}`
   try {
-    // The composer hides every harness without an account, so a fresh database
-    // leaves Send disabled. Seed the one account the fixture harness needs.
-    await ensureMockAccount(baseUrl, harnessKey, native ? 'native' : 'acp')
+    // Native Claude uses an isolated account; ACP peers use their default environment.
+    if (native) await ensureMockAccount(baseUrl, harnessKey, 'native')
   } catch (error) {
     await stopForge(child, dataDir, !options.dataDir, port)
     throw error

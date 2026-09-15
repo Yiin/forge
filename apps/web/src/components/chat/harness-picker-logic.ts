@@ -16,6 +16,7 @@ export type HarnessOption = {
   harness: string
   label: string
   accounts: HarnessOptionAccount[]
+  accountOptional?: boolean
 }
 export type HarnessSelection = {
   harness: string
@@ -26,7 +27,14 @@ export type HarnessSelection = {
 
 export function buildHarnessOptions(
   harnesses: ReadonlyArray<
-    string | { key: string; name?: string; enabled?: boolean }
+    | string
+    | {
+        key: string
+        name?: string
+        enabled?: boolean
+        protocol?: 'acp' | 'pty'
+        adapterKind?: 'native' | 'acp' | 'pty' | 'custom'
+      }
   >,
   accounts: ReadonlyArray<Account>,
   nowMs: number,
@@ -60,12 +68,18 @@ export function buildHarnessOptions(
           disabled: !account.enabled,
         }
       })
-    if (optionAccounts.length === 0) return []
+    const accountOptional =
+      typeof entry !== 'string' &&
+      (entry.protocol === 'pty' ||
+        entry.adapterKind === 'acp' ||
+        entry.adapterKind === 'custom')
+    if (optionAccounts.length === 0 && !accountOptional) return []
     return [
       {
         harness,
         label: harnessLabel,
         accounts: optionAccounts,
+        accountOptional,
       },
     ]
   })
@@ -78,6 +92,7 @@ export function defaultSelection(
   const currentOption = options.find(
     (option) => option.harness === current.harness,
   )
+  if (currentOption?.accountOptional && !current.accountId) return current
   const currentAccount = currentOption?.accounts.find(
     (account) => account.id === current.accountId,
   )
@@ -90,9 +105,14 @@ export function defaultSelection(
     return current
   const usable = options.find((option) => {
     const account = option.accounts[0]
-    return account && !account.cooling && !account.disabled
+    return (
+      option.accountOptional ||
+      (account && !account.cooling && !account.disabled)
+    )
   })
   if (usable)
-    return { harness: usable.harness, accountId: usable.accounts[0]!.id }
+    return usable.accountOptional
+      ? { harness: usable.harness }
+      : { harness: usable.harness, accountId: usable.accounts[0]!.id }
   return { harness: '' }
 }
