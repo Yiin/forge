@@ -9,6 +9,7 @@ export type DraftPromotionInput = {
   model?: string
   clientItemId: string
   workspace?: { mode: 'local' | 'worktree'; baseRef?: string }
+  targetPath?: string
 }
 
 function newPromotionKey() {
@@ -37,6 +38,7 @@ export async function promoteDraftWithKey(
       {
         draftId: draft.id,
         projectId: draft.projectId,
+        targetPath: input.targetPath ?? draft.targetPath,
         harness: input.harness || draft.harness,
         accountId: input.accountId,
         model: input.model,

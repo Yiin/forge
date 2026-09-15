@@ -130,7 +130,9 @@ export function CommandPalette() {
   }
   const newDraft = () => {
     close()
-    void openNewDraft(navigate).catch(() => undefined)
+    void openNewDraft(navigate, { allowFilesystemTarget: true }).catch(
+      () => undefined,
+    )
   }
   const copySession = async () => {
     if (!sessionId) return
