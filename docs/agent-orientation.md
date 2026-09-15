@@ -62,6 +62,7 @@ From the assigned checkout root:
    BUN_INSTALL_CACHE_DIR="$PWD/.native-build/bun-cache" bun install --frozen-lockfile --ignore-scripts --backend=copyfile
    node scripts/build-node-pty.mjs
    node scripts/check-node-pty.mjs
+   bun run build:cursor-sidecar
    ```
 
 2. Run focused checks and `bun run typecheck`. Use `bunx vitest run <file>` for focused Vitest tests.
