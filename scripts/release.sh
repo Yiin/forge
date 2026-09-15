@@ -15,7 +15,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
-npm version "$version" --no-git-tag-version --allow-same-version >/dev/null
+bun pm version "$version" --no-git-tag-version --allow-same-version >/dev/null
 git add package.json
 git commit -m "chore: release v$version"
 git tag "v$version"
