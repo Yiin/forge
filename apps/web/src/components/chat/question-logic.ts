@@ -1,4 +1,5 @@
 import type { Message } from '@forge/protocol/message'
+import type { NativeInteraction } from '@forge/protocol/ws'
 
 export type Question = NonNullable<
   Extract<Message['content'], { type: 'ask_user_question' }>['questions']
@@ -12,12 +13,16 @@ export type PendingQuestion = {
 export type PendingQuestionRequest = {
   requestId: string
   source?: 'permission' | 'ext'
-  requestStatus?: 'pending' | 'replying' | 'submitted' | 'expired' | 'uncertain'
+  // A snapshot row overrides the stored content status, so this takes the wire
+  // status set. It is wider: stored content never carries 'cancelled'.
+  requestStatus?: NativeInteraction['status']
   toolName?: string
   toolContext?: string
   permissionScope?: 'once' | 'session'
   questions: Question[]
 }
+
+export type RequestStatus = NonNullable<PendingQuestionRequest['requestStatus']>
 
 type AskContent = Extract<Message['content'], { type: 'ask_user_question' }>
 
@@ -48,6 +53,7 @@ export function requestQuestions(content: AskContent): Question[] {
 
 export function pendingQuestionRequests(
   messages: Message[],
+  statuses?: ReadonlyMap<string, RequestStatus>,
 ): PendingQuestionRequest[] {
   const answered = new Set(
     messages.flatMap((message) =>
@@ -67,7 +73,8 @@ export function pendingQuestionRequests(
       {
         requestId: content.questionId,
         source: content.source,
-        requestStatus: content.requestStatus,
+        requestStatus:
+          statuses?.get(content.questionId) ?? content.requestStatus,
         toolName: content.toolName,
         toolContext: content.toolContext,
         permissionScope: content.permissionScope,
