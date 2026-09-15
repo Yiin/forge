@@ -156,6 +156,29 @@ export function migrate(sqlite: SqliteLike) {
   }
 }
 
+type BrokenReference = {
+  table: string
+  rowid: number | null
+  parent: string
+  fkid: number
+}
+
+function assertForeignKeysIntact(sqlite: SqliteLike) {
+  const broken = sqlite
+    .prepare('PRAGMA foreign_key_check')
+    .all() as BrokenReference[]
+  if (!broken.length) return
+  // Name the rows. A count alone leaves nobody able to repair the database.
+  const shown = broken
+    .slice(0, 5)
+    .map((row) => `${row.table} rowid ${row.rowid} -> ${row.parent}`)
+    .join(', ')
+  const rest = broken.length > 5 ? `, and ${broken.length - 5} more` : ''
+  throw new Error(
+    `Migration left ${broken.length} broken foreign key reference(s): ${shown}${rest}`,
+  )
+}
+
 function migrateWithin(
   sqlite: SqliteLike,
   dir: string,
@@ -181,20 +204,18 @@ function migrateWithin(
     const insert = sqlite.prepare(
       'INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)',
     )
+    let ran = false
     for (const file of files) {
       if (applied.has(file)) continue
       const sql = readFileSync(dir + file, 'utf8')
       if (legacy) replayLegacyMigration(sqlite, file, sql)
       else sqlite.exec(sql)
       insert.run(file, Date.now())
+      ran = true
     }
-    if (check) {
-      const broken = sqlite.prepare('PRAGMA foreign_key_check').all()
-      if (broken.length)
-        throw new Error(
-          `Migration left ${broken.length} broken foreign key reference(s)`,
-        )
-    }
+    // Only a run that changed something is worth checking. A boot with nothing
+    // pending must not refuse to start over a dangling row it did not create.
+    if (check && ran) assertForeignKeysIntact(sqlite)
     sqlite.exec('COMMIT')
   } catch (error) {
     sqlite.exec('ROLLBACK')
