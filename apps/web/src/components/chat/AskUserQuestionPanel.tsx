@@ -29,8 +29,15 @@ export function AskUserQuestionPanel({ sessionId }: { sessionId: string }) {
   // The store appends into the per-session array in place and replaces only
   // the record, so subscribe to the record or live replies never re-render.
   const messagesBySession = useMessagesStore((state) => state.bySession)
+  const requestsBySession = useMessagesStore(
+    (state) => state.snapshotStateBySession,
+  )
   const messages = messagesBySession[sessionId] ?? EMPTY_MESSAGES
-  const requests = pendingQuestionRequests(messages)
+  const statusRows = requestsBySession[sessionId]?.requests ?? []
+  const statuses = new Map(
+    statusRows.map((row) => [row.questionId, row.status] as const),
+  )
+  const requests = pendingQuestionRequests(messages, statuses)
   const answerable = requests.filter(
     (item) =>
       item.requestStatus === 'pending' || item.requestStatus === undefined,

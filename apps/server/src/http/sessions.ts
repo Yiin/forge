@@ -19,11 +19,13 @@ import { WorkspaceError } from '../workspace/paths.js'
 import { WorktreeRemovalError } from '../git/worktrees.js'
 import { TerminalError } from '../terminals/error.js'
 import { withProjectActivity } from '../db/project-activity.js'
+import type { QuestionManager } from '../acp/questions.js'
 
 export function sessionRoutes(
   manager: SessionManager,
   uploads?: UploadStore,
   workspaceTargets = new WorkspaceTargets(manager.database),
+  questions?: QuestionManager,
 ) {
   const app = new Hono()
   app.onError((error, c) => {
@@ -107,6 +109,7 @@ export function sessionRoutes(
       sessionId,
       cursor: Number(cursor.seq ?? 0),
       queuedPrompts: manager.queuedPrompts(sessionId) ?? [],
+      requests: questions?.listPending(sessionId) ?? [],
       messages: rows.map((row) => ({
         seq: row.seq,
         sessionId: row.session_id,

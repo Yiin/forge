@@ -6,8 +6,39 @@ import { createProject, createSession } from '../db/queries.js'
 import { SessionManager } from '../sessions/manager.js'
 import { sessionRoutes } from './sessions.js'
 import { UploadStore } from '../uploads/store.js'
+import { QuestionManager } from '../acp/questions.js'
 
 describe('prompt REST lifecycle', () => {
+  it('includes durable native interaction status in the session snapshot', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'native',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const manager = new SessionManager(db, new EventBus(), () => undefined)
+    const questions = new QuestionManager({ db, now: () => 1000 })
+    void questions.handleExtension('cursor/ask_question', {
+      sessionId: session.id,
+      toolCallId: 'request-1',
+      questions: [{ prompt: 'Continue?', options: [] }],
+    })
+    const response = await sessionRoutes(
+      manager,
+      undefined,
+      undefined,
+      questions,
+    ).request(`/api/sessions/${session.id}/messages`)
+    expect(response.status).toBe(200)
+    expect((await response.json()).requests).toMatchObject([
+      { questionId: 'request-1', status: 'pending', sessionId: session.id },
+    ])
+    db.close()
+  })
+
   it('returns after acceptance and keeps request idempotency synchronous', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)

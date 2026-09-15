@@ -198,7 +198,7 @@ export function createApp(
     if (manager) {
       app.route(
         '/',
-        sessionRoutes(manager, uploadStore, workspaceFiles?.targets),
+        sessionRoutes(manager, uploadStore, workspaceFiles?.targets, questions),
       )
       app.route('/', forkRoutes(manager))
       app.route('/', sideChatRoutes(manager))

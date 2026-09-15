@@ -89,4 +89,36 @@ describe('AskUserQuestionPanel', () => {
     ).toBeTruthy()
     expect(screen.queryByText(/needs your approval/)).toBeNull()
   })
+
+  it('shows a restart-expired request as settled and disables replies', () => {
+    seed({
+      type: 'ask_user_question',
+      questionId: 'request-expired',
+      question: 'Continue?',
+      questions: [{ question: 'Continue?', options: [] }],
+    })
+    useMessagesStore.setState({
+      snapshotStateBySession: {
+        'session-1': {
+          requests: [
+            {
+              questionId: 'request-expired',
+              sessionId: 'session-1',
+              questions: [{ question: 'Continue?', options: [] }],
+              source: 'ext',
+              status: 'expired',
+              createdAt: 1,
+              updatedAt: 2,
+              expiresAt: 3,
+            },
+          ],
+        },
+      },
+    })
+    render(<AskUserQuestionPanel sessionId="session-1" />)
+    expect(
+      screen.getByText('This request expired after the session ended.'),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Submit/ })).toBeNull()
+  })
 })

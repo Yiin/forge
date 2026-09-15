@@ -19,6 +19,8 @@ export type PendingQuestionRequest = {
   questions: Question[]
 }
 
+export type RequestStatus = NonNullable<PendingQuestionRequest['requestStatus']>
+
 type AskContent = Extract<Message['content'], { type: 'ask_user_question' }>
 
 // Legacy rows carry one bare question and label-only options. Replies address
@@ -48,6 +50,7 @@ export function requestQuestions(content: AskContent): Question[] {
 
 export function pendingQuestionRequests(
   messages: Message[],
+  statuses?: ReadonlyMap<string, RequestStatus>,
 ): PendingQuestionRequest[] {
   const answered = new Set(
     messages.flatMap((message) =>
@@ -67,7 +70,8 @@ export function pendingQuestionRequests(
       {
         requestId: content.questionId,
         source: content.source,
-        requestStatus: content.requestStatus,
+        requestStatus:
+          statuses?.get(content.questionId) ?? content.requestStatus,
         toolName: content.toolName,
         toolContext: content.toolContext,
         permissionScope: content.permissionScope,
