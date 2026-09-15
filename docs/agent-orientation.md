@@ -55,7 +55,15 @@ Keep dock surface tabs separate from session navigation.
 
 From the assigned checkout root:
 
-1. Use `bun install --frozen-lockfile` for dependency setup.
+1. Isolate dependencies before setup. The helper preserves borrowed dependencies under `.native-build/` without changing their external targets.
+
+   ```bash
+   node scripts/isolate-gate-dependencies.mjs
+   BUN_INSTALL_CACHE_DIR="$PWD/.native-build/bun-cache" bun install --frozen-lockfile --ignore-scripts --backend=copyfile
+   node scripts/build-node-pty.mjs
+   node scripts/check-node-pty.mjs
+   ```
+
 2. Run focused checks and `bun run typecheck`. Use `bunx vitest run <file>` for focused Vitest tests.
 3. Format every changed supported file with `bunx prettier --write <changed files>`.
    For ignored docs, pass `--ignore-path /dev/null`.

@@ -1,4 +1,5 @@
 import { pbkdf2 } from 'node:crypto'
+import * as processGroups from './process-group.js'
 import { getEventListeners, once } from 'node:events'
 import {
   groupHasRunningMember,
@@ -9,7 +10,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { JsonlTransport } from './jsonl.js'
 import { JsonlRpcTransport } from './jsonrpc.js'
 import { DiagnosticTail, diagnosticError } from './diagnostics.js'
@@ -26,6 +27,54 @@ import {
   running,
   startFixture,
 } from './transport-test-helpers.js'
+
+const cleanupSpies: Array<{ mockRestore(): void }> = []
+beforeEach(() => {
+  const originalWait = processGroups.waitForProcessGroupExit
+  cleanupSpies.push(
+    vi
+      .spyOn(processGroups, 'waitForProcessGroupExit')
+      .mockImplementation(async (...args) => {
+        try {
+          return await originalWait(...args)
+        } catch (error) {
+          const cause = error as NodeJS.ErrnoException
+          console.error('FORGE_PROCESS_CLEANUP_DIAGNOSTIC', {
+            operation: 'waitForProcessGroupExit',
+            name: cause.name,
+            code: cause.code,
+            syscall: cause.syscall,
+            message: cause.message,
+            remainingMs: args[1] - performance.now(),
+          })
+          throw error
+        }
+      }),
+  )
+  const originalSignal = processGroups.signalProcessGroup
+  cleanupSpies.push(
+    vi
+      .spyOn(processGroups, 'signalProcessGroup')
+      .mockImplementation((...args) => {
+        try {
+          return originalSignal(...args)
+        } catch (error) {
+          const cause = error as NodeJS.ErrnoException
+          console.error('FORGE_PROCESS_CLEANUP_DIAGNOSTIC', {
+            operation: 'signalProcessGroup',
+            name: cause.name,
+            code: cause.code,
+            syscall: cause.syscall,
+            message: cause.message,
+          })
+          throw error
+        }
+      }),
+  )
+})
+afterEach(() => {
+  for (const spy of cleanupSpies.splice(0)) spy.mockRestore()
+})
 
 async function readyProcess(
   mode: string,
