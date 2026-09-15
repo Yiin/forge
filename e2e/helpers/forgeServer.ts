@@ -78,7 +78,7 @@ export async function proxyForgeApi(
 
 export async function stopProxiedForge(
   page: {
-    unrouteAll(options: { behavior: 'wait' }): Promise<void>
+    unrouteAll(options: { behavior: 'ignoreErrors' }): Promise<void>
   },
   forge: {
     stop(): Promise<void>
@@ -88,7 +88,10 @@ export async function stopProxiedForge(
   let stopFailure: { error: unknown } | undefined
   try {
     try {
-      await page.unrouteAll({ behavior: 'wait' })
+      // The settings route the specs end on keeps real harness-discovery
+      // requests in flight. Waiting for them would spend the whole test budget
+      // on work the test is done with.
+      await page.unrouteAll({ behavior: 'ignoreErrors' })
     } catch (error) {
       routeFailure = { error }
     }
