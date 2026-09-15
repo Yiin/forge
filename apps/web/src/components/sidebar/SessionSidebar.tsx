@@ -9,7 +9,8 @@ import {
   Plus,
   Search,
   Settings,
-  Terminal,
+  ArrowDownUp,
+  Workflow,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -38,8 +39,15 @@ import {
   filterScope,
   partitionSessions,
   relativeTime,
+  searchSessions,
+  sortSessions,
   settledPage,
 } from './sidebar-logic'
+import {
+  readSidebarView,
+  writeSidebarView,
+  type SidebarView,
+} from '../../lib/shell-storage'
 
 const iconButtonClass = 'size-11 pointer-fine:size-9'
 const navLinkClass =
@@ -67,9 +75,10 @@ export function SessionSidebar() {
   const upsertSession = useSessionsStore((state) => state.upsertSession)
   const removeSession = useSessionsStore((state) => state.removeSession)
   const setDrawerOpen = useShellStore((state) => state.setDrawerOpen)
-  const [scope, setScope] = useState<string | 'all'>('all')
+  const [view, setView] = useState<SidebarView>(() => readSidebarView())
   const [settledPageNumber, setSettledPageNumber] = useState(1)
   const [editing, setEditing] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [runs, setRuns] = useState<
     Array<{
       id: string
@@ -113,7 +122,21 @@ export function SessionSidebar() {
     return () => clearInterval(timer)
   }, [])
 
-  const scoped = useMemo(() => filterScope(sessions, scope), [sessions, scope])
+  const updateView = (patch: Partial<SidebarView>) => {
+    setView((current) => {
+      const next = { ...current, ...patch }
+      writeSidebarView(next)
+      return next
+    })
+  }
+  const scoped = useMemo(
+    () =>
+      sortSessions(
+        searchSessions(filterScope(sessions, view.scope), view.query),
+        view.sort,
+      ),
+    [sessions, view.scope, view.query, view.sort],
+  )
   const { active, settled } = partitionSessions(
     scoped.filter((session) => session.kind !== 'subagent'),
   )
@@ -135,6 +158,7 @@ export function SessionSidebar() {
     try {
       await api.renameSession(session.id, clean)
     } catch {
+      setActionError('Could not rename the session.')
       upsertSession(session)
     }
   }
@@ -143,6 +167,7 @@ export function SessionSidebar() {
     try {
       await api.settleSession(session.id, settled)
     } catch {
+      setActionError('Could not update the session archive state.')
       upsertSession(session)
     }
   }
@@ -161,6 +186,7 @@ export function SessionSidebar() {
     try {
       await api.deleteSession(session.id)
     } catch {
+      setActionError('Could not delete the session.')
       upsertSession(session)
     }
   }
@@ -194,6 +220,17 @@ export function SessionSidebar() {
           </Button>
         </div>
       </div>
+      {actionError && (
+        <p role="alert" className="px-2 text-xs text-destructive">
+          {actionError}
+          <button
+            className="ml-1 underline"
+            onClick={() => setActionError(null)}
+          >
+            Dismiss
+          </button>
+        </p>
+      )}
       <div className="flex flex-col gap-0.5">
         <Link
           to="/"
@@ -263,7 +300,7 @@ export function SessionSidebar() {
       </div>
       <div className="flex items-center gap-1 px-1">
         <Select
-          value={scope}
+          value={view.scope}
           items={[
             { value: 'all', label: 'All projects' },
             ...projects.map((project) => ({
@@ -272,7 +309,7 @@ export function SessionSidebar() {
             })),
           ]}
           onValueChange={(value) => {
-            setScope(value ?? 'all')
+            updateView({ scope: value ?? 'all' })
             setSettledPageNumber(1)
           }}
         >
@@ -296,6 +333,22 @@ export function SessionSidebar() {
           variant="ghost"
           size="icon"
           className={iconButtonClass}
+          aria-label="Session sort order"
+          title={
+            view.sort === 'updated' ? 'Sort by created' : 'Sort by updated'
+          }
+          onClick={() =>
+            updateView({
+              sort: view.sort === 'updated' ? 'created' : 'updated',
+            })
+          }
+        >
+          <ArrowDownUp className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={iconButtonClass}
           aria-label="New project"
           onClick={() => {
             setDrawerOpen(false)
@@ -304,6 +357,16 @@ export function SessionSidebar() {
         >
           <FolderPlus className="size-4" />
         </Button>
+      </div>
+      <div className="relative px-1">
+        <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
+        <Input
+          aria-label="Search sessions"
+          value={view.query}
+          onChange={(event) => updateView({ query: event.target.value })}
+          placeholder="Search sessions"
+          className="h-9 pl-8"
+        />
       </div>
       <ul className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
         {active.length === 0 && settled.length === 0 && (
@@ -357,6 +420,17 @@ export function SessionSidebar() {
         )}
       </ul>
       <div className="mt-auto flex flex-col gap-0.5 border-t border-sidebar-border pt-2">
+        <Link
+          to="/settings/epics"
+          className={navLinkClass}
+          activeProps={{
+            className: cn(navLinkClass, navLinkActiveClass),
+            'aria-current': 'page',
+          }}
+          onClick={() => setDrawerOpen(false)}
+        >
+          <Workflow className="size-4" /> Epics
+        </Link>
         <Link
           to="/settings"
           className={navLinkClass}
@@ -456,10 +530,9 @@ function SessionRow({
           <span className="shrink-0 text-xs text-muted-foreground">
             {relativeTime(session.lastActivityAt)}
           </span>
-          <Terminal
-            className="size-3.5 shrink-0 text-muted-foreground"
-            aria-label={session.harness}
-          />
+          <span className="hidden max-w-20 truncate text-[11px] text-muted-foreground sm:inline">
+            {session.branch || session.harness || ''}
+          </span>
         </button>
       )}
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>

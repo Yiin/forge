@@ -1,5 +1,6 @@
 import type { NavigateFn } from '@tanstack/react-router'
 import { api } from './api'
+import { readSidebarView } from './shell-storage'
 import { useDraftsStore } from '../stores/drafts'
 import {
   useSessionsStore,
@@ -99,7 +100,10 @@ export async function openNewDraft(
   useSessionsStore.getState().setSessions(sessions)
   useDraftsStore.getState().hydrate()
   useDraftsStore.getState().removeInvalid(projects.map((project) => project.id))
-  const project = selectDraftProject(projects, sessions)
+  const view = readSidebarView()
+  const project =
+    (view.scope !== 'all' && projects.find((item) => item.id === view.scope)) ||
+    selectDraftProject(projects, sessions)
   if (!project) return { kind: 'empty' }
   const draft = useDraftsStore.getState().getOrCreate(project.id)
   await navigate({

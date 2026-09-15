@@ -5,6 +5,8 @@ export type SidebarSession = {
   kind?: 'chat' | 'subagent' | 'epic_worker' | string
   status?: 'idle' | 'running' | 'errored' | 'archived' | string
   harness?: string
+  branch?: string | null
+  createdAt?: number | string
   lastActivityAt?: number | string
   snippet?: string
   unread?: boolean
@@ -19,6 +21,11 @@ export type SidebarRun = {
 }
 
 export const SETTLED_PAGE_SIZE = 25
+
+function timestamp(value: number | string | undefined) {
+  if (typeof value === 'number') return value
+  return value ? Date.parse(value) || 0 : 0
+}
 
 export function visibleSessions(sessions: SidebarSession[]) {
   return sessions.filter(
@@ -36,6 +43,38 @@ export function filterScope(
   return visibleSessions(sessions).filter(
     (session) => projectId === 'all' || session.projectId === projectId,
   )
+}
+
+export function searchSessions(sessions: SidebarSession[], query: string) {
+  const needle = query.trim().toLocaleLowerCase()
+  if (!needle) return sessions
+  return sessions.filter((session) =>
+    [session.title, session.snippet, session.harness, session.branch]
+      .filter(Boolean)
+      .some((value) => value!.toLocaleLowerCase().includes(needle)),
+  )
+}
+
+export function sortSessions(
+  sessions: SidebarSession[],
+  sort: 'updated' | 'created' = 'updated',
+) {
+  return [...sessions].sort((a, b) => {
+    const left = timestamp(sort === 'created' ? a.createdAt : a.lastActivityAt)
+    const right = timestamp(sort === 'created' ? b.createdAt : b.lastActivityAt)
+    return right - left || a.id.localeCompare(b.id)
+  })
+}
+
+export function navigationSessions(
+  sessions: SidebarSession[],
+  view: { scope: string; query: string; sort: 'updated' | 'created' },
+) {
+  const scoped = sortSessions(
+    searchSessions(filterScope(sessions, view.scope), view.query),
+    view.sort,
+  )
+  return partitionSessions(scoped).active
 }
 
 export function partitionSessions(sessions: SidebarSession[]) {
