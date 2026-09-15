@@ -39,6 +39,14 @@ const fixtures = [
   { type: 'turn_interrupted', reason: 'server restart' },
   { type: 'error', message: 'failed', code: 'E_FAIL' },
   {
+    type: 'plan',
+    explanation: 'Land the merge',
+    steps: [
+      { id: 'step-1', title: 'Merge main', status: 'completed' },
+      { id: 'step-2', title: 'Fix the gate', status: 'running' },
+    ],
+  },
+  {
     type: 'epic_triage',
     runId: 'run-1',
     beadId: 'bead-1',
