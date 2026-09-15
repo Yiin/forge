@@ -18,6 +18,27 @@ const message = (
 })
 
 describe('chat render model', () => {
+  it('projects every native passthrough event into a visible transcript row', () => {
+    const types = [
+      'content_block',
+      'source_reference',
+      'usage',
+      'usage_snapshot',
+      'file_change',
+      'child_updated',
+    ] as const
+    const items = toRenderModel(
+      types.map((type, index) =>
+        message({ type } as Message['content'], {
+          itemId: `native-${index}`,
+          seq: index + 1,
+        }),
+      ),
+    )
+    expect(items.filter((item) => item.kind === 'native')).toHaveLength(6)
+    expect(items.map((item) => item.kind)).toEqual(types.map(() => 'native'))
+  })
+
   it('renders an answered question with the labels the user clicked', () => {
     const items = toRenderModel([
       message(

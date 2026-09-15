@@ -8,6 +8,8 @@ const subagent = z.object({
   status: z.enum(['running', 'completed', 'failed', 'unknown']),
 })
 export const MessageContent = z.discriminatedUnion('type', [
+  // Native passthrough rows retain provider-neutral event fields. Their
+  // detailed validation happens at the harness boundary.
   z.object({ type: z.literal('content_block') }).catchall(z.unknown()),
   z.object({ type: z.literal('source_reference') }).catchall(z.unknown()),
   z.object({ type: z.literal('usage') }).catchall(z.unknown()),

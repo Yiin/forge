@@ -50,6 +50,22 @@ export type ChatRenderItem =
       card: Extract<Message['content'], { type: 'epic_triage' }>
     }
   | { kind: 'system'; id: string; text: string; code?: string; alert?: boolean }
+  | {
+      kind: 'native'
+      id: string
+      content: Extract<
+        Message['content'],
+        {
+          type:
+            | 'content_block'
+            | 'source_reference'
+            | 'usage'
+            | 'usage_snapshot'
+            | 'file_change'
+            | 'child_updated'
+        }
+      >
+    }
   | { kind: 'subagent'; id: string; child: SubagentSession }
   | {
       kind: 'activity'
@@ -275,6 +291,15 @@ export function toRenderModel(
         alert: true,
         ...(content.code ? { code: content.code } : {}),
       })
+    } else if (
+      content.type === 'content_block' ||
+      content.type === 'source_reference' ||
+      content.type === 'usage' ||
+      content.type === 'usage_snapshot' ||
+      content.type === 'file_change' ||
+      content.type === 'child_updated'
+    ) {
+      result.push({ kind: 'native', id: message.itemId, content })
     }
   }
   const placed = placeSubagents(result, children, anchors) as ChatRenderItem[]

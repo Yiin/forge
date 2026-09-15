@@ -60,7 +60,6 @@ function item(event: HarnessEvent): HarnessItem | undefined {
     case 'file_change':
     case 'source_reference':
     case 'usage':
-      return make({ ...event })
     case 'usage_snapshot':
       return make({ ...event })
     case 'request_cancelled':
