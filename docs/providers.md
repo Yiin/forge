@@ -14,6 +14,9 @@ Unsupported operations fail explicitly. A provider label alone does not promise 
 
 The dedicated ACP runtime owns its journal, artifacts, filesystem access, terminals, and request callbacks.
 Load requires the provider's advertised support. Gemini's dedicated profile does not support load.
+ACP runtimes retire after 256 roots or 24 hours.
+Load-capable profiles resume the saved binding after original cleanup finishes.
+Profiles without load support stop with an explicit resume error.
 Selected accounts are unsupported for Devin and custom ACP profiles.
 Grok questions use its original question protocol. Generic tool approvals do not become questions by guessing tool names.
 Plans remain progress events and do not create approval requests.
@@ -39,5 +42,8 @@ The browser fixtures use isolated data directories and account homes.
 `bun run package:release` bundles the server, web assets, migrations, native terminal binary, Kimi guardian, and Cursor sidecar.
 The package retains provider and dependency notices.
 `bun run smoke:packed-native` checks the package outside the checkout with synthetic peers.
-It verifies native turns, original resume binding, and packaged terminal assets without a live provider.
+It verifies a synthetic Claude turn, exact original resume binding, and a second turn after restart.
+It loads the packaged terminal addon and Cursor modules without calling SDK methods.
+This proves asset loading, not a live Cursor run or terminal execution.
+The smoke joins each original server shutdown and keeps evidence when a check or cleanup fails.
 The integration coordinator reruns this smoke after the final merge.
