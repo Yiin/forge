@@ -1,11 +1,23 @@
 import { Link } from '@tanstack/react-router'
-import { Settings, Cpu, Folder, Workflow, Keyboard } from 'lucide-react'
+import {
+  Settings,
+  Cpu,
+  Folder,
+  Workflow,
+  Keyboard,
+  Palette,
+  Bell,
+} from 'lucide-react'
 import { useShellStore } from '../../stores/shell'
 
 const items = [
   ['/settings/general', 'General', Settings],
-  ['/settings/keybindings', 'Keybindings', Keyboard],
-  ['/settings/harnesses', 'Harnesses', Cpu],
+  ['/settings/agents', 'Agents', Cpu],
+  ['/settings/accounts', 'Accounts', Cpu],
+  ['/settings/appearance', 'Appearance', Palette],
+  ['/settings/files', 'Files', Folder],
+  ['/settings/notifications', 'Notifications', Bell],
+  ['/settings/shortcuts', 'Shortcuts', Keyboard],
   ['/settings/projects', 'Projects', Folder],
   ['/settings/epics', 'Epics', Workflow],
 ] as const
@@ -15,7 +27,7 @@ export function SettingsNav() {
   return (
     <nav className="flex flex-col gap-1 p-2">
       <p className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Workspace
+        Settings
       </p>
       {items.map(([to, label, Icon]) => (
         <Link
