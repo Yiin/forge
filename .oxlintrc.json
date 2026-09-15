@@ -1,4 +1,4 @@
 {
   "env": { "es2022": true, "node": true },
-  "ignorePatterns": ["spike/**", "**/drizzle/**", "dist/**"]
+  "ignorePatterns": ["spike/**", "**/drizzle/**", "dist/**", ".native-build/**"]
 }

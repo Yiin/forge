@@ -1,4 +1,11 @@
-import { afterEach, beforeAll, describe, expect, test } from 'vitest'
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from 'vitest'
 import {
   chmod,
   copyFile,
@@ -46,6 +53,10 @@ function controlled<T>() {
   return { promise, resolve, reject }
 }
 const peer = fileURLToPath(new URL('./__fixtures__/peer.mjs', import.meta.url))
+const guardianEntry = fileURLToPath(
+  new URL('./__fixtures__/guardian.mjs', import.meta.url),
+)
+let runtime: string
 const paths: string[] = [],
   guardians: {
     child: ChildProcessWithoutNullStreams
@@ -59,6 +70,10 @@ beforeAll(async () => {
     cwd: root,
   })
 }, 30000)
+beforeEach(async () => {
+  runtime = await temp()
+  await fixtureEvidence('guardian_test.owns_runtime', { runtime })
+})
 afterEach(async () => {
   await fixtureEvidence('runner.logical_test_complete', { homes: paths })
   for (const owner of guardians.splice(0)) {
@@ -94,6 +109,49 @@ async function temp() {
   await chmod(value, 0o700)
   paths.push(value)
   return value
+}
+async function holdRegistry() {
+  const child = spawn(
+    process.execPath,
+    [
+      fileURLToPath(
+        new URL('./__fixtures__/registry-holder.mjs', import.meta.url),
+      ),
+      join(runtime, 'forge-kimi', 'registry.lock'),
+    ],
+    { stdio: ['pipe', 'pipe', 'pipe'] },
+  )
+  const closed = new Promise<void>((resolve) =>
+    child.once('close', () => resolve()),
+  )
+  guardians.push({ child, closed })
+  child.stderr.resume()
+  await deadline(
+    new Promise<void>((resolve, reject) => {
+      child.once('error', reject)
+      child.once('close', () =>
+        reject(new Error('Registry holder exited before admission')),
+      )
+      child.stdout.once('data', (bytes) => {
+        if (String(bytes) === 'locked\n') resolve()
+        else reject(new Error('Unexpected registry fixture response'))
+      })
+    }),
+    5000,
+  )
+  await fixtureEvidence('guardian_test.registry_held', {
+    runtime,
+    pid: child.pid,
+    startTicks: await processStartTicks(child.pid!),
+  })
+  return async () => {
+    child.stdin.end()
+    await deadline(closed, 5000)
+    await fixtureEvidence('guardian_test.registry_released', {
+      runtime,
+      pid: child.pid,
+    })
+  }
 }
 async function selected(scenario = {}): Promise<KimiLaunchAuthority> {
   const home = await temp()
@@ -182,7 +240,9 @@ async function startGuardian(
   const child = spawn(
     process.execPath,
     [
+      guardianEntry,
       artifact ?? (await resolveKimiGuardian()),
+      runtime,
       JSON.stringify(kimiLimits(overrides)),
     ],
     { cwd: authority.account.homePath, stdio: ['pipe', 'pipe', 'pipe'] },
@@ -230,6 +290,11 @@ async function startGuardian(
     }) + '\n',
   )
   const result = await deadline(ready.promise, 25000)
+  await fixtureEvidence('guardian_test.initialized', {
+    home: authority.account.homePath,
+    runtime,
+    result,
+  })
   if (result.type === 'result') {
     owner.native = Number(
       await readFile(join(authority.account.homePath, 'fixture.ready'), 'utf8'),
@@ -247,6 +312,38 @@ async function startGuardian(
 }
 
 describe('Kimi guardian process and release acceptance', () => {
+  test('reports registry contention before native startup without confusing it with home ownership', async () => {
+    const authority = await selected()
+    const effective = await effectiveAuthority(
+      captureAuthority(authority, kimiLimits()),
+    )
+    const seed = await KimiHomeLock.acquire(
+      effective.home,
+      kimiLimits(),
+      runtime,
+    )
+    await seed.release(true)
+    const release = await holdRegistry()
+    try {
+      const running = await startGuardian(authority)
+      expect(running.result, JSON.stringify(running.result)).toMatchObject({
+        type: 'error',
+        code: 'kimi_account_home_busy',
+        uncertain: false,
+      })
+      await deadline(running.closed, 10000)
+      await expect(
+        readFile(join(authority.account.homePath, 'fixture.ready')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await release()
+    }
+    const replacement = await guardian(authority)
+    expect(
+      replacement.result,
+      JSON.stringify(replacement.result),
+    ).toMatchObject({ type: 'result' })
+  }, 30000)
   test.each(['interrupted', 'held_shutdown'] as const)(
     'the owning runner settles its original guardian and native group after %s',
     async (mode) => {
@@ -263,6 +360,7 @@ describe('Kimi guardian process and release acceptance', () => {
           fileURLToPath(new URL('./__fixtures__/runner.mjs', import.meta.url)),
           JSON.stringify({
             artifact: await resolveKimiGuardian(),
+            runtime,
             authority: selectedAuthority,
             limits,
             log: ownershipLog,
@@ -284,7 +382,9 @@ describe('Kimi guardian process and release acceptance', () => {
           }),
           25000,
         )
-        expect(ready.result).toMatchObject({ type: 'result' })
+        expect(ready.result, JSON.stringify(ready.result)).toMatchObject({
+          type: 'result',
+        })
         const native = Number(
           await readFile(
             join(selectedAuthority.account.homePath, 'fixture.ready'),
@@ -325,7 +425,7 @@ describe('Kimi guardian process and release acceptance', () => {
             ),
           ).toBe(true)
         const lock = await retryFixtureAdmission(() =>
-          KimiHomeLock.acquire(authority.home, limits),
+          KimiHomeLock.acquire(authority.home, limits, runtime),
         )
         await lock.release(true)
       } finally {
@@ -357,7 +457,9 @@ describe('Kimi guardian process and release acceptance', () => {
     ).rejects.toMatchObject({ code: 'kimi_guardian_artifact_missing' })
     const authority = await selected({ banner: true }),
       running = await guardian(authority, {}, artifact)
-    expect(running.result.type).toBe('result')
+    expect(running.result, JSON.stringify(running.result)).toMatchObject({
+      type: 'result',
+    })
     expect(
       (await command(authority.account.homePath, { op: 'inspect' })).cwd,
     ).toBe(authority.account.homePath)
@@ -411,7 +513,7 @@ describe('Kimi guardian process and release acceptance', () => {
         captureAuthority(authority, kimiLimits()),
       )
       const replacement = await retryFixtureAdmission(() =>
-        KimiHomeLock.acquire(effective.home, kimiLimits()),
+        KimiHomeLock.acquire(effective.home, kimiLimits(), runtime),
       )
       await replacement.release(true)
     },
@@ -420,13 +522,15 @@ describe('Kimi guardian process and release acceptance', () => {
   test('holds the descriptor while a descendant survives its early leader exit', async () => {
     const authority = await selected(),
       running = await guardian(authority)
-    expect(running.result).toMatchObject({ type: 'result' })
+    expect(running.result, JSON.stringify(running.result)).toMatchObject({
+      type: 'result',
+    })
     const effective = await effectiveAuthority(
       captureAuthority(authority, kimiLimits()),
     )
     await command(authority.account.homePath, { op: 'spawn_descendant' })
     await expect(
-      KimiHomeLock.acquire(effective.home, kimiLimits()),
+      KimiHomeLock.acquire(effective.home, kimiLimits(), runtime),
     ).rejects.toMatchObject({ code: 'kimi_account_home_busy' })
     await command(authority.account.homePath, { op: 'exit' })
     await deadline(running.closed, 10000)
@@ -440,14 +544,16 @@ describe('Kimi guardian process and release acceptance', () => {
       running.messages.some((message) => message.type === 'cleanup_proved'),
     ).toBe(true)
     const replacement = await retryFixtureAdmission(() =>
-      KimiHomeLock.acquire(effective.home, kimiLimits()),
+      KimiHomeLock.acquire(effective.home, kimiLimits(), runtime),
     )
     await replacement.release(true)
   }, 30000)
   test('hard guardian death leaves a dirty fence until the captured group is absent', async () => {
     const authority = await selected(),
       running = await guardian(authority)
-    expect(running.result).toMatchObject({ type: 'result' })
+    expect(running.result, JSON.stringify(running.result)).toMatchObject({
+      type: 'result',
+    })
     const effective = await effectiveAuthority(
       captureAuthority(authority, kimiLimits()),
     )
@@ -460,8 +566,16 @@ describe('Kimi guardian process and release acceptance', () => {
         performance.now() + 5000,
       ),
     ).toBe(true)
+    const release = await holdRegistry()
+    try {
+      await expect(
+        KimiHomeLock.acquire(effective.home, kimiLimits(), runtime),
+      ).rejects.toMatchObject({ code: 'kimi_account_home_busy' })
+    } finally {
+      await release()
+    }
     await expect(
-      KimiHomeLock.acquire(effective.home, kimiLimits()),
+      KimiHomeLock.acquire(effective.home, kimiLimits(), runtime),
     ).rejects.toMatchObject({ code: 'kimi_home_cleanup_unproved' })
     expect(await processStartTicks(running.owner.native!)).toBe(
       running.owner.nativeTicks,
@@ -472,14 +586,16 @@ describe('Kimi guardian process and release acceptance', () => {
       performance.now() + 5000,
     )
     const replacement = await retryFixtureAdmission(() =>
-      KimiHomeLock.acquire(effective.home, kimiLimits()),
+      KimiHomeLock.acquire(effective.home, kimiLimits(), runtime),
     )
     await replacement.release(true)
   }, 30000)
   test('SIGTERM closes the owned group before the permanent lease becomes reusable', async () => {
     const authority = await selected(),
       running = await guardian(authority)
-    expect(running.result).toMatchObject({ type: 'result' })
+    expect(running.result, JSON.stringify(running.result)).toMatchObject({
+      type: 'result',
+    })
     await command(authority.account.homePath, { op: 'spawn_descendant' })
     running.child.kill('SIGTERM')
     await deadline(running.closed, 10000)
@@ -496,7 +612,9 @@ describe('Kimi guardian process and release acceptance', () => {
   test('parent EOF cleans the native group even when the response channel has ended', async () => {
     const authority = await selected(),
       running = await guardian(authority)
-    expect(running.result).toMatchObject({ type: 'result' })
+    expect(running.result, JSON.stringify(running.result)).toMatchObject({
+      type: 'result',
+    })
     await command(authority.account.homePath, { op: 'spawn_descendant' })
     running.child.stdin.end()
     await deadline(running.closed, 10000)
@@ -510,7 +628,7 @@ describe('Kimi guardian process and release acceptance', () => {
       captureAuthority(authority, kimiLimits()),
     )
     const replacement = await retryFixtureAdmission(() =>
-      KimiHomeLock.acquire(effective.home, kimiLimits()),
+      KimiHomeLock.acquire(effective.home, kimiLimits(), runtime),
     )
     await replacement.release(true)
   }, 30000)

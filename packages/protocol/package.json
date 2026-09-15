@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./terminal": "./src/terminal.ts",
     "./ids": "./src/ids.ts",
     "./message": "./src/message.ts",
     "./events": "./src/events.ts",

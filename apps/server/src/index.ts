@@ -1,7 +1,13 @@
 import { serve, type ServerType } from '@hono/node-server'
 import { Hono } from 'hono'
 import { createRequire } from 'node:module'
-import { createNodeWebSocket } from '@hono/node-ws'
+import type { Server } from 'node:http'
+import { WebSocketUpgrades } from './ws-upgrade.js'
+import { TerminalManager } from './terminals/manager.js'
+import { TerminalAuthority } from './terminals/origin.js'
+import { TerminalError } from './terminals/error.js'
+import { TerminalRequests, terminalRoutes } from './http/terminals.js'
+import { ServerShutdown } from './shutdown.js'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { mkdirSync } from 'node:fs'
 import { dirname, extname, join, resolve } from 'node:path'
@@ -258,9 +264,25 @@ export function createEpicSessionAdapter(manager: SessionManager) {
   }
 }
 
-export function startServer(
-  port = Number(process.env.FORGE_PORT ?? 3900),
-): ServerType {
+export function serverPort(
+  argument: number | undefined,
+  environment: string | undefined,
+  configured: number,
+) {
+  if (
+    argument === undefined &&
+    environment !== undefined &&
+    !/^(0|[1-9][0-9]*)$/.test(environment)
+  )
+    throw new Error('FORGE_PORT must be an integer from 0 through 65535')
+  const port =
+    argument ?? (environment === undefined ? configured : Number(environment))
+  if (!Number.isSafeInteger(port) || port < 0 || port > 65535)
+    throw new Error('Server port must be an integer from 0 through 65535')
+  return port
+}
+
+export function startServer(port?: number): ServerType {
   // Loaded lazily: the Bun e2e launcher cannot resolve node:sqlite, and it
   // never reaches this branch.
   const { DatabaseSync } = require('node:sqlite') as {
@@ -283,15 +305,6 @@ export function startServer(
        started_at = excluded.started_at,
        stopped_at = NULL`,
   ).run(currentVersion, Date.now())
-  const markStopped = async () => {
-    await workspaceFiles.close()
-    db.prepare('UPDATE server_boots SET stopped_at = ? WHERE id = 1').run(
-      Date.now(),
-    )
-    process.exit(0)
-  }
-  process.once('SIGTERM', markStopped)
-  process.once('SIGINT', markStopped)
   void pruneWorktreesForRepositories(
     (
       db
@@ -321,8 +334,7 @@ export function startServer(
       config = defaultConfig()
       saveConfigSync(configPath, config)
     } else {
-      console.error(error instanceof Error ? error.message : String(error))
-      config = defaultConfig()
+      throw error
     }
   }
   const configState: ConfigState = { current: config, path: configPath }
@@ -354,6 +366,14 @@ export function startServer(
       accountKindForHarness(harness, configState.current.harness[harness]) !==
       null,
     dataDir,
+  )
+  const terminals = new TerminalManager(db, workspaceFiles.targets)
+  uploadStore.setTerminalManager(terminals)
+  manager.setTerminalManager(terminals)
+  const terminalAuthority = new TerminalAuthority(config.terminalAccess)
+  const terminalRequests = new TerminalRequests(
+    terminals.limits.http,
+    terminals.limits.requestDeadlineMs,
   )
   const runner = new EpicRunner(
     db,
@@ -435,23 +455,66 @@ export function startServer(
     workspaceFiles,
   )
   usagePoller.start()
-  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
-  app.get('/ws', websocketRoute(upgradeWebSocket, db, bus))
-  const server = serve({ fetch: app.fetch, port })
-  injectWebSocket(server)
-  // Stop SSE and file work before waiting for HTTP connections to close.
-  const closeServer = server.close.bind(server)
-  server.close = ((callback?: (error?: Error) => void) => {
-    void workspaceFiles.close().then(() => closeServer(callback))
-    return server
-  }) as typeof server.close
-  server.on('close', () => {
-    void workspaceFiles.close()
-    process.removeListener('SIGTERM', markStopped)
-    process.removeListener('SIGINT', markStopped)
+  const upgrades = new WebSocketUpgrades(
+    app,
+    terminals.limits.http,
+    terminals.limits.requestDeadlineMs,
+  )
+  app.get('/ws', websocketRoute(upgrades.upgradeWebSocket, db, bus))
+  app.route(
+    '/',
+    terminalRoutes(terminals, terminalAuthority, upgrades, terminalRequests),
+  )
+  const server = serve(
+    {
+      fetch: app.fetch,
+      port: serverPort(port, process.env.FORGE_PORT, config.port),
+    },
+    (address) => terminalAuthority.bind(address.port),
+  )
+  upgrades.install(server as Server)
+  const shutdown = new ServerShutdown(
+    server as Server,
+    () => {
+      terminals.stopAccepting()
+      terminalRequests.stopAccepting()
+      upgrades.stopAccepting()
+    },
+    () => {
+      db.prepare('UPDATE server_boots SET stopped_at = ? WHERE id = 1').run(
+        Date.now(),
+      )
+      process.removeListener('SIGTERM', shutdown.signal)
+      process.removeListener('SIGINT', shutdown.signal)
+    },
+    terminals.limits.shutdownCallbacks,
+  )
+  shutdown.addCleanupHook(() => terminalRequests.settled())
+  shutdown.addCleanupHook(async () => {
+    if (!(await terminals.closeAll()))
+      throw new TerminalError(
+        'cleanup_unknown',
+        503,
+        'Terminal cleanup is unknown',
+      )
+  })
+  shutdown.addCleanupHook(async () => {
+    if (!(await upgrades.close()))
+      throw new TerminalError(
+        'cleanup_unknown',
+        503,
+        'WebSocket cleanup is unknown',
+      )
+  })
+  shutdown.addCleanupHook(() => workspaceFiles.close())
+  shutdown.addCleanupHook(() => {
     loginManager.close()
     usagePoller.stop()
+    uploadStore.close()
+    manager.close()
   })
+  process.on('SIGTERM', shutdown.signal)
+  process.on('SIGINT', shutdown.signal)
   return server
 }
 

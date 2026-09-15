@@ -55,6 +55,12 @@ function newId() {
 }
 
 export class UploadStore {
+  private terminals?: import('../terminals/manager.js').TerminalManager
+  setTerminalManager(
+    manager: import('../terminals/manager.js').TerminalManager,
+  ) {
+    this.terminals = manager
+  }
   private readonly bus: EventBus
   private readonly now: () => number
   private readonly sweeper: ReturnType<typeof setInterval>
@@ -504,6 +510,13 @@ export class UploadStore {
   }
 
   async deleteSession(id: string) {
+    const operation = () => this.deleteSessionData(id)
+    return this.terminals
+      ? this.terminals.removeSession(id, operation)
+      : operation()
+  }
+
+  private async deleteSessionData(id: string) {
     const session = this.db
       .prepare('SELECT project_id FROM sessions WHERE id = ?')
       .get(id) as { project_id: string } | undefined
@@ -536,6 +549,13 @@ export class UploadStore {
   }
 
   async deleteProject(id: string) {
+    const operation = () => this.deleteProjectData(id)
+    return this.terminals
+      ? this.terminals.removeProject(id, operation)
+      : operation()
+  }
+
+  private async deleteProjectData(id: string) {
     const project = this.db
       .prepare('SELECT id FROM projects WHERE id = ?')
       .get(id) as { id: string } | undefined

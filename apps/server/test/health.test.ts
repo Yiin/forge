@@ -77,6 +77,8 @@ describe('health endpoint', () => {
         'gemini',
         'opencode',
         'grok',
+        'devin',
+        'hermes',
         'pi',
         'mock',
       ])

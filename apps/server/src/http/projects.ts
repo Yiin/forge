@@ -3,9 +3,15 @@ import { createProject, getProject } from '../db/queries.js'
 import { createProject as createProjectSchema } from '@forge/protocol/commands'
 import type { DatabaseSync } from 'node:sqlite'
 import type { UploadStore } from '../uploads/store.js'
+import { TerminalError } from '../terminals/error.js'
 
 export function projectRoutes(db: DatabaseSync, uploads?: UploadStore) {
   const app = new Hono()
+  app.onError((error, c) => {
+    if (error instanceof TerminalError)
+      return c.json(error.body(), error.status)
+    throw error
+  })
   app.post('/api/projects', async (c) => {
     const value = createProjectSchema.safeParse(await c.req.json())
     if (!value.success) return c.json({ error: value.error.message }, 400)

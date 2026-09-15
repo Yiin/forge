@@ -30,14 +30,16 @@ jobs:
           cache: true
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
-      - run: bun install --frozen-lockfile
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile --ignore-scripts --backend=copyfile
+      - run: node scripts/build-node-pty.mjs
+      - run: node scripts/check-node-pty.mjs
       - name: Build web assets
         run: (cd apps/web && bunx vite build)
       - name: Build Node server bundle
         run: |
           mkdir -p dist
-          bun build --target=node apps/server/src/index.ts --outfile dist/forge-server.js
+          bun build --target=node --define 'process.env.NODE_ENV=process.env.NODE_ENV' apps/server/src/index.ts --outfile dist/forge-server.js
           bun run build:kimi-guardian
       - name: Pack release
         id: pack
@@ -55,11 +57,11 @@ jobs:
           cp -R apps/server/drizzle/. "$staging/apps/drizzle/"
           cp -R apps/web/dist/. "$staging/web/"
           cp apps/server/package.json "$staging/apps/server/package.json"
-          # node-pty has no linux-x64 prebuild; it compiles on install. The
-          # bundle's native loader checks build/Release next to index.js.
-          # The isolated linker puts the package under apps/server.
+          # Pack the verified owned build beside the bundle's native loader.
           mkdir -p "$staging/apps/server/src/build/Release"
           cp apps/server/node_modules/node-pty/build/Release/pty.node "$staging/apps/server/src/build/Release/"
+          cp apps/server/node_modules/node-pty/build/Release/forge-owned-build.json "$staging/apps/server/src/build/Release/"
+          cp apps/server/node_modules/node-pty/LICENSE "$staging/apps/server/src/build/Release/node-pty.LICENSE"
           if [ -f apps/server/node_modules/node-pty/build/Release/spawn-helper ]; then
             cp apps/server/node_modules/node-pty/build/Release/spawn-helper "$staging/apps/server/src/build/Release/"
           fi
@@ -73,6 +75,8 @@ jobs:
           tar -C "$RUNNER_TEMP" -czf "dist/forge-linux-x64.tar.gz" forge-linux-x64
           (cd dist && sha256sum forge-linux-x64.tar.gz "forge-client-${version}.tgz" > checksums.txt)
           printf 'version=%s\nclient_tarball=dist/forge-client-%s.tgz\n' "$version" "$version" >> "$GITHUB_OUTPUT"
+      - name: Extracted terminal smoke
+        run: node scripts/terminal-release-smoke.mjs dist/forge-linux-x64.tar.gz "$RUNNER_TEMP/forge-terminal-smoke"
       - name: Boot smoke
         env:
           FORGE_VERSION: ${{ steps.pack.outputs.version }}

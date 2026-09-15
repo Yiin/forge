@@ -16,6 +16,9 @@
     "node-pty"
   ],
   "scripts": {
+    "postinstall": "node scripts/install-native.mjs",
+    "native:build": "node scripts/build-node-pty.mjs",
+    "native:check": "node scripts/check-node-pty.mjs",
     "lint": "oxlint .",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check .",
@@ -27,10 +30,14 @@
     "check": "bun run lint && bun run fmt:check && bun run typecheck && bun run test"
   },
   "devDependencies": {
+    "node-gyp": "11.4.2",
     "@types/node": "^24.0.0",
     "oxlint": "^1.15.0",
     "prettier": "^3.6.2",
     "typescript": "^5.9.0",
     "vitest": "^3.2.4"
+  },
+  "patchedDependencies": {
+    "node-pty@1.1.0": "patches/node-pty@1.1.0.patch"
   }
 }

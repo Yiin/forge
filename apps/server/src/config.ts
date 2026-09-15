@@ -22,6 +22,7 @@ import {
 } from '@forge/protocol/config'
 import { epicRunConfig, type EpicRunConfig } from '@forge/protocol/rolePolicy'
 import { join } from 'node:path'
+import { validateTerminalAccess } from './terminals/origin.js'
 
 type SqliteDb = {
   exec(sql: string): unknown
@@ -117,6 +118,7 @@ export function defaultConfig(
   return {
     dataDir: resolve(process.cwd(), 'data'),
     port: 3900,
+    terminalAccess: { mode: 'loopback' },
     harness,
     settings: {
       titleGeneration: true,
@@ -256,6 +258,7 @@ export function loadConfigSync(path?: string): ForgeConfig {
   const document = parsed as {
     dataDir?: unknown
     port?: unknown
+    terminalAccess?: unknown
     harness?: Record<string, unknown>
     settings?: Record<string, unknown>
   }
@@ -282,6 +285,9 @@ export function loadConfigSync(path?: string): ForgeConfig {
   const checked = forgeConfigSchema.safeParse({
     dataDir: document.dataDir ?? resolve(dirname(file), 'data'),
     port: document.port ?? 3900,
+    terminalAccess: validateTerminalAccess(
+      document.terminalAccess ?? { mode: 'loopback' },
+    ),
     harness: result,
     settings: document.settings,
   })
@@ -300,6 +306,7 @@ export async function loadConfig(path?: string): Promise<ForgeConfig> {
 const configBody = (config: ForgeConfig) => ({
   dataDir: config.dataDir,
   port: config.port,
+  terminalAccess: validateTerminalAccess(config.terminalAccess),
   harness: config.harness,
   settings: config.settings,
 })

@@ -33,6 +33,7 @@ function setup() {
     current: {
       dataDir: root,
       port: 3900,
+      terminalAccess: { mode: 'loopback' as const },
       harness: {
         claude: {
           name: 'Claude',

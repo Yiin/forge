@@ -3,9 +3,15 @@ import type { DatabaseSync } from 'node:sqlite'
 import { createProject, getActiveSession, listSessions } from '../db/queries.js'
 import type { UploadStore } from '../uploads/store.js'
 import { sessionResponses } from './session-response.js'
+import { TerminalError } from '../terminals/error.js'
 
 export function workspaceRoutes(db: DatabaseSync, uploads?: UploadStore) {
   const app = new Hono()
+  app.onError((error, c) => {
+    if (error instanceof TerminalError)
+      return c.json(error.body(), error.status)
+    throw error
+  })
   app.get('/api/projects', (c) => {
     const projects = db
       .prepare(

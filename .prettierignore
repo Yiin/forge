@@ -2,6 +2,7 @@ spike/
 **/drizzle/
 dist/
 node_modules/
+.native-build/
 .beads/
 AGENTS.md
 CLAUDE.md

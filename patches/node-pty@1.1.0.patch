@@ -1,0 +1,900 @@
+diff --git a/lib/index.js b/lib/index.js
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -49,4 +49,9 @@
+  * could be removed at any time.
+  */
+ exports.native = (process.platform !== 'win32' ? utils_1.loadNativeModule('pty').module : null);
++if (process.platform === 'linux') {
++    var owned = require('./unixTerminal');
++    exports.spawnOwnedLinuxV1 = owned.spawnOwnedLinuxV1;
++    exports.ownedLinuxV1 = owned.ownedLinuxV1;
++}
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/lib/unixTerminal.js b/lib/unixTerminal.js
+--- a/lib/unixTerminal.js
++++ b/lib/unixTerminal.js
+@@ -35,7 +35,7 @@
+ var DESTROY_SOCKET_TIMEOUT_MS = 200;
+ var UnixTerminal = /** @class */ (function (_super) {
+     __extends(UnixTerminal, _super);
+-    function UnixTerminal(file, args, opt) {
++    function UnixTerminal(file, args, opt, owned) {
+         var _a, _b;
+         var _this = _super.call(this, opt) || this;
+         _this._boundClose = false;
+@@ -89,12 +89,13 @@
+             _this.emit('exit', code, signal);
+         };
+         // fork
+-        var term = pty.fork(file, args, parsedEnv, cwd, _this._cols, _this._rows, uid, gid, (encoding === 'utf8'), helperPath, onexit);
++        var term = owned || pty.fork(file, args, parsedEnv, cwd, _this._cols, _this._rows, uid, gid, (encoding === 'utf8'), helperPath, onexit);
+         _this._socket = new tty.ReadStream(term.fd);
++        if (owned) owned.socket = _this._socket;
+         if (encoding !== null) {
+             _this._socket.setEncoding(encoding);
+         }
+-        _this._writeStream = new CustomWriteStream(term.fd, (encoding || undefined));
++        if (!owned) _this._writeStream = new CustomWriteStream(term.fd, (encoding || undefined));
+         // setup
+         _this._socket.on('error', function (err) {
+             // NOTE: fs.ReadStream gets EAGAIN twice at first:
+@@ -343,4 +344,114 @@
+     };
+     return CustomWriteStream;
+ }());
+-//# sourceMappingURL=unixTerminal.js.map
+\ No newline at end of file
++'use strict';
++// Forge's opt-in extension. This module uses node-pty's ordinary native loader.
++const { loadNativeModule } = require('./utils');
++const live = new Set();
++let probeOwner;
++function ownedBinding() {
++  if (process.platform !== 'linux' || process.versions.bun || Number(process.versions.node.split('.')[0]) !== 24) throw new Error('Owned PTYs require Node 24 on Linux');
++  const module = loadNativeModule('pty').module;
++  if (module.forgeOwnedApiVersion !== 1) throw new Error('Forge owned node-pty build is required');
++  return module;
++}
++function spawnOwnedLinuxV1(file, args, options) {
++  return spawnOwnedReceipt(file, args, options, false);
++}
++function spawnOwnedReceipt(file, args, options, trustedProbe) {
++  const api = ownedBinding();
++  let resolveReady, rejectReady, resolveExit;
++  const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
++  void ready.catch(() => {});
++  const leaderExit = new Promise(resolve => { resolveExit = resolve; });
++  let adopted = null;
++  let term;
++  const receipt = Object.freeze({ get pty() { return adopted; }, get token() { return term.token; }, ready, leaderExit });
++  term = (trustedProbe ? api.spawnOwnedProbeV1 : api.spawnOwnedV1)(file, args, options, event => {
++    if (event.type === 'ready') {
++      if (event.error) rejectReady(new Error(event.error));
++      else resolveReady({ identity: Object.freeze(event.identity) });
++    } else if (!event.error) {
++      const result = Object.freeze({ exitCode: event.exitCode, signal: event.signal });
++      resolveExit(result);
++      adopted?.emit('exit', result.exitCode, result.signal);
++    }
++  });
++  // A forgotten receipt remains reachable until the original child's final reap.
++  live.add(receipt);
++  try {
++    if (term.testAdoptionFailure) throw new Error('Injected socket adoption failure');
++    adopted = new UnixTerminal(file, args, { ...options, env: { ...options.env } }, term);
++    api.adoptOwnedV1(term.token, true);
++    const socket = term.socket;
++    socket.once('close', () => { api.adoptOwnedV1(term.token, false); });
++    // Public kill/destroy/write have incompatible ownership or buffering rules.
++    for (const method of ['kill', 'destroy', 'write']) Object.defineProperty(adopted, method, { writable: method === 'write', value() { throw new Error('Use the owned terminal operation'); } });
++  } catch (error) {
++    api.abortBeforeReleaseV1(term.token);
++    if (term.socket) {
++      if (!api.ownedStateV1(term.token).socketAdopted) api.adoptOwnedV1(term.token, true);
++      term.socket.once('close', () => { api.adoptOwnedV1(term.token, false); });
++      term.socket.destroy();
++    } else api.adoptOwnedV1(term.token, false);
++    rejectReady(error);
++  }
++  return receipt;
++}
++const ownedLinuxV1 = Object.freeze({
++  forgeOwnedApiVersion: 1,
++  releaseOwnedV1: token => ownedBinding().releaseOwnedV1(token),
++  abortBeforeReleaseV1: token => ownedBinding().abortBeforeReleaseV1(token),
++  inspectOwnedV1: (token, limits) => ownedBinding().inspectOwnedV1(token, limits),
++  signalOwnedV1: (token, member, signal) => ownedBinding().signalOwnedV1(token, member, signal),
++  ownedStateV1: token => ownedBinding().ownedStateV1(token),
++  async reapOwnedV1(token, limits) {
++    const result = await ownedBinding().reapOwnedV1(token, limits);
++    if (result.status === 'complete') for (const receipt of live) if (receipt.token === token) live.delete(receipt);
++    return result;
++  },
++  probeOwnedLinuxV1(deadlineMs) {
++    if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 1000) throw new RangeError('Invalid probe deadline');
++    if (probeOwner?.attempt) return probeOwner.attempt;
++    if (probeOwner?.result?.cleanupComplete) return Promise.resolve(probeOwner.result);
++    const owner = probeOwner ??= { receipt: null, attempt: null, result: null, facts: { apiVersion: 1, supported: false, cleanupComplete: false, linux: process.platform === 'linux', pidfdOpen: false, pidfdSendSignal: false, retainedChildWait: false, reason: null } };
++    const attempt = Promise.resolve().then(async () => {
++      const result = { ...owner.facts, cleanupComplete: false };
++      if (!owner.receipt) {
++        try {
++          const api = ownedBinding();
++          owner.receipt = spawnOwnedReceipt('/forge-owned-trusted-probe', [], { cwd: '/', env: {}, cols: 80, rows: 24, encoding: null, name: 'xterm-256color', startupDeadlineMs: deadlineMs }, true);
++          await owner.receipt.ready;
++          result.pidfdOpen = api.ownedStateV1(owner.receipt.token).leaderPidfdOpen;
++          result.pidfdSendSignal = api.checkOwnedPidfdV1(owner.receipt.token);
++          if (!result.pidfdSendSignal) throw new Error('pidfd_send_signal is unavailable');
++          if (!api.releaseOwnedV1(owner.receipt.token).released) throw new Error('Owned probe release failed');
++          await owner.receipt.leaderExit;
++          result.retainedChildWait = api.ownedStateV1(owner.receipt.token).anchorRetained;
++          if (!result.retainedChildWait) throw new Error('Retained child wait is unavailable');
++        } catch (error) { result.reason = String(error.message || error).slice(0, 128); }
++        owner.facts = { ...result };
++      }
++      const receipt = owner.receipt;
++      if (receipt) {
++        const api = ownedBinding();
++        api.abortBeforeReleaseV1(receipt.token);
++        await receipt.leaderExit;
++        const socket = receipt.pty?._socket;
++        if (socket && !socket.closed) await new Promise(resolve => { socket.once('close', resolve); socket.destroy(); });
++        const reaped = await ownedLinuxV1.reapOwnedV1(receipt.token, { maxEntries: 65536, maxBytes: 268435456, maxStatBytes: 4096, maxMembers: 256, deadlineMs });
++        const state = api.ownedStateV1(receipt.token);
++        result.cleanupComplete = reaped.status === 'complete' && state.phase === 'reaped' && state.socketClosed && !state.leaderPidfdOpen && state.openControlEndpoints === 0 && state.waitWorkerSettled && state.pendingOperations === 0 && (!socket || socket.closed && socket._handle === null);
++        if (!result.cleanupComplete) result.reason = 'Owned probe cleanup is unknown';
++      } else result.cleanupComplete = true;
++      result.supported = result.cleanupComplete && result.reason === null && result.pidfdOpen && result.pidfdSendSignal && result.retainedChildWait;
++      owner.result = Object.freeze(result);
++      return owner.result;
++    });
++    owner.attempt = attempt;
++    void attempt.then(() => { if (owner.attempt === attempt) owner.attempt = null; }, () => { if (owner.attempt === attempt) owner.attempt = null; });
++    return attempt;
++  }
++});
++exports.spawnOwnedLinuxV1 = spawnOwnedLinuxV1;
++exports.ownedLinuxV1 = ownedLinuxV1;
+diff --git a/scripts/post-install.js b/scripts/post-install.js
+--- a/scripts/post-install.js
++++ b/scripts/post-install.js
+@@ -4,6 +4,8 @@
+ const os = require('os');
+ const path = require('path');
+ 
++if (process.platform === 'linux') process.exit(0);
++
+ const RELEASE_DIR = path.join(__dirname, '../build/Release');
+ const BUILD_FILES = [
+   path.join(RELEASE_DIR, 'conpty.node'),
+diff --git a/scripts/prebuild.js b/scripts/prebuild.js
+--- a/scripts/prebuild.js
++++ b/scripts/prebuild.js
+@@ -3,6 +3,12 @@
+ const fs = require('fs');
+ const path = require('path');
+ 
++// Forge builds Linux from the maintained patch with its pinned Node and headers.
++if (process.platform === 'linux') {
++  console.log('Forge Linux native build is deferred to native:build');
++  process.exit(0);
++}
++
+ /**
+  * This script checks for the prebuilt binaries for the current platform and
+  * architecture. It exits with 0 if prebuilds are found and 1 if not.
+diff --git a/src/index.ts b/src/index.ts
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -50,3 +50,7 @@
+  * could be removed at any time.
+  */
+ export const native = (process.platform !== 'win32' ? loadNativeModule('pty').module : null);
++
++// The maintained owned wrapper leaves the ordinary spawn path unchanged.
++export const ownedLinuxV1: import('node-pty').OwnedLinuxV1 | undefined = process.platform === 'linux' ? require('./unixTerminal').ownedLinuxV1 : undefined;
++export const spawnOwnedLinuxV1: typeof import('node-pty').spawnOwnedLinuxV1 | undefined = process.platform === 'linux' ? require('./unixTerminal').spawnOwnedLinuxV1 : undefined;
+diff --git a/src/terminal.ts b/src/terminal.ts
+--- a/src/terminal.ts
++++ b/src/terminal.ts
+@@ -142,7 +142,7 @@
+       delete (this._socket as any)._decoder;
+     }
+     if (encoding) {
+-      this._socket.setEncoding(encoding);
++      this._socket.setEncoding(encoding as BufferEncoding);
+     }
+   }
+ 
+diff --git a/src/unix/pty.cc b/src/unix/pty.cc
+--- a/src/unix/pty.cc
++++ b/src/unix/pty.cc
+@@ -788,7 +788,475 @@
+  * Init
+  */
+ 
++/* Forge's opt-in Linux ownership extension. Upstream node-pty MIT license applies.
++ * The unreaped child anchors its SID. Only checked pidfds can deliver signals.
++ * Stock PtyFork and its waitpid thread do not use this extension.
++ */
++#if defined(__linux__)
++#include <sys/syscall.h>
++#include <dirent.h>
++#include <poll.h>
++#include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <mutex>
++#include <sstream>
++#include <vector>
++#include <cmath>
++#include <memory>
++
++namespace forge_owned {
++using Clock = std::chrono::steady_clock;
++static std::atomic<unsigned> jobs{0};
++static unsigned owners = 0;
++static Napi::FunctionReference constructor;
++#if defined(FORGE_OWNED_TESTING)
++struct TestFaults { std::string startup; unsigned callbackDelay=0, commandDelay=0; bool reapUnknown=false, signalUnknown=false, queueFailure=false; };
++static TestFaults testFaults;
++#endif
++struct Identity { pid_t pid = 0, sid = 0; std::string start; char state = '?'; };
++struct Limits { unsigned entries, bytes, statBytes, members, milliseconds; };
++struct Scan { std::string status = "unknown"; std::vector<Identity> members; unsigned entries = 0, bytes = 0; };
++static void closeFd(int& fd) { if (fd >= 0) { int old = fd; fd = -1; close(old); } }
++static bool readFile(const std::string& path, unsigned cap, std::string& out, unsigned* charged = nullptr) {
++  int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
++  if (fd < 0) return false;
++  char buffer[4097];
++  ssize_t n = read(fd, buffer, cap + 1);
++  close(fd);
++  if (n > 0 && charged) *charged += static_cast<unsigned>(n);
++  if (n <= 0 || static_cast<unsigned>(n) > cap) return false;
++  out.assign(buffer, n);
++  return true;
++}
++static bool identity(pid_t pid, unsigned cap, Identity& result, unsigned* charged = nullptr) {
++  std::string text;
++  if (!readFile("/proc/" + std::to_string(pid) + "/stat", cap, text, charged)) return false;
++  auto end = text.rfind(')');
++  if (end == std::string::npos || text.back() != '\n') return false;
++  std::istringstream fields(text.substr(end + 2));
++  std::string field;
++  result.pid = pid;
++  for (unsigned i = 0; i <= 19; i++) {
++    if (!(fields >> field)) return false;
++    if (i == 0) result.state = field[0];
++    if (i == 3) { char* e; long n = strtol(field.c_str(), &e, 10); if (*e || n < 0 || n > INT32_MAX) return false; result.sid = n; }
++    if (i == 19) { if (field.find_first_not_of("0123456789") != std::string::npos) return false; result.start = field; }
++  }
++  return true;
++}
++static bool same(const Identity& a, const Identity& b) { return a.pid == b.pid && a.sid == b.sid && a.start == b.start; }
++static bool running(const Identity& i) { return i.state != 'Z' && i.state != 'X' && i.state != 'x'; }
++static Napi::Object jsIdentity(Napi::Env env, const Identity& id) {
++  auto out = Napi::Object::New(env);
++  out.Set("pid", id.pid); out.Set("sid", id.sid); out.Set("startTimeTicks", id.start); return out;
++}
++static unsigned integer(Napi::Env env, Napi::Value value, unsigned max, const char* label) {
++  if (!value.IsNumber()) throw Napi::TypeError::New(env, label);
++  double n = value.As<Napi::Number>().DoubleValue();
++  if (!std::isfinite(n) || n < 1 || n > max || floor(n) != n) throw Napi::RangeError::New(env, label);
++  return static_cast<unsigned>(n);
++}
++static Limits limits(Napi::Env env, Napi::Value value) {
++  if (!value.IsObject()) throw Napi::TypeError::New(env, "Invalid scan limits");
++  auto v = value.As<Napi::Object>();
++  return {integer(env,v.Get("maxEntries"),65536,"maxEntries"), integer(env,v.Get("maxBytes"),268435456,"maxBytes"),
++    integer(env,v.Get("maxStatBytes"),4096,"maxStatBytes"), integer(env,v.Get("maxMembers"),256,"maxMembers"), integer(env,v.Get("deadlineMs"),5000,"deadlineMs")};
++}
++class Owner : public Napi::ObjectWrap<Owner> {
++ public:
++  std::mutex mutex;
++  std::condition_variable started;
++  std::thread thread;
++  Napi::ThreadSafeFunction callback;
++  pid_t pid = 0;
++  int master = -1, leaderFd = -1, releaseFd = -1, statusFd = -1;
++  Identity leader;
++  std::string boot, phase = "setup", setupError;
++  bool committed = false, released = false, aborted = false, adopted = false, socketClosed = false;
++  bool waitSettled = false, reaped = false, childStarted = false, ownershipReleased = false;
++  bool callbackFinalized = false, callbackInitialized = false, trustedProbe = false;
++  char ptyName[128]{};
++  std::unique_ptr<Napi::Promise::Deferred> reapCompletion;
++  unsigned pending = 0;
++  unsigned deadline = 6000;
++#if defined(FORGE_OWNED_TESTING)
++  TestFaults faults;
++#endif
++  int exitCode = -1, exitSignal = -1;
++  Owner(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Owner>(info) {
++    if (info.Length() != 1 || !info[0].IsExternal()) throw Napi::TypeError::New(info.Env(), "Owned tokens have no public constructor");
++  }
++  ~Owner() { if (thread.joinable()) thread.join(); }
++  bool anchor() {
++    if (reaped || leader.pid == 0 || leaderFd < 0) return false;
++    Identity now;
++    return identity(pid,4096,now) && same(leader,now);
++  }
++  Scan scan(const Limits& l) {
++    Scan out;
++    if (!anchor()) return out;
++    auto until = Clock::now() + std::chrono::milliseconds(l.milliseconds);
++    DIR* dir = opendir("/proc");
++    if (!dir) return out;
++    out.status = "complete";
++    while (true) {
++      errno = 0;
++      auto entry = readdir(dir);
++      if (!entry) { if (errno) out.status = "unknown"; break; }
++      const char* name = entry->d_name;
++      if (!*name || strspn(name,"0123456789") != strlen(name)) continue;
++      if (++out.entries > l.entries || out.bytes + l.statBytes + 1 > l.bytes || Clock::now() >= until) { out.status = "unknown"; break; }
++      char* end;
++      long candidate = strtol(name,&end,10);
++      if (*end || candidate <= 0 || candidate > INT32_MAX) { out.status = "unknown"; break; }
++      Identity member;
++      if (!identity(candidate,l.statBytes,member,&out.bytes)) { out.status = "changed"; break; }
++      if (member.sid == leader.sid && running(member)) {
++        if (out.members.size() >= l.members) { out.status = "unknown"; break; }
++        out.members.push_back(member);
++      }
++    }
++    closedir(dir);
++    if (!anchor()) out.status = "unknown";
++    return out;
++  }
++  void revoke() { aborted = true; closeFd(releaseFd); if (!released && !reaped) phase = "aborted"; }
++  void startWaiter() {
++    auto until = Clock::now() + std::chrono::milliseconds(deadline);
++    {
++      std::unique_lock<std::mutex> lock(mutex);
++      started.wait(lock,[this]{return childStarted;});
++      if (!callbackInitialized) { waitSettled = true; return; }
++      if (!committed) {
++        waitSettled = true;phase = "aborted";
++        lock.unlock();
++        callback.BlockingCall(this,[](Napi::Env env,Napi::Function cb,Owner*) {
++          if(!env||cb.IsEmpty())return;
++          auto event=Napi::Object::New(env);event.Set("type","ready");event.Set("error","Owned forkpty failed");cb.Call({event});
++        });
++        callback.BlockingCall(this,[](Napi::Env env,Napi::Function cb,Owner*) {
++          if(!env||cb.IsEmpty())return;
++          auto event=Napi::Object::New(env);event.Set("type","exit");event.Set("exitCode",env.Null());event.Set("signal",env.Null());cb.Call({event});
++        });
++        return;
++      }
++    }
++    int status;
++    pollfd pfd{statusFd,POLLIN,0};
++    do { status = poll(&pfd,1,std::max(0,static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(until-Clock::now()).count()))); } while (status < 0 && errno == EINTR && Clock::now() < until);
++    unsigned char ready = 0;
++    if (status > 0) { if (read(statusFd,&ready,1) != 1) ready = 0; }
++    {
++      std::lock_guard<std::mutex> lock(mutex);
++      closeFd(statusFd);
++      bool identified = identity(pid,4096,leader);
++#if defined(FORGE_OWNED_TESTING)
++      if(faults.startup=="stat")identified=false;
++#endif
++      if (ready != 1 || !identified || leader.pid != leader.sid || leaderFd < 0 || !setupError.empty()) {
++        if (setupError.empty()) setupError = "Owned child setup failed";
++        revoke();
++      } else if (!aborted) phase = "ready";
++    }
++#if defined(FORGE_OWNED_TESTING)
++    if(faults.callbackDelay)std::this_thread::sleep_for(std::chrono::milliseconds(faults.callbackDelay));
++#endif
++    callback.BlockingCall(this,[](Napi::Env env,Napi::Function cb,Owner* owner) {
++      if (!env || cb.IsEmpty()) return;
++      auto result = Napi::Object::New(env);
++      {
++        std::lock_guard<std::mutex> lock(owner->mutex);
++        result.Set("type","ready");
++        if (!owner->setupError.empty() || owner->aborted) result.Set("error",owner->setupError.empty()?"Owned release revoked":owner->setupError);
++        else { auto id=jsIdentity(env,owner->leader); id.Set("bootId",owner->boot); result.Set("identity",id); }
++      }
++      cb.Call({result});
++    });
++    siginfo_t result{};
++    int waited;
++    do { waited=waitid(P_PID,pid,&result,WEXITED|WNOWAIT); } while (waited < 0 && errno == EINTR);
++    {
++      std::lock_guard<std::mutex> lock(mutex);
++      waitSettled = true;
++      if (waited == 0 && result.si_pid == pid) {
++        if (result.si_code == CLD_EXITED) exitCode = result.si_status;
++        else exitSignal = result.si_status;
++        phase = "exited";
++      } else phase = "unknown";
++    }
++    callback.BlockingCall(this,[](Napi::Env env,Napi::Function cb,Owner* owner) {
++      if (!env || cb.IsEmpty()) return;
++      auto result=Napi::Object::New(env); result.Set("type","exit");
++      {
++        std::lock_guard<std::mutex> lock(owner->mutex);
++        if (owner->phase == "unknown") result.Set("error","Owned child wait failed");
++        else { result.Set("exitCode", owner->exitCode < 0 ? env.Null() : Napi::Number::New(env,owner->exitCode)); result.Set("signal",owner->exitSignal < 0 ? env.Null() : Napi::Number::New(env,owner->exitSignal)); }
++      }
++      cb.Call({result});
++    });
++    // Keep the owner's event-loop reference until the explicit final reap.
++  }
++};
++static Owner* token(const Napi::CallbackInfo& info) {
++  if (!info.Length() || !info[0].IsObject() || !info[0].As<Napi::Object>().InstanceOf(constructor.Value())) throw Napi::TypeError::New(info.Env(),"Invalid owned token");
++  return Owner::Unwrap(info[0].As<Napi::Object>());
++}
++static std::string string(Napi::Env env,Napi::Value value,unsigned max,const char* label) {
++  if (!value.IsString()) throw Napi::TypeError::New(env,label);
++  auto s=value.As<Napi::String>().Utf8Value();
++  if (s.size()>max || s.find('\0')!=std::string::npos) throw Napi::RangeError::New(env,label);
++  return s;
++}
++static Napi::Value spawn(const Napi::CallbackInfo& info, bool trustedProbe = false) {
++  auto env=info.Env();
++  if (info.Length()!=4 || !info[1].IsArray() || !info[2].IsObject() || !info[3].IsFunction()) throw Napi::TypeError::New(env,"Invalid owned spawn");
++  if (owners>=32) throw Napi::Error::New(env,"Owned child capacity");
++  auto file=string(env,info[0],4096,"file"); if (file.empty()||file[0]!='/') throw Napi::TypeError::New(env,"Owned executable must be absolute");
++  auto options=info[2].As<Napi::Object>();
++  auto cwd=string(env,options.Get("cwd"),4096,"cwd");
++  if (cwd.empty()||cwd[0]!='/') throw Napi::TypeError::New(env,"Owned cwd must be absolute");
++  unsigned deadline=integer(env,options.Get("startupDeadlineMs"),6000,"startupDeadlineMs");
++  winsize size{}; size.ws_col=integer(env,options.Get("cols"),500,"cols"); size.ws_row=integer(env,options.Get("rows"),300,"rows");
++  if (size.ws_col<2 || !options.Get("encoding").IsNull() || string(env,options.Get("name"),32,"name")!="xterm-256color" || options.Has("uid")||options.Has("gid")) throw Napi::TypeError::New(env,"Invalid owned options");
++  auto args=info[1].As<Napi::Array>();
++  if (args.Length()>256 || !options.Get("env").IsObject()) throw Napi::RangeError::New(env,"Owned argument/environment limit");
++  std::vector<std::string> arguments{file}, environment;
++  unsigned bytes=file.size();
++  for (unsigned i=0;i<args.Length();i++) { auto v=string(env,args.Get(i),4096,"argument"); bytes+=v.size()+1; arguments.push_back(v); }
++  auto vars=options.Get("env").As<Napi::Object>(); auto keys=vars.GetPropertyNames();
++  if (keys.Length()>256) throw Napi::RangeError::New(env,"Owned environment limit");
++  for (unsigned i=0;i<keys.Length();i++) { auto key=string(env,keys.Get(i),4096,"environment key"); if (key.empty()||key.find('=')!=std::string::npos) throw Napi::TypeError::New(env,"Invalid environment key"); auto value=string(env,vars.Get(key),65536,"environment value"); bytes+=key.size()+value.size()+2; environment.push_back(key+"="+value); }
++  if (bytes>65536) throw Napi::RangeError::New(env,"Owned environment/argument bytes");
++  std::vector<char*> argv, envp;
++  for (auto& s:arguments) argv.push_back(&s[0]); argv.push_back(nullptr);
++  for (auto& s:environment) envp.push_back(&s[0]); envp.push_back(nullptr);
++  struct sigaction disposition{};
++  if (sigaction(SIGCHLD,nullptr,&disposition)<0 || disposition.sa_handler==SIG_IGN || (disposition.sa_flags&SA_NOCLDWAIT)) throw Napi::Error::New(env,"SIGCHLD prevents retained child wait");
++  auto object=constructor.New({Napi::External<int>::New(env,nullptr)});
++  Owner* owner=Owner::Unwrap(object);
++  owner->trustedProbe=trustedProbe;
++#if defined(FORGE_OWNED_TESTING)
++  owner->faults=testFaults;
++#endif
++  // Allocate the receipt and its descriptor accessors before a child exists.
++  auto receipt=Napi::Object::New(env);
++  receipt.DefineProperties({
++    Napi::PropertyDescriptor::Value("token",object,napi_enumerable),
++    Napi::PropertyDescriptor::Accessor(env,receipt,"fd",[owner](const Napi::CallbackInfo& v){return Napi::Number::New(v.Env(),owner->master);}),
++    Napi::PropertyDescriptor::Accessor(env,receipt,"pid",[owner](const Napi::CallbackInfo& v){return Napi::Number::New(v.Env(),owner->pid);}),
++    Napi::PropertyDescriptor::Accessor(env,receipt,"pty",[owner](const Napi::CallbackInfo& v){return Napi::String::New(v.Env(),owner->ptyName);})
++  });
++#if defined(FORGE_OWNED_TESTING)
++  receipt.Set("testAdoptionFailure",owner->faults.startup=="adoption");
++#endif
++  if (!readFile("/proc/sys/kernel/random/boot_id",128,owner->boot)) throw Napi::Error::New(env,"Boot identity unavailable");
++  if (!owner->boot.empty()&&owner->boot.back()=='\n') owner->boot.pop_back();
++  int release[2]={-1,-1}, status[2]={-1,-1};
++  if (pipe2(release,O_CLOEXEC)<0 || pipe2(status,O_CLOEXEC)<0) { closeFd(release[0]);closeFd(release[1]);closeFd(status[0]);closeFd(status[1]);throw Napi::Error::New(env,"Owned control pipe failed"); }
++  owner->deadline=deadline; owner->Ref(); owners++;
++  try {
++    // The thread initially waits without touching the callback. A callback
++    // allocation failure can therefore join it synchronously before throwing.
++#if defined(FORGE_OWNED_TESTING)
++    if(owner->faults.startup=="thread")throw Napi::Error::New(env,"Injected wait thread allocation failure");
++#endif
++    owner->thread=std::thread([owner]{owner->startWaiter();});
++#if defined(FORGE_OWNED_TESTING)
++    if(owner->faults.startup=="callback_alloc")throw Napi::Error::New(env,"Injected callback allocation failure");
++#endif
++    owner->callback=Napi::ThreadSafeFunction::New(env,info[3].As<Napi::Function>(),"ForgeOwnedChild",2,1,
++      [](Napi::Env env,Owner* settled){
++        if(settled->thread.joinable())settled->thread.join();
++        settled->callbackFinalized=true;
++        if(settled->reapCompletion){
++          auto result=Napi::Object::New(env);result.Set("status","complete");result.Set("reaped",true);result.Set("leaderPidfdClosed",true);
++          settled->reapCompletion->Resolve(result);settled->reapCompletion.reset();
++          owners--;settled->Unref();
++        }
++      },owner);
++    owner->callbackInitialized=true;
++  } catch (...) {
++    {std::lock_guard<std::mutex> lock(owner->mutex);owner->childStarted=true;}
++    owner->started.notify_one();if(owner->thread.joinable())owner->thread.join();
++    closeFd(release[0]);closeFd(release[1]);closeFd(status[0]);closeFd(status[1]);owners--;owner->Unref();throw;
++  }
++  pid_t pid;
++#if defined(FORGE_OWNED_TESTING)
++  if(owner->faults.startup=="fork")pid=-1;
++  else
++#endif
++  pid=forkpty(&owner->master,owner->ptyName,nullptr,&size);
++  if (pid==0) {
++    close(release[1]);close(status[0]);
++    // Only fixed control bytes and async-signal-safe setup run before execve.
++    sigset_t empty; sigemptyset(&empty); sigprocmask(SIG_SETMASK,&empty,nullptr);
++    struct sigaction action{}; action.sa_handler=SIG_DFL; sigemptyset(&action.sa_mask);
++    for (int s=1;s<NSIG;s++) if (s!=SIGKILL&&s!=SIGSTOP) sigaction(s,&action,nullptr);
++    unsigned char ready=1;
++    if (chdir(cwd.c_str())<0 || write(status[1],&ready,1)!=1) _exit(126);
++    close(status[1]);
++    pollfd input{release[0],POLLIN,0};
++    if (poll(&input,1,deadline)<=0 || read(release[0],&ready,1)!=1 || ready!=1) _exit(125);
++    close(release[0]);
++    if (trustedProbe) _exit(0);
++    execve(file.c_str(),argv.data(),envp.data());
++    _exit(127);
++  }
++  closeFd(release[0]);closeFd(status[1]);
++  {
++    std::lock_guard<std::mutex> lock(owner->mutex);
++    owner->pid=pid;owner->releaseFd=release[1];owner->statusFd=status[0];owner->committed=pid>0;owner->childStarted=true;
++    if (pid>0) {
++      owner->leaderFd=syscall(SYS_pidfd_open,pid,0);
++#if defined(FORGE_OWNED_TESTING)
++      if(owner->faults.startup=="pidfd")closeFd(owner->leaderFd);
++      if(owner->faults.startup=="callback")owner->setupError="Injected callback setup failure";
++#endif
++      if (owner->leaderFd<0) owner->setupError="pidfd_open failed";
++      int flags=fcntl(owner->master,F_GETFL);
++      if (flags<0||fcntl(owner->master,F_SETFL,flags|O_NONBLOCK)<0||fcntl(owner->master,F_SETFD,FD_CLOEXEC)<0) owner->setupError="Owned PTY descriptor setup failed";
++#if defined(FORGE_OWNED_TESTING)
++      if(owner->faults.startup=="nonblock")owner->setupError="Injected nonblock setup failure";
++#endif
++      if (!owner->setupError.empty()) owner->revoke();
++    } else {closeFd(owner->releaseFd);closeFd(owner->statusFd);closeFd(owner->master);}
++  }
++  owner->started.notify_one();
++  // A failed fork still retains admitted callback/thread resources in this
++  // receipt. Final reap settles them without waiting or signalling PID zero.
++  // Once fork succeeds, the caller always receives the owner, including setup errors.
++  return receipt;
++}
++static Napi::Value release(const Napi::CallbackInfo& info) {
++  Owner* o=token(info);std::lock_guard<std::mutex> lock(o->mutex);
++  if (!o->released && !o->aborted && o->phase=="ready" && o->adopted && !o->socketClosed && o->anchor()) {
++    unsigned char byte=1;
++    if (write(o->releaseFd,&byte,1)==1) {o->released=true;o->phase="released";closeFd(o->releaseFd);} else o->revoke();
++  }
++  auto out=Napi::Object::New(info.Env());out.Set("released",o->released);return out;
++}
++static Napi::Value abort(const Napi::CallbackInfo& info) {
++  Owner* o=token(info);std::lock_guard<std::mutex> lock(o->mutex);if(!o->released)o->revoke();
++  auto out=Napi::Object::New(info.Env());out.Set("releaseRevoked",!o->released);return out;
++}
++static Napi::Value adoption(const Napi::CallbackInfo& info) {
++  Owner* o=token(info);std::lock_guard<std::mutex> lock(o->mutex);
++  if(info.Length()!=2 || !info[1].IsBoolean() || o->reaped) throw Napi::TypeError::New(info.Env(),"Invalid owned adoption");
++  if(info[1].As<Napi::Boolean>().Value()) {if(o->adopted)throw Napi::Error::New(info.Env(),"PTY already adopted");o->adopted=true;o->master=-1;}
++  else {if(!o->adopted)closeFd(o->master);o->socketClosed=true;}
++  return info.Env().Undefined();
++}
++static Napi::Value state(const Napi::CallbackInfo& info) {
++  Owner* o=token(info);std::lock_guard<std::mutex> lock(o->mutex);auto env=info.Env();auto out=Napi::Object::New(env);
++  out.Set("phase",o->phase);auto id=jsIdentity(env,o->leader);id.Set("bootId",o->boot);out.Set("identity",o->leader.pid ? static_cast<Napi::Value>(id):env.Null());
++  out.Set("socketAdopted",o->adopted);out.Set("socketClosed",o->socketClosed);out.Set("leaderPidfdOpen",o->leaderFd>=0);out.Set("anchorRetained",o->anchor());out.Set("openControlEndpoints",(o->releaseFd>=0)+(o->statusFd>=0));out.Set("waitWorkerSettled",o->waitSettled);out.Set("pendingOperations",o->pending);return out;
++}
++class Job: public Napi::AsyncWorker {
++ public:
++  Owner* owner;Limits bound;std::string kind,status="unknown";Identity member;int signal=0;Scan result;bool didReap=false,closed=false;
++  std::unique_ptr<Napi::Promise::Deferred> deferred;
++  Job(Napi::Env env,Owner* o,Limits l,std::string k):Napi::AsyncWorker(env),owner(o),bound(l),kind(k),deferred(new Napi::Promise::Deferred(Napi::Promise::Deferred::New(env))){}
++  void Execute() override {
++#if defined(FORGE_OWNED_TESTING)
++    if(owner->faults.commandDelay)std::this_thread::sleep_for(std::chrono::milliseconds(owner->faults.commandDelay));
++#endif
++    std::lock_guard<std::mutex> lock(owner->mutex);
++    if(kind=="scan") {result=owner->scan(bound);return;}
++    if(kind=="signal") {
++#if defined(FORGE_OWNED_TESTING)
++      if(owner->faults.signalUnknown)return;
++#endif
++      if(owner->reaped)return;
++      // The member handle is opened BEFORE identity and SID checks.
++      int fd=syscall(SYS_pidfd_open,member.pid,0);
++      if(fd<0){if(errno==ESRCH)status="gone";return;}
++      Identity current;
++      if(!owner->anchor())status="unknown";
++      else if(!identity(member.pid,4096,current)||!same(member,current)||current.sid!=owner->leader.sid)status="identity_mismatch";
++      else if(syscall(SYS_pidfd_send_signal,fd,signal,nullptr,0)==0)status="sent";
++      else if(errno==ESRCH)status="gone";
++      close(fd);return;
++    }
++    if(owner->reaped){status="complete";didReap=true;closed=owner->leaderFd<0;return;}
++#if defined(FORGE_OWNED_TESTING)
++    if(owner->faults.reapUnknown)return;
++#endif
++    if(!owner->socketClosed||!owner->waitSettled||owner->pending!=1||owner->releaseFd>=0||owner->statusFd>=0)return;
++    // Unreleased children and trusted exit-only probes cannot create descendants.
++    if(owner->released&&!owner->trustedProbe){result=owner->scan(bound);if(result.status!="complete")return;if(!result.members.empty()){status="still_running";return;}}
++    int stat;pid_t waited=owner->committed ? waitpid(owner->pid,&stat,WNOHANG) : owner->pid;
++    if(waited==0){status="still_running";return;}
++    if(waited!=owner->pid)return;
++    owner->reaped=true;owner->phase="reaped";closeFd(owner->leaderFd);closeFd(owner->master);didReap=true;closed=true;status="complete";
++  }
++  void OnOK() override {
++    {std::lock_guard<std::mutex> lock(owner->mutex);owner->pending--;}
++    jobs--;
++    auto env=Env();auto out=Napi::Object::New(env);
++    if(kind=="scan") {out.Set("status",result.status);auto members=Napi::Array::New(env,result.members.size());for(unsigned i=0;i<result.members.size();i++)members.Set(i,jsIdentity(env,result.members[i]));out.Set("members",members);out.Set("inspectedEntries",result.entries);out.Set("inspectedBytes",result.bytes);}
++    else {out.Set("status",status);if(kind=="reap"){out.Set("reaped",didReap);out.Set("leaderPidfdClosed",closed);}}
++    if(kind=="reap"&&didReap&&!owner->ownershipReleased){
++      owner->ownershipReleased=true;owner->reapCompletion=std::move(deferred);
++      owner->callback.Release();return;
++    }
++    deferred->Resolve(out);
++  }
++  void OnError(const Napi::Error& error) override { {std::lock_guard<std::mutex> lock(owner->mutex);owner->pending--;}jobs--;deferred->Reject(error.Value()); }
++};
++static Napi::Value job(const Napi::CallbackInfo& info,const std::string& kind) {
++  Owner* o=token(info);auto env=info.Env();Limits l{65536,268435456,4096,256,5000};Identity member;int signal=0;
++  if(kind!="signal")l=limits(env,info[1]);
++  else {
++    if(info.Length()!=3||!info[1].IsObject())throw Napi::TypeError::New(env,"Invalid owned signal");auto v=info[1].As<Napi::Object>();member.pid=integer(env,v.Get("pid"),INT32_MAX,"pid");member.sid=integer(env,v.Get("sid"),INT32_MAX,"sid");member.start=string(env,v.Get("startTimeTicks"),32,"startTimeTicks");if(member.start.empty()||member.start.find_first_not_of("0123456789")!=std::string::npos)throw Napi::TypeError::New(env,"Invalid process start");auto sig=string(env,info[2],16,"signal");if(sig=="SIGTERM")signal=SIGTERM;else if(sig=="SIGKILL")signal=SIGKILL;else throw Napi::TypeError::New(env,"Invalid owned signal");
++  }
++  if(jobs>=4)throw Napi::Error::New(env,"Owned native job capacity");
++  std::lock_guard<std::mutex> lock(o->mutex);if(o->pending)throw Napi::Error::New(env,"Owned native operation already active");
++  if(o->ownershipReleased&&!o->callbackFinalized)throw Napi::Error::New(env,"Owned callbacks are still settling");
++  auto work=new Job(env,o,l,kind);work->member=member;work->signal=signal;auto promise=work->deferred->Promise();o->pending++;jobs++;
++  try {
++#if defined(FORGE_OWNED_TESTING)
++    if(o->faults.queueFailure)throw Napi::Error::New(env,"Injected native queue failure");
++#endif
++    work->Queue();
++  } catch (...) {o->pending--;jobs--;delete work;throw;}
++  return promise;
++}
++static void init(Napi::Env env,Napi::Object exports) {
++  constructor=Napi::Persistent(Owner::DefineClass(env,"ForgeOwnedToken",{}));constructor.SuppressDestruct();
++  exports.Set("forgeOwnedApiVersion",1);
++#if defined(FORGE_OWNED_TESTING)
++  exports.Set("setOwnedFaultsV1",Napi::Function::New(env,[](const Napi::CallbackInfo& info){
++    if(info.Length()!=1||!info[0].IsObject())throw Napi::TypeError::New(info.Env(),"Invalid test faults");
++    auto input=info[0].As<Napi::Object>();auto keys=input.GetPropertyNames();
++    if(keys.Length()>6)throw Napi::RangeError::New(info.Env(),"Invalid test faults");
++    TestFaults next;
++    for(unsigned i=0;i<keys.Length();i++){
++      auto key=keys.Get(i).As<Napi::String>().Utf8Value();
++      if(key=="startup"){next.startup=string(info.Env(),input.Get(key),16,"startup");if(next.startup!="nonblock"&&next.startup!="pidfd"&&next.startup!="stat"&&next.startup!="adoption"&&next.startup!="callback"&&next.startup!="thread"&&next.startup!="callback_alloc"&&next.startup!="fork")throw Napi::TypeError::New(info.Env(),"Invalid startup fault");}
++      else if(key=="callbackDelay")next.callbackDelay=integer(info.Env(),input.Get(key),5000,"callbackDelay");
++      else if(key=="commandDelay")next.commandDelay=integer(info.Env(),input.Get(key),5000,"commandDelay");
++      else if(key=="reapUnknown"||key=="signalUnknown"||key=="queueFailure"){if(!input.Get(key).IsBoolean())throw Napi::TypeError::New(info.Env(),"Invalid test flag");if(key=="reapUnknown")next.reapUnknown=input.Get(key).As<Napi::Boolean>().Value();else if(key=="signalUnknown")next.signalUnknown=input.Get(key).As<Napi::Boolean>().Value();else next.queueFailure=input.Get(key).As<Napi::Boolean>().Value();}
++      else throw Napi::TypeError::New(info.Env(),"Invalid test fault");
++    }
++    testFaults=next;return info.Env().Undefined();
++  }));
++  exports.Set("clearOwnedFaultsV1",Napi::Function::New(env,[](const Napi::CallbackInfo& info){Owner* owner=token(info);std::lock_guard<std::mutex> lock(owner->mutex);if(owner->pending)throw Napi::Error::New(info.Env(),"Native operation is pending");owner->faults=TestFaults{};return info.Env().Undefined();}));
++  exports.Set("ownedTestCountsV1",Napi::Function::New(env,[](const Napi::CallbackInfo& info){auto out=Napi::Object::New(info.Env());out.Set("owners",owners);out.Set("jobs",jobs.load());return out;}));
++#endif
++  exports.Set("checkOwnedPidfdV1",Napi::Function::New(env,[](const Napi::CallbackInfo& info){Owner* o=token(info);std::lock_guard<std::mutex> lock(o->mutex);return Napi::Boolean::New(info.Env(),o->anchor()&&syscall(SYS_pidfd_send_signal,o->leaderFd,0,nullptr,0)==0);}));
++  exports.Set("spawnOwnedV1",Napi::Function::New(env,[](const Napi::CallbackInfo& info){return spawn(info);}));
++  exports.Set("spawnOwnedProbeV1",Napi::Function::New(env,[](const Napi::CallbackInfo& info){return spawn(info,true);}));
++  exports.Set("releaseOwnedV1",Napi::Function::New(env,release));exports.Set("abortBeforeReleaseV1",Napi::Function::New(env,abort));exports.Set("adoptOwnedV1",Napi::Function::New(env,adoption));exports.Set("ownedStateV1",Napi::Function::New(env,state));
++  exports.Set("inspectOwnedV1",Napi::Function::New(env,[](const Napi::CallbackInfo& info){return job(info,"scan");}));exports.Set("signalOwnedV1",Napi::Function::New(env,[](const Napi::CallbackInfo& info){return job(info,"signal");}));exports.Set("reapOwnedV1",Napi::Function::New(env,[](const Napi::CallbackInfo& info){return job(info,"reap");}));
++}
++}
++#endif
++
+ Napi::Object init(Napi::Env env, Napi::Object exports) {
++#if defined(__linux__)
++  forge_owned::init(env, exports);
++#endif
+   exports.Set("fork",    Napi::Function::New(env, PtyFork));
+   exports.Set("open",    Napi::Function::New(env, PtyOpen));
+   exports.Set("resize",  Napi::Function::New(env, PtyResize));
+diff --git a/src/unixTerminal.ts b/src/unixTerminal.ts
+--- a/src/unixTerminal.ts
++++ b/src/unixTerminal.ts
+@@ -23,6 +23,126 @@
+ const DEFAULT_NAME = 'xterm';
+ const DESTROY_SOCKET_TIMEOUT_MS = 200;
+ 
++
++import type * as Owned from 'node-pty';
++type OwnedSocket = tty.ReadStream & { closed: boolean; _handle: object | null };
++type OwnedTerm = { readonly token: Owned.OwnedToken; readonly fd: number; readonly pid: number; readonly pty: string; socket?: OwnedSocket; testAdoptionFailure?: boolean };
++type OwnedEvent = { type: 'ready' | 'exit'; error?: string; identity?: Owned.LeaderIdentity; exitCode: number | null; signal: number | null };
++type OwnedSpawn = (file: string, args: readonly string[], options: Owned.OwnedOptions, callback: (event: OwnedEvent) => void) => OwnedTerm;
++type OwnedNative = Owned.OwnedLinuxV1 & { spawnOwnedV1: OwnedSpawn; spawnOwnedProbeV1: OwnedSpawn; adoptOwnedV1(token: Owned.OwnedToken, adopted: boolean): void; checkOwnedPidfdV1(token: Owned.OwnedToken): boolean };
++// Forge's opt-in extension. This module uses node-pty's ordinary native loader.
++const live = new Set<Owned.OwnedReceipt>();
++type ProbeFacts = { -readonly [K in keyof Owned.OwnedCapabilities]: Owned.OwnedCapabilities[K] };
++type ProbeOwner = { receipt: Owned.OwnedReceipt | null; attempt: Promise<Owned.OwnedCapabilities> | null; result: Owned.OwnedCapabilities | null; facts: ProbeFacts };
++let probeOwner: ProbeOwner | undefined;
++function ownedBinding(): OwnedNative {
++  if (process.platform !== 'linux' || (process.versions as Record<string, string | undefined>).bun || Number(process.versions.node.split('.')[0]) !== 24) throw new Error('Owned PTYs require Node 24 on Linux');
++  const module = loadNativeModule('pty').module as OwnedNative;
++  if (module.forgeOwnedApiVersion !== 1) throw new Error('Forge owned node-pty build is required');
++  return module;
++}
++export function spawnOwnedLinuxV1(file: string, args: readonly string[], options: Owned.OwnedOptions): Owned.OwnedReceipt {
++  return spawnOwnedReceipt(file, args, options, false);
++}
++function spawnOwnedReceipt(file: string, args: readonly string[], options: Owned.OwnedOptions, trustedProbe: boolean): Owned.OwnedReceipt {
++  const api = ownedBinding();
++  let resolveReady!: (value: Readonly<{ identity: Owned.LeaderIdentity }>) => void;
++  let rejectReady!: (error: unknown) => void;
++  let resolveExit!: (value: Owned.OwnedExit) => void;
++  const ready = new Promise<Readonly<{ identity: Owned.LeaderIdentity }>>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
++  void ready.catch(() => {});
++  const leaderExit = new Promise<Owned.OwnedExit>(resolve => { resolveExit = resolve; });
++  let adopted: UnixTerminal | null = null;
++  let term: OwnedTerm;
++  const receipt = Object.freeze({ get pty() { return adopted; }, get token() { return term.token; }, ready, leaderExit });
++  term = (trustedProbe ? api.spawnOwnedProbeV1 : api.spawnOwnedV1)(file, args, options, event => {
++    if (event.type === 'ready') {
++      if (event.error) rejectReady(new Error(event.error));
++      else resolveReady({ identity: Object.freeze(event.identity!) });
++    } else if (!event.error) {
++      const result = Object.freeze({ exitCode: event.exitCode, signal: event.signal });
++      resolveExit(result);
++      adopted?.emit('exit', result.exitCode, result.signal);
++    }
++  });
++  // A forgotten receipt remains reachable until the original child's final reap.
++  live.add(receipt);
++  try {
++    if (term.testAdoptionFailure) throw new Error('Injected socket adoption failure');
++    adopted = new UnixTerminal(file, [...args], { ...options, env: { ...options.env } }, term);
++    api.adoptOwnedV1(term.token, true);
++    const socket = term.socket!;
++    socket.once('close', () => { api.adoptOwnedV1(term.token, false); });
++    // Public kill/destroy/write have incompatible ownership or buffering rules.
++    for (const method of ['kill', 'destroy', 'write']) Object.defineProperty(adopted, method, { writable: method === 'write', value() { throw new Error('Use the owned terminal operation'); } });
++  } catch (error) {
++    api.abortBeforeReleaseV1(term.token);
++    if (term.socket) {
++      if (!api.ownedStateV1(term.token).socketAdopted) api.adoptOwnedV1(term.token, true);
++      term.socket.once('close', () => { api.adoptOwnedV1(term.token, false); });
++      term.socket.destroy();
++    } else api.adoptOwnedV1(term.token, false);
++    rejectReady(error);
++  }
++  return receipt;
++}
++export const ownedLinuxV1: Owned.OwnedLinuxV1 = Object.freeze({
++  forgeOwnedApiVersion: 1,
++  releaseOwnedV1: (token: Owned.OwnedToken) => ownedBinding().releaseOwnedV1(token),
++  abortBeforeReleaseV1: (token: Owned.OwnedToken) => ownedBinding().abortBeforeReleaseV1(token),
++  inspectOwnedV1: (token: Owned.OwnedToken, limits: Owned.ScanLimits) => ownedBinding().inspectOwnedV1(token, limits),
++  signalOwnedV1: (token: Owned.OwnedToken, member: Owned.MemberIdentity, signal: 'SIGTERM' | 'SIGKILL') => ownedBinding().signalOwnedV1(token, member, signal),
++  ownedStateV1: (token: Owned.OwnedToken) => ownedBinding().ownedStateV1(token),
++  async reapOwnedV1(token: Owned.OwnedToken, limits: Owned.ScanLimits) {
++    const result = await ownedBinding().reapOwnedV1(token, limits);
++    if (result.status === 'complete') for (const receipt of live) if (receipt.token === token) live.delete(receipt);
++    return result;
++  },
++  probeOwnedLinuxV1(deadlineMs: number): Promise<Owned.OwnedCapabilities> {
++    if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 1000) throw new RangeError('Invalid probe deadline');
++    if (probeOwner?.attempt) return probeOwner.attempt;
++    if (probeOwner?.result?.cleanupComplete) return Promise.resolve(probeOwner.result);
++    const owner: ProbeOwner = probeOwner ??= { receipt: null, attempt: null, result: null, facts: { apiVersion: 1, supported: false, cleanupComplete: false, linux: process.platform === 'linux', pidfdOpen: false, pidfdSendSignal: false, retainedChildWait: false, reason: null } };
++    const attempt = Promise.resolve().then(async () => {
++      const result: ProbeFacts = { ...owner.facts, cleanupComplete: false };
++      if (!owner.receipt) {
++        try {
++          const api = ownedBinding();
++          owner.receipt = spawnOwnedReceipt('/forge-owned-trusted-probe', [], { cwd: '/', env: {}, cols: 80, rows: 24, encoding: null, name: 'xterm-256color', startupDeadlineMs: deadlineMs }, true);
++          await owner.receipt.ready;
++          result.pidfdOpen = api.ownedStateV1(owner.receipt.token).leaderPidfdOpen;
++          result.pidfdSendSignal = api.checkOwnedPidfdV1(owner.receipt.token);
++          if (!result.pidfdSendSignal) throw new Error('pidfd_send_signal is unavailable');
++          if (!api.releaseOwnedV1(owner.receipt.token).released) throw new Error('Owned probe release failed');
++          await owner.receipt.leaderExit;
++          result.retainedChildWait = api.ownedStateV1(owner.receipt.token).anchorRetained;
++          if (!result.retainedChildWait) throw new Error('Retained child wait is unavailable');
++        } catch (error) { result.reason = String(error instanceof Error ? error.message : error).slice(0, 128); }
++        owner.facts = { ...result };
++      }
++      const receipt = owner.receipt;
++      if (receipt) {
++        const api = ownedBinding();
++        api.abortBeforeReleaseV1(receipt.token);
++        await receipt.leaderExit;
++        const socket = (receipt.pty as (Owned.IPty & { _socket: OwnedSocket }) | null)?._socket;
++        if (socket && !socket.closed) await new Promise<void>(resolve => { socket.once('close', resolve); socket.destroy(); });
++        const reaped = await ownedLinuxV1.reapOwnedV1(receipt.token, { maxEntries: 65536, maxBytes: 268435456, maxStatBytes: 4096, maxMembers: 256, deadlineMs });
++        const state = api.ownedStateV1(receipt.token);
++        result.cleanupComplete = reaped.status === 'complete' && state.phase === 'reaped' && state.socketClosed && !state.leaderPidfdOpen && state.openControlEndpoints === 0 && state.waitWorkerSettled && state.pendingOperations === 0 && (!socket || socket.closed && socket._handle === null);
++        if (!result.cleanupComplete) result.reason = 'Owned probe cleanup is unknown';
++      } else result.cleanupComplete = true;
++      result.supported = result.cleanupComplete && result.reason === null && result.pidfdOpen && result.pidfdSendSignal && result.retainedChildWait;
++      owner.result = Object.freeze(result);
++      return owner.result;
++    });
++    owner.attempt = attempt;
++    void attempt.then(() => { if (owner.attempt === attempt) owner.attempt = null; }, () => { if (owner.attempt === attempt) owner.attempt = null; });
++    return attempt;
++  }
++});
++
++
+ export class UnixTerminal extends Terminal {
+   protected _fd: number;
+   protected _pty: string;
+@@ -44,7 +164,7 @@
+   public get master(): net.Socket | undefined { return this._master; }
+   public get slave(): net.Socket | undefined { return this._slave; }
+ 
+-  constructor(file?: string, args?: ArgvOrCommandLine, opt?: IPtyForkOptions) {
++  constructor(file?: string, args?: ArgvOrCommandLine, opt?: IPtyForkOptions, owned?: { fd: number; pid: number; pty: string; socket?: tty.ReadStream }) {
+     super(opt);
+ 
+     if (typeof args === 'string') {
+@@ -103,13 +223,16 @@
+     };
+ 
+     // fork
+-    const term = pty.fork(file, args, parsedEnv, cwd, this._cols, this._rows, uid, gid, (encoding === 'utf8'), helperPath, onexit);
++    const term = owned || pty.fork(file, args, parsedEnv, cwd, this._cols, this._rows, uid, gid, (encoding === 'utf8'), helperPath, onexit);
+ 
+     this._socket = new tty.ReadStream(term.fd);
++    if (owned) owned.socket = this._socket as tty.ReadStream;
+     if (encoding !== null) {
+-      this._socket.setEncoding(encoding);
++      this._socket.setEncoding(encoding as BufferEncoding);
+     }
+-    this._writeStream = new CustomWriteStream(term.fd, (encoding || undefined) as BufferEncoding);
++    // Owned terminals write through the checked synchronous descriptor path.
++    // They never allocate CustomWriteStream's unbounded queue or scheduler.
++    if (!owned) this._writeStream = new CustomWriteStream(term.fd, (encoding || undefined) as BufferEncoding);
+ 
+     // setup
+     this._socket.on('error', (err: any) => {
+@@ -198,13 +321,13 @@
+ 
+     self._master = new tty.ReadStream(term.master);
+     if (encoding !== null) {
+-      self._master.setEncoding(encoding);
++      self._master.setEncoding(encoding as BufferEncoding);
+     }
+     self._master.resume();
+ 
+     self._slave = new tty.ReadStream(term.slave);
+     if (encoding !== null) {
+-      self._slave.setEncoding(encoding);
++      self._slave.setEncoding(encoding as BufferEncoding);
+     }
+     self._slave.resume();
+ 
+diff --git a/typings/node-pty.d.ts b/typings/node-pty.d.ts
+--- a/typings/node-pty.d.ts
++++ b/typings/node-pty.d.ts
+@@ -4,6 +4,32 @@
+  */
+ 
+ declare module 'node-pty' {
++  export interface LeaderIdentity { readonly pid: number; readonly sid: number; readonly startTimeTicks: string; readonly bootId: string }
++  export interface MemberIdentity { readonly pid: number; readonly sid: number; readonly startTimeTicks: string }
++  export interface OwnedToken { readonly __forgeOwnedToken: unique symbol }
++  export interface OwnedExit { readonly exitCode: number | null; readonly signal: number | null }
++  export interface OwnedReceipt { readonly pty: IPty | null; readonly token: OwnedToken; readonly ready: Promise<{ readonly identity: LeaderIdentity }>; readonly leaderExit: Promise<OwnedExit> }
++  export interface OwnedScan { readonly status: 'complete' | 'changed' | 'unknown'; readonly members: readonly MemberIdentity[]; readonly inspectedEntries: number; readonly inspectedBytes: number }
++  export interface OwnedSignal { readonly status: 'sent' | 'gone' | 'identity_mismatch' | 'unknown' }
++  export interface OwnedReap { readonly status: 'complete' | 'still_running' | 'unknown'; readonly reaped: boolean; readonly leaderPidfdClosed: boolean }
++  export interface ScanLimits { readonly maxEntries: number; readonly maxBytes: number; readonly maxStatBytes: number; readonly maxMembers: number; readonly deadlineMs: number }
++  export interface OwnedOptions { readonly cols: number; readonly rows: number; readonly cwd: string; readonly env: Readonly<Record<string, string>>; readonly name: 'xterm-256color'; readonly encoding: null; readonly startupDeadlineMs: number }
++  export interface OwnedCapabilities { readonly apiVersion: 1; readonly supported: boolean; readonly cleanupComplete: boolean; readonly linux: boolean; readonly pidfdOpen: boolean; readonly pidfdSendSignal: boolean; readonly retainedChildWait: boolean; readonly reason: string | null }
++  export interface OwnedState { readonly phase: 'setup' | 'ready' | 'released' | 'aborted' | 'exited' | 'reaped' | 'unknown'; readonly identity: LeaderIdentity | null; readonly socketAdopted: boolean; readonly socketClosed: boolean; readonly leaderPidfdOpen: boolean; readonly anchorRetained: boolean; readonly openControlEndpoints: number; readonly waitWorkerSettled: boolean; readonly pendingOperations: number }
++  export interface OwnedLinuxV1 {
++    readonly forgeOwnedApiVersion: 1;
++    probeOwnedLinuxV1(deadlineMs: number): Promise<OwnedCapabilities>;
++    releaseOwnedV1(token: OwnedToken): { readonly released: boolean };
++    abortBeforeReleaseV1(token: OwnedToken): { readonly releaseRevoked: boolean };
++    inspectOwnedV1(token: OwnedToken, limits: ScanLimits): Promise<OwnedScan>;
++    signalOwnedV1(token: OwnedToken, member: MemberIdentity, signal: 'SIGTERM' | 'SIGKILL'): Promise<OwnedSignal>;
++    reapOwnedV1(token: OwnedToken, limits: ScanLimits): Promise<OwnedReap>;
++    ownedStateV1(token: OwnedToken): OwnedState;
++  }
++  export const ownedLinuxV1: OwnedLinuxV1;
++  export function spawnOwnedLinuxV1(file: string, args: string[], options: OwnedOptions): OwnedReceipt;
++}
++declare module 'node-pty' {
+   /**
+    * Forks a process as a pseudoterminal.
+    * @param file The file to launch.
