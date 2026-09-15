@@ -118,9 +118,14 @@ test('reconnects after restart without losing the cursor', async () => {
         resolve()
       }
     })
+    // Restart recovery runs before the server accepts requests. Under full
+    // gate load, the first replay can still arrive after Playwright's
+    // five-second polling default. Keep the assertion bounded, but separate
+    // the recovery budget from the test runner's retry mechanism.
     await expect
-      .poll(() =>
-        messages.some((message) => message.type === 'turn_interrupted'),
+      .poll(
+        () => messages.some((message) => message.type === 'turn_interrupted'),
+        { timeout: 15_000, intervals: [100, 250, 500, 1_000] },
       )
       .toBe(true)
     expect(messages.map((message) => message.seq)).toEqual(
