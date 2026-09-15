@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { migrate } from '../db/migrate.js'
 import { harnessAccountRoutes } from '../http/harnessAccounts.js'
+import type { ModelEntry } from '@forge/protocol/models'
 import {
   MODEL_CATALOG_TTL_MS,
   isAccountModelsStale,
@@ -15,7 +16,7 @@ const catalog = (updatedAt = Date.now()) => ({
   accountId: 'account-1',
   harnessKey: 'kimi',
   models: [{ id: 'k3', displayName: 'Kimi K3' }],
-  source: 'acp' as const,
+  source: 'native' as const,
   updatedAt,
 })
 
@@ -66,6 +67,29 @@ describe('account model catalogs', () => {
       models: catalog().models,
       warning: 'not authenticated',
     })
+  })
+
+  it('aborts a timed-out native probe', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    let aborted = false
+    const result = await refreshAccountModels(
+      db,
+      {
+        accountId: 'account-1',
+        harnessKey: 'codex',
+        probe: async (signal) =>
+          new Promise<ModelEntry[]>((resolve) => {
+            signal.addEventListener('abort', () => {
+              aborted = true
+              resolve([{ id: 'ignored', displayName: 'Ignored' }])
+            })
+          }),
+      },
+      1,
+    )
+    expect(aborted).toBe(true)
+    expect(result).toBeNull()
   })
 
   it('serves a cached catalog and preserves the account 404', async () => {

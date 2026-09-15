@@ -77,32 +77,39 @@ export async function refreshAccountModels(
   input: {
     accountId: string
     harnessKey: string
-    probe: () => Promise<ModelEntry[]>
+    probe: (signal: AbortSignal) => Promise<ModelEntry[]>
+    signal?: AbortSignal
   },
   timeoutMs = MODEL_PROBE_TIMEOUT_MS,
 ): Promise<ModelCatalog | null> {
   const previous = readAccountModels(db, input.accountId)
   let timer: ReturnType<typeof setTimeout> | undefined
+  const controller = new AbortController()
+  const abortExternal = () => controller.abort()
+  input.signal?.addEventListener('abort', abortExternal, { once: true })
   try {
+    if (controller.signal.aborted)
+      throw new Error('native model discovery cancelled')
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`model probe timed out after ${timeoutMs}ms`)),
-        timeoutMs,
-      )
+      timer = setTimeout(() => {
+        controller.abort()
+        reject(new Error(`model probe timed out after ${timeoutMs}ms`))
+      }, timeoutMs)
     })
-    const models = await Promise.race([input.probe(), timeout])
+    const models = await Promise.race([input.probe(controller.signal), timeout])
     if (timer) clearTimeout(timer)
     if (!models.length) return previous
     const next = {
       accountId: input.accountId,
       harnessKey: input.harnessKey,
       models,
-      source: 'acp' as const,
+      source: 'native' as const,
       updatedAt: Date.now(),
     }
     writeAccountModels(db, next)
     return next
   } catch (error) {
+    controller.abort()
     if (timer) clearTimeout(timer)
     recordModelProbeFailure(
       db,
@@ -110,5 +117,7 @@ export async function refreshAccountModels(
       error instanceof Error ? error.message : String(error),
     )
     return previous
+  } finally {
+    input.signal?.removeEventListener('abort', abortExternal)
   }
 }
