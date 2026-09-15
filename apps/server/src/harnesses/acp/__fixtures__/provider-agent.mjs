@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { appendFileSync, existsSync, watch } from 'node:fs'
-import { dirname, basename } from 'node:path'
+import { dirname, basename, join } from 'node:path'
 import { createInterface } from 'node:readline'
 
 // A synthetic peer. File gates control advertisements without provider access.
@@ -18,6 +18,8 @@ const send = (frame) =>
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...frame }) + '\n')
 const reply = (id, result) => send({ id, result })
 let watcher
+let retirementTurn = 0
+const retirementChildren = new Map()
 let advertised = false
 let currentModeId = 'default'
 const modes = () => ({
@@ -80,6 +82,96 @@ input.on('line', (line) => {
       })
       break
     case 'session/prompt':
+      if (scenario === 'late-child-retirement') {
+        const turn = ++retirementTurn
+        const child = {
+          subagent_id: `child-${turn}`,
+          child_session_id: `child-session-${turn}`,
+          attempt_id: `attempt-${turn}`,
+          parent_prompt_id: frame.params._meta.promptId,
+        }
+        retirementChildren.set(`finish-child-${turn}`, child)
+        const native = (update) =>
+          send({
+            method: '_x.ai/session/update',
+            params: { sessionId, update },
+          })
+        if (!watcher)
+          watcher = watch(dirname(reportPath), (_event, name) => {
+            const pending = retirementChildren.get(name)
+            if (pending && existsSync(join(dirname(reportPath), name))) {
+              retirementChildren.delete(name)
+              send({
+                method: 'session/update',
+                params: {
+                  sessionId: pending.child_session_id,
+                  update: {
+                    sessionUpdate: 'agent_message_chunk',
+                    content: {
+                      type: 'text',
+                      text: `Late ${pending.subagent_id}.`,
+                    },
+                    _meta: { attempt_id: pending.attempt_id },
+                  },
+                },
+              })
+              native({
+                sessionUpdate: 'subagent_finished',
+                ...pending,
+                status: 'completed',
+                tool_calls: 0,
+                turns: 1,
+                duration_ms: 1,
+              })
+              report('child_finish_sent', { child: pending.subagent_id })
+            }
+            if (
+              name === 'late-response' &&
+              !advertised &&
+              existsSync(join(dirname(reportPath), name))
+            ) {
+              advertised = true
+              native({
+                sessionUpdate: 'response_completed',
+                message_id: 'response-1',
+                stop_reason: 'end_turn',
+                usage: { output_tokens: 99 },
+              })
+              report('late_response_sent')
+            }
+          })
+        native({
+          sessionUpdate: 'response_started',
+          message_id: `response-${turn}`,
+          input_tokens: turn,
+        })
+        send({
+          method: 'session/update',
+          params: {
+            sessionId,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: `Root ${turn}.` },
+            },
+          },
+        })
+        native({
+          sessionUpdate: 'subagent_spawned',
+          ...child,
+          subagent_type: 'general',
+          parent_session_id: sessionId,
+          description: `Child ${turn}`,
+        })
+        native({
+          sessionUpdate: 'response_completed',
+          message_id: `response-${turn}`,
+          stop_reason: 'end_turn',
+          usage: { output_tokens: turn },
+        })
+        reply(frame.id, { stopReason: 'end_turn' })
+        break
+      }
+
       if (scenario === 'grok-completion') {
         const completionCase = process.env.FORGE_ACP_TEST_COMPLETION
         const rail = process.env.FORGE_ACP_TEST_RAIL
