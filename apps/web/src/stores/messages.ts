@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Ephemeral, ServerEvent } from '@forge/protocol/events'
 import type { Message, MessageContent } from '@forge/protocol/message'
 import type { QueuedPrompt } from '@forge/protocol/session'
+import type { SessionSnapshot } from '@forge/protocol/ws'
 
 export type TimelineItem = Message
 export type VolatileEvent = Ephemeral
@@ -12,15 +13,22 @@ export type PendingUserMessage = {
   createdAt: string
 }
 type FoldedMessagesState = Pick<MessagesState, 'bySession' | 'lastSeq'> &
-  Partial<Pick<MessagesState, 'pendingBySession'>>
+  Partial<Pick<MessagesState, 'pendingBySession' | 'seenSeqs'>>
 type MessagesState = {
   bySession: Record<string, TimelineItem[]>
   pendingBySession: Record<string, PendingUserMessage[]>
   queuedBySession: Record<string, QueuedPrompt[]>
+  snapshotCursorBySession: Record<string, number>
+  snapshotStateBySession: Record<
+    string,
+    { commands?: unknown[]; requests?: unknown[]; usage?: unknown }
+  >
+  seenSeqs: Set<number>
   lastSeq: number
   volatile: VolatileEvent[]
   applyEvent: (event: ServerEvent) => void
   loadMessages: (sessionId: string, messages: Message[]) => void
+  loadSnapshot: (snapshot: SessionSnapshot) => void
   addPending: (pending: PendingUserMessage) => void
   removePending: (sessionId: string, itemId: string) => void
   clearPending: (sessionId: string) => void
@@ -58,12 +66,45 @@ function toolCallId(message: Message): string | undefined {
   return undefined
 }
 
+function sameItem(left: Message, right: Message): boolean {
+  if (left.itemId === right.itemId) return true
+  const leftTool = toolCallId(left)
+  return leftTool !== undefined && leftTool === toolCallId(right)
+}
+
+function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
+  const result = [...existing].sort((left, right) => left.seq - right.seq)
+  for (const message of [...incoming].sort(
+    (left, right) => left.seq - right.seq,
+  )) {
+    // A snapshot and replay can contain the same durable row. Sequence is the
+    // durable event identity, so do not fold an overlap twice.
+    if (result.some((item) => item.seq === message.seq)) continue
+    const index = result.findIndex((item) => sameItem(item, message))
+    if (index < 0) result.push(message)
+    else result[index] = foldMessage(result[index], message)
+  }
+  return result.sort((left, right) => left.seq - right.seq)
+}
+
+function mergeNewerMessages(history: Message[], newer: Message[]): Message[] {
+  const result = [...history]
+  for (const message of newer) {
+    const index = result.findIndex((item) => sameItem(item, message))
+    if (index < 0) result.push(message)
+    else if (message.seq > result[index].seq) result[index] = message
+  }
+  return result.sort((left, right) => left.seq - right.seq)
+}
+
 export function foldEvent(
   state: Pick<MessagesState, 'bySession' | 'lastSeq'> &
-    Partial<Pick<MessagesState, 'pendingBySession'>>,
+    Partial<Pick<MessagesState, 'pendingBySession' | 'seenSeqs'>>,
   event: ServerEvent,
 ): FoldedMessagesState {
-  if (event.seq <= state.lastSeq) return state
+  const seenSeqs = new Set<number>(state.seenSeqs ?? [])
+  if (seenSeqs.has(event.seq))
+    return { ...state, lastSeq: Math.max(state.lastSeq, event.seq) }
   const items = state.bySession[event.sessionId] ?? []
   const pending = state.pendingBySession?.[event.sessionId] ?? []
   // Fold by itemId first. Older rows can lack the server-generated itemId,
@@ -91,6 +132,7 @@ export function foldEvent(
       ),
     },
     lastSeq: event.seq,
+    seenSeqs: new Set(seenSeqs).add(event.seq),
   }
 }
 
@@ -98,34 +140,68 @@ export const useMessagesStore = create<MessagesState>((set) => ({
   bySession: {},
   pendingBySession: {},
   queuedBySession: {},
+  snapshotCursorBySession: {},
+  snapshotStateBySession: {},
+  seenSeqs: new Set(),
   lastSeq: 0,
   volatile: [],
   applyEvent: (event) => set((state) => foldEvent(state, event)),
   loadMessages: (sessionId, messages) =>
+    set((state) => {
+      const history = mergeMessages([], messages)
+      const watermark = Math.max(0, ...messages.map((message) => message.seq))
+      const newerLive = (state.bySession[sessionId] ?? []).filter(
+        (message) => message.seq > watermark,
+      )
+      return {
+        bySession: {
+          ...state.bySession,
+          [sessionId]: mergeNewerMessages(history, newerLive),
+        },
+        pendingBySession: {
+          ...state.pendingBySession,
+          [sessionId]: (state.pendingBySession[sessionId] ?? []).filter(
+            (pending) =>
+              !messages.some((message) => message.itemId === pending.itemId),
+          ),
+        },
+        // REST history is scoped to one session. It cannot advance the global
+        // live cursor because another subscribed session may have unseen rows.
+        seenSeqs: new Set([
+          ...state.seenSeqs,
+          ...messages.map((message) => message.seq),
+        ]),
+      }
+    }),
+  loadSnapshot: (snapshot) => {
+    const current =
+      useMessagesStore.getState().snapshotCursorBySession[snapshot.sessionId]
+    if (current !== undefined && snapshot.cursor < current) return
+    if (snapshot.queuedPrompts)
+      useMessagesStore
+        .getState()
+        .setQueued(snapshot.sessionId, snapshot.queuedPrompts)
+    useMessagesStore
+      .getState()
+      .loadMessages(snapshot.sessionId, snapshot.messages)
     set((state) => ({
-      bySession: {
-        ...state.bySession,
-        [sessionId]: Array.from(
-          new Map(
-            [...(state.bySession[sessionId] ?? []), ...messages].map(
-              (message) => [message.seq, message],
-            ),
-          ).values(),
-        ).sort((left, right) => left.seq - right.seq),
-      },
-      pendingBySession: {
-        ...state.pendingBySession,
-        [sessionId]: (state.pendingBySession[sessionId] ?? []).filter(
-          (pending) =>
-            !messages.some((message) => message.itemId === pending.itemId),
+      snapshotCursorBySession: {
+        ...state.snapshotCursorBySession,
+        [snapshot.sessionId]: Math.max(
+          state.snapshotCursorBySession[snapshot.sessionId] ?? 0,
+          snapshot.cursor,
         ),
       },
-      lastSeq: Math.max(
-        state.lastSeq,
-        ...messages.map((message) => message.seq),
-        0,
-      ),
-    })),
+      snapshotStateBySession: {
+        ...state.snapshotStateBySession,
+        [snapshot.sessionId]: {
+          ...(snapshot.commands ? { commands: snapshot.commands } : {}),
+          ...(snapshot.requests ? { requests: snapshot.requests } : {}),
+          ...(snapshot.usage !== undefined ? { usage: snapshot.usage } : {}),
+        },
+      },
+    }))
+  },
   addPending: (pending) =>
     set((state) => ({
       pendingBySession: {
@@ -174,12 +250,37 @@ export const useMessagesStore = create<MessagesState>((set) => ({
       },
     })),
   applyEphemeral: (event) =>
-    set((state) => ({ volatile: [...state.volatile, event] })),
+    set((state) => {
+      if (event.type === 'availableCommands')
+        return {
+          volatile: [
+            ...state.volatile.filter(
+              (current) =>
+                !(
+                  current.type === 'availableCommands' &&
+                  current.sessionId === event.sessionId
+                ),
+            ),
+            event,
+          ],
+        }
+      const commands = state.volatile.filter(
+        (current) => current.type === 'availableCommands',
+      )
+      const other = state.volatile
+        .filter((current) => current.type !== 'availableCommands')
+        .concat(event)
+        .slice(-99)
+      return { volatile: [...other, ...commands] }
+    }),
   reset: () =>
     set({
       bySession: {},
       pendingBySession: {},
       queuedBySession: {},
+      snapshotCursorBySession: {},
+      snapshotStateBySession: {},
+      seenSeqs: new Set(),
       lastSeq: 0,
       volatile: [],
     }),

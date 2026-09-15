@@ -1,7 +1,8 @@
 import { Bot, ChevronDown } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Message } from '@forge/protocol/message'
-import { connectForgeSocket, normalizeServerEvent } from '../../lib/socket'
+import { connectForgeSocket } from '../../lib/socket'
+import { SessionSnapshot } from '@forge/protocol/ws'
 import { useMessagesStore } from '../../stores/messages'
 import {
   deriveSubagentStatus,
@@ -50,15 +51,13 @@ export function SubagentCard({
         return response.json()
       })
       .then((rows: unknown) => {
-        if (!active || !Array.isArray(rows)) return
-        const parsedRows: Message[] = []
-        for (const row of rows) {
-          const event = normalizeServerEvent(row)
-          if (!event || typeof event !== 'object' || !('msg' in event)) continue
-          const parsed = Message.safeParse(event.msg)
-          if (parsed.success) parsedRows.push(parsed.data)
-        }
-        useMessagesStore.getState().loadMessages(child.id, parsedRows)
+        const snapshot = SessionSnapshot.safeParse({
+          ...(rows as object),
+          type: 'sessionSnapshot',
+          sessionId: child.id,
+        })
+        if (!active || !snapshot.success) return
+        useMessagesStore.getState().loadSnapshot(snapshot.data)
         setLoaded(true)
       })
       .catch(() => {
