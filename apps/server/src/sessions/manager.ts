@@ -529,6 +529,138 @@ export class SessionManager {
     return this.queuedPrompt(row)
   }
 
+  reorderQueuedPrompts(sessionId: string, promptIds: string[]) {
+    const existing = this.queuedPromptRows(sessionId)
+    if (
+      existing.length !== promptIds.length ||
+      new Set(promptIds).size !== promptIds.length
+    )
+      return undefined
+    const known = new Set(existing.map((row) => row.id))
+    if (promptIds.some((id) => !known.has(id))) return undefined
+    const update = this.db.prepare(
+      'UPDATE queued_prompts SET order_index = ? WHERE id = ? AND session_id = ?',
+    )
+    this.db.exec('BEGIN')
+    try {
+      promptIds.forEach((id, index) => update.run(index, id, sessionId))
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+    this.publishQueuedPrompts(sessionId)
+    return this.queuedPrompts(sessionId)
+  }
+
+  async sendQueuedPromptNow(sessionId: string, promptId: string) {
+    const row = this.db
+      .prepare('SELECT * FROM queued_prompts WHERE id = ? AND session_id = ?')
+      .get(promptId, sessionId) as
+      | {
+          text: string
+          attachment_ids: string | null
+          model: string | null
+          config_options: string | null
+          client_item_id: string | null
+          prompt_parts: string | null
+          review_references: string | null
+          revision: number
+        }
+      | undefined
+    if (!row) return false
+    const activeTurn = this.turns.get(sessionId)
+    // Interrupting a turn whose harness is still spawning is a no-op, so the
+    // wait below would run for the whole turn. Refuse instead of hanging.
+    if (activeTurn && !this.handles.get(sessionId))
+      throw new Error('Session is still starting')
+    const leaseId = makeId('lease_')
+    const claimed = this.db
+      .prepare(
+        `UPDATE queued_prompts SET delivery_state = 'leased', lease_id = ?,
+         lease_until = ? WHERE id = ? AND session_id = ? AND revision = ? AND
+         (delivery_state <> 'leased' OR lease_until IS NULL OR lease_until < ?)`,
+      )
+      .run(
+        leaseId,
+        Date.now() + 60_000,
+        promptId,
+        sessionId,
+        row.revision,
+        Date.now(),
+      ) as { changes?: number }
+    if (!claimed.changes)
+      throw new Error('Queued prompt is already being delivered')
+    this.publishQueuedPrompts(sessionId)
+    // Hold the drain lock so the interrupted turn does not deliver the queue
+    // head while this prompt takes its place.
+    this.queueBusy.add(sessionId)
+    try {
+      const stopped = activeTurn
+        ? new Promise<void>((resolve) => {
+            // Chain any waiter already registered for this turn. Replacing it
+            // would strand a caller that awaits turn completion.
+            const key = `${sessionId}:${activeTurn}`
+            const waiting = this.turnWaiters.get(key)
+            this.turnWaiters.set(key, {
+              resolve: () => {
+                waiting?.resolve()
+                resolve()
+              },
+              reject: (error) => {
+                waiting?.reject(error)
+                resolve()
+              },
+            })
+          })
+        : undefined
+      await this.interrupt(sessionId)
+      if (stopped) await stopped
+      // The wait is unbounded, so the lease may have expired and been taken
+      // over by a second send now. Re-assert it before delivering.
+      const held = this.db
+        .prepare(
+          'UPDATE queued_prompts SET lease_until = ? WHERE id = ? AND lease_id = ?',
+        )
+        .run(Date.now() + 60_000, promptId, leaseId) as { changes?: number }
+      if (!held.changes) throw new Error('Queued prompt was taken over')
+      await this.prompt(
+        sessionId,
+        row.text,
+        makeId('queue_now_'),
+        row.attachment_ids ? JSON.parse(row.attachment_ids) : undefined,
+        undefined,
+        undefined,
+        row.model ?? undefined,
+        row.client_item_id ?? undefined,
+        row.config_options ? JSON.parse(row.config_options) : undefined,
+        'immediate',
+        false,
+        row.review_references ? JSON.parse(row.review_references) : undefined,
+        row.prompt_parts ? JSON.parse(row.prompt_parts) : undefined,
+        row.revision,
+      )
+      // Delete only after delivery, as drainQueue does, so a failed prompt
+      // stays recoverable instead of vanishing.
+      const deleted = this.db
+        .prepare('DELETE FROM queued_prompts WHERE id = ? AND lease_id = ?')
+        .run(promptId, leaseId) as { changes?: number }
+      if (deleted.changes) this.publishQueuedPrompts(sessionId)
+      return true
+    } catch (error) {
+      const released = this.db
+        .prepare(
+          `UPDATE queued_prompts SET delivery_state = 'failed', lease_id = NULL,
+           lease_until = NULL WHERE id = ? AND lease_id = ?`,
+        )
+        .run(promptId, leaseId) as { changes?: number }
+      if (released.changes) this.publishQueuedPrompts(sessionId)
+      throw error
+    } finally {
+      this.queueBusy.delete(sessionId)
+    }
+  }
+
   async drainQueuedPrompt(sessionId: string) {
     return this.drainQueue(sessionId)
   }

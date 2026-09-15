@@ -6,8 +6,8 @@ import { ownedListener } from './listener.js'
 /** Which group members report as gone when their descriptors are scanned. */
 let vanished: 'none' | 'every member' | 'other members' = 'none'
 let refused = 0
-/** Every directory the scan listed, with the options it asked for. */
-const listed: [string, unknown][] = []
+/** Every directory the scan listed. */
+const listed: string[] = []
 /** Whether other members report as gone when their state is read, and how many did. */
 let stateGone = false
 let unread = 0
@@ -17,8 +17,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return {
     ...actual,
-    readdir: (path: string, ...rest: never[]) => {
-      listed.push([path, (rest as unknown[])[0]])
+    opendir: (path: string, ...rest: never[]) => {
+      listed.push(path)
       const member = /^\/proc\/(\d+)\/fd$/.exec(path)
       const gone =
         member &&
@@ -28,11 +28,11 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       return gone
         ? Promise.reject(
             Object.assign(
-              new Error(`ENOENT: no such file or directory, scandir '${path}'`),
-              { code: 'ENOENT', syscall: 'scandir', path },
+              new Error(`ENOENT: no such file or directory, opendir '${path}'`),
+              { code: 'ENOENT', syscall: 'opendir', path },
             ),
           )
-        : actual.readdir(path, ...rest)
+        : actual.opendir(path, ...rest)
     },
     open: (path: string, ...rest: never[]) => {
       const member = /^\/proc\/(\d+)\/stat$/.exec(path)
@@ -84,10 +84,11 @@ test('accepts a listening socket held by an owned group member', async () => {
   await expect(
     ownedListener(port, await processGroup(), performance.now() + 10_000),
   ).resolves.toBe(true)
-  // Names only. Asking for Dirents makes Node lstat every exiting task, and one
-  // such failure drops the rest of that readdir batch.
-  expect(listed[0]).toEqual(['/proc', undefined])
-  expect(listed.every(([, options]) => options === undefined)).toBe(true)
+  // The group scan starts from the process table, never from a cached listing.
+  expect(listed[0]).toBe('/proc')
+  expect(
+    listed.every((path) => path === '/proc' || /^\/proc\/\d+\/fd$/.test(path)),
+  ).toBe(true)
 })
 
 test('keeps scanning past a member that exits before its descriptor scan', async () => {

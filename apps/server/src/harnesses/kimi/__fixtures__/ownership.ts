@@ -1,4 +1,5 @@
-import { appendFile, readFile, readdir, open } from 'node:fs/promises'
+import { appendFile, readFile, open } from 'node:fs/promises'
+import { readProcNames } from '../../proc-names.js'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { expect } from 'vitest'
@@ -50,18 +51,21 @@ export async function finishFixtureHomes(homes: string[]) {
   // One completed scan covers every original group after all guardians close.
   const groups = new Set(peers.map((peer) => peer.pid as number)),
     running = new Set<number>(),
-    // Names only. /proc reports an exiting task as DT_UNKNOWN, and Node
-    // resolves that type with an lstat that fails once the task is gone. One
-    // such entry aborts the whole readdir batch it arrived in.
-    names = await readdir('/proc'),
     buffer = Buffer.alloc(4096),
     end = performance.now() + 5000
+  const names = await readProcNames('/proc', {
+    maximum: 65536,
+    check() {
+      if (performance.now() >= end)
+        throw new Error('Fixture group inspection deadline')
+    },
+    limitError: () => new Error('Fixture process inspection limit'),
+  })
   let inspected = 0
   for (const name of names) {
     if (performance.now() >= end)
       throw new Error('Fixture group inspection deadline')
-    if (!/^\d+$/.test(name)) continue
-    if (++inspected > 65536) throw new Error('Fixture process inspection limit')
+    inspected++
     try {
       const file = await open(`/proc/${name}/stat`, 'r')
       try {
