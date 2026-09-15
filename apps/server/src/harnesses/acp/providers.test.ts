@@ -1,11 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { DatabaseSync } from 'node:sqlite'
-import { defaultConfig } from '../../config.js'
-import { migrate } from '../../db/migrate.js'
-import { createProject, createSession } from '../../db/queries.js'
-import { EventBus } from '../../events/bus.js'
-import { QuestionManager } from '../../acp/questions.js'
-import { spawnMockAgent } from '../../../test/helpers/mock-agent.js'
+import { describe, expect, test } from 'vitest'
+import type { HarnessHandle } from '../types.js'
+import { sdkFixture } from './sdk-test-helpers.js'
 import {
   acpProviderDescriptors,
   createCustomAcpAdapter,
@@ -15,63 +10,85 @@ import {
   createHermesAdapter,
 } from './providers.js'
 
-const fakeDb = {
-  prepare: () => ({ get: () => undefined, run: () => undefined }),
-  exec: () => undefined,
-}
+const providers = [
+  ['grok', createGrokAdapter],
+  ['gemini', createGeminiAdapter],
+  ['devin', createDevinAdapter],
+  ['hermes', createHermesAdapter],
+  ['custom-acp', createCustomAcpAdapter],
+] as const
 
-const deps = () => ({
-  db: fakeDb,
-  bus: new EventBus(),
-  questions: new QuestionManager({ db: fakeDb }),
-})
+describe('typed dedicated ACP constructors', () => {
+  test.each(providers)(
+    '%s owns a typed SDK prompt and its durable completion',
+    async (profile, create) => {
+      const f = await sdkFixture('normal')
+      f.deps.launch = {
+        ...f.deps.launch,
+        args: [...acpProviderDescriptors[profile].args],
+      }
+      let handle: HarnessHandle | undefined
+      try {
+        const adapter = create({ ...f.deps, grokRail: 'comet' })
+        expect(adapter.kind).toBe(profile === 'custom-acp' ? 'custom' : 'acp')
+        expect(adapter.capabilities.loadSession).toBe(profile !== 'gemini')
+        expect(typeof adapter.load).toBe(
+          profile === 'gemini' ? 'undefined' : 'function',
+        )
+        handle = await adapter.spawn(f.session, (event) => f.events.push(event))
+        const receipt = await handle.prompt('typed provider')
+        expect(await receipt.completion).toEqual({
+          status: 'completed',
+          runId: receipt.runId,
+          turnId: receipt.turnId,
+        })
+        expect(handle.binding).toMatchObject({
+          provider: 'instance',
+          accountId: null,
+          providerSessionId: 'sdk-session-1',
+        })
+        expect(
+          f.events.some(
+            (event) =>
+              event.type === 'text_delta' && event.text === 'Hello from SDK.',
+          ),
+        ).toBe(true)
+        expect(
+          f.transactions
+            .flatMap((transaction) => transaction.records)
+            .some(
+              (record) =>
+                record.value.kind === 'event' &&
+                record.value.event.type === 'turn_completed',
+            ),
+        ).toBe(true)
+        expect(f.failures).toEqual([])
+      } finally {
+        await f.cleanup(handle)
+      }
+    },
+    15000,
+  )
 
-describe('dedicated ACP provider catalog', () => {
-  it('keeps provider commands and install guidance explicit', () => {
-    expect(acpProviderDescriptors.grok.args).toEqual(['agent', 'stdio'])
-    expect(acpProviderDescriptors.gemini.args).toEqual(['--experimental-acp'])
-    expect(acpProviderDescriptors.hermes.install).toContain('ACP extra')
-    expect(acpProviderDescriptors.devin.install).toContain('Install')
-  })
-
-  it('exposes each provider through its own constructor', () => {
-    const config = defaultConfig(false).harness
-    expect(createGrokAdapter(config.grok, deps())).toBeDefined()
-    expect(createGeminiAdapter(config.gemini, deps())).toBeDefined()
-    expect(
-      createDevinAdapter({ ...config.grok, name: 'Devin' }, deps()),
-    ).toBeDefined()
-    expect(
-      createHermesAdapter({ ...config.grok, name: 'Hermes' }, deps()),
-    ).toBeDefined()
-    expect(createCustomAcpAdapter(config.grok, deps())).toBeDefined()
-  })
-
-  it('runs a dedicated adapter against the ACP wire', async () => {
-    const db = new DatabaseSync(':memory:')
-    migrate(db)
-    const project = createProject(db, { name: 'acp', path: '/tmp' })
-    const session = createSession(db, {
-      projectId: project.id,
-      harness: 'grok',
-      title: 'ACP',
-      cwd: '/tmp',
-    })
-    const command = spawnMockAgent()
-    const handle = await createGrokAdapter(
-      {
-        ...defaultConfig(false).harness.grok,
-        command: command.command,
-        args: command.args,
-        enabled: true,
+  test('rejects unsupported selected-account profiles before native startup', async () => {
+    const f = await sdkFixture('normal')
+    f.deps.launch = {
+      ...f.deps.launch,
+      account: {
+        kind: 'selected-account',
+        accountId: 'account',
+        home: f.session.cwd,
       },
-      { db, bus: new EventBus(), questions: new QuestionManager({ db }) },
-    ).spawn(
-      { id: session.id, cwd: '/tmp', harness: 'grok' },
-      () => undefined,
-      () => undefined,
-    )
-    await handle.prompt('wire check')
-    await handle.kill()
+    }
+    try {
+      expect(() => createDevinAdapter(f.deps)).toThrow(
+        'isolation is unsupported',
+      )
+      expect(() => createCustomAcpAdapter(f.deps)).toThrow(
+        'isolation is unsupported',
+      )
+    } finally {
+      await f.cleanup()
+    }
   })
 })
