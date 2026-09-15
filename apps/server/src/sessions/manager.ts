@@ -431,13 +431,15 @@ export class SessionManager {
   private queuedPromptRows(sessionId: string) {
     return this.db
       .prepare(
-        'SELECT id, session_id, text, created_at FROM queued_prompts WHERE session_id = ? ORDER BY created_at, id',
+        'SELECT id, session_id, text, attachment_ids, revision, created_at FROM queued_prompts WHERE session_id = ? ORDER BY position, created_at, id',
       )
       .all(sessionId) as Array<{
       id: string
       session_id: string
       text: string
       created_at: number
+      attachment_ids: string | null
+      revision: number
     }>
   }
 
@@ -446,12 +448,16 @@ export class SessionManager {
     session_id: string
     text: string
     created_at: number
+    attachment_ids?: string | null
+    revision?: number
   }): QueuedPrompt {
     return {
       id: row.id,
       sessionId: row.session_id,
       text: row.text,
       createdAt: Number(row.created_at),
+      attachmentIds: row.attachment_ids ? JSON.parse(row.attachment_ids) : [],
+      revision: Number(row.revision ?? 0),
     }
   }
 
@@ -480,25 +486,113 @@ export class SessionManager {
     return true
   }
 
-  updateQueuedPrompt(sessionId: string, promptId: string, text: string) {
+  updateQueuedPrompt(
+    sessionId: string,
+    promptId: string,
+    text: string,
+    attachmentIds?: string[],
+    revision?: number,
+  ) {
+    const where =
+      revision === undefined
+        ? 'id = ? AND session_id = ?'
+        : 'id = ? AND session_id = ? AND revision = ?'
+    const args =
+      revision === undefined
+        ? [promptId, sessionId]
+        : [promptId, sessionId, revision]
     const result = this.db
       .prepare(
-        'UPDATE queued_prompts SET text = ? WHERE id = ? AND session_id = ?',
+        `UPDATE queued_prompts SET text = ?, attachment_ids = COALESCE(?, attachment_ids), revision = revision + 1 WHERE ${where}`,
       )
-      .run(text, promptId, sessionId) as { changes?: number }
+      .run(
+        text,
+        attachmentIds ? JSON.stringify(attachmentIds) : null,
+        ...args,
+      ) as { changes?: number }
     if (!result.changes) return undefined
     this.publishQueuedPrompts(sessionId)
     const row = this.db
       .prepare(
-        'SELECT id, session_id, text, created_at FROM queued_prompts WHERE id = ?',
+        'SELECT id, session_id, text, attachment_ids, revision, created_at FROM queued_prompts WHERE id = ?',
       )
       .get(promptId) as {
       id: string
       session_id: string
       text: string
       created_at: number
+      attachment_ids: string | null
+      revision: number
     }
     return this.queuedPrompt(row)
+  }
+
+  reorderQueuedPrompts(sessionId: string, promptIds: string[]) {
+    const existing = this.queuedPromptRows(sessionId)
+    if (
+      existing.length !== promptIds.length ||
+      new Set(promptIds).size !== promptIds.length
+    )
+      return undefined
+    const known = new Set(existing.map((row) => row.id))
+    if (promptIds.some((id) => !known.has(id))) return undefined
+    const update = this.db.prepare(
+      'UPDATE queued_prompts SET position = ?, revision = revision + 1 WHERE id = ? AND session_id = ?',
+    )
+    this.db.exec('BEGIN')
+    try {
+      promptIds.forEach((id, position) => update.run(position, id, sessionId))
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+    this.publishQueuedPrompts(sessionId)
+    return this.queuedPrompts(sessionId)
+  }
+
+  async sendQueuedPromptNow(sessionId: string, promptId: string) {
+    const row = this.db
+      .prepare('SELECT * FROM queued_prompts WHERE id = ? AND session_id = ?')
+      .get(promptId, sessionId) as
+      | {
+          text: string
+          attachment_ids: string | null
+          model: string | null
+          config_options: string | null
+          client_item_id: string | null
+        }
+      | undefined
+    if (!row) return false
+    const activeTurn = this.turns.get(sessionId)
+    const stopped = activeTurn
+      ? new Promise<void>((resolve) => {
+          this.turnWaiters.set(`${sessionId}:${activeTurn}`, {
+            resolve,
+            reject: resolve,
+          })
+        })
+      : undefined
+    await this.interrupt(sessionId)
+    if (stopped) await stopped
+    const deleted = this.db
+      .prepare('DELETE FROM queued_prompts WHERE id = ? AND session_id = ?')
+      .run(promptId, sessionId) as { changes?: number }
+    if (!deleted.changes) return false
+    this.publishQueuedPrompts(sessionId)
+    await this.prompt(
+      sessionId,
+      row.text,
+      makeId('queue_now_'),
+      row.attachment_ids ? JSON.parse(row.attachment_ids) : undefined,
+      undefined,
+      undefined,
+      row.model ?? undefined,
+      row.client_item_id ?? undefined,
+      row.config_options ? JSON.parse(row.config_options) : undefined,
+      'immediate',
+    )
+    return true
   }
 
   async drainQueuedPrompt(sessionId: string) {
@@ -509,7 +603,7 @@ export class SessionManager {
     if (this.queueBusy.has(sessionId) || this.turns.has(sessionId)) return
     const queued = this.db
       .prepare(
-        'SELECT * FROM queued_prompts WHERE session_id = ? ORDER BY created_at, id LIMIT 1',
+        'SELECT * FROM queued_prompts WHERE session_id = ? AND lease_id IS NULL ORDER BY position, created_at, id LIMIT 1',
       )
       .get(sessionId) as
       | {
@@ -524,8 +618,13 @@ export class SessionManager {
     if (!queued) return
     this.queueBusy.add(sessionId)
     try {
-      this.db.prepare('DELETE FROM queued_prompts WHERE id = ?').run(queued.id)
-      this.publishQueuedPrompts(sessionId)
+      const lease = makeId('lease_')
+      const leased = this.db
+        .prepare(
+          'UPDATE queued_prompts SET lease_id = ? WHERE id = ? AND lease_id IS NULL',
+        )
+        .run(lease, queued.id) as { changes?: number }
+      if (!leased.changes) return
       await this.prompt(
         sessionId,
         queued.text,
@@ -538,6 +637,10 @@ export class SessionManager {
         queued.config_options ? JSON.parse(queued.config_options) : undefined,
         'immediate',
       )
+      this.db
+        .prepare('DELETE FROM queued_prompts WHERE id = ? AND lease_id = ?')
+        .run(queued.id, lease)
+      this.publishQueuedPrompts(sessionId)
     } finally {
       this.queueBusy.delete(sessionId)
     }
@@ -613,8 +716,8 @@ export class SessionManager {
         this.db
           .prepare(
             `INSERT INTO queued_prompts
-           (id, session_id, text, attachment_ids, model, config_options, client_item_id, request_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, session_id, text, attachment_ids, model, config_options, client_item_id, request_id, position, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             makeId('queued_'),
@@ -625,6 +728,15 @@ export class SessionManager {
             configOptions ? JSON.stringify(configOptions) : null,
             clientItemId ?? null,
             requestId ?? null,
+            Number(
+              (
+                this.db
+                  .prepare(
+                    'SELECT COALESCE(MAX(position), -1) AS position FROM queued_prompts WHERE session_id = ?',
+                  )
+                  .get(id) as { position: number }
+              ).position,
+            ) + 1,
             Math.max(
               Date.now(),
               Number(

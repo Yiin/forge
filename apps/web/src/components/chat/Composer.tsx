@@ -578,12 +578,30 @@ export function Composer({
                     })
                   }}
                   onEdit={(item: QueuedPrompt) => {
-                    void api.deleteQueued(sessionId, item.id).then(() => {
-                      useMessagesStore
-                        .getState()
-                        .removeQueued(sessionId, item.id)
-                      update(item.text)
-                      textarea.current?.focus()
+                    update(item.text)
+                    textarea.current?.focus()
+                    void api.patchQueued(sessionId, item.id, item.text)
+                  }}
+                  onMove={(id, direction) => {
+                    const index = queued.findIndex((item) => item.id === id)
+                    const target = index + direction
+                    if (index < 0 || target < 0 || target >= queued.length)
+                      return
+                    const next = [...queued]
+                    ;[next[index], next[target]] = [next[target], next[index]]
+                    useMessagesStore.getState().setQueued(sessionId, next)
+                    void api
+                      .reorderQueued(
+                        sessionId,
+                        next.map((item) => item.id),
+                      )
+                      .catch(() => {
+                        useMessagesStore.getState().setQueued(sessionId, queued)
+                      })
+                  }}
+                  onSendNow={(id) => {
+                    void api.sendQueuedNow(sessionId, id).then(() => {
+                      useMessagesStore.getState().removeQueued(sessionId, id)
                     })
                   }}
                 />

@@ -36,6 +36,8 @@ export const queuedPromptSchema = z.object({
   sessionId: z.string(),
   text: z.string(),
   createdAt: z.number().int(),
+  attachmentIds: z.array(z.string()).optional(),
+  revision: z.number().int().nonnegative().optional(),
 })
 
 export type QueuedPrompt = z.infer<typeof queuedPromptSchema>

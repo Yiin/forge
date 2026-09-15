@@ -155,15 +155,45 @@ export function sessionRoutes(
   })
   app.patch('/api/sessions/:id/queued/:promptId', async (c) => {
     const value = z
-      .object({ text: z.string().min(1) })
+      .object({
+        text: z.string().min(1),
+        attachmentIds: z.array(z.string()).optional(),
+        revision: z.number().int().nonnegative().optional(),
+      })
       .safeParse(await c.req.json())
     if (!value.success) return c.json({ error: value.error.message }, 400)
     const prompt = manager.updateQueuedPrompt(
       c.req.param('id'),
       c.req.param('promptId'),
       value.data.text,
+      value.data.attachmentIds,
+      value.data.revision,
     )
     return prompt ? c.json(prompt) : c.json({ error: 'Not found' }, 404)
+  })
+  app.put('/api/sessions/:id/queued/order', async (c) => {
+    const value = z
+      .object({ promptIds: z.array(z.string()) })
+      .safeParse(await c.req.json())
+    if (!value.success) return c.json({ error: value.error.message }, 400)
+    const prompts = manager.reorderQueuedPrompts(
+      c.req.param('id'),
+      value.data.promptIds,
+    )
+    return prompts
+      ? c.json({ prompts })
+      : c.json({ error: 'Invalid queue order' }, 409)
+  })
+  app.post('/api/sessions/:id/queued/:promptId/send-now', async (c) => {
+    try {
+      const sent = await manager.sendQueuedPromptNow(
+        c.req.param('id'),
+        c.req.param('promptId'),
+      )
+      return sent ? c.json({ ok: true }) : c.json({ error: 'Not found' }, 404)
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, 409)
+    }
   })
   app.get('/api/sessions/:id/models', (c) => {
     const row = manager.database
