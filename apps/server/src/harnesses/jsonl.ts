@@ -1,7 +1,34 @@
+import { randomUUID } from 'node:crypto'
 import type { Readable, Writable } from 'node:stream'
 import { diagnosticError, positiveLimit } from './diagnostics.js'
 
+export type SubmissionEvidence = Readonly<{
+  operationId: string
+  transportId: string
+  status: 'not_written' | 'written' | 'failed_after_handoff'
+  cancellation: 'none' | 'before_handoff' | 'after_handoff'
+}>
+export type Submission = {
+  logical: Promise<void>
+  submission: Promise<SubmissionEvidence>
+}
+export type SendOptions = {
+  signal?: AbortSignal
+  deadline?: number
+  operationId?: string
+  onHandoff?: () => void
+}
+type SubmissionOwner = {
+  handed: boolean
+  finished: boolean
+  cancellation: SubmissionEvidence['cancellation']
+  finish(status: SubmissionEvidence['status']): void
+}
+
+export type JsonlFrameCapture = { context: unknown; release(): void }
 export type JsonlOptions = {
+  /** Runs before parsing. The exact decoded frame preserves numeric source spellings. */
+  captureFrame?: (source: string) => JsonlFrameCapture
   stdin: Writable
   stdout: Readable
   maxLineBytes?: number
@@ -25,7 +52,10 @@ export type JsonlOptions = {
     ownership?: JsonlValueOwnership,
   ) => void
 }
-export type JsonlValueOwnership = { retain(): () => void }
+export type JsonlValueOwnership = {
+  readonly capture?: unknown
+  retain(): () => void
+}
 
 type Write = {
   bytes: Buffer
@@ -35,12 +65,17 @@ type Write = {
   cleanup: () => void
   settled: boolean
   release: () => void
+  owner: SubmissionOwner
+  onHandoff?: () => void
+  callbackPending: boolean
+  streamClosed: boolean
 }
 
 /** Owns Node streams. Accepts CRLF, blank lines, and a valid final line at EOF. */
 export class JsonlTransport {
   readonly done: Promise<Error>
   private finish!: (reason: Error) => void
+  readonly transportId = randomUUID()
   private reason?: Error
   private maxLineBytes: number
   private maxQueuedBytes: number
@@ -156,9 +191,46 @@ export class JsonlTransport {
     }
   }
 
-  send(
+  send(value: unknown, options: SendOptions = {}): Promise<void> {
+    return this.sendWithSubmission(value, options).logical
+  }
+
+  sendWithSubmission(value: unknown, input: SendOptions = {}): Submission {
+    const options = { ...input }
+    const operationId = options.operationId ?? randomUUID()
+    const transportId = this.transportId
+    let complete!: (value: SubmissionEvidence) => void
+    const submission = new Promise<SubmissionEvidence>((resolve) => {
+      complete = resolve
+    })
+    const owner: SubmissionOwner = {
+      handed: false,
+      finished: false,
+      cancellation: options.signal?.aborted ? 'before_handoff' : 'none',
+      finish: (status) => {
+        if (owner.finished) return
+        owner.finished = true
+        complete(
+          Object.freeze({
+            operationId,
+            transportId,
+            status,
+            cancellation: owner.cancellation,
+          }),
+        )
+      },
+    }
+    const logical = this.queueSend(value, options, owner)
+    void logical.catch(() => {
+      if (!owner.handed) owner.finish('not_written')
+    })
+    return { logical, submission }
+  }
+
+  private queueSend(
     value: unknown,
-    options: { signal?: AbortSignal; deadline?: number } = {},
+    options: SendOptions,
+    owner: SubmissionOwner,
   ): Promise<void> {
     const unavailable = () => {
       if (this.reason) return this.reason
@@ -244,13 +316,20 @@ export class JsonlTransport {
           cleanup: () => {},
           settled: false,
           release,
+          owner,
+          onHandoff: options.onHandoff,
+          callbackPending: false,
+          streamClosed: false,
         }
         const cancel = () => {
+          write.cleanup()
+          owner.cancellation = owner.handed ? 'after_handoff' : 'before_handoff'
           const index = this.queue.indexOf(write)
           if (index >= 0) {
             this.queue.splice(index, 1)
             this.queuedBytes -= write.bytes.length
             write.release()
+            this.finishSubmission(write, 'not_written')
           }
           this.settle(write, new Error('JSONL write cancelled'))
         }
@@ -281,6 +360,7 @@ export class JsonlTransport {
     this.active = undefined
     for (const write of this.queue) {
       write.release()
+      this.finishSubmission(write, 'not_written')
       this.settle(write, this.reason)
     }
     this.queue.length = 0
@@ -295,7 +375,6 @@ export class JsonlTransport {
   private settle(write: Write, error?: Error) {
     if (write.settled) return
     write.settled = true
-    write.cleanup()
     if (error) write.reject(error)
     else write.resolve()
   }
@@ -309,6 +388,7 @@ export class JsonlTransport {
       const expired = this.queue.shift()!
       this.queuedBytes -= expired.bytes.length
       expired.release()
+      this.finishSubmission(expired, 'not_written')
       this.settle(expired, new Error('JSONL write timed out'))
     }
     const write = this.queue.shift()
@@ -322,6 +402,7 @@ export class JsonlTransport {
       if (!returned || !callbackDone || !drained || this.active !== write)
         return
       write.release()
+      this.finishSubmission(write, 'written')
       this.physicalWrites.delete(write)
       if (this.onDrain) this.options.stdin.off('drain', this.onDrain)
       this.onDrain = undefined
@@ -336,7 +417,28 @@ export class JsonlTransport {
     }
     this.options.stdin.once('drain', this.onDrain)
     try {
+      write.onHandoff?.()
+      if (write.settled || this.reason) {
+        write.release()
+        this.finishSubmission(write, 'not_written')
+        this.physicalWrites.delete(write)
+        if (this.active === write) {
+          this.active = undefined
+          this.queuedBytes -= write.bytes.length
+          if (this.onDrain) this.options.stdin.off('drain', this.onDrain)
+          this.onDrain = undefined
+          this.pump()
+        }
+        return
+      }
+      write.owner.handed = true
+      write.callbackPending = true
       const accepted = this.options.stdin.write(write.bytes, (error) => {
+        write.callbackPending = false
+        if (write.streamClosed) {
+          write.release()
+          this.physicalWrites.delete(write)
+        }
         if (error) {
           this.onWriteError()
           return
@@ -348,8 +450,20 @@ export class JsonlTransport {
       returned = true
       complete()
     } catch {
+      write.callbackPending = false
+      write.release()
+      this.finishSubmission(
+        write,
+        write.owner.handed ? 'failed_after_handoff' : 'not_written',
+      )
+      this.physicalWrites.delete(write)
       this.onWriteError()
     }
+  }
+
+  private finishSubmission(write: Write, status: SubmissionEvidence['status']) {
+    write.cleanup()
+    write.owner.finish(status)
   }
 
   private onWriteError = () => {
@@ -359,8 +473,14 @@ export class JsonlTransport {
     void this.close(new Error('JSONL stdout read failed'))
   }
   private onWriteClose = () => {
-    for (const write of this.physicalWrites) write.release()
-    this.physicalWrites.clear()
+    for (const write of this.physicalWrites) {
+      write.streamClosed = true
+      this.finishSubmission(write, 'failed_after_handoff')
+      if (!write.callbackPending) {
+        write.release()
+        this.physicalWrites.delete(write)
+      }
+    }
     this.options.stdin.off('error', this.onWriteError)
     // A child can close stdin before its final stdout bytes arrive.
     if (this.active || this.queue.length)
@@ -427,14 +547,19 @@ export class JsonlTransport {
   private frame(bytes: Buffer) {
     let releaseDecoded = () => {},
       releaseParsed = () => {}
+    let captured: JsonlFrameCapture | undefined
     let references = 1
     const release = () => {
       if (--references === 0) {
         releaseDecoded()
         releaseParsed()
+        captured?.release()
       }
     }
     const ownership: JsonlValueOwnership = {
+      get capture() {
+        return captured?.context
+      },
       retain: () => {
         if (!references) throw new Error('JSONL value already released')
         references++
@@ -457,6 +582,12 @@ export class JsonlTransport {
         return
       }
       if (!line.trim()) return
+      try {
+        captured = this.options.captureFrame?.(line)
+      } catch {
+        void this.close(new Error('JSONL frame capture failed'))
+        return
+      }
       let value: unknown
       try {
         releaseParsed = this.reserve('parse', bytes.length)

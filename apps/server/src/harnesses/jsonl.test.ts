@@ -717,16 +717,21 @@ describe.each(['standard', 'unversioned'] as const)(
       const io = rpc({ maxPendingRequests: 1 })
       const controller = new AbortController()
       try {
-        const request = io.transport.request('pending', undefined, {
-          signal: controller.signal,
-        })
+        const request = io.transport.requestWithSubmission(
+          'pending',
+          undefined,
+          {
+            signal: controller.signal,
+          },
+        )
         await expect(io.transport.request('overflow')).rejects.toThrow(
           'limit reached',
         )
         expect(io.transport.state.pendingRequests).toBe(1)
         const id = (io.writes[0] as { id: string }).id
         io.stdout.write(frame({ jsonrpc: '2.0', id, result: 1 }))
-        expect(await request).toBe(1)
+        expect(await request.response).toBe(1)
+        expect(await request.submission).toMatchObject({ status: 'written' })
         expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0)
         const timed = io.transport.request('timeout', undefined, {
           signal: controller.signal,

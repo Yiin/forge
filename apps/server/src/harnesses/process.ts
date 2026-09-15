@@ -13,6 +13,8 @@ export type NativeProcessOptions = {
   cwd?: string
   /** Pass accountEnv overrides here. Other inherited values remain available. */
   env?: NodeJS.ProcessEnv
+  /** Use only env when the caller has captured its complete launch environment. */
+  inheritEnv?: boolean
   secrets?: readonly string[]
   stderrLimit?: number
   signal?: AbortSignal
@@ -60,7 +62,10 @@ export class NativeProcess {
     })
     this.child = spawn(options.command, options.args ?? [], {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env:
+        options.inheritEnv === false
+          ? { ...options.env }
+          : { ...process.env, ...options.env },
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,
     })

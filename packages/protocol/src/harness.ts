@@ -176,7 +176,16 @@ const question = z.object({
   header: z.string().optional(),
   question: z.string(),
   options: z.array(
-    z.object({ id, label: z.string(), description: z.string().optional() }),
+    z.object({
+      id,
+      label: z.string(),
+      description: z.string().optional(),
+      preview: z
+        .string()
+        .max(65536)
+        .refine((value) => boundedUtf8Length(value, 65536) <= 65536)
+        .optional(),
+    }),
   ),
   multiSelect: z.boolean().default(false),
   allowFreeInput: z.boolean().default(false),
@@ -840,10 +849,22 @@ const utf8String = (limit: number) =>
   z.string().refine((value) => boundedUtf8Length(value, limit) <= limit, {
     message: `Text must contain at most ${limit} UTF-8 bytes`,
   })
+export const sourceReferenceSchema = z.strictObject({
+  artifactId: utf8String(512).min(1),
+  mime: utf8String(256).min(1),
+  bytes: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(1024 * 1024),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+})
+export type SourceReference = z.infer<typeof sourceReferenceSchema>
 // Public wire ceilings. Providers can impose smaller retained-state limits.
 const contentSnapshotFields = {
   ...turnItem,
   type: z.literal('content_snapshot'),
+  sourceRef: sourceReferenceSchema.optional(),
   text: utf8String(4 * 1024 * 1024),
 }
 const textMetadataBytes = 1024 * 1024
@@ -946,6 +967,91 @@ const usageCounts = {
   cacheWriteInputTokens: tokenCount.optional(),
   reasoningOutputTokens: tokenCount.optional(),
 }
+const artifactFields = {
+  artifactId: utf8String(512).min(1),
+  mime: utf8String(256).min(1),
+  bytes: tokenCount.max(10 * 1024 * 1024),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+}
+const neutralContentBlockSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.enum(['image', 'audio']), ...artifactFields }),
+  z.strictObject({
+    kind: z.literal('artifact_resource'),
+    uri: utf8String(4096),
+    ...artifactFields,
+  }),
+  z.strictObject({
+    kind: z.literal('text_resource'),
+    uri: utf8String(4096),
+    mime: utf8String(256).optional(),
+    text: utf8String(1024 * 1024),
+  }),
+  z.strictObject({
+    kind: z.literal('resource_link'),
+    uri: utf8String(4096),
+    name: utf8String(65536),
+    title: utf8String(65536).optional(),
+    description: utf8String(65536).optional(),
+    mime: utf8String(256).optional(),
+    size: tokenCount.optional(),
+  }),
+])
+const measurementScopeSchema = z.enum([
+  'call',
+  'prompt',
+  'session',
+  'unspecified',
+])
+const tokenPatchSchema = z
+  .strictObject({
+    inputTokens: tokenCount.nullish(),
+    outputTokens: tokenCount.nullish(),
+    totalTokens: tokenCount.nullish(),
+    cachedInputTokens: tokenCount.nullish(),
+    cacheWriteInputTokens: tokenCount.nullish(),
+    reasoningOutputTokens: tokenCount.nullish(),
+  })
+  .refine((value) => Object.values(value).some((field) => field !== undefined))
+const usageSnapshotSchema = z
+  .strictObject({
+    ...turnItem,
+    type: z.literal('usage_snapshot'),
+    measurementId: utf8String(512).min(1),
+    responseId: utf8String(512).min(1).optional(),
+    inputTokenBasis: z
+      .enum(['includes_cache_reads', 'excludes_cache_reads', 'unspecified'])
+      .optional(),
+    tokenScope: measurementScopeSchema.optional(),
+    costScope: measurementScopeSchema.optional(),
+    context: z
+      .strictObject({
+        used: tokenCount.nullish(),
+        capacity: tokenCount.nullish(),
+      })
+      .refine(
+        (value) => value.used !== undefined || value.capacity !== undefined,
+      )
+      .nullish(),
+    tokens: tokenPatchSchema.nullish(),
+    cost: z
+      .strictObject({
+        amount: z.number().finite().nonnegative().nullable(),
+        currency: utf8String(16).min(1),
+      })
+      .nullish(),
+    sourceRef: sourceReferenceSchema.optional(),
+  })
+  .refine(
+    (value) =>
+      (value.context !== undefined ||
+        value.tokens !== undefined ||
+        value.cost !== undefined) &&
+      (value.tokens === undefined || value.tokenScope !== undefined) &&
+      (value.cost === undefined || value.costScope !== undefined) &&
+      (!value.responseId ||
+        value.tokens === undefined ||
+        value.inputTokenBasis !== undefined),
+  )
 const childIdentity = {
   // The Forge tool call that spawned this child, possibly owned by parentChildId.
   parentToolCallId: id.optional(),
@@ -959,12 +1065,53 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
   z.object({
     ...turnItem,
     type: z.literal('text_delta'),
+    sourceRef: sourceReferenceSchema.optional(),
     text: z.string(),
     // Omitted means assistant. Keep role and owner stable across one item's deltas.
     role: z.enum(['user', 'assistant']).optional(),
   }),
-  z.object({ ...turnItem, type: z.literal('thought_delta'), text: z.string() }),
+  z.object({
+    ...turnItem,
+    type: z.literal('thought_delta'),
+    text: z.string(),
+    sourceRef: sourceReferenceSchema.optional(),
+  }),
   contentSnapshotSchema,
+  z.strictObject({
+    ...turnItem,
+    type: z.literal('content_block'),
+    blockIndex: tokenCount,
+    role: z.enum(['user', 'assistant']),
+    block: neutralContentBlockSchema,
+    sourceRef: sourceReferenceSchema.optional(),
+  }),
+  z.strictObject({
+    ...envelope,
+    turnId: id,
+    childId: id.optional(),
+    type: z.literal('source_reference'),
+    subject: z.discriminatedUnion('kind', [
+      z.strictObject({
+        kind: z.literal('item'),
+        itemId: id,
+        responseId: id.optional(),
+      }),
+      z.strictObject({ kind: z.literal('response'), responseId: id }),
+      z.strictObject({
+        kind: z.literal('usage'),
+        measurementId: id,
+        responseId: id.optional(),
+      }),
+      z.strictObject({
+        kind: z.literal('child_interval'),
+        childId: id,
+        intervalId: id,
+      }),
+    ]),
+    boundary: z.enum(['opened', 'reasoning_closed', 'closed']).optional(),
+    sourceRef: sourceReferenceSchema,
+  }),
+  usageSnapshotSchema,
   // Diagnostics never settle turns or children, regardless of severity or retryability.
   // Producers must redact known secrets before bounding and emitting plain text.
   // Keep startup diagnostics outside the timeline until a real root turn exists.
@@ -983,6 +1130,7 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
   z.object({
     ...turnItem,
     type: z.literal('tool_started'),
+    sourceRef: sourceReferenceSchema.optional(),
     toolCallId: id,
     name: z.string(),
     input: z.unknown(),
@@ -990,6 +1138,7 @@ export const harnessEventSchema = z.discriminatedUnion('type', [
   z.object({
     ...turnItem,
     type: z.literal('tool_update'),
+    sourceRef: sourceReferenceSchema.optional(),
     toolCallId: id,
     status: z.string(),
     output: z.unknown().optional(),
