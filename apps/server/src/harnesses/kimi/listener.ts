@@ -2,6 +2,9 @@ import { open, opendir, readlink } from 'node:fs/promises'
 import { statIsRunningGroupMember } from '../process-group.js'
 import { KimiError } from './limits.js'
 
+const processVanished = (error: unknown) =>
+  ['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '')
+
 async function readBounded(path: string, maximum: number) {
   const file = await open(path, 'r')
   try {
@@ -59,27 +62,41 @@ export async function ownedListener(
           pgid,
         )
       } catch (error) {
-        if (
-          ['ENOENT', 'ESRCH'].includes(
-            (error as NodeJS.ErrnoException).code ?? '',
-          )
-        )
-          continue
+        if (processVanished(error)) continue
         throw error
       }
       if (!member) continue
-      const descriptors = await opendir(`/proc/${entry.name}/fd`)
+      // An owned member can exit between its state read and its descriptor scan.
+      // Its absence is not a foreign listener, so keep scanning the other members.
+      let descriptors
+      try {
+        descriptors = await opendir(`/proc/${entry.name}/fd`)
+      } catch (error) {
+        if (processVanished(error)) continue
+        throw error
+      }
       let count = 0
-      for await (const fd of descriptors) {
-        check()
-        if (++count > 4096)
-          throw new KimiError('kimi_listener_inspection_limit')
-        try {
-          if (sockets.has(await readlink(`/proc/${entry.name}/fd/${fd.name}`)))
-            return true
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      try {
+        for await (const fd of descriptors) {
+          check()
+          if (++count > 4096)
+            throw new KimiError('kimi_listener_inspection_limit')
+          try {
+            if (
+              sockets.has(await readlink(`/proc/${entry.name}/fd/${fd.name}`))
+            )
+              return true
+          } catch (error) {
+            if (!processVanished(error)) throw error
+          }
         }
+      } catch (error) {
+        if (!processVanished(error)) throw error
+        // Iteration closes the descriptor when the loop body throws. Release it
+        // here for the case where the iterator itself failed.
+        await descriptors.close().catch((closed: NodeJS.ErrnoException) => {
+          if (closed.code !== 'ERR_DIR_CLOSED') throw closed
+        })
       }
     }
   } finally {

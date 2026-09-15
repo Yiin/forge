@@ -21,6 +21,14 @@ function checkDeadline(deadline: number) {
     throw new Error('Native process cleanup timed out')
 }
 
+/**
+ * Each entry costs an open, a read and a close on the shared filesystem pool, so a
+ * sequential scan of a busy host spends most of its budget waiting. Read a bounded
+ * batch at a time instead. The pool still bounds real work, so a saturated pool
+ * still expires the deadline.
+ */
+export const INSPECTION_BATCH = 8
+
 /** Read only state and group ID. Linux can retain orphan zombies after KILL. */
 export async function groupHasRunningMember(pid: number, deadline: number) {
   let expired = false
@@ -28,41 +36,62 @@ export async function groupHasRunningMember(pid: number, deadline: number) {
     if (expired) throw new Error('Native process cleanup timed out')
     checkDeadline(deadline)
   }
+  const isRunningMember = async (name: string, buffer: Buffer) => {
+    try {
+      check()
+      const file = await open(`/proc/${name}/stat`, 'r')
+      try {
+        check()
+        // One bounded read at a time. Do not read argv or the environment.
+        const { bytesRead } = await file.read(buffer, 0, buffer.length, 0)
+        check()
+        if (bytesRead === buffer.length)
+          throw new Error('Native process stat exceeds limit')
+        const stat = buffer.toString('utf8', 0, bytesRead)
+        return statIsRunningGroupMember(stat, pid)
+      } finally {
+        await file.close()
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT' && code !== 'ESRCH') throw error
+      return false
+    }
+  }
   const inspect = async () => {
     check()
     const directory = await opendir('/proc')
     try {
       check()
-      const buffer = Buffer.alloc(4096)
+      const buffers = Array.from({ length: INSPECTION_BATCH }, () =>
+        Buffer.alloc(4096),
+      )
+      const batch: string[] = []
       let reads = 0
-      while (true) {
-        check()
-        const entry = await directory.read()
-        check()
-        if (!entry) return false
-        if (!/^\d+$/.test(entry.name)) continue
-        if (++reads > 65_536)
-          throw new Error('Native process inspection limit reached')
-        try {
+      let exhausted = false
+      while (!exhausted) {
+        while (batch.length < INSPECTION_BATCH) {
           check()
-          const file = await open(`/proc/${entry.name}/stat`, 'r')
-          try {
-            check()
-            // One bounded read at a time. Do not read argv or the environment.
-            const { bytesRead } = await file.read(buffer, 0, buffer.length, 0)
-            check()
-            if (bytesRead === buffer.length)
-              throw new Error('Native process stat exceeds limit')
-            const stat = buffer.toString('utf8', 0, bytesRead)
-            if (statIsRunningGroupMember(stat, pid)) return true
-          } finally {
-            await file.close()
+          const entry = await directory.read()
+          check()
+          if (!entry) {
+            exhausted = true
+            break
           }
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code
-          if (code !== 'ENOENT' && code !== 'ESRCH') throw error
+          if (!/^\d+$/.test(entry.name)) continue
+          if (++reads > 65_536)
+            throw new Error('Native process inspection limit reached')
+          batch.push(entry.name)
         }
+        const members = await Promise.all(
+          batch
+            .splice(0)
+            .map((name, slot) => isRunningMember(name, buffers[slot]!)),
+        )
+        check()
+        if (members.includes(true)) return true
       }
+      return false
     } finally {
       await directory.close()
     }

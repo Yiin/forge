@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { open, opendir } from 'node:fs/promises'
 import {
+  INSPECTION_BATCH,
   groupHasRunningMember,
   waitForProcessGroupExit,
 } from './process-group.js'
@@ -96,9 +97,13 @@ describe('process inspection deadlines', () => {
           file.read.mock.calls.length,
         ]).toEqual(scans)
         expect(directory.close).toHaveBeenCalledTimes(1)
-        expect(file.close).toHaveBeenCalledTimes(
-          ['opendir', 'directory read'].includes(stage) ? 0 : 1,
-        )
+        // One bounded batch opens INSPECTION_BATCH handles and releases every
+        // one of them. Expiry never leaves a handle behind.
+        const opened = ['opendir', 'directory read'].includes(stage)
+          ? 0
+          : INSPECTION_BATCH
+        expect(vi.mocked(open).mock.calls.length).toBe(opened)
+        expect(file.close).toHaveBeenCalledTimes(opened)
         expect(vi.getTimerCount()).toBe(0)
       } finally {
         blocked.release()

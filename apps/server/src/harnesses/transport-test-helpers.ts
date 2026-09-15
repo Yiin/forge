@@ -13,8 +13,11 @@ export const fixture = fileURLToPath(
 )
 const owned = new Set<NativeProcess>()
 afterEach(async () => {
-  await Promise.all([...owned].map((runtime) => runtime.close()))
+  // Retire the registry first. A runtime that fails to close keeps its rejected
+  // close promise, so leaving it registered would fail every later test too.
+  const runtimes = [...owned]
   owned.clear()
+  await Promise.all(runtimes.map((runtime) => runtime.close()))
 })
 
 export function deferred<T>() {
