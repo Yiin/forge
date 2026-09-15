@@ -1,4 +1,4 @@
-import { Paperclip } from 'lucide-react'
+import { Paperclip, Star } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -142,6 +142,7 @@ export function Composer({
   const [configSelections, setConfigSelections] = useState<ConfigSelections>({})
   const [interrupting, setInterrupting] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
   const modelRequestAccount = useRef<string | undefined>(undefined)
   const submitting = useRef(false)
   const textarea = useRef<HTMLTextAreaElement>(null)
@@ -156,8 +157,11 @@ export function Composer({
     const node = textarea.current
     if (!node) return
     node.style.height = 'auto'
-    node.style.height = `${Math.min(200, Math.max(70, node.scrollHeight))}px`
-  }, [text])
+    const height = expanded
+      ? Math.min(200, Math.max(70, node.scrollHeight))
+      : 49
+    node.style.height = `${height}px`
+  }, [expanded, text])
   useEffect(() => {
     const events = volatile.filter(
       (event): event is Extract<typeof event, { type: 'availableCommands' }> =>
@@ -221,14 +225,15 @@ export function Composer({
       .catch(() => undefined)
   }, [draftMode, draftProjectId, sessionId])
   useEffect(() => {
-    if (draftMode) return
-    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((session: { projectId?: string } | null) => {
-        if (!session?.projectId) return
-        return fetch(
-          `/api/projects/${encodeURIComponent(session.projectId)}/files`,
-        )
+    const project = draftMode
+      ? Promise.resolve(draftProjectId)
+      : fetch(`/api/sessions/${encodeURIComponent(sessionId)}`)
+          .then((response) => (response.ok ? response.json() : null))
+          .then((session: { projectId?: string } | null) => session?.projectId)
+    void project
+      .then((projectId) => {
+        if (!projectId) return
+        return fetch(`/api/projects/${encodeURIComponent(projectId)}/files`)
           .then((response) => (response.ok ? response.json() : []))
           .then((files: Array<{ name: string; type: string }>) =>
             setCommands((items) => [
@@ -245,7 +250,7 @@ export function Composer({
           )
       })
       .catch(() => undefined)
-  }, [draftMode, sessionId])
+  }, [draftMode, draftProjectId, sessionId])
   useEffect(() => {
     if (draftMode || sending) return
     void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/config-options`)
@@ -343,6 +348,7 @@ export function Composer({
     cursor = textarea.current?.selectionStart ?? value.length,
   ) => {
     setText(value)
+    setExpanded(value.includes('\n') || value.length > 160)
     onTextChange?.(value)
     setTrigger(detectComposerTrigger(value, cursor))
   }
@@ -443,10 +449,13 @@ export function Composer({
   }, [])
   const submit = async () => {
     const value = text.trim()
+    const hasAttachments = uploads.items.some(
+      (item) => item.state === 'complete',
+    )
     if (
       sending ||
       submitting.current ||
-      !value ||
+      (!value && !hasAttachments) ||
       (accountsLoaded && !selected.accountId) ||
       !canSendUploads(uploads)
     )
@@ -454,6 +463,7 @@ export function Composer({
     submitting.current = true
     setSendError(null)
     const attachmentIds = completedAttachmentIds(uploads)
+    const previousUploads = uploads
     setText('')
     onTextChange?.('')
     setTrigger(null)
@@ -471,6 +481,7 @@ export function Composer({
     } catch (error) {
       setText(value)
       onTextChange?.(value)
+      dispatchUploads(previousUploads)
       setSendError(
         error instanceof Error ? error.message : 'Message failed to send',
       )
@@ -509,8 +520,13 @@ export function Composer({
       addFiles(files)
     }
   }
-  const canSubmit = !sending && !!text.trim() && canSendUploads(uploads)
-  const stopping = running && onInterrupt
+  const hasContent = Boolean(text.trim()) || uploads.items.length > 0
+  const canSubmit =
+    !sending &&
+    hasContent &&
+    canSendUploads(uploads) &&
+    Boolean(selected.accountId || !accountsLoaded)
+  const stopping = running && onInterrupt && !hasContent
   const accountSnapshot = accountSnapshots.find(
     (snapshot) => snapshot.accountId === selected.accountId,
   )
@@ -613,7 +629,10 @@ export function Composer({
                 }
                 value={text}
                 rows={1}
-                className="max-h-50 min-h-17.5 w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-relaxed text-foreground placeholder:text-muted-foreground/50 focus:outline-none sm:text-[14px]"
+                className={cn(
+                  'max-h-50 w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-relaxed text-foreground placeholder:text-muted-foreground/50 focus:outline-none sm:text-[14px]',
+                  expanded ? 'min-h-17.5' : 'min-h-12.25',
+                )}
                 onPaste={paste}
                 onChange={(event) => update(event.target.value)}
                 onKeyDown={(event) => {
@@ -799,7 +818,23 @@ export function Composer({
                           <SelectContent>
                             {models.map((model) => (
                               <SelectItem key={model.id} value={model.id}>
-                                {model.label}
+                                <span className="flex min-w-0 items-center gap-2">
+                                  {model.favorite && (
+                                    <Star className="size-3.5 shrink-0 fill-current" />
+                                  )}
+                                  <span className="flex min-w-0 flex-col">
+                                    <span className="truncate">
+                                      {model.label}
+                                    </span>
+                                    {(model.description ||
+                                      model.traits?.length) && (
+                                      <span className="truncate text-xs text-muted-foreground">
+                                        {model.description ??
+                                          model.traits?.join(' · ')}
+                                      </span>
+                                    )}
+                                  </span>
+                                </span>
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -842,16 +877,24 @@ export function Composer({
                     account={accountSnapshot}
                   />
                 )}
-                {stopping && (
-                  <button
-                    type="button"
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-solid text-solid-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:hover:scale-105 enabled:hover:bg-solid/90 disabled:opacity-40 sm:h-8 sm:w-8"
-                    disabled={interrupting}
-                    aria-label="End turn"
-                    title="Stop the current turn"
-                    onClick={() => void endTurn()}
-                  >
-                    {interrupting ? (
+                <button
+                  type={stopping ? 'button' : 'submit'}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-solid text-solid-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer hover:scale-105 hover:bg-solid/90 disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none sm:h-8 sm:w-8"
+                  disabled={stopping ? interrupting : !canSubmit}
+                  title={
+                    stopping
+                      ? 'Stop the current turn'
+                      : !canSendUploads(uploads)
+                        ? 'Wait for uploads to finish or remove failed files'
+                        : undefined
+                  }
+                  aria-label={
+                    stopping ? 'End turn' : running ? 'Queue message' : 'Send'
+                  }
+                  onClick={stopping ? () => void endTurn() : undefined}
+                >
+                  {stopping ? (
+                    interrupting ? (
                       <Spinner className="size-3.5" />
                     ) : (
                       <svg
@@ -863,23 +906,8 @@ export function Composer({
                       >
                         <rect x="2" y="2" width="8" height="8" rx="1.5" />
                       </svg>
-                    )}
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-solid text-solid-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer hover:scale-105 hover:bg-solid/90 disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none sm:h-8 sm:w-8"
-                  disabled={
-                    !canSubmit || (accountsLoaded && !selected.accountId)
-                  }
-                  title={
-                    !canSendUploads(uploads)
-                      ? 'Wait for uploads to finish or remove failed files'
-                      : undefined
-                  }
-                  aria-label={running ? 'Queue message' : 'Send'}
-                >
-                  {sending ? (
+                    )
+                  ) : sending ? (
                     <Spinner className="size-3.5" />
                   ) : (
                     <svg

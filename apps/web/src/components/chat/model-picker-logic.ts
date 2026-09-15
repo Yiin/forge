@@ -1,4 +1,10 @@
-export type ModelOption = { id: string; label: string }
+export type ModelOption = {
+  id: string
+  label: string
+  description?: string
+  favorite?: boolean
+  traits?: string[]
+}
 
 export function resolveModelTriggerLabel(
   selectedId: string | undefined,
@@ -10,11 +16,37 @@ export function resolveModelTriggerLabel(
 }
 
 export function buildModelOptions(
-  models: ReadonlyArray<{ id: string; displayName: string }>,
+  models: ReadonlyArray<{
+    id: string
+    displayName: string
+    description?: string
+    isDefault?: boolean
+    options?: Record<string, unknown>
+  }>,
 ): ModelOption[] {
-  return models
-    .filter((model) => model.id.length > 0)
-    .map((model) => ({ id: model.id, label: model.displayName || model.id }))
+  const seen = new Set<string>()
+  return [...models]
+    .filter((model) => model.id.length > 0 && !seen.has(model.id))
+    .filter((model) => {
+      seen.add(model.id)
+      return true
+    })
+    .sort((a, b) => Number(Boolean(b.isDefault)) - Number(Boolean(a.isDefault)))
+    .map((model) => {
+      const options = model.options
+      const traits = Array.isArray(options?.traits)
+        ? options.traits.filter(
+            (trait): trait is string => typeof trait === 'string',
+          )
+        : undefined
+      return {
+        id: model.id,
+        label: model.displayName || model.id,
+        ...(model.description ? { description: model.description } : {}),
+        ...(model.isDefault ? { favorite: true } : {}),
+        ...(traits?.length ? { traits } : {}),
+      }
+    })
 }
 
 export function modelResponse(value: unknown): ModelOption[] {
@@ -23,11 +55,27 @@ export function modelResponse(value: unknown): ModelOption[] {
   if (!Array.isArray(models)) return []
   return buildModelOptions(
     models.filter(
-      (model): model is { id: string; displayName: string } =>
+      (
+        model,
+      ): model is {
+        id: string
+        displayName: string
+        description?: string
+        isDefault?: boolean
+        options?: Record<string, unknown>
+      } =>
         !!model &&
         typeof model === 'object' &&
         typeof model.id === 'string' &&
-        typeof model.displayName === 'string',
+        typeof model.displayName === 'string' &&
+        (model.description === undefined ||
+          typeof model.description === 'string') &&
+        (model.isDefault === undefined ||
+          typeof model.isDefault === 'boolean') &&
+        (model.options === undefined ||
+          (!!model.options &&
+            typeof model.options === 'object' &&
+            !Array.isArray(model.options))),
     ),
   )
 }

@@ -213,6 +213,28 @@ describe('Composer', () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce())
   })
 
+  it('sends completed attachments without typed text', async () => {
+    vi.spyOn(api, 'upload').mockResolvedValue({
+      attachmentId: 'attachment-only',
+      putUrl: 'https://uploads.test/attachment-only',
+    })
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    renderComposer(onSend)
+    fireEvent.paste(screen.getByLabelText('Message composer'), {
+      clipboardData: {
+        files: [new File(['image'], 'image.png', { type: 'image/png' })],
+      },
+    })
+    await waitFor(() => expect(screen.getByText('image.png')).toBeTruthy())
+    fireEvent.submit(screen.getByRole('textbox').closest('form')!)
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith('', ['attachment-only'], {
+        harness: 'claude',
+        accountId: 'main',
+      }),
+    )
+  })
+
   it('does not send again while a send is in flight', async () => {
     let resolveSend!: () => void
     const onSend = vi.fn(
