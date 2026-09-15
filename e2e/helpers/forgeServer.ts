@@ -338,7 +338,7 @@ const ambientPathKeys = new Set([
   'FORGE_DB',
 ])
 
-function withoutAmbientPaths(env: Record<string, string> | undefined) {
+export function withoutAmbientPaths(env: Record<string, string> | undefined) {
   return Object.fromEntries(
     Object.entries(env ?? {}).filter(([key]) => !ambientPathKeys.has(key)),
   )
