@@ -15,6 +15,7 @@ export type NativeProcessOptions = {
   env?: NodeJS.ProcessEnv
   /** Use only env when the caller has captured its complete launch environment. */
   inheritEnv?: boolean
+  onCreated?: (runtime: NativeProcess) => void
   secrets?: readonly string[]
   stderrLimit?: number
   signal?: AbortSignal
@@ -115,7 +116,9 @@ export class NativeProcess {
       throw new Error('Native process failed to spawn')
     }
     let timer: ReturnType<typeof setTimeout> | undefined
+    void runtime.spawned.catch(() => {})
     try {
+      options.onCreated?.(runtime)
       const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(
           () => reject(new Error('Native startup timed out')),
