@@ -78,7 +78,10 @@ export async function launchForge(
       `args = [${JSON.stringify(fakeAgent)}]`,
       'adapterKind = "acp"',
       'enabled = true',
-      ...(tomlEnv ? ['[harness.mock.env]', tomlEnv] : []),
+      // `env` is required by the harness schema, so the table is never optional.
+      // Omitting it when there are no knobs stops the server from booting.
+      '[harness.mock.env]',
+      ...(tomlEnv ? [tomlEnv] : []),
       '',
     ].join('\n'),
   )
@@ -86,6 +89,9 @@ export async function launchForge(
     resolve(dataDir, 'forge.db'),
     'CREATE TABLE IF NOT EXISTS e2e_marker (id INTEGER);',
   ])
+  // Specs point projects at the data directory. The real server reads Git
+  // state from that path, so it has to be a repository with a commit.
+  initRepo(dataDir)
   const child = spawn(
     'node',
     [
@@ -137,11 +143,50 @@ export async function launchForge(
     await stopForge(child, dataDir, !options.dataDir)
     throw error
   }
+  const baseUrl = `http://127.0.0.1:${port}`
+  try {
+    // The composer hides every harness without an account, so a fresh database
+    // leaves Send disabled. Seed the one account the fixture harness needs.
+    await ensureMockAccount(baseUrl)
+  } catch (error) {
+    await stopForge(child, dataDir, !options.dataDir)
+    throw error
+  }
   return {
-    baseUrl: `http://127.0.0.1:${port}`,
+    baseUrl,
     dataDir,
     stop: async () => stopForge(child, dataDir, !options.dataDir),
   }
+}
+
+function initRepo(dataDir: string): void {
+  const git = (...args: string[]) =>
+    spawnSync('git', ['-C', dataDir, ...args], { stdio: 'ignore' })
+  git('init', '--initial-branch=main')
+  git('config', 'user.email', 'e2e@forge.test')
+  git('config', 'user.name', 'Forge E2E')
+  git('commit', '--allow-empty', '-m', 'e2e base')
+}
+
+async function ensureMockAccount(baseUrl: string): Promise<void> {
+  const existing = (await (
+    await fetch(`${baseUrl}/api/harness-accounts?harness=mock`)
+  ).json()) as unknown[]
+  if (existing.length > 0) return
+  const created = await fetch(`${baseUrl}/api/harness-accounts`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      harnessKey: 'mock',
+      label: 'E2E fixture account',
+      kind: 'mock',
+      adapterKind: 'acp',
+    }),
+  })
+  if (!created.ok)
+    throw new Error(
+      `could not seed the mock account: ${created.status} ${await created.text()}`,
+    )
 }
 
 export async function stopForge(

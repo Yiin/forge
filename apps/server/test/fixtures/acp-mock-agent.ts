@@ -14,6 +14,42 @@ function logRequest(method: string, params: unknown): void {
     appendFileSync(requestLogPath, `${JSON.stringify({ method, params })}\n`)
 }
 
+// Multi-select mode carries its own question so the browser specs can tell a
+// grouped single-choice panel apart from a confirm-and-submit one.
+function askQuestionBody(index: number, multiSelect: boolean) {
+  if (multiSelect)
+    return {
+      header: 'Toppings',
+      question: 'Choose your toppings',
+      options: [
+        { label: 'Cheese', value: 'cheese', description: 'A classic choice' },
+        {
+          label: 'Mushrooms',
+          value: 'mushrooms',
+          description: 'A savoury choice',
+        },
+      ],
+      multiSelect: true,
+    }
+  return index === 0
+    ? {
+        header: 'Choice',
+        question: 'Pick one',
+        options: [
+          { label: 'First', value: 'first' },
+          { label: 'Second', value: 'second' },
+        ],
+      }
+    : {
+        header: 'Second choice',
+        question: 'Pick another one',
+        options: [
+          { label: 'Third', value: 'third' },
+          { label: 'Fourth', value: 'fourth' },
+        ],
+      }
+}
+
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   if (milliseconds <= 0) return Promise.resolve()
   return new Promise((resolve, reject) => {
@@ -248,25 +284,7 @@ class MockAgent implements acp.Agent {
             kind: 'other',
             status: 'pending',
             rawInput: question
-              ? {
-                  questions: [
-                    {
-                      header: index === 0 ? 'Choice' : 'Second choice',
-                      question: index === 0 ? 'Pick one' : 'Pick another one',
-                      options:
-                        index === 0
-                          ? [
-                              { label: 'First', value: 'first' },
-                              { label: 'Second', value: 'second' },
-                            ]
-                          : [
-                              { label: 'Third', value: 'third' },
-                              { label: 'Fourth', value: 'fourth' },
-                            ],
-                      ...(multiSelect ? { multiSelect: true } : {}),
-                    },
-                  ],
-                }
+              ? { questions: [askQuestionBody(index, multiSelect)] }
               : { command: 'echo mock' },
           },
           options: [
@@ -297,9 +315,11 @@ class MockAgent implements acp.Agent {
           content: { type: 'text', text: `selected: ${selected}` },
         })
       }
-      await ask(0)
+      // Queued mode must leave both requests pending at once, so the UI groups
+      // them. Awaiting the first in turn would only ever show one question.
       if (question && env.FORGE_MOCK_ASK_QUESTION_MODE === 'queued')
-        await ask(1)
+        await Promise.all([ask(0), ask(1)])
+      else await ask(0)
     }
     await delay(numberFlag('PROMPT_DELAY_MS'), signal)
     if (flag('EXIT_MID_TURN')) process.exit(0)

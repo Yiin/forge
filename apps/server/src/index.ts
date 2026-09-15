@@ -340,8 +340,7 @@ export function startServer(port?: number): ServerType {
   }
   const listenPort = serverPort(port, process.env.FORGE_PORT, config.port)
   if (saveConfig) saveConfigSync(configPath, config)
-  // Loaded lazily: the Bun e2e launcher cannot resolve node:sqlite, and it
-  // never reaches this branch.
+  // Loaded lazily so the module still imports on runtimes without node:sqlite.
   const { DatabaseSync } = require('node:sqlite') as {
     DatabaseSync: new (path: string) => DatabaseSync
   }
