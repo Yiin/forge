@@ -61,7 +61,7 @@ async function fixture(
         } else done()
       },
     }),
-    runtimeGeneration: 'generation',
+    runtimeGeneration: 'transport-generation',
     async onIncoming(request) {
       if (request.type !== 'request') return
       try {
@@ -78,6 +78,7 @@ async function fixture(
   service = await createAcpTerminals({
     session: { id: 'session', provider: 'provider', cwd: root },
     runtimeGeneration: 'generation',
+    transportGeneration: 'transport-generation',
     account: owner.account,
     binding: () => binding,
     rpc,

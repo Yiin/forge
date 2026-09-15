@@ -77,6 +77,7 @@ type Operation = {
 export async function createAcpTerminals(options: {
   session: HarnessSession
   runtimeGeneration: string
+  transportGeneration: string
   binding(): ConfirmedNativeBinding | null
   rpc: JsonlRpcTransport
   host: AcpResourceHost
@@ -88,7 +89,8 @@ export async function createAcpTerminals(options: {
   commandDeadlineMs?: number
   expiryMs?: number
 }) {
-  const { rpc, host, instanceId, runtimeGeneration } = options
+  const { rpc, host, instanceId, runtimeGeneration, transportGeneration } =
+    options
   const session = immutableData(options.session)
   const account = immutableData(options.account)
   const capturedBinding = options.binding
@@ -104,7 +106,11 @@ export async function createAcpTerminals(options: {
   ])
     if (!Number.isSafeInteger(value) || value! < 1 || value! > max!)
       throw Error('Invalid ACP terminal deadline')
-  if (!runtimeGeneration || session.provider !== instanceId)
+  if (
+    !runtimeGeneration ||
+    !transportGeneration ||
+    session.provider !== instanceId
+  )
     throw Error('Invalid ACP terminal authority')
   const owners = runtimeOwners.get(host) ?? new Set<string>()
   runtimeOwners.set(host, owners)
@@ -492,7 +498,7 @@ export async function createAcpTerminals(options: {
         !binding ||
         owner.phase !== 'live' ||
         canonical(owner.account) !== canonical(account) ||
-        original.runtimeGeneration !== runtimeGeneration ||
+        original.runtimeGeneration !== transportGeneration ||
         owner.runtimeGeneration !== runtimeGeneration ||
         owner.sessionId !== session.id ||
         owner.providerInstanceId !== instanceId ||

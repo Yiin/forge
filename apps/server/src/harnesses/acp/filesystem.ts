@@ -64,6 +64,7 @@ function deferred<T>() {
 export async function createAcpFilesystem(options: {
   session: HarnessSession
   runtimeGeneration: string
+  transportGeneration: string
   binding(): ConfirmedNativeBinding | null
   rpc: JsonlRpcTransport
   host: AcpResourceHost
@@ -71,12 +72,20 @@ export async function createAcpFilesystem(options: {
   deadlineMs?: number
   hooks?: Hooks
 }) {
-  const { rpc, host, instanceId, runtimeGeneration, binding } = options
+  const {
+    rpc,
+    host,
+    instanceId,
+    runtimeGeneration,
+    transportGeneration,
+    binding,
+  } = options
   const session = immutableData(options.session)
   const hooks = { ...options.hooks }
   const deadlineMs = options.deadlineMs ?? 6000
   if (
     !runtimeGeneration ||
+    !transportGeneration ||
     session.provider !== instanceId ||
     !Number.isSafeInteger(deadlineMs) ||
     deadlineMs < 1 ||
@@ -368,7 +377,7 @@ export async function createAcpFilesystem(options: {
       if (
         !expected ||
         owner.phase !== 'live' ||
-        original.runtimeGeneration !== runtimeGeneration ||
+        original.runtimeGeneration !== transportGeneration ||
         owner.runtimeGeneration !== runtimeGeneration ||
         owner.sessionId !== session.id ||
         owner.providerInstanceId !== instanceId ||
