@@ -2,6 +2,7 @@ import { Ephemeral, ServerEvent } from '@forge/protocol/events'
 import { SessionSnapshot, SubscribeFrame } from '@forge/protocol/ws'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore } from '../stores/sessions'
+import { notifySessionEvent } from './notifications'
 
 export interface ForgeWebSocket {
   readonly readyState: number
@@ -36,6 +37,7 @@ export class ForgeSocket {
   // Replay cursors belong to a subscription, not to the shared message store.
   // A session-specific socket must not skip another session's older events.
   private cursor = 0
+  private connectedAt = Date.now()
   private readonly options: Required<
     Pick<SocketOptions, 'url' | 'sessions' | 'reconnect'>
   > &
@@ -79,6 +81,7 @@ export class ForgeSocket {
     const socket = this.options.createWebSocket!(this.options.url)
     this.socket = socket
     socket.onopen = () => {
+      this.connectedAt = Date.now()
       const reconnecting = this.attempt > 0
       this.attempt = 0
       this.options.onConnectionChange?.('connected')
@@ -157,7 +160,13 @@ export class ForgeSocket {
     const event = ServerEvent.safeParse(value)
     if (event.success) {
       this.cursor = Math.max(this.cursor, event.data.seq)
-      useMessagesStore.getState().applyEvent(event.data)
+      const messages = useMessagesStore.getState()
+      const alreadySeen =
+        messages.seenSeqs.has(event.data.seq) ||
+        event.data.seq <=
+          (messages.snapshotCursorBySession[event.data.sessionId] ?? -1)
+      messages.applyEvent(event.data)
+      if (!alreadySeen) notifySessionEvent(event.data, this.connectedAt)
     }
   }
   private scheduleReconnect() {

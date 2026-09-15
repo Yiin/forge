@@ -273,10 +273,10 @@ export class ForgeApi {
     sessionId: string,
     file: File,
     onProgress?: UploadProgress,
-    projectId?: string,
+    draft?: { draftId: string; projectId?: string },
   ) {
-    const path = projectId
-      ? `/api/drafts/${encodeURIComponent(sessionId)}/uploads`
+    const path = draft
+      ? `/api/drafts/${encodeURIComponent(draft.draftId)}/uploads`
       : `/api/sessions/${encodeURIComponent(sessionId)}/uploads`
     const init = (await this.post(
       path,
@@ -287,7 +287,7 @@ export class ForgeApi {
         sizeBytes: file.size,
       },
       undefined,
-      projectId ? { 'X-Project-Id': projectId } : undefined,
+      draft?.projectId ? { 'X-Project-Id': draft.projectId } : undefined,
     )) as { attachmentId: string; putUrl: string }
     await putUpload(init, file, this.baseUrl, onProgress)
     onProgress?.(1)

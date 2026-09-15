@@ -19,7 +19,7 @@ import {
   Search,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Spinner } from '../ui/spinner'
@@ -52,8 +52,11 @@ type Props = {
   sessionId: string
   target: { workspaceId?: string | null; workspaceRevision?: number | null }
   initialPath?: string
+  transitionRef?: React.MutableRefObject<((action: () => void) => void) | null>
 }
 type OpenFile = {
+  identity: number
+  owner: string
   path: string
   snapshot: WorkspaceSnapshot
   text: string
@@ -65,18 +68,89 @@ type OpenFile = {
   error: string | null
 }
 
+const retainedFiles = new Map<string, OpenFile>()
+const retainedListeners = new Map<{ current: OpenFile | null }, () => void>()
+let nextDocumentIdentity = 0
+function warnUnsaved(event: BeforeUnloadEvent) {
+  if ([...retainedFiles.values()].some((file) => file.dirty || file.saving)) {
+    event.preventDefault()
+    event.returnValue = ''
+  }
+}
+function retainFile(file: OpenFile | null, previous: OpenFile | null) {
+  if (previous && previous.identity !== file?.identity)
+    retainedFiles.delete(previous.owner)
+  if (file) {
+    const mounted = [...retainedListeners.keys()].some(
+      (editor) => editor.current?.identity === file.identity,
+    )
+    if (file.dirty || file.saving || mounted)
+      retainedFiles.set(file.owner, file)
+    else retainedFiles.delete(file.owner)
+  }
+  window.removeEventListener('beforeunload', warnUnsaved)
+  if ([...retainedFiles.values()].some((entry) => entry.dirty || entry.saving))
+    window.addEventListener('beforeunload', warnUnsaved)
+  for (const listener of retainedListeners.values()) listener()
+}
+
 export function WorkspaceFilesSurface({
   sessionId,
   target,
   initialPath,
+  transitionRef,
 }: Props) {
   const selection = useMemo<WorkspaceSelection>(
     () => ({ sessionId, ...target }),
-    [sessionId, target],
+    [sessionId, target.workspaceId, target.workspaceRevision],
   )
   const [entries, setEntries] = useState<WorkspaceEntry[]>([])
   const [path, setPath] = useState('')
-  const [open, setOpen] = useState<OpenFile | null>(null)
+  const owner = JSON.stringify([
+    sessionId,
+    target.workspaceId,
+    target.workspaceRevision,
+  ])
+  const [open, updateOpen] = useState<OpenFile | null>(
+    () => retainedFiles.get(owner) ?? null,
+  )
+  const currentOpen = useRef<OpenFile | null>(open)
+  const documentIdentity = useRef(0)
+  const pendingTransition = useRef<(() => void) | null>(null)
+  const setOpen = useCallback(
+    (
+      value: OpenFile | null | ((current: OpenFile | null) => OpenFile | null),
+    ) => {
+      const previous = currentOpen.current
+      const retained = previous && retainedFiles.get(previous.owner)
+      if (
+        typeof value === 'function' &&
+        previous &&
+        retained?.identity !== previous.identity
+      )
+        return
+      if (retained) currentOpen.current = retained
+      currentOpen.current =
+        typeof value === 'function' ? value(currentOpen.current) : value
+      retainFile(currentOpen.current, previous)
+      updateOpen(currentOpen.current)
+    },
+    [],
+  )
+  useEffect(() => {
+    const changed = () => {
+      const current = currentOpen.current
+      const retained = current && retainedFiles.get(current.owner)
+      if (retained?.identity === current?.identity && retained) {
+        currentOpen.current = retained
+        updateOpen(retained)
+      }
+    }
+    retainedListeners.set(currentOpen, changed)
+    return () => {
+      retainedListeners.delete(currentOpen)
+    }
+  }, [])
   const [query, setQuery] = useState('')
   const [includeIgnored, setIncludeIgnored] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -86,10 +160,28 @@ export function WorkspaceFilesSurface({
   const requestGeneration = useRef(0)
   const initialPathOpened = useRef<string | undefined>(undefined)
   const filePreferences = readFilePreferences()
+  useEffect(
+    () => () => {
+      documentIdentity.current = ++nextDocumentIdentity
+      const file = currentOpen.current
+      if (
+        file &&
+        !file.dirty &&
+        !file.saving &&
+        retainedFiles.get(file.owner)?.identity === file.identity
+      )
+        retainedFiles.delete(file.owner)
+    },
+    [],
+  )
 
   useEffect(() => {
     requestGeneration.current += 1
-    setOpen((current) => (current ? { ...current, staleTarget: true } : null))
+    setOpen((current) =>
+      current && current.owner !== owner
+        ? { ...current, staleTarget: true }
+        : current,
+    )
     setPath('')
     initialPathOpened.current = undefined
   }, [selection])
@@ -142,7 +234,7 @@ export function WorkspaceFilesSurface({
     open?.staleTarget,
   ])
 
-  const openPath = async (next: string) => {
+  const readPath = async (next: string) => {
     const entry = entries.find((item) => item.path === next)
     if (entry?.type === 'directory') {
       setPath(next)
@@ -151,25 +243,45 @@ export function WorkspaceFilesSurface({
     }
     setError(null)
     const generation = requestGeneration.current
+    if (!retainedFiles.has(owner) && retainedFiles.size >= 32) {
+      setError('Close an open file before opening another workspace.')
+      return
+    }
+    const identity = ++nextDocumentIdentity
+    documentIdentity.current = identity
     try {
       const snapshot = await readWorkspaceFile(selection, next)
-      if (generation !== requestGeneration.current) return
+      if (
+        generation !== requestGeneration.current ||
+        identity !== documentIdentity.current
+      )
+        return
       if (snapshot.file.text === null || snapshot.file.readOnlyReason) {
         setError(
           `${next} is read-only: ${snapshot.file.readOnlyReason ?? 'unsupported content'}`,
         )
         return
       }
-      setOpen({
-        path: next,
-        snapshot,
-        text: snapshot.file.text,
-        savedText: snapshot.file.text,
-        dirty: false,
-        conflict: false,
-        staleTarget: false,
-        saving: false,
-        error: null,
+      const text = snapshot.file.text
+      transition(() => {
+        if (
+          generation !== requestGeneration.current ||
+          identity !== documentIdentity.current
+        )
+          return
+        setOpen({
+          identity,
+          owner,
+          path: next,
+          snapshot,
+          text,
+          savedText: text,
+          dirty: false,
+          conflict: false,
+          staleTarget: false,
+          saving: false,
+          error: null,
+        })
       })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not read file')
@@ -183,23 +295,46 @@ export function WorkspaceFilesSurface({
     }
     if (initialPathOpened.current === initialPath) return
     initialPathOpened.current = initialPath
-    void openPath(initialPath)
+    if (
+      currentOpen.current?.path !== initialPath ||
+      currentOpen.current.owner !== owner
+    )
+      void openPath(initialPath)
   }, [initialPath])
 
-  const close = () => {
-    if (open?.dirty) {
+  const transition = (action: () => void) => {
+    if (currentOpen.current?.dirty || currentOpen.current?.saving) {
+      pendingTransition.current = action
       setCloseRequested(true)
-      return
-    }
-    setOpen(null)
+    } else action()
   }
+  const openPath = (next: string) => transition(() => void readPath(next))
+  const close = () =>
+    transition(() => {
+      documentIdentity.current += 1
+      setOpen(null)
+    })
   const discardAndClose = () => {
+    const action = pendingTransition.current
+    pendingTransition.current = null
     setCloseRequested(false)
     setOpen(null)
+    action?.()
   }
+  useEffect(() => {
+    if (!transitionRef) return
+    transitionRef.current = transition
+    return () => {
+      transitionRef.current = null
+    }
+  })
   const save = async () => {
-    if (!open || open.saving || !open.dirty || open.staleTarget) return
-    const submitted = open
+    const submitted = currentOpen.current
+    if (!submitted) return true
+    if (submitted.saving) return false
+    if (!submitted.dirty) return true
+    if (submitted.staleTarget) return false
+    const generation = requestGeneration.current
     setOpen({ ...submitted, saving: true, error: null })
     try {
       const saved = await saveWorkspaceFile(
@@ -208,7 +343,7 @@ export function WorkspaceFilesSurface({
         submitted.text,
       )
       setOpen((current) => {
-        if (!current) return current
+        if (!current || current.identity !== submitted.identity) return current
         const hasNewerEdits = current.text !== submitted.text
         return {
           ...current,
@@ -220,11 +355,16 @@ export function WorkspaceFilesSurface({
           error: null,
         }
       })
+      return (
+        currentOpen.current?.identity === submitted.identity &&
+        !currentOpen.current.dirty &&
+        generation === requestGeneration.current
+      )
     } catch (cause) {
       const conflict =
         cause instanceof WorkspaceFilesError && cause.code === 'conflict'
       setOpen((current) =>
-        current
+        current?.identity === submitted.identity
           ? {
               ...current,
               saving: false,
@@ -234,6 +374,7 @@ export function WorkspaceFilesSurface({
             }
           : current,
       )
+      return false
     }
   }
 
@@ -377,6 +518,7 @@ export function WorkspaceFilesSurface({
             onChange={setOpen}
             onSave={() => void save()}
             onClose={close}
+            onReload={() => transition(() => void readPath(open.path))}
           />
         ) : (
           <div className="hidden flex-1 items-center justify-center p-6 text-sm text-muted-foreground md:flex">
@@ -387,7 +529,7 @@ export function WorkspaceFilesSurface({
       <AlertDialog open={closeRequested} onOpenChange={setCloseRequested}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Save changes before closing?</AlertDialogTitle>
+            <AlertDialogTitle>Save changes before continuing?</AlertDialogTitle>
             <AlertDialogDescription>
               Your changes to {open?.path} are not saved.
             </AlertDialogDescription>
@@ -397,15 +539,19 @@ export function WorkspaceFilesSurface({
             <AlertDialogAction onClick={discardAndClose} variant="ghost">
               Discard
             </AlertDialogAction>
-            <AlertDialogAction
-              onClick={() => {
-                setCloseRequested(false)
-                void save()
+            <Button
+              onClick={async () => {
+                if (await save()) {
+                  const action = pendingTransition.current
+                  pendingTransition.current = null
+                  setCloseRequested(false)
+                  action?.()
+                }
               }}
-              disabled={open?.saving || open?.staleTarget}
+              disabled={open?.saving || (open?.dirty && open?.staleTarget)}
             >
               Save
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -418,11 +564,13 @@ function EditorPanel({
   onChange,
   onSave,
   onClose,
+  onReload,
 }: {
   open: OpenFile
-  onChange: (file: OpenFile) => void
+  onChange: (update: (file: OpenFile | null) => OpenFile | null) => void
   onSave: () => void
   onClose: () => void
+  onReload: () => void
 }) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
@@ -445,7 +593,11 @@ function EditorPanel({
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             const text = update.state.doc.toString()
-            onChange({ ...open, text, dirty: text !== open.savedText })
+            onChange((current) =>
+              current?.identity === open.identity
+                ? { ...current, text, dirty: text !== current.savedText }
+                : current,
+            )
           }
         }),
       ],
@@ -457,7 +609,7 @@ function EditorPanel({
     }
     // The editor must be recreated only when its document changes identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open.path, open.snapshot.file.fileRevision])
+  }, [open.identity])
   return (
     <section
       className="flex min-w-0 flex-1 flex-col"
@@ -499,7 +651,7 @@ function EditorPanel({
             size="sm"
             variant="outline"
             className="ml-auto"
-            onClick={() => window.location.reload()}
+            onClick={onReload}
           >
             <RotateCcw size={14} /> Reload
           </Button>

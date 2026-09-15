@@ -366,7 +366,6 @@ export function Composer({
     })
   }
   const upload = async (file: File, retryId?: string) => {
-    if (draftMode && !draftProjectId) return
     const temp = `local-${crypto.randomUUID()}`
     const id = retryId ?? temp
     if (retryId)
@@ -396,7 +395,9 @@ export function Composer({
           dispatchUploads((state) =>
             attachmentUploadsReducer(state, { type: 'progress', id, progress }),
           ),
-        draftProjectId,
+        draftMode
+          ? { draftId: sessionId, projectId: draftProjectId }
+          : undefined,
       )
       dispatchUploads((state) =>
         attachmentUploadsReducer(state, {

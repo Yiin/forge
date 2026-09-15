@@ -67,6 +67,9 @@ export function WorkspaceDock({
   const closeTab = useShellStore((state) => state.closeDockTab)
   const selectTab = useShellStore((state) => state.setActiveDockTab)
   const [adding, setAdding] = useState(false)
+  const transitionRef = useRef<((action: () => void) => void) | null>(null)
+  const transition = (action: () => void) =>
+    transitionRef.current ? transitionRef.current(action) : action()
   const drag = useRef<{ x: number; width: number } | null>(null)
 
   useEffect(() => {
@@ -85,32 +88,38 @@ export function WorkspaceDock({
     }
   }, [setWidth])
 
+  const add = (kind: DockSurfaceKind) =>
+    transition(() => {
+      const tab: DockTab = {
+        id: `${kind}-${crypto.randomUUID()}`,
+        kind,
+        title: surfaceLabels[kind],
+      }
+      openTab(sessionId, tab)
+      setAdding(false)
+    })
+
   if (!dock.open) {
     return (
-      <Button
-        variant="ghost"
-        size="sm"
-        className="pointer-coarse:min-h-11"
-        onClick={() => setAdding(true)}
-        aria-label="Open workspace dock"
-      >
-        <PanelRight size={16} /> Workspace
-      </Button>
+      <div className="absolute right-2 top-2 z-20 rounded-md border border-border bg-background shadow-sm">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="pointer-coarse:min-h-11"
+          onClick={() => setAdding(true)}
+          aria-label="Open workspace dock"
+        >
+          <PanelRight size={16} /> Workspace
+        </Button>
+        {adding && <SurfacePicker onSelect={add} />}
+      </div>
     )
   }
 
-  const add = (kind: DockSurfaceKind) => {
-    const tab: DockTab = {
-      id: `${kind}-${crypto.randomUUID()}`,
-      kind,
-      title: surfaceLabels[kind],
-    }
-    openTab(sessionId, tab)
-    setAdding(false)
-  }
   const active = dock.tabs.find((tab) => tab.id === dock.activeTabId)
   const content = active ? (
     <SurfaceContent
+      transitionRef={transitionRef}
       kind={active.kind}
       target={target}
       sessionId={sessionId}
@@ -194,23 +203,26 @@ export function WorkspaceDock({
                 aria-selected={tab.id === dock.activeTabId}
                 className="pointer-coarse:min-h-11 px-2 text-xs"
                 onKeyDown={(event) => {
-                  if (event.key === 'Delete') closeTab(sessionId, tab.id)
+                  if (event.key === 'Delete')
+                    transition(() => closeTab(sessionId, tab.id))
                   if (event.key === 'Tab' && event.ctrlKey) {
                     event.preventDefault()
-                    selectTab(
-                      sessionId,
-                      dock.tabs[(index + 1) % dock.tabs.length].id,
+                    transition(() =>
+                      selectTab(
+                        sessionId,
+                        dock.tabs[(index + 1) % dock.tabs.length].id,
+                      ),
                     )
                   }
                 }}
-                onClick={() => selectTab(sessionId, tab.id)}
+                onClick={() => transition(() => selectTab(sessionId, tab.id))}
               >
                 {tab.title}
               </button>
               <button
                 className="pointer-coarse:size-11 p-2 text-muted-foreground hover:text-foreground"
                 aria-label={`Close ${tab.title}`}
-                onClick={() => closeTab(sessionId, tab.id)}
+                onClick={() => transition(() => closeTab(sessionId, tab.id))}
               >
                 <X size={13} />
               </button>
@@ -241,7 +253,7 @@ export function WorkspaceDock({
           variant="ghost"
           size="icon-sm"
           className="pointer-coarse:size-11"
-          onClick={() => closeDock(sessionId)}
+          onClick={() => transition(() => closeDock(sessionId))}
           aria-label="Hide workspace dock"
         >
           <X size={16} />
@@ -280,6 +292,7 @@ function SurfacePicker({
 }
 
 function SurfaceContent({
+  transitionRef,
   kind,
   target,
   sessionId,
@@ -290,6 +303,7 @@ function SurfaceContent({
   childSessionId,
   onCommit = () => undefined,
 }: {
+  transitionRef?: React.MutableRefObject<((action: () => void) => void) | null>
   kind: DockSurfaceKind
   target: WorkspaceTarget
   sessionId: string
@@ -308,6 +322,7 @@ function SurfaceContent({
   if (kind === 'files' || kind === 'file')
     return (
       <WorkspaceFilesSurface
+        transitionRef={transitionRef}
         sessionId={sessionId}
         target={target}
         initialPath={kind === 'file' ? path : undefined}
