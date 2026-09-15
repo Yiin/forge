@@ -1,6 +1,7 @@
 const WIDTH_KEY = 'forge.shell.sidebar-width'
 const THEME_KEY = 'forge.shell.theme'
 const SESSION_KEY = 'forge.shell.last-session'
+const SIDEBAR_VIEW_KEY = 'forge.shell.sidebar-view'
 export const SIDEBAR_WIDTH_DEFAULT = 256
 export const SIDEBAR_WIDTH_MIN = 208
 export const SIDEBAR_WIDTH_MAX = 400
@@ -41,6 +42,32 @@ export const writeLastSession = (id: string, storage: Storage = localStorage) =>
   storage.setItem(SESSION_KEY, id)
 export const clearLastSession = (storage: Storage = localStorage) =>
   storage.removeItem(SESSION_KEY)
+export type SidebarView = {
+  scope: string
+  query: string
+  sort: 'updated' | 'created'
+}
+export const readSidebarView = (
+  storage: Storage = localStorage,
+): SidebarView => {
+  try {
+    const value = JSON.parse(
+      storage.getItem(SIDEBAR_VIEW_KEY) ?? '{}',
+    ) as Partial<SidebarView>
+    return {
+      scope:
+        typeof value.scope === 'string' && value.scope ? value.scope : 'all',
+      query: typeof value.query === 'string' ? value.query : '',
+      sort: value.sort === 'created' ? 'created' : 'updated',
+    }
+  } catch {
+    return { scope: 'all', query: '', sort: 'updated' }
+  }
+}
+export const writeSidebarView = (
+  view: SidebarView,
+  storage: Storage = localStorage,
+) => storage.setItem(SIDEBAR_VIEW_KEY, JSON.stringify(view))
 export const getStartPath = (storage: Storage = localStorage) => {
   const id = readLastSession(storage)
   return id ? `/s/${encodeURIComponent(id)}` : '/'
