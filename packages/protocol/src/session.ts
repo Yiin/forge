@@ -4,7 +4,7 @@ const nullableId = z.string().nullable()
 
 export const sessionResponseSchema = z.object({
   id: z.string(),
-  projectId: z.string(),
+  projectId: z.string().nullable(),
   harness: z.string(),
   title: z.string(),
   cwd: z.string(),

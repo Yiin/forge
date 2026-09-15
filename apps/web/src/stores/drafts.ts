@@ -9,7 +9,8 @@ export type DraftAttachment = {
 }
 export type LocalDraft = {
   id: string
-  projectId: string
+  projectId?: string
+  targetPath?: string
   harness: string
   accountId?: string
   model?: string
@@ -37,6 +38,7 @@ type DraftPatch = Partial<
     | 'promotionKey'
     | 'workspaceMode'
     | 'baseRef'
+    | 'targetPath'
   >
 >
 type DraftState = {
@@ -44,9 +46,10 @@ type DraftState = {
   hydrated: boolean
   hydrate: () => void
   getOrCreate: (
-    projectId: string,
+    projectId?: string,
     harness?: string,
     accountId?: string,
+    targetPath?: string,
   ) => LocalDraft
   update: (id: string, patch: DraftPatch) => void
   remove: (id: string) => void
@@ -58,7 +61,7 @@ const STORAGE_KEY = 'forge.local-drafts.v1'
 let writeTimer: ReturnType<typeof setTimeout> | undefined
 const canUseStorage = () =>
   typeof window !== 'undefined' && !!window.localStorage
-const draftIdFor = (projectId: string) => `draft:${projectId}`
+const draftIdFor = (projectId?: string) => `draft:${projectId ?? 'filesystem'}`
 
 function readStorage(): Record<string, LocalDraft> {
   if (!canUseStorage()) return {}
@@ -73,7 +76,8 @@ function readStorage(): Record<string, LocalDraft> {
         const item = draft as Partial<LocalDraft>
         return (
           typeof item.id === 'string' &&
-          typeof item.projectId === 'string' &&
+          (typeof item.projectId === 'string' ||
+            typeof item.targetPath === 'string') &&
           typeof item.createdAt === 'number' &&
           typeof item.updatedAt === 'number' &&
           Array.isArray(item.attachments)
@@ -100,7 +104,7 @@ export const useDraftsStore = create<DraftState>((set, get) => ({
   hydrate: () => {
     if (!get().hydrated) set({ drafts: readStorage(), hydrated: true })
   },
-  getOrCreate: (projectId, harness = '', accountId) => {
+  getOrCreate: (projectId, harness = '', accountId, targetPath) => {
     const stored = readStorage()
     const id = draftIdFor(projectId)
     const existing = get().drafts[id] ?? stored[id]
@@ -115,6 +119,7 @@ export const useDraftsStore = create<DraftState>((set, get) => ({
     const draft: LocalDraft = {
       id,
       projectId,
+      targetPath,
       harness,
       accountId,
       prompt: '',
@@ -151,8 +156,8 @@ export const useDraftsStore = create<DraftState>((set, get) => ({
     set((state) => {
       const valid = new Set(projectIds)
       const drafts = Object.fromEntries(
-        Object.entries(state.drafts).filter(([, draft]) =>
-          valid.has(draft.projectId),
+        Object.entries(state.drafts).filter(
+          ([, draft]) => !draft.projectId || valid.has(draft.projectId),
         ),
       )
       if (Object.keys(drafts).length !== Object.keys(state.drafts).length)

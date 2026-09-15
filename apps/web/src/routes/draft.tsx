@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import type { ProjectSummary } from '../stores/sessions'
+import { FolderPicker } from '../components/FolderPicker'
 
 export function DraftRoute() {
   const { draftId } = useParams({ from: '/draft/$draftId' })
@@ -54,7 +55,11 @@ export function DraftRoute() {
         <p>Loading draft…</p>
       </section>
     )
-  if (!draft || !projects.some((project) => project.id === draft.projectId))
+  if (
+    !draft ||
+    (draft.projectId &&
+      !projects.some((project) => project.id === draft.projectId))
+  )
     return (
       <section className="grid h-full place-content-center gap-2 text-center">
         <h1 className="text-xl font-semibold tracking-tight">
@@ -87,40 +92,51 @@ export function DraftRoute() {
             <label className="sr-only" htmlFor="draft-project">
               Project
             </label>
-            <Select
-              value={draft.projectId}
-              items={projects.map((project) => ({
-                value: project.id,
-                label: project.name,
-              }))}
-              onValueChange={(value) => {
-                if (value === null || value === draft.projectId) return
-                const next = useDraftsStore.getState().getOrCreate(value)
-                void navigate({
-                  to: '/draft/$draftId',
-                  params: { draftId: next.id },
-                  replace: true,
-                })
-              }}
-            >
-              <SelectTrigger
-                id="draft-project"
-                aria-label="Draft project"
-                className="min-w-[220px]"
+            {draft.projectId ? (
+              <Select
+                value={draft.projectId}
+                items={projects.map((project) => ({
+                  value: project.id,
+                  label: project.name,
+                }))}
+                onValueChange={(value) => {
+                  if (value === null || value === draft.projectId) return
+                  const next = useDraftsStore.getState().getOrCreate(value)
+                  void navigate({
+                    to: '/draft/$draftId',
+                    params: { draftId: next.id },
+                    replace: true,
+                  })
+                }}
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((project) => (
-                  <SelectItem key={project.id} value={project.id}>
-                    {project.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                <SelectTrigger
+                  id="draft-project"
+                  aria-label="Draft project"
+                  className="min-w-[220px]"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((project) => (
+                    <SelectItem key={project.id} value={project.id}>
+                      {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <FolderPicker
+                initialPath={draft.targetPath}
+                onSelect={(targetPath) =>
+                  useDraftsStore.getState().update(draft.id, { targetPath })
+                }
+              />
+            )}
           </div>
         </header>
-        <WorkspaceBar projectId={draft.projectId} draftId={draft.id} />
+        {draft.projectId && (
+          <WorkspaceBar projectId={draft.projectId} draftId={draft.id} />
+        )}
         <Composer
           sessionId={draft.id}
           draftProjectId={draft.projectId}
@@ -158,6 +174,7 @@ export function DraftRoute() {
                 mode: draft.workspaceMode ?? 'local',
                 baseRef: draft.baseRef,
               },
+              targetPath: draft.targetPath,
             })
             useMessagesStore.getState().addPending({
               sessionId: result.sessionId,

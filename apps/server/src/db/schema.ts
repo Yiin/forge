@@ -27,9 +27,7 @@ export const projects = sqliteTable('projects', {
 })
 export const sessions = sqliteTable('sessions', {
   id: text('id').primaryKey(),
-  projectId: text('project_id')
-    .notNull()
-    .references(() => projects.id),
+  projectId: text('project_id').references(() => projects.id),
   harness: text('harness').notNull(),
   title: text('title').notNull(),
   cwd: text('cwd').notNull(),
