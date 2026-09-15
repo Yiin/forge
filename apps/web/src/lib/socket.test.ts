@@ -174,4 +174,21 @@ describe('ForgeSocket', () => {
     first.stop()
     second.stop()
   })
+
+  it('notifies after reconnect so the route can refetch its session snapshot', () => {
+    const onReconnect = vi.fn()
+    const socket = new ForgeSocket({
+      createWebSocket: () => new MockSocket(),
+      backoff: { initialMs: 10, maxMs: 10 },
+      onReconnect,
+    }).start()
+    const first = MockSocket.sockets[0]
+    first.open()
+    expect(onReconnect).not.toHaveBeenCalled()
+    first.drop()
+    vi.advanceTimersByTime(10)
+    MockSocket.sockets[1].open()
+    expect(onReconnect).toHaveBeenCalledOnce()
+    socket.stop()
+  })
 })
