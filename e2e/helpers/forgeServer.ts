@@ -62,16 +62,23 @@ export async function proxyForgeApi(
         body: route.request().postDataBuffer() ?? undefined,
       },
     )
+    // Read the body before the guard below, so a failed read still fails.
+    const body = Buffer.from(await response.arrayBuffer())
     try {
       await route.fulfill({
         status: response.status,
         headers: Object.fromEntries(response.headers),
-        body: Buffer.from(await response.arrayBuffer()),
+        body,
       })
     } catch (error) {
       // A test can finish while the app still has a request in flight. Its
       // route is torn down first, and answering it then is not a test failure.
-      if (!/already handled|closed/i.test(String(error))) throw error
+      const message = String(error)
+      if (
+        !message.includes('Route is already handled') &&
+        !message.includes('has been closed')
+      )
+        throw error
     }
   })
 }
@@ -253,11 +260,20 @@ async function reservePort(): Promise<number> {
 }
 
 function initRepo(dataDir: string): void {
-  const git = (...args: string[]) =>
-    spawnSync('git', ['-C', dataDir, ...args], { stdio: 'ignore' })
+  const git = (...args: string[]) => {
+    const result = spawnSync('git', ['-C', dataDir, ...args], {
+      encoding: 'utf8',
+    })
+    // A silent failure here reappears much later as a branch assertion in
+    // ui-smoke, so it is reported where it happens.
+    if (result.error) throw result.error
+    if (result.status !== 0)
+      throw new Error(`git ${args[0]} failed in ${dataDir}: ${result.stderr}`)
+  }
   git('init', '--initial-branch=main')
   git('config', 'user.email', 'e2e@forge.test')
   git('config', 'user.name', 'Forge E2E')
+  git('config', 'commit.gpgsign', 'false')
   git('commit', '--allow-empty', '-m', 'e2e base')
 }
 

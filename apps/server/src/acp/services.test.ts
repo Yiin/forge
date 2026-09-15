@@ -1,8 +1,29 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { migrate } from '../db/migrate.js'
+import { createProject, createSession } from '../db/queries.js'
+import { QuestionManager } from './questions.js'
 import { createAcpServices } from './services.js'
+
+// Questions are stored against Forge's session, and the production database
+// enforces that with a foreign key. An in-memory database does not unless it
+// is asked to, so ask.
+function questionFixture() {
+  const db = new DatabaseSync(':memory:')
+  migrate(db)
+  db.exec('PRAGMA foreign_keys = ON')
+  const project = createProject(db, { name: 'Forge', path: '/tmp/forge' })
+  const session = createSession(db, {
+    projectId: project.id,
+    harness: 'mock',
+    title: 'Questions',
+    cwd: '/tmp/forge',
+  })
+  return { db, sessionId: session.id, questions: new QuestionManager({ db }) }
+}
 
 const dirs: string[] = []
 afterEach(async () => {
@@ -12,6 +33,70 @@ afterEach(async () => {
 })
 
 describe('ACP client services', () => {
+  it('records a permission question against Forge session, not the provider session', async () => {
+    const { sessionId, questions } = questionFixture()
+    const services = createAcpServices({
+      cwd: '/tmp/forge',
+      projectRoot: '/tmp/forge',
+      questionManager: questions,
+      sessionId,
+    })
+    const answered = services.onRequestPermission?.({
+      sessionId: 'provider-session',
+      toolCall: {
+        toolCallId: 'question-0',
+        title: 'AskUserQuestion',
+        rawInput: {
+          questions: [
+            {
+              question: 'Pick one',
+              options: [{ label: 'First', value: 'first' }],
+            },
+          ],
+        },
+      },
+      options: [{ kind: 'allow_once', name: 'once', optionId: 'once' }],
+    })
+    expect(questions.listPending(sessionId)).toHaveLength(1)
+    expect(questions.listPending('provider-session')).toHaveLength(0)
+    questions.answerQuestion(
+      sessionId,
+      questions.listPending(sessionId)[0]!.questionId,
+      {
+        answer: 'first',
+      },
+    )
+    expect(await answered).toEqual({
+      outcome: { outcome: 'selected', optionId: 'first' },
+    })
+  })
+
+  it('records an extension question against Forge session too', async () => {
+    const { sessionId, questions } = questionFixture()
+    const services = createAcpServices({
+      cwd: '/tmp/forge',
+      projectRoot: '/tmp/forge',
+      questionManager: questions,
+      sessionId,
+    })
+    const answered = services.onExtRequest?.('cursor/ask_question', {
+      sessionId: 'provider-session',
+      toolCallId: 'request-1',
+      questions: [
+        { prompt: 'Name?', options: [{ id: 'name', label: 'Name' }] },
+      ],
+    })
+    expect(questions.listPending(sessionId)).toHaveLength(1)
+    expect(questions.listPending('provider-session')).toHaveLength(0)
+    questions.answerQuestion(sessionId, 'request-1', {
+      answers: { 'Name?': ['Ada'] },
+    })
+    await answered
+    expect(questions.listPending(sessionId)[0]).toMatchObject({
+      status: 'submitted',
+    })
+  })
+
   it('auto-grants allow_always and reads and writes inside the project', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'forge-acp-'))
     dirs.push(dir)

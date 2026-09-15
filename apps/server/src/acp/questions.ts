@@ -112,6 +112,8 @@ export function isUserQuestion(request: acp.RequestPermissionRequest): boolean {
 export function classifyQuestion(
   method: string,
   params: Record<string, unknown>,
+  /** Forge's session id. Providers report their own, which nothing else knows. */
+  forgeSessionId?: string,
 ): PendingQuestion | undefined {
   if (
     method !== 'cursor/ask_question' &&
@@ -124,11 +126,12 @@ export function classifyQuestion(
   const questions = normalizeQuestions(value.questions)
   if (!questions.length) return undefined
   const sessionId =
-    typeof value.sessionId === 'string'
+    forgeSessionId ??
+    (typeof value.sessionId === 'string'
       ? value.sessionId
       : typeof params.sessionId === 'string'
         ? params.sessionId
-        : undefined
+        : undefined)
   if (!sessionId) return undefined
   return {
     questionId: typeof value.toolCallId === 'string' ? value.toolCallId : id(),
@@ -358,8 +361,9 @@ export class QuestionManager {
   handleExtension(
     method: string,
     params: Record<string, unknown>,
+    forgeSessionId?: string,
   ): Promise<Record<string, unknown>> | undefined {
-    const question = classifyQuestion(method, params)
+    const question = classifyQuestion(method, params, forgeSessionId)
     if (!question) return undefined
     return this.hold(question, (value) => {
       if (value === undefined) return { outcome: 'cancelled' }

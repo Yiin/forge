@@ -253,7 +253,13 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
       return {}
     },
     onExtRequest: async (method, params) => {
-      const question = options.questionManager?.handleExtension(method, params)
+      // Extension questions carry the provider's session id, same as a
+      // permission request does. They are stored against Forge's session.
+      const question = options.questionManager?.handleExtension(
+        method,
+        params,
+        options.sessionId,
+      )
       if (question) return question
       throw acp.RequestError.methodNotFound(method)
     },
