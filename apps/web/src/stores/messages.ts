@@ -87,12 +87,22 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
   return result.sort((left, right) => left.seq - right.seq)
 }
 
-function mergeNewerMessages(history: Message[], newer: Message[]): Message[] {
+function mergeNewerMessages(
+  history: Message[],
+  newer: Message[],
+  seenSeqs: Set<number>,
+): Message[] {
   const result = [...history]
   for (const message of newer) {
     const index = result.findIndex((item) => sameItem(item, message))
     if (index < 0) result.push(message)
-    else if (message.seq > result[index].seq) result[index] = message
+    else if (message.seq > result[index].seq) {
+      // If the history row was already live-folded, the newer projection is
+      // cumulative. Otherwise this is a first delta and must be appended.
+      result[index] = seenSeqs.has(result[index].seq)
+        ? message
+        : foldMessage(result[index], message)
+    }
   }
   return result.sort((left, right) => left.seq - right.seq)
 }
@@ -156,7 +166,7 @@ export const useMessagesStore = create<MessagesState>((set) => ({
       return {
         bySession: {
           ...state.bySession,
-          [sessionId]: mergeNewerMessages(history, newerLive),
+          [sessionId]: mergeNewerMessages(history, newerLive, state.seenSeqs),
         },
         pendingBySession: {
           ...state.pendingBySession,
