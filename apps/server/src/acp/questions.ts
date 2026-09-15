@@ -1,6 +1,10 @@
 import * as acp from '@agentclientprotocol/sdk'
 import type { NativeInteraction as WireInteraction } from '@forge/protocol/ws'
-import { appendMessage } from '../db/queries.js'
+import {
+  appendMessage,
+  appendMessageInTransaction,
+  publishAppendedMessage,
+} from '../db/queries.js'
 import type { EventBus } from '../events/bus.js'
 
 export type QuestionOption = {
@@ -161,12 +165,48 @@ export class QuestionManager {
     this.now = hooks.now ?? Date.now
     this.expiryMs = hooks.expiryMs ?? 5 * 60_000
     // A resolver belongs to one runtime. A new manager cannot safely restore it.
-    this.hooks.db
+    const expired = this.hooks.db
       .prepare(
-        `UPDATE native_interactions SET status = 'expired', updated_at = ?
+        `SELECT session_id, request_id FROM native_interactions
          WHERE status IN ('pending', 'replying')`,
       )
-      .run(this.now())
+      .all() as Array<{ session_id: string; request_id: string }>
+    if (expired.length) {
+      const saved = []
+      this.hooks.db.exec('BEGIN')
+      try {
+        for (const request of expired) {
+          this.hooks.db
+            .prepare(
+              `UPDATE native_interactions SET status = 'expired', updated_at = ?
+               WHERE session_id = ? AND request_id = ?
+                 AND status IN ('pending', 'replying')`,
+            )
+            .run(this.now(), request.session_id, request.request_id)
+          saved.push(
+            appendMessageInTransaction(this.hooks.db, {
+              sessionId: request.session_id,
+              turnId: this.turnId(request.session_id),
+              itemId: id(),
+              role: 'user',
+              type: 'user_answer',
+              createdAt: this.now(),
+              content: {
+                type: 'user_answer',
+                questionId: request.request_id,
+                expired: true,
+              },
+            }),
+          )
+        }
+        this.hooks.db.exec('COMMIT')
+      } catch (error) {
+        this.hooks.db.exec('ROLLBACK')
+        throw error
+      }
+      for (const message of saved)
+        publishAppendedMessage(this.hooks.bus, message)
+    }
   }
   get size() {
     return this.pending.size
