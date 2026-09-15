@@ -36,7 +36,13 @@ export async function ownedListener(
       throw new KimiError('kimi_listener_inspection_timeout')
   }
   check()
-  const table = await readBounded('/proc/net/tcp', 1024 * 1024)
+  let table: string
+  try {
+    table = await readBounded('/proc/net/tcp', 1024 * 1024)
+  } catch (error) {
+    if (isUninspectableProcEntry(error)) return false
+    throw error
+  }
   const wanted = `0100007F:${port.toString(16).toUpperCase().padStart(4, '0')}`
   const sockets = new Set<string>()
   for (const row of table.split('\n').slice(1)) {
@@ -50,7 +56,14 @@ export async function ownedListener(
     check,
     limitError: () => new KimiError('kimi_listener_inspection_limit'),
   }
-  for (const name of await readProcNames('/proc', inspection)) {
+  let names: string[]
+  try {
+    names = await readProcNames('/proc', inspection)
+  } catch (error) {
+    if (isUninspectableProcEntry(error)) return false
+    throw error
+  }
+  for (const name of names) {
     check()
     let member = false
     try {
