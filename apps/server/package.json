@@ -8,6 +8,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cursor/sdk": "1.0.28",
+    "@cursor/sdk-linux-x64": "1.0.28",
     "@forge/protocol": "workspace:*",
     "@hono/node-ws": "^1.2.0",
     "@hono/node-server": "^1.19.0",

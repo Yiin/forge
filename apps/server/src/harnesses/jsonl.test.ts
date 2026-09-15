@@ -1573,3 +1573,70 @@ it('refuses negotiated frame limits below the retained unread chunk count', asyn
   await transport.close()
   ready.resolve()
 })
+
+it.each([false, true])(
+  'preserves the consumer pause after frame delivery: deferred=%s',
+  async (defer) => {
+    const io = streams(),
+      ready = deferred<void>(),
+      delivered = deferred<void>()
+    const values: unknown[] = []
+    let first = true
+    const transport = new JsonlTransport({
+      ...io,
+      captureFrame: () => {
+        const capture = { context: undefined, release() {} }
+        if (first && defer) {
+          first = false
+          return { ready: ready.promise, resume: () => capture, release() {} }
+        }
+        return capture
+      },
+      onValue(value) {
+        values.push(value)
+        if (values.length === 1) {
+          io.stdout.pause()
+          delivered.resolve()
+        }
+      },
+    })
+    try {
+      io.stdout.write('1\n')
+      if (defer) ready.resolve()
+      await delivered.promise
+      expect(io.stdout.isPaused()).toBe(true)
+      io.stdout.write('2\n')
+      expect(values).toEqual([1])
+      io.stdout.resume()
+      await vi.waitFor(() => expect(values).toEqual([1, 2]))
+    } finally {
+      await transport.close()
+    }
+  },
+)
+
+it('does not acquire or release a consumer pause when deferring an already paused stream', async () => {
+  const io = streams(),
+    ready = deferred<void>(),
+    delivered = deferred<void>()
+  const transport = new JsonlTransport({
+    ...io,
+    captureFrame: () => ({
+      ready: ready.promise,
+      resume: () => ({ context: undefined, release() {} }),
+      release() {},
+    }),
+    onValue() {
+      delivered.resolve()
+    },
+  })
+  try {
+    io.stdout.pause()
+    io.stdout.emit('data', Buffer.from('1\n'))
+    ready.resolve()
+    await delivered.promise
+    expect(io.stdout.isPaused()).toBe(true)
+  } finally {
+    await transport.close()
+  }
+})

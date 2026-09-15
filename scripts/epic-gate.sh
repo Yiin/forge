@@ -8,6 +8,7 @@ node scripts/isolate-gate-dependencies.mjs
 bun install --frozen-lockfile --ignore-scripts --backend=copyfile
 node scripts/build-node-pty.mjs
 node scripts/check-node-pty.mjs
+bun run build:cursor-sidecar
 bun run check
 bun run build
 bun run e2e

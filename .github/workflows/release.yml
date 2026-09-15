@@ -39,7 +39,7 @@ jobs:
       - name: Build Node server bundle
         run: |
           mkdir -p dist
-          bun build --target=node --define 'process.env.NODE_ENV=process.env.NODE_ENV' apps/server/src/index.ts --outfile dist/forge-server.js
+          bun build --target=node --external @cursor/sdk --define 'process.env.NODE_ENV=process.env.NODE_ENV' apps/server/src/index.ts --outfile dist/forge-server.js
           bun run build:kimi-guardian
       - name: Pack release
         id: pack
@@ -57,6 +57,7 @@ jobs:
           cp -R apps/server/drizzle/. "$staging/apps/drizzle/"
           cp -R apps/web/dist/. "$staging/web/"
           cp apps/server/package.json "$staging/apps/server/package.json"
+          bun scripts/build-cursor-sidecar.ts "$staging/apps/server/src/cursor-sidecar"
           # Pack the verified owned build beside the bundle's native loader.
           mkdir -p "$staging/apps/server/src/build/Release"
           cp apps/server/node_modules/node-pty/build/Release/pty.node "$staging/apps/server/src/build/Release/"

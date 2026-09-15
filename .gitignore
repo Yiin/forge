@@ -1,4 +1,5 @@
 node_modules/
+apps/server/src/cursor-sidecar/
 .native-build/
 dist/
 *.tsbuildinfo

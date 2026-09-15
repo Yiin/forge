@@ -115,6 +115,7 @@ export class JsonlTransport {
   private lineBytes = 0
   private lineContext: unknown
   private pendingFrame?: CapturedFrame
+  private ownsReadPause = false
   private frameSequence = 0
   private readonly unread: UnreadChunk[] = []
   private unreadBytes = 0
@@ -601,8 +602,6 @@ export class JsonlTransport {
     } finally {
       this.reading = false
     }
-    if (!this.pendingFrame && !this.reason && !this.readEnded)
-      this.options.stdout.resume()
   }
   private onData = (chunk: Buffer) => {
     if (this.reason) return
@@ -695,7 +694,10 @@ export class JsonlTransport {
   }
   private pauseFrame(frame: CapturedFrame) {
     this.pendingFrame = frame
-    this.options.stdout.pause()
+    if (!this.options.stdout.isPaused()) {
+      this.ownsReadPause = true
+      this.options.stdout.pause()
+    }
     const id = frame.id
     const capture = frame.capture as JsonlDeferredCapture
     void capture.ready.then(
@@ -720,6 +722,10 @@ export class JsonlTransport {
       if ('ready' in frame.capture) {
         this.pauseFrame(frame)
         return
+      }
+      if (this.ownsReadPause) {
+        this.ownsReadPause = false
+        this.options.stdout.resume()
       }
       this.dispatchFrame(frame)
     } catch {

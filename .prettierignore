@@ -2,6 +2,7 @@ spike/
 **/drizzle/
 dist/
 node_modules/
+apps/server/src/cursor-sidecar/
 .native-build/
 .beads/
 AGENTS.md
