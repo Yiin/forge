@@ -1,4 +1,4 @@
-CREATE TABLE native_provider_state (
+CREATE TABLE IF NOT EXISTS native_provider_state (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   provider TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -6,7 +6,7 @@ CREATE TABLE native_provider_state (
   PRIMARY KEY (session_id, provider, name)
 );
 
-CREATE TABLE native_provider_records (
+CREATE TABLE IF NOT EXISTS native_provider_records (
   position INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   provider TEXT NOT NULL,

@@ -49,6 +49,27 @@ export type SessionConfigOption = {
   category?: string
 }
 
+type HistoryEvent = Extract<
+  HarnessEvent,
+  {
+    type:
+      | 'text_delta'
+      | 'thought_delta'
+      | 'content_snapshot'
+      | 'content_block'
+      | 'tool_started'
+      | 'tool_update'
+      | 'plan'
+      | 'usage_snapshot'
+      | 'source_reference'
+  }
+>
+export type HarnessHistoryEvent = HistoryEvent extends infer Event
+  ? Event extends unknown
+    ? Omit<Event, 'runId' | 'turnId' | 'runtimeGeneration' | 'deliveryId'>
+    : never
+  : never
+
 export type HarnessSession = {
   id: string
   cwd: string

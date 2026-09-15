@@ -187,7 +187,7 @@ export class AcpResponses {
           ? this.options.item(response.subject, 'thought')
           : undefined
       const sourceRef = await this.options.content.source(
-        { ...response.subject, itemId: response.responseId },
+        { ...response.subject, itemId: thoughtItem ?? response.responseId },
         { native: raw, usage: projection.source },
         signal,
       )
@@ -242,13 +242,16 @@ export class AcpResponses {
     source: unknown,
     signal: AbortSignal,
   ): Promise<AcpRecordInput[]> {
+    const capturedSubject = { ...subject, itemId: randomUUID() }
     const sourceRef = await this.options.content.source(
-      { ...subject, itemId: randomUUID() },
+      capturedSubject,
       source,
       signal,
     )
+    const { owner: _owner, ...recordSubject } = capturedSubject
     return [
       {
+        subject: recordSubject,
         value: {
           kind: 'disposition',
           status: 'ignored',

@@ -293,7 +293,10 @@ export class WorkspacePath {
         'workspace_changed',
       )
   }
-  async openFile() {
+  async openFile(
+    onCreated?: (handle: FileHandle) => void,
+    onClosed?: () => void,
+  ) {
     await this.verify()
     const before = await lstat(this.leaf, { bigint: true })
     if (!before.isFile())
@@ -309,6 +312,7 @@ export class WorkspacePath {
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     )
     try {
+      onCreated?.(handle)
       const info = await handle.stat({ bigint: true })
       if (!info.isFile() || identity(info) !== identity(before))
         throw new WorkspaceError(
@@ -322,6 +326,7 @@ export class WorkspacePath {
       return { handle, info }
     } catch (error) {
       await handle.close()
+      onClosed?.()
       throw error
     }
   }

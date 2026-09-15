@@ -194,6 +194,22 @@ export function ToolCallRow({
             {JSON.stringify(item.output, null, 2)}
           </pre>
         )}
+        {item.nativeChildId && sessionId && (
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() =>
+              useShellStore.getState().openDockTab(sessionId, {
+                id: `native-child-${sessionId}-${item.nativeChildId}`,
+                kind: 'subagent',
+                title: 'Child transcript',
+                nativeChildId: item.nativeChildId,
+              })
+            }
+          >
+            Open child transcript
+          </Button>
+        )}
         {filePath && sessionId && (
           <Button variant="outline" size="xs" onClick={openFile}>
             Open {filePath}

@@ -21,6 +21,7 @@ export type ChatRenderItem =
       kind: 'tool'
       id: string
       name: string
+      nativeChildId?: string
       state: ToolState
       input: unknown
       output?: unknown
@@ -157,6 +158,7 @@ export function toRenderModel(
   resumedWithRecap = false,
   children: SubagentSession[] = [],
   pending: PendingUserMessage[] = [],
+  childId?: string,
 ): ChatRenderItem[] {
   const result: ChatRenderItem[] = resumedWithRecap
     ? [{ kind: 'system', id: 'resumed-recap', text: 'Resumed with recap' }]
@@ -167,8 +169,35 @@ export function toRenderModel(
   const turnIds = new Map<string, string>()
   const childTurnIds = new Map<string, string>()
   const toolIds = new Map<string, Extract<ChatRenderItem, { kind: 'tool' }>>()
+  const planItems = new Map<string, Extract<ChatRenderItem, { kind: 'plan' }>>()
+  const textItems = new Map<
+    string,
+    Extract<ChatRenderItem, { kind: 'message' }>
+  >()
   for (const message of messages) {
-    turnIds.set(message.itemId, message.turnId)
+    const owner =
+      'childId' in message.content ? message.content.childId : undefined
+    if (message.content.type !== 'child_updated' && owner !== childId) continue
+    const channel =
+      message.content.type === 'content_snapshot'
+        ? message.content.contentType
+        : message.content.type === 'text_delta'
+          ? 'text'
+          : message.content.type === 'thought_delta'
+            ? 'thought'
+            : ['tool_call', 'tool_update', 'tool_result'].includes(
+                  message.content.type,
+                )
+              ? 'tool'
+              : message.content.type
+    const renderId = JSON.stringify([
+      message.sessionId,
+      message.turnId,
+      owner ?? null,
+      channel,
+      message.itemId,
+    ])
+    turnIds.set(renderId, message.turnId)
     if (message.content.type === 'ask_user_question') {
       questions.set(
         message.content.questionId,
@@ -182,25 +211,63 @@ export function toRenderModel(
       )
     }
     const content = message.content
-    if (content.type === 'text_delta' || content.type === 'thought_delta') {
-      const previous = result.at(-1)
-      if (previous?.kind === 'message' && previous.id === message.itemId) {
-        previous.text += content.text
-        anchors.set(previous.id, message.seq)
+    if (content.type === 'content_snapshot' && content.contentType === 'plan') {
+      const key = JSON.stringify([
+        message.turnId,
+        message.itemId,
+        owner ?? null,
+      ])
+      const previous = planItems.get(key)
+      if (previous) previous.explanation = content.text
+      else {
+        const item: Extract<ChatRenderItem, { kind: 'plan' }> = {
+          kind: 'plan',
+          id: renderId,
+          explanation: content.text,
+          steps: [],
+        }
+        planItems.set(key, item)
+        result.push(item)
+      }
+      continue
+    }
+    if (
+      content.type === 'text_delta' ||
+      content.type === 'thought_delta' ||
+      content.type === 'content_snapshot'
+    ) {
+      const channel =
+        content.type === 'content_snapshot'
+          ? content.contentType
+          : content.type === 'thought_delta'
+            ? 'thought'
+            : 'text'
+      const key = JSON.stringify([
+        message.turnId,
+        message.itemId,
+        owner ?? null,
+        channel,
+      ])
+      const previous = textItems.get(key)
+      if (previous) {
+        previous.text =
+          content.type === 'content_snapshot'
+            ? content.text
+            : previous.text + content.text
+        previous.seq = message.seq
       } else {
-        result.push({
+        const item: Extract<ChatRenderItem, { kind: 'message' }> = {
           kind: 'message',
-          id: message.itemId,
+          id: renderId,
           seq: message.seq,
           role: message.role === 'user' ? 'user' : 'agent',
           text: content.text,
-          ...(content.type === 'thought_delta' ? { thought: true } : {}),
-        })
-        anchors.set(message.itemId, message.seq)
+          ...(channel === 'thought' ? { thought: true } : {}),
+        }
+        result.push(item)
+        textItems.set(key, item)
       }
-      const current = result.at(-1)
-      if (current?.kind === 'message' && current.id === message.itemId)
-        current.seq = message.seq
+      anchors.set(renderId, message.seq)
     } else if (
       content.type === 'tool_call' ||
       content.type === 'tool_update' ||
@@ -210,17 +277,19 @@ export function toRenderModel(
         content.type === 'tool_call' ||
         content.type === 'tool_update' ||
         content.type === 'tool_result'
-          ? content.toolCallId
+          ? JSON.stringify([message.turnId, owner ?? null, content.toolCallId])
           : undefined
       const previous =
-        result.find(
-          (item) => item.kind === 'tool' && item.id === message.itemId,
-        ) ??
+        result.find((item) => item.kind === 'tool' && item.id === renderId) ??
         (content.type !== 'tool_call' ? toolIds.get(toolId ?? '') : undefined)
       if (previous?.kind === 'tool') {
+        if (content.nativeChildId !== undefined)
+          previous.nativeChildId = content.nativeChildId
         anchors.set(previous.id, message.seq)
-        if (content.type === 'tool_update')
+        if (content.type === 'tool_update') {
           previous.state = stateForStatus(content.status)
+          if (content.output !== undefined) previous.output = content.output
+        }
         if (content.type === 'tool_result') {
           previous.output = content.output
           previous.state = content.isError ? 'error' : 'done'
@@ -228,8 +297,9 @@ export function toRenderModel(
       } else {
         const tool = {
           kind: 'tool',
-          id: message.itemId,
+          id: renderId,
           name: 'name' in content ? content.name : 'Tool',
+          nativeChildId: content.nativeChildId,
           state:
             content.type === 'tool_result'
               ? content.isError
@@ -239,11 +309,14 @@ export function toRenderModel(
                 ? stateForStatus(content.status)
                 : 'running',
           input: content.type === 'tool_call' ? content.input : undefined,
-          output: content.type === 'tool_result' ? content.output : undefined,
+          output:
+            content.type === 'tool_result' || content.type === 'tool_update'
+              ? content.output
+              : undefined,
         } satisfies Extract<ChatRenderItem, { kind: 'tool' }>
         result.push(tool)
         if (toolId) toolIds.set(toolId, tool)
-        anchors.set(message.itemId, message.seq)
+        anchors.set(renderId, message.seq)
       }
     } else if (content.type === 'attachment_ref') {
       result.push({
@@ -257,7 +330,7 @@ export function toRenderModel(
     } else if (content.type === 'user_answer') {
       result.push({
         kind: 'answered-question',
-        id: message.itemId,
+        id: renderId,
         question: questions.get(content.questionId) ?? 'Question',
         answer: content.expired
           ? 'Expired'
@@ -269,24 +342,24 @@ export function toRenderModel(
               ),
       })
     } else if (content.type === 'epic_triage') {
-      result.push({ kind: 'epic-triage', id: message.itemId, card: content })
+      result.push({ kind: 'epic-triage', id: renderId, card: content })
     } else if (content.type === 'plan') {
       result.push({
         kind: 'plan',
-        id: message.itemId,
+        id: renderId,
         explanation: content.explanation,
         steps: content.steps,
       })
     } else if (content.type === 'turn_interrupted') {
       result.push({
         kind: 'system',
-        id: message.itemId,
+        id: renderId,
         text: interruptReasonText(content.reason, content.version),
       })
     } else if (content.type === 'error') {
       result.push({
         kind: 'system',
-        id: message.itemId,
+        id: renderId,
         text: content.message,
         alert: true,
         ...(content.code ? { code: content.code } : {}),
@@ -299,7 +372,7 @@ export function toRenderModel(
       content.type === 'file_change' ||
       content.type === 'child_updated'
     ) {
-      result.push({ kind: 'native', id: message.itemId, content })
+      result.push({ kind: 'native', id: renderId, content })
     }
   }
   const placed = placeSubagents(result, children, anchors) as ChatRenderItem[]

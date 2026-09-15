@@ -285,7 +285,7 @@ export class SessionManager {
     )
     return work
   }
-  private async disposeLate(handle: HarnessHandle): Promise<never> {
+  private async disposeHandle(handle: HarnessHandle): Promise<void> {
     try {
       await handle.kill()
     } catch {
@@ -293,6 +293,9 @@ export class SessionManager {
         await handle.kill()
       })
     }
+  }
+  private async disposeLate(handle: HarnessHandle): Promise<never> {
+    await this.disposeHandle(handle)
     throw new Error('Session manager is closed')
   }
   private spawn(row: SessionRow) {
@@ -358,7 +361,7 @@ export class SessionManager {
       const loaded = await process.loadSession(session, onItem, onExit)
       if (this.closeWork) return this.disposeLate(loaded.handle)
       if (!loaded.proven) {
-        await loaded.handle.kill()
+        await this.disposeHandle(loaded.handle)
         throw new Error('Provider session load was not proven')
       }
       handle = loaded.handle
@@ -430,8 +433,10 @@ export class SessionManager {
       try {
         result = await process.loadSession!(session, onItem, onExit)
         if (this.closeWork) return this.disposeLate(result.handle)
-        if (!result.proven)
+        if (!result.proven) {
+          await this.disposeHandle(result.handle)
           throw new Error('Provider session load was not proven')
+        }
       } catch (error) {
         if (error instanceof NativeCleanupError) throw error
         // A failed native resume is not permission to create a replacement.
@@ -445,7 +450,10 @@ export class SessionManager {
         throw new Error('Harness cannot create a session')
       result = await process.newSession(session, onItem, onExit)
       if (this.closeWork) return this.disposeLate(result.handle)
-      if (!result.proven) throw new Error('New session was not proven')
+      if (!result.proven) {
+        await this.disposeHandle(result.handle)
+        throw new Error('New session was not proven')
+      }
     }
     if (this.closeWork) return this.disposeLate(result.handle)
     this.rememberModels(
@@ -1264,6 +1272,14 @@ export class SessionManager {
 
   private failPrompt(row: SessionRow, turnId: string, error: unknown) {
     if (this.turns.get(row.id) !== turnId) return
+    if (this.closeWork) {
+      this.finishTurn(
+        row,
+        turnId,
+        new Error('Session interrupted by server shutdown'),
+      )
+      return
+    }
     const message = errorMessage(error)
     const match = detectProviderError(message)
     if (match && row.account_id) {
@@ -1299,6 +1315,14 @@ export class SessionManager {
   }
 
   private finishPrompt(row: SessionRow, turnId: string) {
+    if (this.closeWork) {
+      this.finishTurn(
+        row,
+        turnId,
+        new Error('Session interrupted by server shutdown'),
+      )
+      return
+    }
     // A harness may emit its own framing. Complete the turn when it does not.
     if (this.turns.get(row.id) === turnId) {
       appendMessage(this.db, {

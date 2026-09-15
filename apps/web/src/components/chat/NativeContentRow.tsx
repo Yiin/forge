@@ -57,6 +57,14 @@ function NativeDetail({
 }) {
   if (content.type === 'content_block' && 'block' in content) {
     const block = content.block as Record<string, unknown>
+    if (sessionId && typeof block.artifactId === 'string')
+      return (
+        <ArtifactContent
+          key={block.artifactId}
+          reference={block}
+          sessionId={sessionId}
+        />
+      )
     if (block.kind === 'text_resource' && typeof block.text === 'string')
       return <pre className="whitespace-pre-wrap text-sm">{block.text}</pre>
     if (block.kind === 'resource_link' && typeof block.uri === 'string')
@@ -101,7 +109,7 @@ function NativeDetail({
             id: `subagent-${sessionId}-${childId}`,
             kind: 'subagent',
             title: 'Child transcript',
-            childSessionId: childId,
+            nativeChildId: childId,
           })
         }
       >
@@ -109,8 +117,24 @@ function NativeDetail({
       </Button>
     )
   }
-  if (content.type === 'source_reference' && 'subject' in content)
+  if (content.type === 'source_reference' && 'subject' in content) {
+    const reference = content.sourceRef
+    if (
+      sessionId &&
+      reference &&
+      typeof reference === 'object' &&
+      'artifactId' in reference &&
+      typeof reference.artifactId === 'string'
+    )
+      return (
+        <ArtifactContent
+          key={reference.artifactId}
+          reference={reference as Record<string, unknown>}
+          sessionId={sessionId}
+        />
+      )
     return <p className="text-sm">Linked {nativeDetail(content)} source.</p>
+  }
   if (content.type === 'usage' || content.type === 'usage_snapshot')
     return (
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
@@ -163,4 +187,52 @@ function nativeDetail(content: NativeItem['content']): string {
   if (content.type === 'content_block' && 'block' in content)
     return String((content.block as { kind?: unknown }).kind ?? 'block')
   return ''
+}
+
+function ArtifactContent({
+  reference,
+  sessionId,
+}: {
+  reference: Record<string, unknown>
+  sessionId: string
+}) {
+  const [failed, setFailed] = useState(false)
+  const url = `/api/sessions/${encodeURIComponent(sessionId)}/acp-artifacts/${encodeURIComponent(String(reference.artifactId))}`
+  const image =
+    reference.kind === 'image' &&
+    ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(
+      String(reference.mime),
+    )
+  const audio =
+    reference.kind === 'audio' &&
+    ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm'].includes(
+      String(reference.mime),
+    )
+  return (
+    <div className="space-y-2 text-sm">
+      {image && !failed && (
+        <img
+          src={url}
+          alt="Agent image"
+          loading="lazy"
+          className="max-h-96 max-w-full rounded-md object-contain"
+          onError={() => setFailed(true)}
+        />
+      )}
+      {audio && !failed && (
+        <audio
+          src={url}
+          controls
+          preload="none"
+          aria-label="Agent audio"
+          className="max-w-full"
+          onError={() => setFailed(true)}
+        />
+      )}
+      {failed && <p role="status">Media preview is unavailable.</p>}
+      <a href={url} download className="underline">
+        Download {image ? 'image' : audio ? 'audio' : 'source'}
+      </a>
+    </div>
+  )
 }

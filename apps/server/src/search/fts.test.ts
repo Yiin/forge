@@ -1,5 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
+import { migrate } from '../db/migrate.js'
+import { createProject, createSession, appendMessage } from '../db/queries.js'
 import { searchRoutes } from '../http/search.js'
 
 function fixture() {
@@ -72,4 +74,51 @@ describe('FTS5 search', () => {
     const response = await app.request('/api/search?q=kitch')
     expect((await response.json()).sessions).toHaveLength(1)
   })
+})
+
+it('returns marked snippets from migrated indexes and preserves history on replay', async () => {
+  const db = new DatabaseSync(':memory:')
+  try {
+    migrate(db)
+    const project = createProject(db, { name: 'search', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Garden history',
+      cwd: '/tmp',
+    })
+    appendMessage(db, {
+      sessionId: session.id,
+      turnId: 'turn',
+      itemId: 'item',
+      role: 'agent',
+      type: 'text_delta',
+      content: { type: 'text_delta', text: 'A garden with basil' },
+    })
+    appendMessage(db, {
+      sessionId: session.id,
+      turnId: 'turn',
+      itemId: 'end',
+      role: 'system',
+      type: 'turn_end',
+      content: { type: 'turn_end' },
+    })
+    const app = searchRoutes(db)
+    const verify = async () => {
+      const result = await (await app.request('/api/search?q=garden')).json()
+      expect(result.sessions).toHaveLength(1)
+      expect(result.sessions[0].snippet).toContain('<mark>Garden</mark>')
+      expect(result.messages).toHaveLength(1)
+      expect(result.messages[0].snippet).toContain('<mark>garden</mark>')
+    }
+    await verify()
+    db.prepare('DELETE FROM schema_migrations WHERE name=?').run(
+      '0029_search_snippet_content.sql',
+    )
+    migrate(db)
+    await verify()
+    expect(db.prepare('SELECT count(*) AS n FROM messages').get()?.n).toBe(2)
+  } finally {
+    db.close()
+  }
 })

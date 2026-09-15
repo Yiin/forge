@@ -15,6 +15,7 @@ import { TerminalSurface } from './TerminalSurface'
 import { GitReviewSurface, type ReviewComment } from './GitReviewSurface'
 import { GitHistorySurface } from './GitHistorySurface'
 import { WorkspaceFilesSurface } from './WorkspaceFilesSurface'
+import { NativeChildTranscript } from './NativeChildTranscript'
 import { SubagentTranscript } from '../chat/SubagentTranscript'
 import { connectForgeSocket } from '../../lib/socket'
 import { SessionSnapshot } from '@forge/protocol/ws'
@@ -131,6 +132,7 @@ export function WorkspaceDock({
       commit={active.commit}
       path={active.path}
       childSessionId={active.childSessionId}
+      nativeChildId={active.nativeChildId}
       onCommit={(sha) => {
         openTab(sessionId, {
           id: `commit-${sha}`,
@@ -335,6 +337,7 @@ function SurfaceContent({
   commit,
   path,
   childSessionId,
+  nativeChildId,
   onCommit = () => undefined,
 }: {
   transitionRef?: React.MutableRefObject<((action: () => void) => void) | null>
@@ -346,10 +349,19 @@ function SurfaceContent({
   commit?: string
   path?: string
   childSessionId?: string
+  nativeChildId?: string
   onCommit?: (sha: string) => void
 }) {
   if (kind === 'subagent')
-    return <ChildTranscriptSurface sessionId={childSessionId} />
+    return nativeChildId ? (
+      <NativeChildTranscript
+        key={`${sessionId}:${nativeChildId}`}
+        sessionId={sessionId}
+        childId={nativeChildId}
+      />
+    ) : (
+      <ChildTranscriptSurface sessionId={childSessionId} />
+    )
   if (kind === 'browser') return <BrowserPreview sessionId={sessionId} />
   if (kind === 'terminal')
     return <TerminalSurface sessionId={sessionId} target={target} />

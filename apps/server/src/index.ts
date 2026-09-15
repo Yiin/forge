@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { UploadStore } from './uploads/store.js'
 import { uploadRoutes } from './http/uploads.js'
+import { acpArtifactRoutes } from './http/acp-artifacts.js'
+import { nativeChildRoutes } from './http/native-children.js'
 import { attachmentRoutes } from './http/attachments.js'
 import { fsBrowseRoutes } from './http/fsBrowse.js'
 import { WorkspaceFiles } from './workspace/files.js'
@@ -63,7 +65,8 @@ import {
   type ConfigState,
 } from './config.js'
 import { ptyHarness } from './pty/harness.js'
-import { acpHarness } from './acp/harness.js'
+import { createProductionAcpAdapter } from './sessions/acp-factory.js'
+import { AcpResourceHost } from './harnesses/acp/limits.js'
 import { createNativeAttachmentLoader } from './uploads/native.js'
 import { nativeHarness } from './sessions/native.js'
 import { NativeInteractions } from './sessions/native-interactions.js'
@@ -210,6 +213,8 @@ export function createApp(
       app.route('/', sideChatRoutes(manager))
     }
     app.route('/', uploadRoutes(uploadStore))
+    app.route('/', acpArtifactRoutes(uploadStore.database))
+    app.route('/', nativeChildRoutes(uploadStore.database))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
     if (workspaceFiles) app.route('/', workspaceFileRoutes(workspaceFiles))
@@ -391,6 +396,7 @@ export function startServer(port?: number): ServerType {
   const configState: ConfigState = { current: config, path: configPath }
   const accountStore = new HarnessAccountStore(db)
   const nativeResources = createNativeResources()
+  const acpResources = new AcpResourceHost()
   const loadNativeAttachment = createNativeAttachmentLoader(db, dataDir)
   const factory: HarnessFactory = (key, accountId) => {
     const entry = configState.current.harness[key]
@@ -400,11 +406,9 @@ export function startServer(port?: number): ServerType {
       throw new Error('Account does not belong to harness')
     const transport = harnessTransport(key, entry)
     const derived =
-      transport === 'native'
-        ? entry
-        : account
-          ? deriveAccountHarness(entry, account)
-          : entry
+      account && transport === 'pty'
+        ? deriveAccountHarness(entry, account)
+        : entry
     const adapter =
       transport === 'native'
         ? createProductionNativeAdapter(key, {
@@ -416,7 +420,17 @@ export function startServer(port?: number): ServerType {
             resources: nativeResources,
             loadAttachment: loadNativeAttachment,
           })
-        : undefined
+        : entry?.protocol === 'acp'
+          ? createProductionAcpAdapter(key, {
+              entry,
+              account,
+              db,
+              bus,
+              host: acpResources,
+              resources: nativeResources,
+              loadAttachment: loadNativeAttachment,
+            })
+          : undefined
     if (adapter)
       return nativeHarness(
         adapter,
@@ -428,8 +442,6 @@ export function startServer(port?: number): ServerType {
         nativeInteractions,
       )
     if (derived?.protocol === 'pty') return ptyHarness(derived)
-    if (derived?.protocol === 'acp')
-      return acpHarness(derived, { db, bus, questions, accountId })
     throw new Error(`Harness ${key} is not configured`)
   }
   const manager = new SessionManager(

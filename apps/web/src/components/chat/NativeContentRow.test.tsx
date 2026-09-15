@@ -80,10 +80,59 @@ describe('NativeContentRow', () => {
     expect(useShellStore.getState().dock('session-1').tabs).toContainEqual(
       expect.objectContaining({
         kind: 'subagent',
-        childSessionId: 'child-1',
+        nativeChildId: 'child-1',
       }),
     )
     childView.unmount()
     view.unmount()
   })
 })
+
+it.each(['image', 'audio', 'artifact_resource'])(
+  'opens durable %s content through its session endpoint',
+  (kind) => {
+    const view = render(
+      <NativeContentRow
+        sessionId="session/one"
+        item={{
+          kind: 'native',
+          id: kind,
+          content: {
+            type: 'content_block',
+            block: {
+              kind,
+              artifactId: 'artifact/two',
+              mime:
+                kind === 'image'
+                  ? 'image/png'
+                  : kind === 'audio'
+                    ? 'audio/ogg'
+                    : 'application/octet-stream',
+              uri: 'file:///private/source',
+            },
+          },
+        }}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /content block/i }))
+    const link = screen.getByRole('link', { name: /^Download/ })
+    expect(link.getAttribute('href')).toBe(
+      '/api/sessions/session%2Fone/acp-artifacts/artifact%2Ftwo',
+    )
+    if (kind === 'image') {
+      const image = screen.getByRole('img', { name: 'Agent image' })
+      expect(image.getAttribute('src')).toBe(link.getAttribute('href'))
+      fireEvent.error(image)
+      expect(screen.getByRole('status').textContent).toBe(
+        'Media preview is unavailable.',
+      )
+      expect(screen.queryByRole('img')).toBeNull()
+    }
+    if (kind === 'audio')
+      expect(
+        view.container.querySelector('audio')?.getAttribute('preload'),
+      ).toBe('none')
+    expect(view.container.innerHTML).not.toContain('file:///private/source')
+    view.unmount()
+  },
+)

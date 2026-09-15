@@ -655,7 +655,7 @@ it('retains a failed replacement process cleanup without closing the shared writ
         return originalClose.call(this, reason)
       })
     await expect(connection.replace('manual')).rejects.toThrow(
-      'candidate cleanup refused',
+      'Native cleanup failed',
     )
     expect(connection.process).not.toBe(original)
     await expectStopped(original.child.pid!)
@@ -678,4 +678,53 @@ it('retains a failed replacement process cleanup without closing the shared writ
     await f.cleanup()
   }
   expect(closeWriter).toHaveBeenCalledTimes(1)
+})
+
+it('retries refused original cleanup while keeping the connection permanently closed', async () => {
+  const f = await setup('normal')
+  let connection: AcpConnection | undefined
+  let release: (() => void) | undefined
+  try {
+    connection = await AcpConnection.open(f.options, session, false)
+    const original = connection.process
+    const originalClose = original.close.bind(original)
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const close = vi
+      .spyOn(original, 'close')
+      .mockRejectedValue(Error('original cleanup refused'))
+    await expect(connection.close()).rejects.toThrow('original cleanup refused')
+    await expect(connection.replace('yolo')).rejects.toThrow(
+      'cannot be replaced',
+    )
+    const refusedCalls = close.mock.calls.length
+    let enter!: () => void
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    close.mockImplementation(async () => {
+      enter()
+      await held
+      await originalClose()
+    })
+    const retry = connection.close()
+    expect(connection.close()).toBe(retry)
+    await entered
+    expect(connection.process).toBe(original)
+    expect(() => f.options.host.reserve('instance', 'processes', 8)).toThrow(
+      'resource limit',
+    )
+    expect(close).toHaveBeenCalledTimes(refusedCalls + 1)
+    release!()
+    await retry
+    expect(connection.close()).toBe(retry)
+    await expectStopped(original.child.pid!)
+    const restore = f.options.host.reserve('instance', 'processes', 8)
+    restore()
+  } finally {
+    release?.()
+    await connection?.close()
+    await f.cleanup()
+  }
 })

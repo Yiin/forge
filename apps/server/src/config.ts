@@ -23,6 +23,7 @@ import {
 import { epicRunConfig, type EpicRunConfig } from '@forge/protocol/rolePolicy'
 import { join } from 'node:path'
 import { validateTerminalAccess } from './terminals/origin.js'
+import { acpProviderDescriptors } from './harnesses/acp/profiles.js'
 
 type SqliteDb = {
   exec(sql: string): unknown
@@ -105,10 +106,19 @@ export function defaultConfig(
       ...defaultEntry('Cursor', process.execPath, []),
       adapterKind: 'native',
     },
-    gemini: defaultEntry('Gemini', 'gemini', ['--experimental-acp']),
-    grok: defaultEntry('Grok', 'grok', ['agent', 'stdio']),
-    devin: defaultEntry('Devin', 'devin', ['acp']),
-    hermes: defaultEntry('Hermes', 'hermes', ['acp']),
+    ...Object.fromEntries(
+      ['gemini', 'grok', 'devin', 'hermes'].map((key) => {
+        const profile =
+          acpProviderDescriptors[key as 'gemini' | 'grok' | 'devin' | 'hermes']
+        return [
+          key,
+          {
+            ...defaultEntry(profile.name, profile.command, [...profile.args]),
+            adapterKind: 'acp' as const,
+          },
+        ]
+      }),
+    ),
   }
   if (dev)
     harness.mock = {
@@ -340,12 +350,25 @@ function inferredAdapterKind(key: string, entry: HarnessConfig) {
   if (entry.adapterKind) return entry.adapterKind
   if (entry.protocol === 'pty') return 'pty' as const
   if (nativeHarnesses.has(key)) return 'native' as const
+  if (key !== 'custom-acp' && Object.hasOwn(acpProviderDescriptors, key))
+    return 'acp' as const
   return 'custom' as const
 }
 
 /** Preserve configured IDs while replacing the exact shipped ACP wrapper commands. */
 function nativeEntry(key: string, entry: HarnessConfig): HarnessConfig {
   const adapterKind = inferredAdapterKind(key, entry)
+  if (
+    adapterKind === 'acp' &&
+    key === 'grok' &&
+    entry.command === 'grok' &&
+    JSON.stringify(entry.args) === JSON.stringify(['agent', 'stdio'])
+  )
+    return {
+      ...entry,
+      adapterKind,
+      args: [...acpProviderDescriptors.grok.args],
+    }
   if (adapterKind !== 'native') return { ...entry, adapterKind }
   const args = JSON.stringify(entry.args)
   const wrappers: Record<
