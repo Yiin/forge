@@ -31,9 +31,9 @@ export function Timeline({
   running?: boolean
 }) {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
-  const messages = useMessagesStore(
-    (state) => state.bySession[sessionId] ?? EMPTY_MESSAGES,
-  )
+  const messagesBySession = useMessagesStore((state) => state.bySession)
+  const messagesVersion = useMessagesStore((state) => state.lastSeq)
+  const messages = messagesBySession[sessionId] ?? EMPTY_MESSAGES
   const pending = useMessagesStore(
     (state) => state.pendingBySession[sessionId] ?? EMPTY_MESSAGES,
   )
@@ -47,7 +47,7 @@ export function Timeline({
     return running
       ? [...base, { kind: 'working' as const, id: 'working-indicator' }]
       : base
-  }, [messages, resumedWithRecap, children, pending, running])
+  }, [messages, messagesVersion, resumedWithRecap, children, pending, running])
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
   // The bottom spacer grows with the composer, so re-pin before paint whenever

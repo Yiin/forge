@@ -10,9 +10,8 @@ import { Input } from '../ui/input'
 const EMPTY_MESSAGES: never[] = []
 
 export function AskUserQuestionPanel({ sessionId }: { sessionId: string }) {
-  const messages = useMessagesStore(
-    (state) => state.bySession[sessionId] ?? EMPTY_MESSAGES,
-  )
+  const messagesBySession = useMessagesStore((state) => state.bySession)
+  const messages = messagesBySession[sessionId] ?? EMPTY_MESSAGES
   const pending = pendingQuestions(messages)
   const current = pending[0]
   if (!current) return null

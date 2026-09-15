@@ -21,6 +21,35 @@ const event = (seq: number, msg: Message): ServerEvent => ({
 })
 
 describe('message folding', () => {
+  it('keeps replay folding close to linear for large sessions', () => {
+    const run = (count: number) => {
+      let state: Parameters<typeof foldEvent>[0] = {
+        bySession: {},
+        lastSeq: 0,
+      }
+      const started = performance.now()
+      for (let sequence = 1; sequence <= count; sequence++) {
+        state = foldEvent(
+          state,
+          event(
+            sequence,
+            message({
+              itemId: `item-${sequence}`,
+              content: { type: 'text_delta', text: 'x' },
+            }),
+          ),
+        )
+      }
+      expect(state.bySession['ses-1']).toHaveLength(count)
+      return performance.now() - started
+    }
+
+    const small = run(2_000)
+    const large = run(20_000)
+    // Ten times as many events must not approach the old hundredfold copy cost.
+    expect(large).toBeLessThan(small * 25 + 100)
+  })
+
   it('joins deltas by item and keeps sessions independent', () => {
     let state: Parameters<typeof foldEvent>[0] = { bySession: {}, lastSeq: 0 }
     state = foldEvent(
