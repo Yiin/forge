@@ -7,8 +7,10 @@ import { cn } from '../../lib/utils'
 
 export function ActivityStack({
   item,
+  sessionId,
 }: {
   item: Extract<ChatRenderItem, { kind: 'activity' }>
+  sessionId?: string
 }) {
   const [open, setOpen] = useState(false)
   const count = item.tools.length + item.agents.length
@@ -78,7 +80,7 @@ export function ActivityStack({
       {open && (
         <div className="mt-2 space-y-2 border-t border-border/45 pt-2">
           {item.tools.map((tool) => (
-            <ToolCallRow key={tool.id} item={tool} />
+            <ToolCallRow key={tool.id} item={tool} sessionId={sessionId} />
           ))}
           {item.agents.map((agent) => (
             <SubagentCard key={agent.id} child={agent} />

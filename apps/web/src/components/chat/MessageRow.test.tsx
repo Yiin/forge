@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MessageRow, ToolCallRow } from './MessageRow'
+import { useShellStore } from '../../stores/shell'
 
 describe('MessageRow', () => {
   afterEach(cleanup)
@@ -97,6 +98,28 @@ describe('MessageRow', () => {
     )
   })
 
+  it('allows long user messages to collapse without changing the row', () => {
+    const view = render(
+      <MessageRow
+        item={{
+          kind: 'message',
+          id: 'u4',
+          seq: 4,
+          role: 'user',
+          text: 'long prompt '.repeat(25),
+        }}
+      />,
+    )
+    const toggle = screen.getByRole('button', { name: 'Hide message' })
+    fireEvent.click(toggle)
+    expect(
+      screen
+        .getByRole('button', { name: 'Show message' })
+        .getAttribute('aria-expanded'),
+    ).toBe('false')
+    expect(view.container.querySelector('.chat-user')).toBeTruthy()
+  })
+
   it('chips only skills listed by the workspace', () => {
     const view = render(
       <MessageRow
@@ -160,6 +183,27 @@ describe('MessageRow', () => {
     fireEvent.click(screen.getByRole('button', { name: /\$ hostname/i }))
     expect(view.container.querySelector('pre')?.textContent).toContain(
       '"command": "hostname"',
+    )
+  })
+
+  it('opens a file tool path in the workspace dock', () => {
+    useShellStore.setState({ docks: {}, dockWidth: 480 })
+    render(
+      <ToolCallRow
+        sessionId="session-1"
+        item={{
+          kind: 'tool',
+          id: 'tool-file',
+          name: 'read_file',
+          state: 'done',
+          input: { path: 'src/main.ts' },
+        }}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /read_file/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open src/main.ts' }))
+    expect(useShellStore.getState().dock('session-1').tabs).toContainEqual(
+      expect.objectContaining({ kind: 'file', path: 'src/main.ts' }),
     )
   })
 })
