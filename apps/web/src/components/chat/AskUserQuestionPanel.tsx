@@ -11,6 +11,7 @@ import {
   pendingQuestionRequests,
   type PendingQuestionRequest,
   type Question,
+  type RequestStatus,
 } from './question-logic'
 import { useMessagesStore } from '../../stores/messages'
 import { cn } from '../../lib/utils'
@@ -223,20 +224,23 @@ function QuestionCard({
   }, [answers, cancel, freeText, page, question, selectedIds, sending, settled])
   if (!question) return null
   if (settled) {
-    const statusText = {
+    // Total over RequestStatus on purpose: a status the server can report but
+    // this map omits would render an empty panel instead of failing the build.
+    const statusText: Record<RequestStatus, string> = {
       pending: '',
       replying: 'Reply is being delivered.',
       submitted: 'Reply submitted.',
+      cancelled: 'This request was cancelled.',
       expired: 'This request expired after the session ended.',
       uncertain:
         'Reply status is uncertain. Reload to check the request state.',
-    }[request.requestStatus!]
+    }
     return (
       <section
         className="ask-question-panel mx-auto mb-2 w-full max-w-3xl rounded-[20px] border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground"
         aria-live="polite"
       >
-        {statusText}
+        {statusText[request.requestStatus!]}
       </section>
     )
   }

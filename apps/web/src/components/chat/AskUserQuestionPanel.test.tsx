@@ -33,7 +33,7 @@ describe('AskUserQuestionPanel', () => {
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
-    useMessagesStore.setState({ bySession: {} })
+    useMessagesStore.setState({ bySession: {}, snapshotStateBySession: {} })
   })
 
   it('never submits a tool permission from the choice alone', () => {
@@ -119,6 +119,39 @@ describe('AskUserQuestionPanel', () => {
     expect(
       screen.getByText('This request expired after the session ended.'),
     ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Submit/ })).toBeNull()
+  })
+
+  // Snapshot rows carry the native-interaction status, whose 'cancelled' member
+  // the stored message enum lacks. Every settled status must render its own
+  // text, so the panel never shows an empty card with no reply controls.
+  it('shows a cancelled request as settled and disables replies', () => {
+    seed({
+      type: 'ask_user_question',
+      questionId: 'request-cancelled',
+      question: 'Continue?',
+      questions: [{ question: 'Continue?', options: [] }],
+    })
+    useMessagesStore.setState({
+      snapshotStateBySession: {
+        'session-1': {
+          requests: [
+            {
+              questionId: 'request-cancelled',
+              sessionId: 'session-1',
+              questions: [{ question: 'Continue?', options: [] }],
+              source: 'ext',
+              status: 'cancelled',
+              createdAt: 1,
+              updatedAt: 2,
+              expiresAt: 3,
+            },
+          ],
+        },
+      },
+    })
+    render(<AskUserQuestionPanel sessionId="session-1" />)
+    expect(screen.getByText('This request was cancelled.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Submit/ })).toBeNull()
   })
 })

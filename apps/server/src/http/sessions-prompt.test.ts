@@ -19,7 +19,9 @@ describe('prompt REST lifecycle', () => {
       title: 'Chat',
       cwd: '/tmp',
     })
-    const manager = new SessionManager(db, new EventBus(), () => undefined)
+    const manager = new SessionManager(db, new EventBus(), () => {
+      throw new Error('snapshot read must not start a harness')
+    })
     const questions = new QuestionManager({ db, now: () => 1000 })
     void questions.handleExtension('cursor/ask_question', {
       sessionId: session.id,

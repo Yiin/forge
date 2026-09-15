@@ -12,7 +12,10 @@ export type PendingQuestion = {
 export type PendingQuestionRequest = {
   requestId: string
   source?: 'permission' | 'ext'
-  requestStatus?: 'pending' | 'replying' | 'submitted' | 'expired' | 'uncertain'
+  // Snapshot rows carry the live native-interaction status, which includes
+  // 'cancelled'; stored message content only ever carries the narrower set.
+  requestStatus?:
+    'pending' | 'replying' | 'submitted' | 'cancelled' | 'expired' | 'uncertain'
   toolName?: string
   toolContext?: string
   permissionScope?: 'once' | 'session'
