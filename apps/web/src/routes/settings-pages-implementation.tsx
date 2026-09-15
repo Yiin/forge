@@ -1140,6 +1140,7 @@ export function KeybindingsSettings() {
       setCapture(null)
       return
     }
+    if (['Control', 'Meta', 'Alt', 'Shift'].includes(event.key)) return
     const parts = [
       event.ctrlKey || event.metaKey ? 'mod' : '',
       event.altKey ? 'alt' : '',
