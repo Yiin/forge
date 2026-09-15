@@ -11,7 +11,83 @@ import {
   questionAnswerSchema,
 } from '../src/harness.js'
 
+// Passthrough content types carry the harness event itself, minus the turnId and
+// itemId the session manager strips before it appends the message. Their
+// fixtures therefore have to stay valid harness events, so `passthroughFixtures`
+// is checked against `harnessEventSchema` below.
+const runEnvelope = {
+  runId: 'run-1',
+  runtimeGeneration: 'generation-1',
+  deliveryId: 'delivery-1',
+} as const
+const turnItemEnvelope = {
+  ...runEnvelope,
+  turnId: 'turn-1',
+  itemId: 'item-1',
+} as const
+const sourceRef = {
+  artifactId: 'artifact-1',
+  mime: 'application/json',
+  bytes: 24,
+  sha256: 'a'.repeat(64),
+} as const
+const passthroughFixtures = [
+  {
+    ...turnItemEnvelope,
+    type: 'content_block',
+    blockIndex: 0,
+    role: 'assistant',
+    block: {
+      kind: 'text_resource',
+      uri: 'file:///repo/README.md',
+      mime: 'text/markdown',
+      text: '# Forge',
+    },
+    sourceRef,
+  },
+  {
+    ...runEnvelope,
+    turnId: 'turn-1',
+    type: 'source_reference',
+    subject: { kind: 'item', itemId: 'item-1' },
+    boundary: 'closed',
+    sourceRef,
+  },
+  {
+    ...turnItemEnvelope,
+    type: 'usage',
+    inputTokens: 120,
+    outputTokens: 34,
+    totalTokens: 154,
+    modelContextWindow: 200000,
+  },
+  {
+    ...turnItemEnvelope,
+    type: 'usage_snapshot',
+    measurementId: 'measurement-1',
+    responseId: 'response-1',
+    inputTokenBasis: 'excludes_cache_reads',
+    tokenScope: 'call',
+    tokens: { inputTokens: 120, outputTokens: 34 },
+    context: { used: 154, capacity: 200000 },
+  },
+  {
+    ...turnItemEnvelope,
+    type: 'file_change',
+    path: 'apps/server/src/index.ts',
+    kind: 'modified',
+  },
+  {
+    ...turnItemEnvelope,
+    type: 'child_updated',
+    childId: 'child-1',
+    parentToolCallId: 'tool-1',
+    providerChildId: 'agent-7',
+  },
+] as const
+
 const fixtures = [
+  ...passthroughFixtures,
   { type: 'text_delta', text: 'hello' },
   { type: 'thought_delta', text: 'thinking' },
   {
@@ -143,6 +219,10 @@ describe('protocol schemas', () => {
     expect(new Set(messageContentTypes)).toEqual(
       new Set(fixtures.map(({ type }) => type)),
     )
+  })
+  it('keeps passthrough content valid as harness events', () => {
+    for (const fixture of passthroughFixtures)
+      expect(harnessEventSchema.parse(fixture)).toEqual(fixture)
   })
   it('round-trips every ephemeral variant', () => {
     const events = [
