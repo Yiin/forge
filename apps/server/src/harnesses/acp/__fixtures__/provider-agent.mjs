@@ -80,10 +80,77 @@ input.on('line', (line) => {
       })
       break
     case 'session/prompt':
+      if (scenario === 'grok-completion') {
+        const completionCase = process.env.FORGE_ACP_TEST_COMPLETION
+        const rail = process.env.FORGE_ACP_TEST_RAIL
+        const replyGate = process.env.FORGE_ACP_TEST_REPLY_GATE
+        const correlation =
+          completionCase === 'missing'
+            ? undefined
+            : completionCase === 'foreign-prompt'
+              ? 'unowned-prompt'
+              : frame.params._meta.promptId
+        const nativeSession =
+          completionCase === 'foreign-session' ? 'foreign-session' : sessionId
+        const stopReason = completionCase === 'error' ? 'error' : 'end_turn'
+        const completion =
+          rail === 'public'
+            ? {
+                method: '_x.ai/session/update',
+                params: {
+                  sessionId: nativeSession,
+                  update: {
+                    sessionUpdate: 'turn_completed',
+                    prompt_id: correlation,
+                    stop_reason: stopReason,
+                  },
+                },
+              }
+            : {
+                method: '_x.ai/session/prompt_complete',
+                params: {
+                  sessionId: nativeSession,
+                  promptId: correlation,
+                  stopReason,
+                },
+              }
+        if (completionCase === 'response-first')
+          reply(frame.id, { stopReason: 'end_turn' })
+        send(completion)
+        report('completion_sent', { frame: completion })
+        if (
+          ['missing', 'foreign-session', 'foreign-prompt'].includes(
+            completionCase,
+          )
+        ) {
+          let replied = false
+          const release = () => {
+            if (replied || !existsSync(replyGate)) return
+            replied = true
+            watcher.close()
+            reply(frame.id, { stopReason: 'refusal' })
+          }
+          watcher = watch(dirname(replyGate), (_event, name) => {
+            if (name === basename(replyGate)) release()
+          })
+          release()
+        } else if (!['hung', 'response-first'].includes(completionCase))
+          reply(frame.id, {
+            stopReason: completionCase === 'error' ? 'refusal' : 'end_turn',
+          })
+        break
+      }
+
       if (scenario === 'grok-responses') {
         const update = (value) =>
           send({
-            method: 'session/update',
+            method: [
+              'response_started',
+              'reasoning_completed',
+              'response_completed',
+            ].includes(value.sessionUpdate)
+              ? '_x.ai/session/update'
+              : 'session/update',
             params: { sessionId, update: value },
           })
         for (const [index, message_id] of [
