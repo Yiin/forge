@@ -1,6 +1,5 @@
 import { Ephemeral, ServerEvent } from '@forge/protocol/events'
-import type { Message } from '@forge/protocol/message'
-import { SubscribeFrame } from '@forge/protocol/ws'
+import { SessionSnapshot, SubscribeFrame } from '@forge/protocol/ws'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionsStore } from '../stores/sessions'
 
@@ -33,6 +32,9 @@ export class ForgeSocket {
   private timer?: ReturnType<typeof setTimeout>
   private stopped = false
   private attempt = 0
+  // Replay cursors belong to a subscription, not to the shared message store.
+  // A session-specific socket must not skip another session's older events.
+  private cursor = 0
   private readonly options: Required<
     Pick<SocketOptions, 'url' | 'sessions' | 'reconnect'>
   > &
@@ -94,7 +96,7 @@ export class ForgeSocket {
     return SubscribeFrame.parse({
       type: 'subscribe',
       sessions: this.options.sessions,
-      cursor: useMessagesStore.getState().lastSeq,
+      cursor: this.cursor,
     })
   }
   private receive(data: string) {
@@ -104,14 +106,16 @@ export class ForgeSocket {
     } catch {
       return
     }
-    value = normalizeServerEvent(value)
-    if (
-      value &&
-      typeof value === 'object' &&
-      'message' in value &&
-      value.message
-    )
-      value = normalizeServerEvent(value.message)
+    const snapshot = SessionSnapshot.safeParse(value)
+    if (snapshot.success) {
+      if (
+        this.options.sessions !== 'all' &&
+        !this.options.sessions.includes(snapshot.data.sessionId)
+      )
+        return
+      useMessagesStore.getState().loadSnapshot(snapshot.data)
+      return
+    }
     const ephemeral = Ephemeral.safeParse(value)
     if (ephemeral.success) {
       const frame = ephemeral.data
@@ -147,7 +151,10 @@ export class ForgeSocket {
       return useMessagesStore.getState().applyEphemeral(frame)
     }
     const event = ServerEvent.safeParse(value)
-    if (event.success) useMessagesStore.getState().applyEvent(event.data)
+    if (event.success) {
+      this.cursor = Math.max(this.cursor, event.data.seq)
+      useMessagesStore.getState().applyEvent(event.data)
+    }
   }
   private scheduleReconnect() {
     if (this.timer) return
@@ -163,52 +170,5 @@ export class ForgeSocket {
     )
   }
 }
-export function normalizeServerEvent(value: unknown): unknown {
-  if (!value || typeof value !== 'object') return value
-  const candidate = value as Record<string, any>
-  if (candidate.msg) return value
-  if (
-    typeof candidate.seq !== 'number' ||
-    typeof candidate.sessionId !== 'string'
-  )
-    return value
-  return {
-    seq: candidate.seq,
-    sessionId: candidate.sessionId,
-    msg: {
-      seq: candidate.seq,
-      sessionId: candidate.sessionId,
-      turnId: candidate.turnId ?? `${candidate.sessionId}-turn`,
-      // Deltas coalesce per session; everything else needs a unique itemId
-      // or same-type messages would fold into each other and lose content.
-      itemId:
-        candidate.itemId ??
-        (candidate.type === 'text_delta' || candidate.type === 'thought_delta'
-          ? `${candidate.sessionId}-${candidate.type}`
-          : `${candidate.sessionId}-${candidate.seq}`),
-      role: candidate.role ?? 'system',
-      type: candidate.type,
-      content:
-        candidate.content && typeof candidate.content === 'object'
-          ? { type: candidate.type, ...candidate.content }
-          : { type: candidate.type },
-      // Replayed history carries its own timestamp, and subagent placement
-      // reads it, so keep the row's value and stamp only live frames.
-      createdAt:
-        typeof candidate.createdAt === 'string'
-          ? candidate.createdAt
-          : new Date().toISOString(),
-    },
-  }
-}
 export const connectForgeSocket = (options?: SocketOptions) =>
   new ForgeSocket(options).start()
-// History rows arrive in the same wire shape as socket frames, so the timeline
-// has to normalize them too. A row that carries its type outside `content`
-// renders as nothing, and it also replaces the folded socket copy of that seq.
-export function normalizeMessage(value: unknown): Message {
-  const event = normalizeServerEvent(value)
-  return event && typeof event === 'object' && 'msg' in event
-    ? (event.msg as Message)
-    : (value as Message)
-}

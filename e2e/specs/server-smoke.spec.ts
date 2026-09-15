@@ -22,7 +22,7 @@ test('creates a project and session, then replays streamed messages', async () =
     const messages: Array<{ seq: number; type: string }> = []
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data as string)
-      if (data.message) messages.push(data.message)
+      if (data.msg) messages.push(data.msg)
     }
     await new Promise<void>((resolve) => {
       socket.onopen = () => {
@@ -82,7 +82,7 @@ test('reconnects after restart without losing the cursor', async () => {
     const messages: Array<{ seq: number; type: string }> = []
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data as string)
-      if (data.message) messages.push(data.message)
+      if (data.msg) messages.push(data.msg)
     }
     await new Promise<void>((resolve) => {
       socket.onopen = () => {
