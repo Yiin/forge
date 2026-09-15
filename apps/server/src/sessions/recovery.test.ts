@@ -186,7 +186,7 @@ describe('session recovery', () => {
     ).toBe('errored')
   })
 
-  it('falls back to recap when the provider rejects session load', async () => {
+  it('keeps the native binding and exposes provider resume failure', async () => {
     const { db, project, bus } = setup()
     const session = createSession(db, {
       projectId: project.id,
@@ -206,28 +206,28 @@ describe('session recovery', () => {
       content: { type: 'text_delta', text: 'Finish the report' },
     })
     let loaded = 0
-    const prompts: string[] = []
-    const handle = {
-      prompt: async (text: string) => {
-        prompts.push(text)
-      },
-      cancel() {},
-      kill() {},
-    }
     const process: HarnessProcess = {
       capabilities: { loadSession: true },
       loadSession: async () => {
         loaded += 1
         throw new Error('provider session expired')
       },
-      newSession: async () => ({ handle, proven: true }),
-      spawn: async () => handle,
+      newSession: async () => {
+        throw new Error('must not replace the native session')
+      },
+      spawn: async () => {
+        throw new Error('must not spawn after resume failure')
+      },
     }
     await recoverSessions(db, new SessionManager(db, bus, () => process), bus)
     expect(loaded).toBe(1)
-    expect(prompts).toHaveLength(2)
-    expect(prompts[0]).toContain('Finish the report')
-    expect(prompts[1]).toBe('The server restarted mid-turn. Continue.')
+    expect(
+      db
+        .prepare(
+          'SELECT provider_session_id, status FROM sessions WHERE id = ?',
+        )
+        .get(session.id) as { provider_session_id: string; status: string },
+    ).toEqual({ provider_session_id: 'provider-1', status: 'errored' })
     expect(
       db
         .prepare(

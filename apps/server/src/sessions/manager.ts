@@ -86,22 +86,6 @@ export class PromptBusyError extends Error {
   }
 }
 
-function recoveryRecap(db: Db, sessionId: string) {
-  const rows = db
-    .prepare(
-      `SELECT role, type, content FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT 30`,
-    )
-    .all(sessionId) as Array<{ role: string; type: string; content: string }>
-  const prompt = rows.find((row) => {
-    if (row.role !== 'user' || row.type !== 'text_delta') return false
-    return Boolean((JSON.parse(row.content) as { text?: string }).text)
-  })
-  const tools = rows.filter(
-    (row) => row.type === 'tool_call' || row.type === 'tool_result',
-  ).length
-  return `Last user prompt: ${prompt ? (JSON.parse(prompt.content) as { text: string }).text : '(none)'}. Tool events: ${tools}.`
-}
-
 export class SessionManager {
   private readonly promotions = new Map<string, PromotionOwner>()
   private terminals?: import('../terminals/manager.js').TerminalManager
@@ -111,9 +95,14 @@ export class SessionManager {
     this.terminals = manager
   }
   private readonly handles = new Map<string, HarnessHandle>()
+  private readonly generations = new Map<string, number>()
   private readonly availableModels = new Map<string, HarnessModel[]>()
   private readonly handleHarnesses = new Map<string, string>()
   private readonly reapTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly turnWaiters = new Map<
+    string,
+    { resolve: () => void; reject: (error: unknown) => void }
+  >()
   constructor(
     private readonly db: Db,
     private readonly bus: EventBus,
@@ -267,7 +256,10 @@ export class SessionManager {
   }
 
   private async spawn(row: SessionRow) {
+    const generation = (this.generations.get(row.id) ?? 0) + 1
+    this.generations.set(row.id, generation)
     const onItem = (item: HarnessItem) => {
+      if (this.generations.get(row.id) !== generation) return
       const turnId = item.turnId ?? this.turns.get(row.id) ?? makeId('turn_')
       const itemId = item.itemId ?? makeId('item_')
       const { itemId: _itemId, turnId: _turnId, ...normalized } = item
@@ -287,15 +279,20 @@ export class SessionManager {
         normalized.type === 'turn_end' ||
         normalized.type === 'turn_interrupted'
       ) {
-        this.turns.delete(row.id)
-        this.status(row.id, 'idle')
-        this.maybeTitle(row.id, row.title, this.firstPrompt.get(row.id) ?? '')
-        this.scheduleReap(row.id)
-        void this.drainQueue(row.id)
+        this.finishTurn(
+          row,
+          this.turns.get(row.id),
+          normalized.type === 'turn_interrupted'
+            ? new Error('Turn interrupted')
+            : undefined,
+        )
       }
     }
     const onExit = () => {
+      if (this.generations.get(row.id) !== generation) return
+      const turnId = this.turns.get(row.id)
       this.forgetHandle(row.id)
+      if (turnId) this.finishTurn(row, turnId, new Error('Harness exited'))
       if (
         this.db.prepare('SELECT status FROM sessions WHERE id = ?').get(row.id)
       )
@@ -329,9 +326,12 @@ export class SessionManager {
   }
 
   async recover(row: SessionRow, recap?: string) {
+    const generation = (this.generations.get(row.id) ?? 0) + 1
+    this.generations.set(row.id, generation)
     const process = this.factory(row.harness, row.account_id)
     const fallbackTurnId = makeId('turn_')
     const onItem = (item: HarnessItem) => {
+      if (this.generations.get(row.id) !== generation) return
       const { itemId: _itemId, turnId: _turnId, ...content } = item
       appendMessage(this.db, {
         sessionId: row.id,
@@ -344,6 +344,7 @@ export class SessionManager {
       })
     }
     const onExit = () => {
+      if (this.generations.get(row.id) !== generation) return
       this.forgetHandle(row.id)
       this.status(row.id, 'errored')
     }
@@ -368,14 +369,12 @@ export class SessionManager {
         result = await process.loadSession!(session, onItem, onExit)
         if (!result.proven)
           throw new Error('Provider session load was not proven')
-      } catch {
-        // Providers can advertise loading but lose the persisted session.
-        // Fall back to a fresh session and preserve the local conversation.
-        if (!process.newSession)
-          throw new Error('Harness cannot create a session')
-        result = await process.newSession(session, onItem, onExit)
-        if (!result.proven) throw new Error('New session was not proven')
-        recap = recoveryRecap(this.db, row.id)
+      } catch (error) {
+        // A failed native resume is not permission to create a replacement.
+        // Keep the persisted binding and expose the provider failure instead.
+        throw new Error(
+          `Provider session resume failed: ${errorMessage(error)}`,
+        )
       }
     } else {
       if (!process.newSession)
@@ -407,6 +406,27 @@ export class SessionManager {
   private readonly turns = new Map<string, string>()
   private readonly queueBusy = new Set<string>()
   private readonly firstPrompt = new Map<string, string>()
+
+  private finishTurn(
+    row: SessionRow,
+    turnId: string | undefined,
+    error?: Error,
+  ) {
+    if (!turnId || this.turns.get(row.id) !== turnId) return
+    this.turns.delete(row.id)
+    const waiter = this.turnWaiters.get(`${row.id}:${turnId}`)
+    if (waiter) {
+      this.turnWaiters.delete(`${row.id}:${turnId}`)
+      if (error) waiter.reject(error)
+      else waiter.resolve()
+    }
+    if (!error) {
+      this.status(row.id, 'idle')
+      this.maybeTitle(row.id, row.title, this.firstPrompt.get(row.id) ?? '')
+      this.scheduleReap(row.id)
+      void this.drainQueue(row.id)
+    } else this.status(row.id, 'errored')
+  }
 
   private queuedPromptRows(sessionId: string) {
     return this.db
@@ -741,6 +761,7 @@ export class SessionManager {
     clientItemId?: string,
     configOptions?: Record<string, string | boolean>,
     delivery?: 'immediate' | 'turn-boundary',
+    waitForCompletion = false,
   ) {
     const accepted = await this.acceptPrompt(
       id,
@@ -755,6 +776,14 @@ export class SessionManager {
       delivery,
     )
     if (!accepted) return
+    const completion = waitForCompletion
+      ? new Promise<void>((resolve, reject) => {
+          this.turnWaiters.set(`${accepted.row.id}:${accepted.turnId}`, {
+            resolve,
+            reject,
+          })
+        })
+      : undefined
     // Startup errors become timeline errors after acceptance. This keeps the
     // user row visible and leaves the session reachable for inspection.
     void (async () => {
@@ -804,6 +833,7 @@ export class SessionManager {
     })().catch((error: unknown) =>
       this.failPrompt(accepted.row, accepted.turnId, error),
     )
+    if (completion) return completion
   }
 
   private runPrompt(
@@ -826,7 +856,7 @@ export class SessionManager {
   }
 
   private failPrompt(row: SessionRow, turnId: string, error: unknown) {
-    this.turns.delete(row.id)
+    if (this.turns.get(row.id) !== turnId) return
     const message = errorMessage(error)
     const match = detectProviderError(message)
     if (match && row.account_id) {
@@ -852,6 +882,12 @@ export class SessionManager {
       eventBus: this.bus,
     })
     this.status(row.id, 'errored')
+    const waiter = this.turnWaiters.get(`${row.id}:${turnId}`)
+    if (waiter) {
+      this.turnWaiters.delete(`${row.id}:${turnId}`)
+      waiter.reject(error)
+    }
+    this.turns.delete(row.id)
     void this.drainQueue(row.id)
   }
 
@@ -867,11 +903,7 @@ export class SessionManager {
         content: { type: 'turn_end' },
         eventBus: this.bus,
       })
-      this.turns.delete(row.id)
-      this.status(row.id, 'idle')
-      this.maybeTitle(row.id, row.title, this.firstPrompt.get(row.id) ?? '')
-      this.scheduleReap(row.id)
-      void this.drainQueue(row.id)
+      this.finishTurn(row, turnId)
     }
   }
 

@@ -92,6 +92,54 @@ describe('session harness selection', () => {
     ])
   })
 
+  it('can await authoritative turn completion after prompt acceptance', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async (_session, onItem) => ({
+        prompt: () => onItem({ type: 'turn_end' }),
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+
+    let settled = false
+    const completion = manager.prompt(
+      session.id,
+      'hello',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    )
+    void completion.then(() => {
+      settled = true
+    })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(settled).toBe(true)
+    await completion
+    expect(
+      db
+        .prepare(
+          "SELECT type FROM messages WHERE session_id = ? AND type = 'turn_end'",
+        )
+        .all(session.id),
+    ).toEqual([{ type: 'turn_end' }])
+    manager.close()
+  })
+
   it('persists harness item and turn ids for one logical turn', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)
