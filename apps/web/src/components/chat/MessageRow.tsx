@@ -23,6 +23,7 @@ import { SkillChipText } from './SkillChipText'
 import { summarizeToolCall } from './tool-summary'
 import { api } from '../../lib/api'
 import { cn } from '../../lib/utils'
+import { useShellStore } from '../../stores/shell'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
 
@@ -39,6 +40,7 @@ export function MessageRow({
   skills?: string[]
 }) {
   const [open, setOpen] = useState(!item.thought)
+  const [collapsed, setCollapsed] = useState(false)
   const copy = async () => {
     await navigator.clipboard.writeText(item.text)
     toast.success('Copied message')
@@ -83,9 +85,29 @@ export function MessageRow({
         data-pending={item.pending ? 'true' : undefined}
         aria-busy={item.pending ? true : undefined}
       >
-        <div className="relative max-w-[80%] rounded-2xl border border-border bg-surface-raised p-3 text-sm text-foreground whitespace-pre-wrap break-words">
-          <SkillChipText text={item.text} skills={skills} />
+        <div
+          className={cn(
+            'relative max-w-[80%] rounded-2xl border border-border bg-surface-raised p-3 text-sm text-foreground whitespace-pre-wrap break-words',
+            collapsed && 'max-h-16 overflow-hidden',
+          )}
+        >
+          {collapsed ? (
+            <span className="text-muted-foreground">Message collapsed</span>
+          ) : (
+            <SkillChipText text={item.text} skills={skills} />
+          )}
         </div>
+        {item.text.length > 240 && (
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+            aria-label={collapsed ? 'Show message' : 'Hide message'}
+            aria-expanded={!collapsed}
+            onClick={() => setCollapsed((value) => !value)}
+          >
+            {collapsed ? 'Show' : 'Hide'}
+          </button>
+        )}
         {!item.pending && (
           <div className={META_ROW_CLASS}>
             <Button
@@ -136,11 +158,23 @@ export function MessageRow({
 
 export function ToolCallRow({
   item,
+  sessionId,
 }: {
   item: Extract<ChatRenderItem, { kind: 'tool' }>
+  sessionId?: string
 }) {
   const [open, setOpen] = useState(false)
   const summary = summarizeToolCall(item.name, item.input)
+  const filePath = toolPath(item.input)
+  const openFile = () => {
+    if (!sessionId || !filePath) return
+    useShellStore.getState().openDockTab(sessionId, {
+      id: `file-${sessionId}-${filePath}`,
+      kind: 'file',
+      title: filePath.split('/').at(-1) || 'File',
+      path: filePath,
+    })
+  }
   return (
     <article className="chat-tool">
       <WorkEntryRow
@@ -160,9 +194,24 @@ export function ToolCallRow({
             {JSON.stringify(item.output, null, 2)}
           </pre>
         )}
+        {filePath && sessionId && (
+          <Button variant="outline" size="xs" onClick={openFile}>
+            Open {filePath}
+          </Button>
+        )}
       </WorkEntryRow>
     </article>
   )
+}
+
+function toolPath(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return
+  const value = input as Record<string, unknown>
+  for (const key of ['path', 'file_path', 'filePath']) {
+    if (typeof value[key] === 'string' && value[key].trim())
+      return value[key].trim()
+  }
+  return
 }
 
 /**

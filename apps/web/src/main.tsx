@@ -7,7 +7,9 @@ import '@fontsource-variable/geist-mono'
 import './app.css'
 import './styles.css'
 import { readTheme, resolveTheme } from './lib/shell-storage'
+import { applyStoredPreferences } from './lib/settings-preferences'
 document.documentElement.dataset.theme = resolveTheme(readTheme())
+applyStoredPreferences()
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <RouterProvider router={router} />

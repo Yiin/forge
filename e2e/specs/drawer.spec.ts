@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test'
-import { launchForge, stopProxiedForge } from '../helpers/forgeServer.js'
+import {
+  launchForge,
+  proxyForgeApi,
+  stopProxiedForge,
+} from '../helpers/forgeServer.js'
 
 test('phone drawer opens on-screen within the viewport', async ({
   page,
@@ -12,22 +16,7 @@ test('phone drawer opens on-screen within the viewport', async ({
   const forge = await launchForge()
   try {
     await page.setViewportSize({ width: 390, height: 844 })
-    await page.route('**/api/**', async (route) => {
-      const target = `${forge.baseUrl}${new URL(route.request().url()).pathname}${new URL(route.request().url()).search}`
-      const response = await fetch(target, {
-        method: route.request().method(),
-        headers: {
-          'content-type':
-            route.request().headers()['content-type'] ?? 'application/json',
-        },
-        body: route.request().postDataBuffer() ?? undefined,
-      })
-      await route.fulfill({
-        status: response.status,
-        headers: Object.fromEntries(response.headers),
-        body: Buffer.from(await response.arrayBuffer()),
-      })
-    })
+    await proxyForgeApi(page, forge)
     await page.addInitScript((url) => {
       const NativeWebSocket = window.WebSocket
       const socketUrl = url.replace(/^http/, 'ws') + '/ws'

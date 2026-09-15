@@ -14,6 +14,42 @@ function logRequest(method: string, params: unknown): void {
     appendFileSync(requestLogPath, `${JSON.stringify({ method, params })}\n`)
 }
 
+// Multi-select mode carries its own question so the browser specs can tell a
+// grouped single-choice panel apart from a confirm-and-submit one.
+function askQuestionBody(index: number, multiSelect: boolean) {
+  if (multiSelect)
+    return {
+      header: 'Toppings',
+      question: 'Choose your toppings',
+      options: [
+        { label: 'Cheese', value: 'cheese', description: 'A classic choice' },
+        {
+          label: 'Mushrooms',
+          value: 'mushrooms',
+          description: 'A savoury choice',
+        },
+      ],
+      multiSelect: true,
+    }
+  return index === 0
+    ? {
+        header: 'Choice',
+        question: 'Pick one',
+        options: [
+          { label: 'First', value: 'first' },
+          { label: 'Second', value: 'second' },
+        ],
+      }
+    : {
+        header: 'Second choice',
+        question: 'Pick another one',
+        options: [
+          { label: 'Third', value: 'third' },
+          { label: 'Fourth', value: 'fourth' },
+        ],
+      }
+}
+
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   if (milliseconds <= 0) return Promise.resolve()
   return new Promise((resolve, reject) => {
@@ -237,63 +273,67 @@ class MockAgent implements acp.Agent {
     }
     if (flag('REQUEST_PERMISSION') || flag('ASK_QUESTION')) {
       const question = flag('ASK_QUESTION')
-      const outcome = await this.connection.requestPermission({
-        sessionId: params.sessionId,
-        toolCall: {
-          toolCallId: 'permission-1',
-          title: question ? 'AskUserQuestion' : 'Run command',
-          kind: 'other',
-          status: 'pending',
-          rawInput: question
-            ? {
-                questions: [
-                  {
-                    header: 'Choice',
-                    question: 'Pick one',
-                    options: [
-                      { label: 'First', value: 'first' },
-                      { label: 'Second', value: 'second' },
-                    ],
-                  },
-                ],
-              }
-            : { command: 'echo mock' },
-        },
-        options: [
-          { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
-          {
-            kind: 'allow_always',
-            name: 'Allow always',
-            optionId: 'allow-always',
+      const ask = async (index: number) => {
+        const mode = env.FORGE_MOCK_ASK_QUESTION_MODE ?? 'single'
+        const multiSelect = mode === 'multi'
+        const outcome = await this.connection.requestPermission({
+          sessionId: params.sessionId,
+          toolCall: {
+            toolCallId: question ? `question-${index}` : 'permission-1',
+            title: question ? 'AskUserQuestion' : 'Run command',
+            kind: 'other',
+            status: 'pending',
+            rawInput: question
+              ? { questions: [askQuestionBody(index, multiSelect)] }
+              : { command: 'echo mock' },
           },
-          { kind: 'reject_once', name: 'Reject once', optionId: 'reject-once' },
-        ],
-      })
-      const selected =
-        outcome.outcome.outcome === 'selected'
-          ? outcome.outcome.optionId
-          : outcome.outcome.outcome
-      if (requestLogPath)
-        appendFileSync(
-          requestLogPath,
-          `${JSON.stringify({ permissionOutcome: selected })}\n`,
-        )
-      await this.update(params.sessionId, {
-        sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: `selected: ${selected}` },
-      })
+          options: [
+            { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
+            {
+              kind: 'allow_always',
+              name: 'Allow always',
+              optionId: 'allow-always',
+            },
+            {
+              kind: 'reject_once',
+              name: 'Reject once',
+              optionId: 'reject-once',
+            },
+          ],
+        })
+        const selected =
+          outcome.outcome.outcome === 'selected'
+            ? outcome.outcome.optionId
+            : outcome.outcome.outcome
+        if (requestLogPath)
+          appendFileSync(
+            requestLogPath,
+            `${JSON.stringify({ permissionOutcome: selected })}\n`,
+          )
+        await this.update(params.sessionId, {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: `selected: ${selected}` },
+        })
+      }
+      // Queued mode must leave both requests pending at once, so the UI groups
+      // them. Awaiting the first in turn would only ever show one question.
+      if (question && env.FORGE_MOCK_ASK_QUESTION_MODE === 'queued')
+        await Promise.all([ask(0), ask(1)])
+      else await ask(0)
     }
     await delay(numberFlag('PROMPT_DELAY_MS'), signal)
     if (flag('EXIT_MID_TURN')) process.exit(0)
     const text = env.FORGE_MOCK_PROMPT_RESPONSE_TEXT ?? input
-    const chunks = text.length
+    const repeat = Math.max(1, Number(env.FORGE_MOCK_REPLY_REPEAT ?? 1))
+    const repeatedText = Array.from({ length: repeat }, () => text).join(' ')
+    const chunks = repeatedText.length
       ? [
-          text.slice(0, Math.ceil(text.length / 3)),
-          text.slice(
-            Math.ceil(text.length / 3),
-            Math.ceil((text.length * 2) / 3),
+          repeatedText.slice(0, Math.ceil(repeatedText.length / 3)),
+          repeatedText.slice(
+            Math.ceil(repeatedText.length / 3),
+            Math.ceil((repeatedText.length * 2) / 3),
           ),
-          text.slice(Math.ceil((text.length * 2) / 3)),
+          repeatedText.slice(Math.ceil((repeatedText.length * 2) / 3)),
         ]
       : ['']
     for (const chunk of chunks) {

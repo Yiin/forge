@@ -1,25 +1,47 @@
 import { expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { launchForge } from '../helpers/forgeServer.js'
+import { launchForge, type ForgeServer } from '../helpers/forgeServer.js'
+
+async function post<T>(url: string, body: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok)
+    throw new Error(
+      `${url} failed: ${response.status} ${await response.text()}`,
+    )
+  return (await response.json()) as T
+}
+
+// The real server needs a named project on a real path, and a session bound to
+// a harness and a working directory. The data directory is already a repo.
+async function createSession(forge: ForgeServer): Promise<string> {
+  const project = await post<{ id: string }>(`${forge.baseUrl}/api/projects`, {
+    name: 'Smoke project',
+    path: forge.dataDir,
+  })
+  const session = await post<{ id: string }>(`${forge.baseUrl}/api/sessions`, {
+    projectId: project.id,
+    harness: 'mock',
+    cwd: forge.dataDir,
+  })
+  return session.id
+}
 
 test('creates a project and session, then replays streamed messages', async () => {
   const forge = await launchForge()
   try {
-    const project = (await (
-      await fetch(`${forge.baseUrl}/api/projects`, {
-        method: 'POST',
-        body: '{}',
-      })
-    ).json()) as { id: string }
-    const session = (await (
-      await fetch(`${forge.baseUrl}/api/projects/${project.id}/sessions`, {
-        method: 'POST',
-        body: '{}',
-      })
-    ).json()) as { id: string }
+    const sessionId = await createSession(forge)
     const socket = new WebSocket(`${forge.baseUrl.replace('http', 'ws')}/ws`)
-    const messages: Array<{ seq: number; type: string }> = []
+    const messages: Array<{
+      seq: number
+      type: string
+      role: string
+      content: { text?: string }
+    }> = []
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data as string)
       if (data.msg) messages.push(data.msg)
@@ -29,16 +51,15 @@ test('creates a project and session, then replays streamed messages', async () =
         socket.send(
           JSON.stringify({
             type: 'subscribe',
-            sessions: [session.id],
+            sessions: [sessionId],
             cursor: 0,
           }),
         )
         resolve()
       }
     })
-    await fetch(`${forge.baseUrl}/api/sessions/${session.id}/prompt`, {
-      method: 'POST',
-      body: JSON.stringify({ prompt: 'hello' }),
+    await post(`${forge.baseUrl}/api/sessions/${sessionId}/prompt`, {
+      text: 'hello',
     })
     await expect
       .poll(() => messages.some((message) => message.type === 'turn_end'))
@@ -46,9 +67,14 @@ test('creates a project and session, then replays streamed messages', async () =
     expect(messages.map((message) => message.seq)).toEqual(
       [...messages].map((message) => message.seq).sort((a, b) => a - b),
     )
-    expect(
-      messages.filter((message) => message.type === 'text_delta'),
-    ).toHaveLength(3)
+    // The server folds a turn's streamed chunks into one durable item, so the
+    // assertion is on the assembled reply, not on a chunk count. The fixture
+    // echoes the prompt back.
+    const reply = messages.filter(
+      (message) => message.type === 'text_delta' && message.role === 'agent',
+    )
+    expect(reply).toHaveLength(1)
+    expect(reply[0]?.content.text).toBe('hello')
     socket.close()
   } finally {
     await forge.stop()
@@ -61,25 +87,21 @@ test('reconnects after restart without losing the cursor', async () => {
     dataDir,
     env: { FORGE_MOCK_HANG_PROMPT: '1' },
   })
-  const project = (await (
-    await fetch(`${first.baseUrl}/api/projects`, { method: 'POST', body: '{}' })
-  ).json()) as { id: string }
-  const session = (await (
-    await fetch(`${first.baseUrl}/api/projects/${project.id}/sessions`, {
-      method: 'POST',
-      body: '{}',
-    })
-  ).json()) as { id: string }
-  await fetch(`${first.baseUrl}/api/sessions/${session.id}/prompt`, {
-    method: 'POST',
-    body: '{}',
+  const sessionId = await createSession(first)
+  await post(`${first.baseUrl}/api/sessions/${sessionId}/prompt`, {
+    text: 'hang',
   })
   await first.stop()
 
   const second = await launchForge({ dataDir })
   try {
     const socket = new WebSocket(`${second.baseUrl.replace('http', 'ws')}/ws`)
-    const messages: Array<{ seq: number; type: string }> = []
+    const messages: Array<{
+      seq: number
+      type: string
+      role: string
+      content: { text?: string }
+    }> = []
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data as string)
       if (data.msg) messages.push(data.msg)
@@ -89,7 +111,7 @@ test('reconnects after restart without losing the cursor', async () => {
         socket.send(
           JSON.stringify({
             type: 'subscribe',
-            sessions: [session.id],
+            sessions: [sessionId],
             cursor: 1,
           }),
         )

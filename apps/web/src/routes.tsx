@@ -18,6 +18,9 @@ import {
   ProjectSettings,
   EpicSettings,
   KeybindingsSettings,
+  AppearanceSettings,
+  FileSettings,
+  NotificationSettings,
 } from './routes/settings-pages'
 import { DraftRoute } from './routes/draft'
 const root = createRootRoute({ component: AppShell })
@@ -92,6 +95,36 @@ const settingsKeybindings = createRoute({
   path: '/keybindings',
   component: KeybindingsSettings,
 })
+const settingsAgents = createRoute({
+  getParentRoute: () => settings,
+  path: '/agents',
+  component: HarnessSettings,
+})
+const settingsAccounts = createRoute({
+  getParentRoute: () => settings,
+  path: '/accounts',
+  component: HarnessSettings,
+})
+const settingsAppearance = createRoute({
+  getParentRoute: () => settings,
+  path: '/appearance',
+  component: AppearanceSettings,
+})
+const settingsFiles = createRoute({
+  getParentRoute: () => settings,
+  path: '/files',
+  component: FileSettings,
+})
+const settingsNotifications = createRoute({
+  getParentRoute: () => settings,
+  path: '/notifications',
+  component: NotificationSettings,
+})
+const settingsShortcuts = createRoute({
+  getParentRoute: () => settings,
+  path: '/shortcuts',
+  component: KeybindingsSettings,
+})
 const settingsHarnesses = createRoute({
   getParentRoute: () => settings,
   path: '/harnesses',
@@ -120,6 +153,12 @@ const tree = root.addChildren([
     settingsIndex,
     settingsGeneral,
     settingsKeybindings,
+    settingsAgents,
+    settingsAccounts,
+    settingsAppearance,
+    settingsFiles,
+    settingsNotifications,
+    settingsShortcuts,
     settingsHarnesses,
     settingsProjects,
     settingsEpics,

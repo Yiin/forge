@@ -4,7 +4,7 @@ import { once } from 'node:events'
 import { readFileSync } from 'node:fs'
 import { startServer } from '../../apps/server/src/index.ts'
 
-if (process.env.FORGE_E2E || Number(process.versions.node.split('.')[0]) < 24)
+if (Number(process.versions.node.split('.')[0]) < 24)
   throw Error('Request acceptance requires the production Node server')
 const server = startServer(0)
 const sockets = new Set()
