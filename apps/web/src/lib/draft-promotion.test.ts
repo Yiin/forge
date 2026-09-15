@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { promoteDraftWithKey } from './draft-promotion'
 import { resetDraftsStore, useDraftsStore } from '../stores/drafts'
 
@@ -26,6 +26,10 @@ function fakePromote(behavior: 'ok' | 'fail' = 'ok'): {
 describe('draft promotion keys', () => {
   beforeEach(() => {
     window.localStorage.clear()
+    resetDraftsStore()
+  })
+
+  afterEach(() => {
     resetDraftsStore()
   })
 
