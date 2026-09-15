@@ -511,6 +511,449 @@ describe('session harness selection', () => {
     ).toEqual({ count: 0 })
   })
 
+  it('reorders queued prompts and drains them in the new order', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const prompts: string[] = []
+    let release = () => undefined as void
+    let calls = 0
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: async (content) => {
+          prompts.push(
+            typeof content === 'string'
+              ? content
+              : (content.find((item) => item.kind === 'text')?.text ?? ''),
+          )
+          calls += 1
+          if (calls === 1)
+            return new Promise<void>((resolve) => {
+              release = resolve
+            })
+          return Promise.resolve()
+        },
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+    await manager.prompt(session.id, 'one', 'request-1')
+    for (const text of ['two', 'three'])
+      await manager.prompt(
+        session.id,
+        text,
+        `request-${text}`,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'turn-boundary',
+      )
+    const queued = manager.queuedPrompts(session.id) ?? []
+    const reordered = manager.reorderQueuedPrompts(session.id, [
+      queued[1]!.id,
+      queued[0]!.id,
+    ])
+    expect(reordered?.map((prompt) => prompt.text)).toEqual(['three', 'two'])
+    release()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(prompts).toEqual(['one', 'three', 'two'])
+    manager.close()
+  })
+
+  it('rejects a queue order that does not match the queued prompts', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    let release = () => undefined as void
+    let calls = 0
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: async () => {
+          calls += 1
+          if (calls === 1)
+            return new Promise<void>((resolve) => {
+              release = resolve
+            })
+          return Promise.resolve()
+        },
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+    await manager.prompt(session.id, 'one', 'request-1')
+    await manager.prompt(
+      session.id,
+      'two',
+      'request-2',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'turn-boundary',
+    )
+    const queued = manager.queuedPrompts(session.id) ?? []
+    expect(manager.reorderQueuedPrompts(session.id, [])).toBeUndefined()
+    expect(
+      manager.reorderQueuedPrompts(session.id, [queued[0]!.id, 'missing']),
+    ).toBeUndefined()
+    expect(
+      manager.reorderQueuedPrompts(session.id, [queued[0]!.id, queued[0]!.id]),
+    ).toBeUndefined()
+    expect(manager.queuedPrompts(session.id)?.map((item) => item.text)).toEqual(
+      ['two'],
+    )
+    release()
+    manager.close()
+  })
+
+  it('sends a queued prompt now by interrupting the active turn', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const prompts: string[] = []
+    let release = () => undefined as void
+    let calls = 0
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: async (content) => {
+          prompts.push(
+            typeof content === 'string'
+              ? content
+              : (content.find((item) => item.kind === 'text')?.text ?? ''),
+          )
+          calls += 1
+          if (calls === 1)
+            return new Promise<void>((resolve) => {
+              release = resolve
+            })
+          return Promise.resolve()
+        },
+        cancel: () => release(),
+        kill: () => undefined,
+      }),
+    }))
+    await manager.prompt(session.id, 'one', 'request-1')
+    for (const text of ['two', 'three'])
+      await manager.prompt(
+        session.id,
+        text,
+        `request-${text}`,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'turn-boundary',
+      )
+    const queued = manager.queuedPrompts(session.id) ?? []
+    expect(await manager.sendQueuedPromptNow(session.id, queued[1]!.id)).toBe(
+      true,
+    )
+    expect(prompts).toEqual(['one', 'three'])
+    expect(manager.queuedPrompts(session.id)?.map((item) => item.text)).toEqual(
+      ['two'],
+    )
+    manager.close()
+  })
+
+  it('keeps a waiting turn caller settled when send now interrupts it', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    let release = () => undefined as void
+    let calls = 0
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: async () => {
+          calls += 1
+          if (calls === 1)
+            return new Promise<void>((resolve) => {
+              release = resolve
+            })
+          return Promise.resolve()
+        },
+        cancel: () => release(),
+        kill: () => undefined,
+      }),
+    }))
+    let waited = false
+    const waiting = manager
+      .prompt(
+        session.id,
+        'one',
+        'request-1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      )
+      .then(() => {
+        waited = true
+      })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await manager.prompt(
+      session.id,
+      'two',
+      'request-2',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'turn-boundary',
+    )
+    const queued = manager.queuedPrompts(session.id) ?? []
+    expect(await manager.sendQueuedPromptNow(session.id, queued[0]!.id)).toBe(
+      true,
+    )
+    await waiting
+    expect(waited).toBe(true)
+    manager.close()
+  })
+
+  it('drains the rest of the queue after a send now turn ends', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const prompts: string[] = []
+    let release = () => undefined as void
+    let calls = 0
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: async (content) => {
+          prompts.push(
+            typeof content === 'string'
+              ? content
+              : (content.find((item) => item.kind === 'text')?.text ?? ''),
+          )
+          calls += 1
+          if (calls === 1)
+            return new Promise<void>((resolve) => {
+              release = resolve
+            })
+          return Promise.resolve()
+        },
+        cancel: () => release(),
+        kill: () => undefined,
+      }),
+    }))
+    await manager.prompt(session.id, 'one', 'request-1')
+    for (const text of ['two', 'three'])
+      await manager.prompt(
+        session.id,
+        text,
+        `request-${text}`,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'turn-boundary',
+      )
+    const queued = manager.queuedPrompts(session.id) ?? []
+    await manager.sendQueuedPromptNow(session.id, queued[1]!.id)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(prompts).toEqual(['one', 'three', 'two'])
+    expect(
+      db.prepare('SELECT count(*) AS count FROM queued_prompts').get(),
+    ).toEqual({ count: 0 })
+    manager.close()
+  })
+
+  it('keeps a queued prompt recoverable when send now cannot be accepted', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    let release = () => undefined as void
+    let calls = 0
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: async () => {
+          calls += 1
+          if (calls === 1)
+            return new Promise<void>((resolve) => {
+              release = resolve
+            })
+          return Promise.resolve()
+        },
+        // Deleting the session mid-interrupt makes the follow-up prompt
+        // unacceptable, which is the path that must not lose the prompt.
+        cancel: () => {
+          db.prepare('UPDATE sessions SET deleted_at = ? WHERE id = ?').run(
+            Date.now(),
+            session.id,
+          )
+          release()
+        },
+        kill: () => undefined,
+      }),
+    }))
+    await manager.prompt(session.id, 'one', 'request-1')
+    await manager.prompt(
+      session.id,
+      'two',
+      'request-2',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'turn-boundary',
+    )
+    const queued = manager.queuedPrompts(session.id) ?? []
+    await expect(
+      manager.sendQueuedPromptNow(session.id, queued[0]!.id),
+    ).rejects.toThrow('Session not found')
+    expect(
+      db
+        .prepare(
+          'SELECT text, delivery_state, lease_id FROM queued_prompts WHERE id = ?',
+        )
+        .get(queued[0]!.id),
+    ).toEqual({ text: 'two', delivery_state: 'failed', lease_id: null })
+    manager.close()
+  })
+
+  it('delivers a queued prompt once when send now is retried after the lease expires', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const prompts: string[] = []
+    let release = () => undefined as void
+    let calls = 0
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: async (content) => {
+          prompts.push(
+            typeof content === 'string'
+              ? content
+              : (content.find((item) => item.kind === 'text')?.text ?? ''),
+          )
+          calls += 1
+          if (calls === 1)
+            return new Promise<void>((resolve) => {
+              release = resolve
+            })
+          return Promise.resolve()
+        },
+        // A steering harness would accept the loser's prompt into the winner's
+        // turn, so the mock must expose it for the race to be provable.
+        steer: async (text: string) => {
+          prompts.push(text)
+        },
+        cancel: () => release(),
+        kill: () => undefined,
+      }),
+    }))
+    await manager.prompt(session.id, 'one', 'request-1')
+    await manager.prompt(
+      session.id,
+      'two',
+      'request-2',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'turn-boundary',
+    )
+    const queued = manager.queuedPrompts(session.id) ?? []
+    const first = manager.sendQueuedPromptNow(session.id, queued[0]!.id)
+    // Expire the first lease so the retry can claim the same row.
+    db.prepare('UPDATE queued_prompts SET lease_until = 0 WHERE id = ?').run(
+      queued[0]!.id,
+    )
+    const second = manager.sendQueuedPromptNow(session.id, queued[0]!.id)
+    const results = await Promise.allSettled([first, second])
+    expect(results.filter((item) => item.status === 'rejected')).toHaveLength(1)
+    expect(prompts.filter((text) => text === 'two')).toHaveLength(1)
+    expect(
+      db.prepare('SELECT count(*) AS count FROM queued_prompts').get(),
+    ).toEqual({ count: 0 })
+    manager.close()
+  })
+
+  it('reports a missing queued prompt for send now', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async () => ({
+        prompt: async () => undefined,
+        cancel: () => undefined,
+        kill: () => undefined,
+      }),
+    }))
+    expect(
+      await manager.sendQueuedPromptNow(session.id, 'queued_missing'),
+    ).toBe(false)
+    manager.close()
+  })
+
   it('publishes user rows before a cold harness finishes spawning', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)

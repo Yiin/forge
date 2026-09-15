@@ -27,20 +27,25 @@ type MessageRow = {
 }
 
 function eventFromRow(row: MessageRow) {
-  return ServerEvent.parse({
-    seq: row.seq,
-    sessionId: row.session_id,
-    msg: {
+  try {
+    const event = ServerEvent.safeParse({
       seq: row.seq,
       sessionId: row.session_id,
-      turnId: row.turn_id,
-      itemId: row.item_id,
-      role: row.role,
-      type: row.type,
-      content: JSON.parse(row.content),
-      createdAt: new Date(row.created_at).toISOString(),
-    },
-  })
+      msg: {
+        seq: row.seq,
+        sessionId: row.session_id,
+        turnId: row.turn_id,
+        itemId: row.item_id,
+        role: row.role,
+        type: row.type,
+        content: JSON.parse(row.content),
+        createdAt: new Date(row.created_at).toISOString(),
+      },
+    })
+    return event.success ? event.data : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function matchesSession(event: Ephemeral, sessions: string[] | 'all') {
@@ -125,6 +130,10 @@ export function websocketRoute(
         for (const row of rows) {
           if (current !== generation) return
           const event = eventFromRow(row)
+          if (!event) {
+            cursor = Math.max(cursor, row.seq)
+            continue
+          }
           if (!(await send(event))) return
         }
         if (rows.length < 500) break

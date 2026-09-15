@@ -129,6 +129,34 @@ describe('event websocket', () => {
     socket.close()
   })
 
+  it('skips persisted rows that fail the message schema', async () => {
+    const { db, bus, session, port } = fixture()
+    append(db, bus, session.id, 1)
+    db.prepare(
+      `INSERT INTO messages
+        (session_id, turn_id, item_id, role, type, content, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      session.id,
+      'turn-bad',
+      'item-bad',
+      'user',
+      'attachment_ref',
+      JSON.stringify({ attachmentId: 'legacy', relPath: 'legacy.txt' }),
+      Date.now(),
+    )
+    append(db, bus, session.id, 3)
+
+    const socket = await openSocket(port)
+    const events = receiveWithTimeout(socket, 2)
+    socket.send(
+      JSON.stringify({ type: 'subscribe', sessions: [session.id], cursor: 0 }),
+    )
+
+    expect((await events).map((event) => event.seq)).toEqual([1, 3])
+    socket.close()
+  })
+
   it('routes context window frames only to subscribed sessions', async () => {
     const { bus, session, port } = fixture()
     const other = `${session.id}-other`
