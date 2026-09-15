@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import dns from 'node:dns/promises'
-import { isIP } from 'node:net'
+import { isIP, Socket } from 'node:net'
 import {
   previewRegisterSchema,
   type PreviewTarget,
@@ -63,6 +62,8 @@ export function normalizePreviewOrigin(value: string) {
 }
 
 export class PreviewManager {
+  private closed = false
+  private readonly probes = new Map<Socket, Promise<boolean>>()
   private readonly targets = new Map<string, PreviewTarget>()
   private readonly connections = new Map<string, number>()
   constructor(
@@ -71,7 +72,7 @@ export class PreviewManager {
   ) {}
 
   async register(input: unknown): Promise<PreviewTarget> {
-    if (this.targets.size >= MAX_TARGETS)
+    if (this.closed || this.targets.size >= MAX_TARGETS)
       throw new PreviewError(
         'preview_limit_exceeded',
         'Preview target limit exceeded',
@@ -92,6 +93,8 @@ export class PreviewManager {
         403,
       )
     }
+    if (this.closed)
+      throw new PreviewError('preview_unavailable', 'Preview manager is closed')
     const id = randomUUID()
     const target: PreviewTarget = {
       id,
@@ -139,7 +142,7 @@ export class PreviewManager {
   }
   acquire(id: string) {
     const target = this.targets.get(id)
-    if (!target || target.status !== 'ready')
+    if (this.closed || !target || target.status !== 'ready')
       throw new PreviewError(
         'preview_not_found',
         'Preview target not found',
@@ -163,22 +166,45 @@ export class PreviewManager {
     }
   }
   async reachable(id: string) {
-    const target = this.targets.get(id)
-    if (!target)
-      throw new PreviewError(
-        'preview_not_found',
-        'Preview target not found',
-        404,
-      )
+    const lease = this.acquire(id)
+    const url = new URL(lease.target.origin)
+    const socket = new Socket()
+    let connected = false
+    let settle!: (result: boolean) => void
+    const result = new Promise<boolean>((resolve) => {
+      settle = resolve
+    })
+    this.probes.set(socket, result)
+    const timer = setTimeout(() => socket.destroy(), 3000)
+    socket.once('connect', () => {
+      connected = true
+      socket.destroy()
+    })
+    socket.once('error', () => socket.destroy())
+    socket.once('close', () => {
+      clearTimeout(timer)
+      this.probes.delete(socket)
+      lease.release()
+      settle(connected)
+    })
     try {
-      const host = new URL(target.origin).hostname
-      await dns.lookup(host)
-      return true
+      socket.connect({
+        host:
+          url.hostname === 'localhost'
+            ? '127.0.0.1'
+            : url.hostname.replace(/^\[|\]$/g, ''),
+        port: Number(url.port || (url.protocol === 'https:' ? 443 : 80)),
+      })
     } catch {
-      return false
+      socket.destroy()
     }
+    return result
   }
-  close() {
+  async close() {
+    this.closed = true
+    const pending = [...this.probes.values()]
+    for (const socket of this.probes.keys()) socket.destroy()
+    await Promise.all(pending)
     this.targets.clear()
     this.connections.clear()
   }
