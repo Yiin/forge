@@ -11,7 +11,7 @@ import { acpProviderDescriptors } from './profiles.js'
 
 function installServices(f: Awaited<ReturnType<typeof sdkFixture>>) {
   const generations: Array<{ public: string; transport: string }> = []
-  f.deps.services = async (connection) => {
+  f.deps.services = async (connection, history) => {
     generations.push({
       public: connection.generation,
       transport: connection.transportGeneration,
@@ -30,6 +30,7 @@ function installServices(f: Awaited<ReturnType<typeof sdkFixture>>) {
       terminals: await createAcpTerminals({
         ...options,
         account: connection.account,
+        history,
         approvedEnv: {},
       }),
     }

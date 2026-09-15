@@ -12,7 +12,7 @@ import { JsonlRpcTransport } from '../jsonrpc.js'
 import { deferred } from '../transport-test-helpers.js'
 import type { AcpLiveOwner } from './ingestion.js'
 import { AcpResourceHost } from './limits.js'
-import { createAcpTerminals } from './terminals.js'
+import { createAcpTerminals, createAcpTerminalHistory } from './terminals.js'
 import type { PathHooks, WorkspacePath } from '../../workspace/paths.js'
 
 async function fixture(
@@ -75,10 +75,12 @@ async function fixture(
     },
   })
   const host = new AcpResourceHost()
+  const history = createAcpTerminalHistory(host, 'provider', 'generation')
   service = await createAcpTerminals({
     session: { id: 'session', provider: 'provider', cwd: root },
     runtimeGeneration: 'generation',
     transportGeneration: 'transport-generation',
+    history,
     account: owner.account,
     binding: () => binding,
     rpc,
@@ -111,6 +113,7 @@ async function fixture(
     request,
     host,
     service,
+    history,
     replyHeld: replyHeld.promise,
     holdReplies() {
       holdReply = true
@@ -124,6 +127,7 @@ async function fixture(
     },
     async close() {
       await service.close()
+      history.close()
       await rpc.close()
       await rm(root, { recursive: true, force: true })
     },
@@ -442,6 +446,11 @@ test('escape-heavy output replies retain their encoded allocation allowance thro
     f.releaseReplies()
     expect((await output).result.output).toHaveLength(bytes)
     await f.service.close()
+    f.host.reserve('provider', 'retained', 124 * 1024 * 1024)()
+    expect(() =>
+      f.host.reserve('provider', 'retained', 128 * 1024 * 1024),
+    ).toThrow('ACP resource limit')
+    f.history.close()
     const released = f.host.reserve('provider', 'retained', 128 * 1024 * 1024)
     released()
   } finally {
