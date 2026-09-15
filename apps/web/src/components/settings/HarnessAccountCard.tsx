@@ -208,6 +208,7 @@ export function HarnessAccountCard({
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span
                 className="relative inline-flex size-5 shrink-0 items-center justify-center"
+                role="img"
                 aria-label={iconName}
               >
                 <Cpu className="size-4 text-foreground/80" aria-hidden />

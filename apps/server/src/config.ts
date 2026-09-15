@@ -260,6 +260,7 @@ export function loadConfigSync(path?: string): ForgeConfig {
     dataDir?: unknown
     port?: unknown
     terminalAccess?: unknown
+    preview?: unknown
     harness?: Record<string, unknown>
     settings?: Record<string, unknown>
   }
@@ -290,6 +291,7 @@ export function loadConfigSync(path?: string): ForgeConfig {
       document.terminalAccess ?? { mode: 'loopback' },
     ),
     harness: result,
+    preview: document.preview,
     settings: document.settings,
   })
   if (!checked.success)
@@ -308,6 +310,7 @@ const configBody = (config: ForgeConfig) => ({
   dataDir: config.dataDir,
   port: config.port,
   terminalAccess: validateTerminalAccess(config.terminalAccess),
+  preview: config.preview,
   harness: config.harness,
   settings: config.settings,
 })

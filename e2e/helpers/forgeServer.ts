@@ -12,6 +12,7 @@ export type ForgeServer = {
   stop: () => Promise<void>
 }
 export type LaunchOptions = {
+  preview?: boolean
   fakeNative?: { kind: 'claude'; directory: string }
   frontendOrigin?: string | null
   env?: Record<string, string>
@@ -189,6 +190,7 @@ export async function launchForge(
   // so the request guard has to be told about both. That needs the port up
   // front, which rules out letting the kernel pick one at listen time.
   const port = await reservePort()
+  const previewPort = options.preview ? await reservePort() : undefined
   const home = resolve(dataDir, 'home')
   const configHome = resolve(home, '.config')
   const dataHome = resolve(home, '.local', 'share')
@@ -211,6 +213,14 @@ export async function launchForge(
     resolve(dataDir, 'forge.toml'),
     [
       `dataDir = ${JSON.stringify(dataDir)}`,
+      ...(previewPort
+        ? [
+            '[preview]',
+            'listenerHost = "127.0.0.1"',
+            `listenerPort = ${previewPort}`,
+            `publicOrigin = "http://127.0.0.1:${previewPort}"`,
+          ]
+        : []),
       '[terminalAccess]',
       'mode = "explicit"',
       `allowedOrigins = ${JSON.stringify(origins)}`,

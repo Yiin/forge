@@ -1,5 +1,31 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeBrowserAddress, normalizePreviewPath } from './BrowserPreview'
+import {
+  normalizeBrowserAddress,
+  normalizePreviewPath,
+  previewPage,
+} from './BrowserPreview'
+import type { PreviewTarget } from '@forge/protocol/preview'
+
+it('keeps every navigation inside the registered preview prefix', () => {
+  const target = {
+    publicUrl: 'http://127.0.0.2:4567/preview/original/',
+  } as PreviewTarget
+  expect(previewPage(target, '/')).toBe(
+    'http://127.0.0.2:4567/preview/original/',
+  )
+  expect(previewPage(target, '/second?q=1#detail')).toBe(
+    'http://127.0.0.2:4567/preview/original/second?q=1#detail',
+  )
+  expect(previewPage(target, '/../../outside')).toBe(
+    'http://127.0.0.2:4567/preview/original/outside',
+  )
+  expect(previewPage(target, '/https://example.test/x')).toBe(
+    'http://127.0.0.2:4567/preview/original/https://example.test/x',
+  )
+  expect(previewPage(target, '/javascript:alert(1)')).toBe(
+    'http://127.0.0.2:4567/preview/original/javascript:alert(1)',
+  )
+})
 
 describe('browser preview addresses', () => {
   it('adds HTTP and strips paths before registration', () => {

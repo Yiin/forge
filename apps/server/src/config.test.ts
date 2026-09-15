@@ -59,6 +59,24 @@ describe('resolveRunConfig', () => {
 })
 
 describe('default harness configuration', () => {
+  test('retains the preview origin and listener through load, save, and conversion', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-preview-config-'))
+    const file = join(root, 'forge.toml')
+    const preview = {
+      publicOrigin: 'https://preview.example.test',
+      listenerHost: '127.0.0.2',
+      listenerPort: 4567,
+    }
+    try {
+      saveConfigSync(file, { ...defaultConfig(false), preview })
+      expect(loadConfigSync(file).preview).toEqual(preview)
+      convertConfigFileSync(file)
+      expect(loadConfigSync(file).preview).toEqual(preview)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('classifies legacy entries without changing their commands', () => {
     const config = defaultConfig(false)
     const converted = convertConfig(config)
