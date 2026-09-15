@@ -1596,3 +1596,76 @@ describe('manager startup shutdown ownership', () => {
     },
   )
 })
+
+describe('unproven recovery ownership', () => {
+  it.each(['load', 'new', 'refused-load', 'refused-new'] as const)(
+    'closes the original unproven handle before rejecting %s',
+    async (mode) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'recovery', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'recovery',
+        cwd: '/tmp',
+      })
+      const load = mode.endsWith('load')
+      if (load)
+        db.prepare('UPDATE sessions SET provider_session_id=? WHERE id=?').run(
+          'original',
+          session.id,
+        )
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const kill = vi.fn(async () => {
+        await held
+        if (mode.startsWith('refused') && kill.mock.calls.length === 1)
+          throw Error('cleanup refused')
+      })
+      const prompt = vi.fn()
+      const open = vi.fn(async () => ({
+        handle: { prompt, cancel() {}, kill },
+        proven: false,
+      }))
+      const spawn = vi.fn()
+      const manager = new SessionManager(db, new EventBus(), () => ({
+        capabilities: { loadSession: true },
+        spawn,
+        loadSession: open,
+        newSession: open,
+      }))
+      try {
+        const row = db
+          .prepare('SELECT * FROM sessions WHERE id=?')
+          .get(session.id) as Parameters<SessionManager['recover']>[0]
+        let settled = false
+        const result = manager
+          .recover(row)
+          .catch((error) => error)
+          .finally(() => {
+            settled = true
+          })
+        await vi.waitFor(() => expect(kill).toHaveBeenCalledTimes(1))
+        expect(settled).toBe(false)
+        release()
+        const failure = await result
+        expect(failure).toBeInstanceOf(Error)
+        if (mode.startsWith('refused'))
+          expect(failure.name).toBe('NativeCleanupError')
+        else expect(failure.message).toContain('not proven')
+        await manager.close()
+        expect(kill).toHaveBeenCalledTimes(mode.startsWith('refused') ? 2 : 1)
+        expect(open).toHaveBeenCalledTimes(1)
+        expect(spawn).not.toHaveBeenCalled()
+        expect(prompt).not.toHaveBeenCalled()
+      } finally {
+        release()
+        await manager.close()
+        db.close()
+      }
+    },
+  )
+})
