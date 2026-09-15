@@ -364,7 +364,15 @@ export class KimiServer {
       throw error
     }
     const id = `ipc-${++this.ordinal}`
-    if (isHttp) this.httpReleases.set(id, release)
+    let markReleased = () => {}
+    const returned = new Promise<void>((resolve) => {
+      markReleased = resolve
+    })
+    if (isHttp)
+      this.httpReleases.set(id, () => {
+        release()
+        markReleased()
+      })
     let written: Promise<void> = Promise.resolve()
     const response = new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, {
@@ -393,7 +401,18 @@ export class KimiServer {
           return reply.value
         })
       : response
-    return (physicalOnly ? physical : deadline(physical, ms)).finally(
+    // The guardian returns the startup HTTP buffer in a separate 'http_released'
+    // line after its 'result'. Admission must not report a started server while
+    // that reservation still stands, or the next startup is refused for bytes
+    // the host has already finished with.
+    const settled =
+      message.op === 'initialize'
+        ? physical.then(async (value) => {
+            await returned
+            return value
+          })
+        : physical
+    return (physicalOnly ? settled : deadline(settled, ms)).finally(
       releaseTimer,
     )
   }

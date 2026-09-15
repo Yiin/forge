@@ -86,3 +86,59 @@ test.each(['digest', 'length', 'base64', 'utf8', 'envelope'])(
     expect(budget.count('hostRetainedBytes')).toBe(0)
   },
 )
+
+test('initialize admission waits for the returned startup HTTP buffer', async () => {
+  const limits = kimiLimits(),
+    budget = new KimiBudget(limits),
+    sent: Record<string, unknown>[] = []
+  const server = Object.create(KimiServer.prototype) as KimiServer
+  Object.assign(server, {
+    hostBudget: budget,
+    stopped: false,
+    blobReleases: new Set(),
+    transfers: new Set(),
+    sockets: new Map(),
+    pending: new Map(),
+    httpReleases: new Map(),
+    ordinal: 0,
+    ipc: {
+      send: async (value: Record<string, unknown>) => {
+        sent.push(value)
+      },
+    },
+  })
+  const internals = server as unknown as {
+    pending: Map<
+      string,
+      { resolve(value: unknown): void; release(): void; reject(): void }
+    >
+    httpReleases: Map<string, () => void>
+  }
+  const startup = server.rpc({ op: 'initialize' }, 5000)
+  let settled = false
+  void startup.then(
+    () => {
+      settled = true
+    },
+    () => {
+      settled = true
+    },
+  )
+  const startupReservation = 5 * limits.startupBytes
+  expect(budget.count('hostHttpBufferBytes')).toBe(startupReservation)
+  const id = sent[0].id as string
+  const pending = internals.pending.get(id)!
+  internals.pending.delete(id)
+  pending.release()
+  pending.resolve({ ok: true })
+  await new Promise((resolve) => setImmediate(resolve))
+  // The guardian answered, but its 'http_released' line has not arrived yet.
+  expect(settled).toBe(false)
+  expect(budget.count('hostHttpBufferBytes')).toBe(startupReservation)
+  internals.httpReleases.get(id)!()
+  internals.httpReleases.delete(id)
+  await expect(startup).resolves.toEqual({ ok: true })
+  expect(budget.count('hostHttpBufferBytes')).toBe(0)
+  expect(budget.count('hostHttp')).toBe(0)
+  expect(budget.count('hostTimers')).toBe(0)
+})
