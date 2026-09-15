@@ -609,6 +609,40 @@ type E2eQuestion = {
   }
 }
 
+type E2ePublish = {
+  sessionId: string
+  type: string
+  role: 'user' | 'agent' | 'system'
+  content: Record<string, unknown>
+  turnId?: string
+  itemId?: string
+}
+
+// The fixture speaks the same wire contract as the real server: durable rows
+// carry a full Message shape and travel as `{ seq, sessionId, msg }` frames.
+function e2eRow(seq: number, message: E2ePublish): Record<string, unknown> {
+  return {
+    seq,
+    sessionId: message.sessionId,
+    turnId: message.turnId ?? `${message.sessionId}-turn`,
+    // Deltas coalesce per session and role. Everything else needs a unique
+    // itemId, or same-type rows would fold into each other and lose content.
+    itemId:
+      message.itemId ??
+      (message.type === 'text_delta' || message.type === 'thought_delta'
+        ? `${message.sessionId}-${message.role}-${message.type}`
+        : `${message.sessionId}-${seq}`),
+    role: message.role,
+    type: message.type,
+    content: { type: message.type, ...message.content },
+    createdAt: new Date().toISOString(),
+  }
+}
+
+function e2eEvent(row: Record<string, unknown>): Record<string, unknown> {
+  return { seq: Number(row.seq), sessionId: String(row.sessionId), msg: row }
+}
+
 // Scroll checks need a reply that overflows the viewport, so the repeat count
 // is a knob. One repeat keeps the default reply short.
 function e2eReplyChunks(): string[] {
@@ -678,23 +712,23 @@ async function startE2eServer(): Promise<void> {
     )
   ) {
     state.seq += 1
-    state.messages.push({
-      seq: state.seq,
-      sessionId: unfinished.sessionId,
-      type: 'turn_interrupted',
-      role: 'system',
-      content: {},
-    })
+    state.messages.push(
+      e2eRow(state.seq, {
+        sessionId: String(unfinished.sessionId),
+        type: 'turn_interrupted',
+        role: 'system',
+        content: {},
+      }),
+    )
     await writeFile(statePath, JSON.stringify(state))
   }
   const sockets = new Set<{ send: (value: string) => void }>()
-  const publish = (message: Record<string, unknown>) => {
+  const publish = (message: E2ePublish) => {
     state.seq += 1
-    const row = { seq: state.seq, ...message }
+    const row = e2eRow(state.seq, message)
     state.messages.push(row)
     void writeFile(statePath, JSON.stringify(state))
-    for (const socket of sockets)
-      socket.send(JSON.stringify({ type: 'message', message: row }))
+    for (const socket of sockets) socket.send(JSON.stringify(e2eEvent(row)))
   }
   const response = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -785,24 +819,14 @@ async function startE2eServer(): Promise<void> {
       if (request.method === 'POST' && project) {
         const id = `ses_${crypto.randomUUID()}`
         state.sessions.push({ id, projectId: project[1] })
-        publish({
-          sessionId: id,
-          type: 'session_start',
-          role: 'system',
-          content: {},
-        })
+        await writeFile(statePath, JSON.stringify(state))
         return response({ id })
       }
       if (request.method === 'POST' && url.pathname === '/api/sessions') {
         const body = (await request.json()) as { projectId?: string }
         const id = `ses_${crypto.randomUUID()}`
         state.sessions.push({ id, projectId: body.projectId ?? '' })
-        publish({
-          sessionId: id,
-          type: 'session_start',
-          role: 'system',
-          content: {},
-        })
+        await writeFile(statePath, JSON.stringify(state))
         return response({ id })
       }
       const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/prompt$/)
@@ -851,9 +875,15 @@ async function startE2eServer(): Promise<void> {
         /^\/api\/sessions\/([^/]+)\/messages$/,
       )
       if (request.method === 'GET' && messages)
-        return response(
-          state.messages.filter((message) => message.sessionId === messages[1]),
-        )
+        return response({
+          type: 'sessionSnapshot',
+          sessionId: messages[1],
+          cursor: state.seq,
+          queuedPrompts: [],
+          messages: state.messages.filter(
+            (message) => message.sessionId === messages[1],
+          ),
+        })
       if (request.method === 'POST' && promote) {
         const body = (await request.json()) as {
           projectId?: string
@@ -979,7 +1009,7 @@ async function startE2eServer(): Promise<void> {
             for (const message of state.messages.filter(
               (item) => Number(item.seq) > (frame.cursor ?? 0),
             ))
-              socket.send(JSON.stringify({ type: 'message', message }))
+              socket.send(JSON.stringify(e2eEvent(message)))
         } catch {}
       },
     },
