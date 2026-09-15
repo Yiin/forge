@@ -1,5 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
-import { launchForge, stopProxiedForge } from '../helpers/forgeServer.js'
+import {
+  launchForge,
+  proxyForgeApi,
+  stopProxiedForge,
+} from '../helpers/forgeServer.js'
 
 async function openQuestion(page: Page, mode = 'single') {
   const forge = await launchForge({
@@ -9,22 +13,7 @@ async function openQuestion(page: Page, mode = 'single') {
     },
   })
   try {
-    await page.route('**/api/**', async (route) => {
-      const target = `${forge.baseUrl}${new URL(route.request().url()).pathname}`
-      const response = await fetch(target, {
-        method: route.request().method(),
-        headers: {
-          'content-type':
-            route.request().headers()['content-type'] ?? 'application/json',
-        },
-        body: route.request().postDataBuffer() ?? undefined,
-      })
-      await route.fulfill({
-        status: response.status,
-        headers: Object.fromEntries(response.headers),
-        body: Buffer.from(await response.arrayBuffer()),
-      })
-    })
+    await proxyForgeApi(page, forge)
     await page.addInitScript((url) => {
       const NativeWebSocket = window.WebSocket
       const socketUrl = url.replace(/^http/, 'ws') + '/ws'
@@ -51,10 +40,9 @@ async function openQuestion(page: Page, mode = 'single') {
     await shell.getByLabel('Message composer').fill('ask me')
     await shell.getByRole('button', { name: 'Send' }).click()
     await page.waitForURL(/\/s\//)
-    // Promotion creates the session. AskUserQuestion is emitted by the first
-    // prompt sent to that session, so submit the test prompt after promotion.
-    await shell.getByLabel('Message composer').fill('ask me')
-    await shell.getByRole('button', { name: 'Send' }).click()
+    // Promotion sends the draft's text as the session's first prompt, and the
+    // fixture asks its question on that prompt. A second send would only be
+    // queued behind the turn already waiting for an answer.
     await expect(
       shell.getByRole('region', { name: 'Question from Forge' }),
     ).toBeVisible()

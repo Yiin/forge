@@ -100,6 +100,8 @@ export type AcpServicesOptions = {
   logger?: Logger
   isUserQuestion?: (request: acp.RequestPermissionRequest) => boolean
   questionManager?: QuestionManager
+  /** Forge's own session id, which the provider never sees. */
+  sessionId?: string
 }
 
 export type AcpServices = ClientHandlers & {
@@ -117,7 +119,13 @@ export function createAcpServices(options: AcpServicesOptions): AcpServices {
       const checked = permissionRequest.parse(request)
       if (options.isUserQuestion?.(request) ?? isUserQuestion(request)) {
         if (options.questionManager)
-          return options.questionManager.handlePermission(request)
+          // The request carries the provider's session id. Questions are stored
+          // against Forge's session and answered through its route, so they are
+          // recorded under Forge's id.
+          return options.questionManager.handlePermission({
+            ...request,
+            sessionId: options.sessionId ?? request.sessionId,
+          })
         return { outcome: { outcome: 'cancelled' } }
       }
       logger.debug('Auto-granted ACP permission', checked.toolCall.title)

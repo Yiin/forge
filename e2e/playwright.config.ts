@@ -1,17 +1,9 @@
-import { createHash } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
-
 import { defineConfig, devices } from '@playwright/test'
 
-// Several checkouts of this repository run the gate at the same time, and a
-// killed run can leak its dev server. A fixed port makes both cases fail with
-// "port is already used", so derive a stable port per checkout instead.
-const checkout = fileURLToPath(new URL('.', import.meta.url))
-const digest = createHash('sha256').update(checkout).digest()
-const port = Number(
-  process.env.FORGE_E2E_PORT ?? 5200 + (digest.readUInt16BE(0) % 700),
-)
-const origin = `http://127.0.0.1:${port}`
+import { devServerOrigin, devServerPort } from './helpers/devServer.js'
+
+const port = devServerPort()
+const origin = devServerOrigin()
 
 export default defineConfig({
   testDir: './specs',

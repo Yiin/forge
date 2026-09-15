@@ -2,7 +2,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
+import { devServerOrigin } from './devServer.js'
 
 export type ForgeServer = {
   baseUrl: string
@@ -13,6 +15,59 @@ export type LaunchOptions = {
   env?: Record<string, string>
   dataDir?: string
   fakeAgentEnv?: Record<string, string>
+}
+
+type ForgeRoutePage = {
+  route(
+    pattern: string,
+    handler: (route: {
+      request(): {
+        url(): string
+        method(): string
+        headers(): Record<string, string>
+        postDataBuffer(): Buffer | null
+      }
+      fulfill(options: {
+        status: number
+        headers: Record<string, string>
+        body: Buffer
+      }): Promise<void>
+    }) => Promise<void>,
+  ): Promise<void>
+}
+
+/**
+ * Point the app's `/api` calls at an isolated Forge server.
+ *
+ * Headers are forwarded, not rebuilt. The real server rejects a draft
+ * promotion that arrives without its `Idempotency-Key`, and only the app knows
+ * which key it sent. The origin travels too, and the server is configured to
+ * accept the dev server it comes from.
+ */
+export async function proxyForgeApi(
+  page: ForgeRoutePage,
+  forge: { baseUrl: string },
+): Promise<void> {
+  await page.route('**/api/**', async (route) => {
+    const requestUrl = new URL(route.request().url())
+    const headers = { ...route.request().headers() }
+    // The response is re-served verbatim, so never invite a compressed one.
+    for (const key of ['host', 'accept-encoding', 'connection', 'referer'])
+      delete headers[key]
+    const response = await fetch(
+      `${forge.baseUrl}${requestUrl.pathname}${requestUrl.search}`,
+      {
+        method: route.request().method(),
+        headers,
+        body: route.request().postDataBuffer() ?? undefined,
+      },
+    )
+    await route.fulfill({
+      status: response.status,
+      headers: Object.fromEntries(response.headers),
+      body: Buffer.from(await response.arrayBuffer()),
+    })
+  })
 }
 
 export async function stopProxiedForge(
@@ -67,10 +122,23 @@ export async function launchForge(
   const tomlEnv = Object.entries(fakeAgentEnv)
     .map(([key, value]) => `${key} = ${JSON.stringify(value)}`)
     .join('\n')
+  // The browser is served by the dev server and calls Forge on another port,
+  // so the request guard has to be told about both. That needs the port up
+  // front, which rules out letting the kernel pick one at listen time.
+  const port = await reservePort()
+  const origins = [
+    devServerOrigin(),
+    `http://127.0.0.1:${port}`,
+    `http://localhost:${port}`,
+  ]
   await writeFile(
     resolve(dataDir, 'forge.toml'),
     [
       `dataDir = ${JSON.stringify(dataDir)}`,
+      '[terminalAccess]',
+      'mode = "explicit"',
+      `allowedOrigins = ${JSON.stringify(origins)}`,
+      `allowedHostAuthorities = ${JSON.stringify([`127.0.0.1:${port}`, `localhost:${port}`])}`,
       '[harness.mock]',
       'name = "E2E native protocol fixture"',
       'protocol = "acp"',
@@ -105,7 +173,7 @@ export async function launchForge(
         ...process.env,
         FORGE_DATA_DIR: dataDir,
         FORGE_CONFIG: resolve(dataDir, 'forge.toml'),
-        FORGE_PORT: '0',
+        FORGE_PORT: String(port),
         ...options.env,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -119,9 +187,8 @@ export async function launchForge(
   child.once('exit', (code, signal) => {
     logStream.end(`\n[exit code=${code} signal=${signal}]\n`)
   })
-  let port: number
   try {
-    port = await new Promise<number>((resolvePort, reject) => {
+    await new Promise<void>((ready, reject) => {
       let output = ''
       const timer = setTimeout(
         () => reject(new Error(`forge did not start: ${output}`)),
@@ -130,10 +197,11 @@ export async function launchForge(
       const onData = (chunk: Buffer) => {
         output += chunk.toString()
         const match = output.match(/FORGE_LISTENING\s+(\d+)/)
-        if (match) {
-          clearTimeout(timer)
-          resolvePort(Number(match[1]))
-        }
+        if (!match) return
+        clearTimeout(timer)
+        if (Number(match[1]) !== port)
+          reject(new Error(`forge took port ${match[1]}, not ${port}`))
+        else ready()
       }
       child.stdout?.on('data', onData)
       child.stderr?.on('data', onData)
@@ -156,6 +224,22 @@ export async function launchForge(
     baseUrl,
     dataDir,
     stop: async () => stopForge(child, dataDir, !options.dataDir),
+  }
+}
+
+async function reservePort(): Promise<number> {
+  const server = createServer()
+  try {
+    await new Promise<void>((done, fail) => {
+      server.once('error', fail)
+      server.listen(0, '127.0.0.1', done)
+    })
+    const address = server.address()
+    if (typeof address === 'string' || address === null)
+      throw new Error('could not reserve a port for the e2e server')
+    return address.port
+  } finally {
+    await new Promise<void>((done) => server.close(() => done()))
   }
 }
 

@@ -167,6 +167,7 @@ export function acpHarness(
       cwd: session.cwd,
       projectRoot: session.cwd,
       questionManager: deps.questions,
+      sessionId: session.id,
     })
     const client = await spawnAcpClient(entry, {
       ...services,

@@ -36,7 +36,12 @@ test('creates a project and session, then replays streamed messages', async () =
   try {
     const sessionId = await createSession(forge)
     const socket = new WebSocket(`${forge.baseUrl.replace('http', 'ws')}/ws`)
-    const messages: Array<{ seq: number; type: string; role: string }> = []
+    const messages: Array<{
+      seq: number
+      type: string
+      role: string
+      content: { text?: string }
+    }> = []
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data as string)
       if (data.msg) messages.push(data.msg)
@@ -62,13 +67,14 @@ test('creates a project and session, then replays streamed messages', async () =
     expect(messages.map((message) => message.seq)).toEqual(
       [...messages].map((message) => message.seq).sort((a, b) => a - b),
     )
-    // The prompt itself is persisted as a user text_delta, so count the agent's
-    // chunks alone. The fixture always splits its reply into three.
-    expect(
-      messages.filter(
-        (message) => message.type === 'text_delta' && message.role === 'agent',
-      ),
-    ).toHaveLength(3)
+    // The server folds a turn's streamed chunks into one durable item, so the
+    // assertion is on the assembled reply, not on a chunk count. The fixture
+    // echoes the prompt back.
+    const reply = messages.filter(
+      (message) => message.type === 'text_delta' && message.role === 'agent',
+    )
+    expect(reply).toHaveLength(1)
+    expect(reply[0]?.content.text).toBe('hello')
     socket.close()
   } finally {
     await forge.stop()
@@ -90,7 +96,12 @@ test('reconnects after restart without losing the cursor', async () => {
   const second = await launchForge({ dataDir })
   try {
     const socket = new WebSocket(`${second.baseUrl.replace('http', 'ws')}/ws`)
-    const messages: Array<{ seq: number; type: string; role: string }> = []
+    const messages: Array<{
+      seq: number
+      type: string
+      role: string
+      content: { text?: string }
+    }> = []
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data as string)
       if (data.msg) messages.push(data.msg)
