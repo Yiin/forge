@@ -1,7 +1,11 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
+import { migrate } from '../db/migrate.js'
+import { createProject, createSession } from '../db/queries.js'
+import { QuestionManager } from './questions.js'
 import { createAcpServices } from './services.js'
 
 const dirs: string[] = []
@@ -12,6 +16,50 @@ afterEach(async () => {
 })
 
 describe('ACP client services', () => {
+  it('stores permission questions against the owning Forge session', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-acp-'))
+    dirs.push(dir)
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'Forge', path: dir })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'native',
+      title: 'Native',
+      cwd: dir,
+    })
+    const questions = new QuestionManager({ db, now: () => 1000 })
+    const services = createAcpServices({
+      cwd: dir,
+      projectRoot: dir,
+      questionManager: questions,
+      forgeSessionId: session.id,
+    })
+    const pending = services.onRequestPermission?.({
+      sessionId: 'provider-session',
+      toolCall: {
+        toolCallId: 'tool',
+        title: 'AskUserQuestion',
+        rawInput: {
+          questions: [{ question: 'Pick one', options: [{ label: 'First' }] }],
+        },
+      },
+      options: [{ kind: 'allow_once', name: 'First', optionId: 'allow-once' }],
+    })
+    const stored = questions.listPending(session.id)
+    expect(stored).toHaveLength(1)
+    expect(
+      db.prepare('SELECT session_id FROM native_interactions').get(),
+    ).toEqual({ session_id: session.id })
+    questions.answerQuestion(session.id, stored[0].questionId, {
+      answers: { 'question-0': [stored[0].questions[0].options[0].id] },
+    })
+    await expect(pending).resolves.toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once' },
+    })
+    db.close()
+  })
+
   it('auto-grants allow_always and reads and writes inside the project', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'forge-acp-'))
     dirs.push(dir)
