@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, writeSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 
 if (
   process.platform !== 'linux' ||
@@ -75,16 +76,71 @@ try {
     },
   )
   let output = ''
+  let settleOutput
+  const echoed = new Promise((resolve) => {
+    settleOutput = resolve
+  })
   receipt.pty.onData((bytes) => {
     assert.ok(Buffer.isBuffer(bytes))
     output += bytes.toString()
+    if (/owned:synthetic/.test(output)) settleOutput()
   })
   await receipt.ready
   assert.equal(output, '')
   assert.equal(api.releaseOwnedV1(receipt.token).released, true)
+  // A /proc entry can vanish between the directory read and its stat read.
+  // Churn short-lived processes so every sweep meets that race.
+  let churning = true
+  let outstanding = 0
+  let drained
+  const idle = new Promise((resolve) => {
+    drained = resolve
+  })
+  const churnErrors = []
+  const settleChild = () => {
+    outstanding--
+    if (!churning && outstanding === 0) drained()
+  }
+  const churn = () => {
+    for (let i = 0; i < 24; i++) {
+      outstanding++
+      const child = spawn('/bin/true', [], { stdio: 'ignore' })
+      child.once('exit', settleChild)
+      // `exit` never fires after a spawn failure, so record it and settle here.
+      child.once('error', (error) => {
+        churnErrors.push(String(error))
+        child.removeListener('exit', settleChild)
+        settleChild()
+      })
+    }
+    if (churning) setTimeout(churn, 5)
+    else if (outstanding === 0) drained()
+  }
+  churn()
+  const swept = []
+  for (let round = 0; round < 24; round++)
+    swept.push((await api.inspectOwnedV1(receipt.token, limits)).status)
+  churning = false
+  await idle
+  assert.deepEqual(churnErrors, [])
+  assert.deepEqual(
+    swept.filter((status) => status !== 'complete'),
+    [],
+  )
+  console.log(JSON.stringify({ churnedOwnedScan: { rounds: swept.length } }))
   writeSync(receipt.pty.fd, Buffer.from('synthetic\n'))
   assert.deepEqual(await receipt.leaderExit, { exitCode: 0, signal: null })
   assert.equal(api.ownedStateV1(receipt.token).anchorRetained, true)
+  // Destroying the socket drops buffered output. Wait for the echo, then stop
+  // waiting so a lost echo fails the match below instead of hanging the check.
+  let echoDeadline
+  await Promise.race([
+    echoed,
+    new Promise((resolve) => {
+      echoDeadline = setTimeout(resolve, 5000)
+    }),
+  ])
+  clearTimeout(echoDeadline)
   const socket = receipt.pty._socket
   if (!socket.closed)
     await new Promise((resolve) => {

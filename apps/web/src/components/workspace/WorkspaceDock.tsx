@@ -12,6 +12,8 @@ import { Button } from '../ui/button'
 import { cn } from '@/lib/utils'
 import { BrowserPreview } from './BrowserPreview'
 import { TerminalSurface } from './TerminalSurface'
+import { GitReviewSurface, type ReviewComment } from './GitReviewSurface'
+import { GitHistorySurface } from './GitHistorySurface'
 import {
   DOCK_CHAT_MIN_WIDTH,
   type DockSurfaceKind,
@@ -38,10 +40,14 @@ const surfaceLabels: Record<DockSurfaceKind, string> = {
 export function WorkspaceDock({
   sessionId,
   target,
+  projectId,
+  onReviewComment,
   mobile = false,
 }: {
   sessionId: string
   target: WorkspaceTarget
+  projectId: string
+  onReviewComment?: (comment: ReviewComment) => void
   mobile?: boolean
 }) {
   const dock = useShellStore((state) => state.dock(sessionId))
@@ -96,7 +102,22 @@ export function WorkspaceDock({
   }
   const active = dock.tabs.find((tab) => tab.id === dock.activeTabId)
   const content = active ? (
-    <SurfaceContent kind={active.kind} target={target} sessionId={sessionId} />
+    <SurfaceContent
+      kind={active.kind}
+      target={target}
+      sessionId={sessionId}
+      projectId={projectId}
+      onReviewComment={onReviewComment}
+      commit={active.commit}
+      onCommit={(sha) => {
+        openTab(sessionId, {
+          id: `commit-${sha}`,
+          kind: 'diff',
+          title: `Commit ${sha.slice(0, 7)}`,
+          commit: sha,
+        })
+      }}
+    />
   ) : (
     <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
       Select a workspace surface.
@@ -252,10 +273,18 @@ function SurfaceContent({
   kind,
   target,
   sessionId,
+  projectId,
+  onReviewComment = () => undefined,
+  commit,
+  onCommit = () => undefined,
 }: {
   kind: DockSurfaceKind
   target: WorkspaceTarget
   sessionId: string
+  projectId: string
+  onReviewComment?: (comment: ReviewComment) => void
+  commit?: string
+  onCommit?: (sha: string) => void
 }) {
   if (kind === 'subagent')
     return (
@@ -271,6 +300,25 @@ function SurfaceContent({
       <div className="p-6 text-sm" role="status">
         No workspace is attached to this session.
       </div>
+    )
+  if (kind === 'diff')
+    return (
+      <GitReviewSurface
+        projectId={projectId}
+        sessionId={sessionId}
+        cwd={target.cwd!}
+        commit={commit}
+        onComment={onReviewComment}
+      />
+    )
+  if (kind === 'history')
+    return (
+      <GitHistorySurface
+        projectId={projectId}
+        sessionId={sessionId}
+        cwd={target.cwd!}
+        onCommit={onCommit}
+      />
     )
   return (
     <div

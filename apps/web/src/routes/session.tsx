@@ -16,6 +16,7 @@ import type { HarnessSelection } from '../components/chat/harness-picker-logic'
 import type { QueuedPrompt } from '@forge/protocol/session'
 import { SessionSnapshot } from '@forge/protocol/ws'
 import { WorkspaceDock } from '../components/workspace/WorkspaceDock'
+import type { ReviewComment } from '../components/workspace/GitReviewSurface'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
@@ -36,6 +37,7 @@ export function SessionRoute() {
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [skills, setSkills] = useState<string[]>([])
+  const [reviewComments, setReviewComments] = useState<ReviewComment[]>([])
   const [workspaceTarget, setWorkspaceTarget] = useState<{
     cwd: string | null
     workspaceId?: string | null
@@ -192,6 +194,9 @@ export function SessionRoute() {
     setSending(true)
     try {
       const value = text.trim()
+      const reviewText = reviewComments.length
+        ? `\n\nReview comments:\n${reviewComments.map((comment) => `- ${comment.path}:${comment.line} (${comment.side}): ${comment.text}`).join('\n')}`
+        : ''
       if (value === '/btw' || value.startsWith('/btw ')) {
         const result = (await api.btw({
           sessionId,
@@ -224,13 +229,13 @@ export function SessionRoute() {
         useMessagesStore.getState().addPending({
           sessionId,
           itemId: clientItemId,
-          text: value,
+          text: value + reviewText,
           createdAt: new Date().toISOString(),
         })
         try {
           await api.prompt({
             sessionId,
-            text: value,
+            text: value + reviewText,
             attachmentIds,
             harness: selection.harness || harness,
             accountId: selection.accountId,
@@ -242,6 +247,7 @@ export function SessionRoute() {
           useMessagesStore.getState().removePending(sessionId, clientItemId)
           throw error
         }
+        setReviewComments([])
         setHarness(selection.harness || harness)
         setAccountId(selection.accountId)
         setModel(selection.model)
@@ -332,7 +338,18 @@ export function SessionRoute() {
         )}
       </div>
       {!loading && !loadError && (
-        <WorkspaceDock sessionId={sessionId} target={workspaceTarget} />
+        <WorkspaceDock
+          sessionId={sessionId}
+          projectId={
+            useSessionsStore
+              .getState()
+              .sessions.find((item) => item.id === sessionId)?.projectId ?? ''
+          }
+          target={workspaceTarget}
+          onReviewComment={(comment) =>
+            setReviewComments((items) => [...items, comment])
+          }
+        />
       )}
     </div>
   )

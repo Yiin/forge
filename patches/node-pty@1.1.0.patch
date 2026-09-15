@@ -40,7 +40,7 @@ diff --git a/lib/unixTerminal.js b/lib/unixTerminal.js
          // setup
          _this._socket.on('error', function (err) {
              // NOTE: fs.ReadStream gets EAGAIN twice at first:
-@@ -343,4 +344,114 @@
+@@ -343,4 +344,117 @@
      };
      return CustomWriteStream;
  }());
@@ -141,6 +141,9 @@ diff --git a/lib/unixTerminal.js b/lib/unixTerminal.js
 +        await receipt.leaderExit;
 +        const socket = receipt.pty?._socket;
 +        if (socket && !socket.closed) await new Promise(resolve => { socket.once('close', resolve); socket.destroy(); });
++        // `socket.closed` can lead the close event that records the release.
++        // The native flag is the authority, so give that event bounded turns.
++        for (let turn = 0; turn < 64 && !api.ownedStateV1(receipt.token).socketClosed; turn++) await new Promise(resolve => setImmediate(resolve));
 +        const reaped = await ownedLinuxV1.reapOwnedV1(receipt.token, { maxEntries: 65536, maxBytes: 268435456, maxStatBytes: 4096, maxMembers: 256, deadlineMs });
 +        const state = api.ownedStateV1(receipt.token);
 +        result.cleanupComplete = reaped.status === 'complete' && state.phase === 'reaped' && state.socketClosed && !state.leaderPidfdOpen && state.openControlEndpoints === 0 && state.waitWorkerSettled && state.pendingOperations === 0 && (!socket || socket.closed && socket._handle === null);
@@ -211,7 +214,7 @@ diff --git a/src/terminal.ts b/src/terminal.ts
 diff --git a/src/unix/pty.cc b/src/unix/pty.cc
 --- a/src/unix/pty.cc
 +++ b/src/unix/pty.cc
-@@ -788,7 +788,475 @@
+@@ -788,7 +788,481 @@
   * Init
   */
  
@@ -245,20 +248,25 @@ diff --git a/src/unix/pty.cc b/src/unix/pty.cc
 +struct Limits { unsigned entries, bytes, statBytes, members, milliseconds; };
 +struct Scan { std::string status = "unknown"; std::vector<Identity> members; unsigned entries = 0, bytes = 0; };
 +static void closeFd(int& fd) { if (fd >= 0) { int old = fd; fd = -1; close(old); } }
-+static bool readFile(const std::string& path, unsigned cap, std::string& out, unsigned* charged = nullptr) {
++// A scanned process can exit between its directory entry and its stat read.
++// ENOENT and ESRCH mean the entry is gone, so a scan skips it and keeps scanning.
++static bool vanishing(int code) { return code == ENOENT || code == ESRCH; }
++static bool readFile(const std::string& path, unsigned cap, std::string& out, unsigned* charged = nullptr, bool* vanished = nullptr) {
 +  int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-+  if (fd < 0) return false;
++  if (fd < 0) { if (vanished && vanishing(errno)) *vanished = true; return false; }
 +  char buffer[4097];
 +  ssize_t n = read(fd, buffer, cap + 1);
++  int failure = errno;
 +  close(fd);
 +  if (n > 0 && charged) *charged += static_cast<unsigned>(n);
++  if (n < 0 && vanished && vanishing(failure)) *vanished = true;
 +  if (n <= 0 || static_cast<unsigned>(n) > cap) return false;
 +  out.assign(buffer, n);
 +  return true;
 +}
-+static bool identity(pid_t pid, unsigned cap, Identity& result, unsigned* charged = nullptr) {
++static bool identity(pid_t pid, unsigned cap, Identity& result, unsigned* charged = nullptr, bool* vanished = nullptr) {
 +  std::string text;
-+  if (!readFile("/proc/" + std::to_string(pid) + "/stat", cap, text, charged)) return false;
++  if (!readFile("/proc/" + std::to_string(pid) + "/stat", cap, text, charged, vanished)) return false;
 +  auto end = text.rfind(')');
 +  if (end == std::string::npos || text.back() != '\n') return false;
 +  std::istringstream fields(text.substr(end + 2));
@@ -338,7 +346,8 @@ diff --git a/src/unix/pty.cc b/src/unix/pty.cc
 +      long candidate = strtol(name,&end,10);
 +      if (*end || candidate <= 0 || candidate > INT32_MAX) { out.status = "unknown"; break; }
 +      Identity member;
-+      if (!identity(candidate,l.statBytes,member,&out.bytes)) { out.status = "changed"; break; }
++      bool vanished = false;
++      if (!identity(candidate,l.statBytes,member,&out.bytes,&vanished)) { if (vanished) continue; out.status = "changed"; break; }
 +      if (member.sid == leader.sid && running(member)) {
 +        if (out.members.size() >= l.members) { out.status = "unknown"; break; }
 +        out.members.push_back(member);
@@ -690,7 +699,7 @@ diff --git a/src/unix/pty.cc b/src/unix/pty.cc
 diff --git a/src/unixTerminal.ts b/src/unixTerminal.ts
 --- a/src/unixTerminal.ts
 +++ b/src/unixTerminal.ts
-@@ -23,6 +23,126 @@
+@@ -23,6 +23,129 @@
  const DEFAULT_NAME = 'xterm';
  const DESTROY_SOCKET_TIMEOUT_MS = 200;
  
@@ -798,6 +807,9 @@ diff --git a/src/unixTerminal.ts b/src/unixTerminal.ts
 +        await receipt.leaderExit;
 +        const socket = (receipt.pty as (Owned.IPty & { _socket: OwnedSocket }) | null)?._socket;
 +        if (socket && !socket.closed) await new Promise<void>(resolve => { socket.once('close', resolve); socket.destroy(); });
++        // `socket.closed` can lead the close event that records the release.
++        // The native flag is the authority, so give that event bounded turns.
++        for (let turn = 0; turn < 64 && !api.ownedStateV1(receipt.token).socketClosed; turn++) await new Promise<void>(resolve => setImmediate(resolve));
 +        const reaped = await ownedLinuxV1.reapOwnedV1(receipt.token, { maxEntries: 65536, maxBytes: 268435456, maxStatBytes: 4096, maxMembers: 256, deadlineMs });
 +        const state = api.ownedStateV1(receipt.token);
 +        result.cleanupComplete = reaped.status === 'complete' && state.phase === 'reaped' && state.socketClosed && !state.leaderPidfdOpen && state.openControlEndpoints === 0 && state.waitWorkerSettled && state.pendingOperations === 0 && (!socket || socket.closed && socket._handle === null);
