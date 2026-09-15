@@ -62,7 +62,7 @@ class Socket {
     })
   }
 }
-function mount() {
+function mount(onError = vi.fn(), onClearError = vi.fn()) {
   vi.stubGlobal('WebSocket', Socket)
   vi.stubGlobal(
     'ResizeObserver',
@@ -79,9 +79,10 @@ function mount() {
   return render(
     <TerminalView
       sessionId="s"
-      terminal={{ id } as any}
+      terminal={{ id, state: 'running' } as any}
       onDescriptor={vi.fn()}
-      onError={vi.fn()}
+      onError={onError}
+      onClearError={onClearError}
     />,
   )
 }
@@ -190,4 +191,111 @@ it('clamps the emulator itself to the server dimension limit', () => {
   })
   act(() => vi.mocked(requestAnimationFrame).mock.calls[0][0](0))
   expect(state.resize).toHaveBeenCalledWith(500, 300)
+})
+
+it.each([false, true])(
+  'keeps running resize errors but retires an exited original request: exited=%s',
+  async (exited) => {
+    let settle!: (response: Response) => void
+    const fetcher = vi.fn(
+      (_url: unknown, _init: RequestInit) =>
+        new Promise<Response>((resolve) => {
+          settle = resolve
+        }),
+    )
+    vi.stubGlobal('fetch', fetcher)
+    const onError = vi.fn()
+    const view = mount(onError)
+    Object.defineProperties(view.getByLabelText('Terminal emulator'), {
+      clientWidth: { value: 800 },
+      clientHeight: { value: 400 },
+    })
+    act(() => vi.mocked(requestAnimationFrame).mock.calls[0][0](0))
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    if (exited)
+      act(() =>
+        Socket.all[0].onmessage?.({
+          data: JSON.stringify({
+            type: 'exit',
+            terminalId: id,
+            seq: 1,
+            exitCode: 0,
+            signal: null,
+            outputComplete: true,
+            cleanup: 'complete',
+            reason: 'exited',
+          }),
+        }),
+      )
+    await act(async () => {
+      settle(new Response('{}', { status: 503 }))
+    })
+    if (exited) {
+      expect(fetcher.mock.calls[0][1].signal?.aborted).toBe(true)
+      expect(onError).not.toHaveBeenCalled()
+      act(() => state.input?.('late input'))
+      expect(fetcher).toHaveBeenCalledTimes(1)
+    } else expect(onError).toHaveBeenCalledWith('Terminal resize failed (503)')
+  },
+)
+
+it('fits retained output after exit without sending a new resize', () => {
+  const fetcher = vi.fn()
+  vi.stubGlobal('fetch', fetcher)
+  const view = mount()
+  Object.defineProperties(view.getByLabelText('Terminal emulator'), {
+    clientWidth: { value: 800 },
+    clientHeight: { value: 400 },
+  })
+  act(() =>
+    Socket.all[0].onmessage?.({
+      data: JSON.stringify({
+        type: 'exit',
+        terminalId: id,
+        seq: 1,
+        exitCode: 0,
+        signal: null,
+        outputComplete: true,
+        cleanup: 'complete',
+        reason: 'exited',
+      }),
+    }),
+  )
+  act(() => vi.mocked(requestAnimationFrame).mock.calls[0][0](0))
+  expect(state.fits).toHaveBeenCalledOnce()
+  expect(fetcher).not.toHaveBeenCalled()
+})
+
+it('clears only its reported resize error when original exit arrives later', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('{}', { status: 503 })),
+  )
+  const onError = vi.fn(),
+    onClearError = vi.fn()
+  const view = mount(onError, onClearError)
+  Object.defineProperties(view.getByLabelText('Terminal emulator'), {
+    clientWidth: { value: 800 },
+    clientHeight: { value: 400 },
+  })
+  await act(async () => vi.mocked(requestAnimationFrame).mock.calls[0][0](0))
+  expect(onError).toHaveBeenCalledWith('Terminal resize failed (503)')
+  expect(onClearError).not.toHaveBeenCalled()
+  act(() =>
+    Socket.all[0].onmessage?.({
+      data: JSON.stringify({
+        type: 'exit',
+        terminalId: id,
+        seq: 1,
+        exitCode: 0,
+        signal: null,
+        outputComplete: true,
+        cleanup: 'complete',
+        reason: 'exited',
+      }),
+    }),
+  )
+  expect(onClearError).toHaveBeenCalledExactlyOnceWith(
+    'Terminal resize failed (503)',
+  )
 })

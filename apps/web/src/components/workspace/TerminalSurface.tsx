@@ -325,6 +325,9 @@ export function TerminalSurface({
             sessionId={sessionId}
             terminal={active}
             onError={setError}
+            onClearError={(message) =>
+              setError((current) => (current === message ? undefined : current))
+            }
             onDescriptor={(updated) =>
               setTerminals((items) =>
                 items.map((item) => (item.id === updated.id ? updated : item)),
