@@ -170,7 +170,7 @@ export class NativeProcess {
     this.reason = diagnosticError(reason, this.options.secrets)
     this.options.signal?.removeEventListener('abort', this.onAbort)
     // Defer shutdown so reentrant abort callbacks observe the same closing promise.
-    this.closing = Promise.resolve().then(async () => {
+    const attempt = Promise.resolve().then(async () => {
       let cleanupError: Error | undefined
       let deadline = performance.now() + this.graceMs + this.cleanupTimeoutMs
       try {
@@ -218,6 +218,13 @@ export class NativeProcess {
       }
       if (cleanupError) throw cleanupError
     })
+    const retryable = attempt.catch((error) => {
+      // A settled refusal may still have a safe cleanup path. Let a later
+      // caller retry it, while callers during this attempt still join it.
+      if (this.closing === retryable) this.closing = undefined
+      throw error
+    })
+    this.closing = retryable
     if (!drainOutput) {
       this.end(this.reason)
       this.controller.abort()

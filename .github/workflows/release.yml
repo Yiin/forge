@@ -37,7 +37,7 @@ jobs:
       - name: Build Node server bundle
         run: |
           mkdir -p dist
-          bun build --target=node apps/server/src/index.ts --outfile dist/forge-server.js
+          bun build --target=node --external @cursor/sdk apps/server/src/index.ts --outfile dist/forge-server.js
           bun run build:kimi-guardian
       - name: Pack release
         id: pack
@@ -55,6 +55,7 @@ jobs:
           cp -R apps/server/drizzle/. "$staging/apps/drizzle/"
           cp -R apps/web/dist/. "$staging/web/"
           cp apps/server/package.json "$staging/apps/server/package.json"
+          bun scripts/build-cursor-sidecar.ts "$staging/apps/server/src/cursor-sidecar"
           # node-pty has no linux-x64 prebuild; it compiles on install. The
           # bundle's native loader checks build/Release next to index.js.
           # The isolated linker puts the package under apps/server.

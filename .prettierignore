@@ -2,6 +2,7 @@ spike/
 **/drizzle/
 dist/
 node_modules/
+apps/server/src/cursor-sidecar/
 .beads/
 AGENTS.md
 CLAUDE.md

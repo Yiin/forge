@@ -37,7 +37,7 @@ export type SessionConfigOption = {
   id: string
   name: string
   type: 'select' | 'boolean'
-  currentValue: string | boolean
+  currentValue: string | boolean | null
   options?:
     | Array<{ value: string; name: string; description?: string }>
     | Array<{

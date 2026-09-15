@@ -16,6 +16,7 @@
     "node-pty"
   ],
   "scripts": {
+    "build:cursor-sidecar": "bun scripts/build-cursor-sidecar.ts",
     "lint": "oxlint .",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check .",

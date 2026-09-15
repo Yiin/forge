@@ -30,6 +30,26 @@ export type ConfirmedNativeBinding = z.infer<
 export const modelOptionsSchema = z.object({
   model: z.string().nullable().optional(),
   reasoning: z.string().nullable().optional(),
+  nativeModelParams: z
+    .array(
+      z.strictObject({
+        id: z
+          .string()
+          .min(1)
+          .max(128)
+          .refine((value) => new TextEncoder().encode(value).byteLength <= 128),
+        value: z
+          .string()
+          .max(256)
+          .refine((value) => new TextEncoder().encode(value).byteLength <= 256),
+      }),
+    )
+    .max(32)
+    .refine(
+      (values) =>
+        new Set(values.map((value) => value.id)).size === values.length,
+    )
+    .optional(),
   permissionMode: z.enum(['manual', 'auto', 'yolo']).optional(),
 })
 export type ModelOptions = z.infer<typeof modelOptionsSchema>
