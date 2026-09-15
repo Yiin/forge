@@ -119,6 +119,7 @@ export function defaultConfig(
     dataDir: resolve(process.cwd(), 'data'),
     port: 3900,
     terminalAccess: { mode: 'loopback' },
+    preview: { listenerHost: '127.0.0.2', listenerPort: 0 },
     harness,
     settings: {
       titleGeneration: true,

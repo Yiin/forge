@@ -39,6 +39,14 @@ export const forgeConfigSchema = z.object({
   dataDir: z.string().min(1).default('.forge/data'),
   port: z.number().int().nonnegative().max(65535).default(3900),
   terminalAccess: terminalAccessSchema.default({ mode: 'loopback' }),
+  preview: z
+    .object({
+      publicOrigin: z.string().url().optional(),
+      listenerHost: z.string().min(1).default('127.0.0.2'),
+      listenerPort: z.number().int().nonnegative().max(65535).default(0),
+    })
+    .default({ listenerHost: '127.0.0.2', listenerPort: 0 })
+    .optional(),
   harness: z.record(z.string().min(1), harnessConfigSchema),
   settings: settingsSchema.default({
     titleGeneration: true,
