@@ -113,16 +113,19 @@ export const workspaceListingSchema = z.object({
   truncated: z.boolean(),
   partialReasons: z.array(workspacePartialReasonSchema),
 })
+export type WorkspaceListing = z.infer<typeof workspaceListingSchema>
 export const workspaceSearchSchema = z.object({
   workspace: resolvedWorkspaceSchema,
   matches: z.array(workspaceEntrySchema.extend({ score: z.number() })),
   truncated: z.boolean(),
   partialReasons: z.array(workspacePartialReasonSchema),
 })
+export type WorkspaceSearch = z.infer<typeof workspaceSearchSchema>
 export const workspaceSnapshotSchema = z.object({
   workspace: resolvedWorkspaceSchema,
   file: workspaceTextSchema,
 })
+export type WorkspaceSnapshot = z.infer<typeof workspaceSnapshotSchema>
 export const workspaceErrorSchema = z.object({
   error: z.enum([
     'no_workspace',
