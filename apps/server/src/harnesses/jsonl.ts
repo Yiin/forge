@@ -26,9 +26,36 @@ type SubmissionOwner = {
 }
 
 export type JsonlFrameCapture = { context: unknown; release(): void }
+export type JsonlDeferredCapture = {
+  ready: Promise<void>
+  resume(): JsonlFrameCapture | JsonlDeferredCapture
+  release(): void
+}
+type CapturedFrame = {
+  id: number
+  line: string
+  bytes: number
+  capture?: JsonlFrameCapture | JsonlDeferredCapture
+  context: unknown
+  references: number
+  releaseDecoded(): void
+  releaseParsed(): void
+}
+type UnreadChunk = {
+  bytes: Buffer
+  context: unknown
+  offset: number
+  release(): void
+}
 export type JsonlOptions = {
   /** Runs before parsing. The exact decoded frame preserves numeric source spellings. */
-  captureFrame?: (source: string) => JsonlFrameCapture
+  captureFrame?: (
+    source: string,
+    readContext?: unknown,
+  ) => JsonlFrameCapture | JsonlDeferredCapture
+  /** Capture fallback authority when the original byte chunk arrives. */
+  captureReadContext?: () => unknown
+  maxUnreadBytes?: number
   stdin: Writable
   stdout: Readable
   maxLineBytes?: number
@@ -86,6 +113,14 @@ export class JsonlTransport {
   })
   private line: Buffer = Buffer.alloc(0)
   private lineBytes = 0
+  private lineContext: unknown
+  private pendingFrame?: CapturedFrame
+  private frameSequence = 0
+  private readonly unread: UnreadChunk[] = []
+  private unreadBytes = 0
+  private reading = false
+  private readEnded = false
+  private maxUnreadBytes: number
   private releaseLine: () => void = () => {}
   private readonly physicalWrites = new Set<Write>()
   private readonly queue: Write[] = []
@@ -105,6 +140,10 @@ export class JsonlTransport {
     this.maxQueuedFrames = positiveLimit(
       options.maxQueuedFrames ?? 256,
       'queued frames',
+    )
+    this.maxUnreadBytes = positiveLimit(
+      options.maxUnreadBytes ?? this.maxQueuedBytes,
+      'unread bytes',
     )
     this.done = new Promise((resolve) => {
       this.finish = resolve
@@ -131,6 +170,10 @@ export class JsonlTransport {
     return this.reason !== undefined
   }
 
+  get readState() {
+    return { unreadBytes: this.unreadBytes, paused: !!this.pendingFrame }
+  }
+
   get state() {
     return {
       bufferedBytes: this.lineBytes,
@@ -155,6 +198,9 @@ export class JsonlTransport {
       throw new Error('JSONL limits may only decrease')
     if (
       this.lineBytes > line ||
+      (this.pendingFrame?.bytes ?? 0) > line ||
+      this.unreadBytes > bytes ||
+      this.unread.length > frames ||
       this.queuedBytes > bytes ||
       this.state.queuedFrames > frames
     )
@@ -175,6 +221,7 @@ export class JsonlTransport {
     }
     this.maxLineBytes = line
     this.maxQueuedBytes = bytes
+    this.maxUnreadBytes = Math.min(this.maxUnreadBytes, bytes)
     this.maxQueuedFrames = frames
   }
   private reserve(
@@ -352,6 +399,12 @@ export class JsonlTransport {
     this.releaseLine()
     this.releaseLine = () => {}
     this.lineBytes = 0
+    this.lineContext = undefined
+    const pending = this.pendingFrame
+    this.pendingFrame = undefined
+    if (pending) this.releaseFrame(pending)
+    for (const entry of this.unread.splice(0)) entry.release()
+    this.unreadBytes = 0
     this.options.stdout.off('data', this.onData)
     this.options.stdout.off('end', this.onEnd)
     if (this.onDrain) this.options.stdin.off('drain', this.onDrain)
@@ -488,24 +541,101 @@ export class JsonlTransport {
   }
   private onReadClose = () => {
     this.options.stdout.off('error', this.onReadError)
-    void this.close(new Error('JSONL stdout closed'))
+    if (this.readEnded) this.drainUnread()
+    else void this.close(new Error('JSONL stdout closed'))
   }
   private onEnd = () => {
-    if (this.lineBytes) this.frame(this.line.subarray(0, this.lineBytes))
-    void this.close(new Error('JSONL stdout ended'))
+    this.readEnded = true
+    this.drainUnread()
+  }
+  private queueUnread(bytes: Buffer, context: unknown, first = false) {
+    if (!bytes.length || this.reason) return
+    if (
+      this.unreadBytes + bytes.length > this.maxUnreadBytes ||
+      this.unread.length >= this.maxQueuedFrames
+    ) {
+      void this.close(new Error('JSONL unread capacity exceeded'))
+      return
+    }
+    let release: (() => void) | undefined
+    try {
+      release = this.reserve('receive', bytes.length)
+      const owned = Buffer.allocUnsafeSlow(bytes.length)
+      bytes.copy(owned)
+      const entry = { bytes: owned, context, offset: 0, release }
+      if (first) this.unread.unshift(entry)
+      else this.unread.push(entry)
+      this.unreadBytes += owned.length
+    } catch {
+      release?.()
+      void this.close(new Error('JSONL unread allocation refused'))
+    }
+  }
+  private drainUnread() {
+    if (this.reading || this.pendingFrame || this.reason) return
+    this.reading = true
+    try {
+      while (this.unread.length && !this.pendingFrame && !this.reason) {
+        const entry = this.unread.shift()!
+        let retained = false
+        try {
+          retained = !!this.consume(entry.bytes, entry.context, entry)
+        } finally {
+          if (!retained) {
+            this.unreadBytes = Math.max(
+              0,
+              this.unreadBytes - entry.bytes.length,
+            )
+            entry.release()
+          }
+        }
+      }
+      if (!this.pendingFrame && !this.reason && this.readEnded) {
+        if (this.lineBytes) {
+          this.frame(this.line.subarray(0, this.lineBytes), this.lineContext)
+          this.lineBytes = 0
+          this.lineContext = undefined
+        }
+        if (!this.pendingFrame) void this.close(new Error('JSONL stdout ended'))
+      }
+    } finally {
+      this.reading = false
+    }
+    if (!this.pendingFrame && !this.reason && !this.readEnded)
+      this.options.stdout.resume()
   }
   private onData = (chunk: Buffer) => {
     if (this.reason) return
-    // Node byte streams must not have setEncoding applied by a caller.
     if (!(chunk instanceof Uint8Array)) {
       void this.close(new Error('JSONL requires a byte stream'))
       return
     }
-    let offset = 0
+    let context: unknown
+    try {
+      context = this.options.captureReadContext?.()
+    } catch {
+      void this.close(new Error('JSONL read capture failed'))
+      return
+    }
+    if (this.pendingFrame || this.reading) {
+      this.queueUnread(chunk, context)
+      return
+    }
+    this.reading = true
+    try {
+      this.consume(chunk, context)
+    } finally {
+      this.reading = false
+    }
+    this.drainUnread()
+  }
+  private consume(chunk: Buffer, context: unknown, owned?: UnreadChunk) {
+    let offset = owned?.offset ?? 0
     while (offset < chunk.length && !this.reason) {
       const newline = chunk.indexOf(10, offset)
       const end = newline < 0 ? chunk.length : newline
       const part = chunk.subarray(offset, end)
+      if (!this.lineBytes) this.lineContext = context
       const required = this.lineBytes + part.length
       if (required > this.maxLineBytes) {
         void this.close(new Error('JSONL frame exceeds limit'))
@@ -539,59 +669,131 @@ export class JsonlTransport {
       part.copy(this.line, this.lineBytes)
       this.lineBytes = required
       if (newline < 0) break
-      this.frame(this.line.subarray(0, this.lineBytes))
+      this.frame(this.line.subarray(0, this.lineBytes), this.lineContext)
       this.lineBytes = 0
+      this.lineContext = undefined
       offset = newline + 1
-    }
-  }
-  private frame(bytes: Buffer) {
-    let releaseDecoded = () => {},
-      releaseParsed = () => {}
-    let captured: JsonlFrameCapture | undefined
-    let references = 1
-    const release = () => {
-      if (--references === 0) {
-        releaseDecoded()
-        releaseParsed()
-        captured?.release()
+      if (this.pendingFrame) {
+        if (owned && offset < chunk.length) {
+          owned.offset = offset
+          this.unread.unshift(owned)
+          return true
+        }
+        this.queueUnread(chunk.subarray(offset), context, true)
+        return false
       }
     }
+  }
+  private releaseFrame(frame: CapturedFrame) {
+    if (frame.references <= 0 || --frame.references !== 0) return
+    frame.releaseDecoded()
+    frame.releaseParsed()
+    frame.capture?.release()
+    frame.line = ''
+    frame.context = undefined
+    frame.capture = undefined
+  }
+  private pauseFrame(frame: CapturedFrame) {
+    this.pendingFrame = frame
+    this.options.stdout.pause()
+    const id = frame.id
+    const capture = frame.capture as JsonlDeferredCapture
+    void capture.ready.then(
+      () => this.resumeFrame(id),
+      () => {
+        if (this.pendingFrame?.id === id)
+          void this.close(new Error('JSONL frame admission failed'))
+      },
+    )
+  }
+  private resumeFrame(id: number) {
+    const frame = this.pendingFrame
+    if (!frame || frame.id !== id || this.reason) return
+    this.pendingFrame = undefined
+    this.reading = true
+    try {
+      frame.capture = (frame.capture as JsonlDeferredCapture).resume()
+      if (this.reason) {
+        this.releaseFrame(frame)
+        return
+      }
+      if ('ready' in frame.capture) {
+        this.pauseFrame(frame)
+        return
+      }
+      this.dispatchFrame(frame)
+    } catch {
+      this.releaseFrame(frame)
+      void this.close(new Error('JSONL frame admission failed'))
+    } finally {
+      this.reading = false
+    }
+    this.drainUnread()
+  }
+  private frame(bytes: Buffer, context: unknown) {
+    const frame: CapturedFrame = {
+      id: ++this.frameSequence,
+      line: '',
+      bytes: bytes.length,
+      context,
+      references: 1,
+      releaseDecoded: () => {},
+      releaseParsed: () => {},
+    }
+    try {
+      try {
+        frame.releaseDecoded = this.reserve('decode', bytes.length * 2)
+        frame.line = this.decoder.decode(bytes)
+      } catch {
+        throw new Error('Invalid JSONL UTF-8')
+      }
+      if (!frame.line.trim()) {
+        this.releaseFrame(frame)
+        return
+      }
+      try {
+        frame.capture = this.options.captureFrame?.(frame.line, context)
+      } catch {
+        throw new Error('JSONL frame capture failed')
+      }
+      if (this.reason) {
+        this.releaseFrame(frame)
+        return
+      }
+      if (frame.capture && 'ready' in frame.capture) {
+        this.pauseFrame(frame)
+        return
+      }
+      this.dispatchFrame(frame)
+    } catch (error) {
+      this.releaseFrame(frame)
+      void this.close(
+        error instanceof Error ? error : new Error('JSONL frame failed'),
+      )
+    }
+  }
+  private dispatchFrame(frame: CapturedFrame) {
     const ownership: JsonlValueOwnership = {
       get capture() {
-        return captured?.context
+        return (frame.capture as JsonlFrameCapture | undefined)?.context
       },
       retain: () => {
-        if (!references) throw new Error('JSONL value already released')
-        references++
+        if (!frame.references) throw new Error('JSONL value already released')
+        frame.references++
         let held = true
         return () => {
           if (held) {
             held = false
-            release()
+            this.releaseFrame(frame)
           }
         }
       },
     }
     try {
-      let line: string
-      try {
-        releaseDecoded = this.reserve('decode', bytes.length * 2)
-        line = this.decoder.decode(bytes)
-      } catch {
-        void this.close(new Error('Invalid JSONL UTF-8'))
-        return
-      }
-      if (!line.trim()) return
-      try {
-        captured = this.options.captureFrame?.(line)
-      } catch {
-        void this.close(new Error('JSONL frame capture failed'))
-        return
-      }
       let value: unknown
       try {
-        releaseParsed = this.reserve('parse', bytes.length)
-        value = JSON.parse(line)
+        frame.releaseParsed = this.reserve('parse', frame.bytes)
+        value = JSON.parse(frame.line)
       } catch {
         void this.close(new Error('Malformed JSONL frame'))
         return
@@ -599,7 +801,7 @@ export class JsonlTransport {
       try {
         const work: unknown = this.options.onValue(
           value,
-          bytes.length,
+          frame.bytes,
           ownership,
         )
         if (work && typeof (work as Promise<unknown>).then === 'function') {
@@ -610,7 +812,7 @@ export class JsonlTransport {
         void this.close(new Error('JSONL handler failed'))
       }
     } finally {
-      release()
+      this.releaseFrame(frame)
     }
   }
 }
