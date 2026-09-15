@@ -581,3 +581,31 @@ describe('native diagnostics', () => {
     expect(error.cause).toBeUndefined()
   })
 })
+
+it.each([false, true])(
+  'captures original startup ownership when the creation hook throws, missing executable: %s',
+  async (missing) => {
+    let captured: NativeProcess | undefined
+    const initialize = vi.fn(async () => {})
+    await expect(
+      startNativeProcess(
+        {
+          command: missing
+            ? '/nonexistent/forge-on-created-fixture'
+            : process.execPath,
+          args: missing ? [] : ['-e', 'setInterval(() => {}, 1000)'],
+          onCreated(runtime) {
+            captured = runtime
+            throw Error('creation hook failed')
+          },
+        },
+        initialize,
+      ),
+    ).rejects.toThrow('creation hook failed')
+    expect(captured).toBeDefined()
+    expect(initialize).not.toHaveBeenCalled()
+    await captured!.close()
+    if (captured!.child.pid !== undefined)
+      await expectStopped(captured!.child.pid)
+  },
+)
