@@ -57,35 +57,6 @@ function insertMessage(db: Db, input: AppendMessage): SavedMessage {
     parsed.createdAt,
     parsed.sessionId,
   )
-  if (parsed.type === 'turn_end') {
-    const rows = db
-      .prepare(
-        `SELECT item_id, seq, content FROM messages
-        WHERE session_id = ? AND turn_id = ? AND type = 'text_delta' ORDER BY seq`,
-      )
-      .all(parsed.sessionId, parsed.turnId) as Array<{
-      item_id: string
-      seq: number
-      content: string
-    }>
-    const text = rows
-      .map((row) => {
-        const value = JSON.parse(row.content) as unknown
-        return typeof value === 'string'
-          ? value
-          : ((value as { text?: string })?.text ?? '')
-      })
-      .join('')
-    if (text)
-      db.prepare(
-        'INSERT INTO messages_fts(rowid, text, item_id, seq) VALUES (?, ?, ?, ?)',
-      ).run(
-        rows[0]?.seq ?? seq,
-        text,
-        rows[0]?.item_id ?? parsed.itemId,
-        rows[0]?.seq ?? seq,
-      )
-  }
   return { ...parsed, seq }
 }
 

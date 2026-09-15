@@ -331,5 +331,16 @@ export function projectAcpReplay(db: DatabaseSync, owner: AcpReplayOwner) {
       }),
     )
   }
+  for (const turn of new Set(saved.map((message) => message.turnId))) {
+    db.prepare(
+      `DELETE FROM messages_fts WHERE rowid IN (
+      SELECT seq FROM messages WHERE session_id=? AND turn_id=? AND type IN ('text_delta','content_snapshot'))`,
+    ).run(owner.sessionId, turn)
+    db.prepare(
+      `INSERT INTO messages_fts(rowid,text,item_id,seq)
+      SELECT anchor,text,item_id,anchor FROM authoritative_message_search
+      WHERE session_id=? AND turn_id=? AND text<>''`,
+    ).run(owner.sessionId, turn)
+  }
   return saved
 }
