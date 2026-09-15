@@ -301,7 +301,7 @@ export class LinuxPty {
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait))
       }
       if (performance.now() >= end) return false
-      if (this.socket && !this.socket.closed) {
+      if (this.socket) {
         const remaining = Math.max(0, end - performance.now())
         let timer: ReturnType<typeof setTimeout> | undefined
         await Promise.race([
@@ -317,10 +317,13 @@ export class LinuxPty {
         }
       }
       // A timeout never substitutes for original close. Keep its owner if close is delayed.
+      const ownedState = this.api.ownedStateV1(this.receipt.token)
       if (
         this.socket
-          ? !this.socket.closed || this.socket._handle !== null
-          : !this.api.ownedStateV1(this.receipt.token).socketClosed
+          ? !this.socket.closed ||
+            this.socket._handle !== null ||
+            !ownedState.socketClosed
+          : !ownedState.socketClosed
       )
         return false
       const result = await this.operation(end, () =>
