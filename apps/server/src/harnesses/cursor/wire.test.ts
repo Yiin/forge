@@ -150,7 +150,9 @@ it('retains bounded frames while the real Node stdout pipe is blocked and settle
     await vi.waitFor(() =>
       expect(child.diagnostics).toContain('fixture:blocked:2:'),
     )
-    expect(child.diagnostics).toContain('fixture:diagnostic:3')
+    await vi.waitFor(() =>
+      expect(child.diagnostics).toContain('fixture:diagnostic:3'),
+    )
     expect(child.child.exitCode).toBe(null)
     child.child.stdout.resume()
     await vi.waitFor(() =>
