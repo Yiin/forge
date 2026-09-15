@@ -286,8 +286,10 @@ export function toRenderModel(
         if (content.nativeChildId !== undefined)
           previous.nativeChildId = content.nativeChildId
         anchors.set(previous.id, message.seq)
-        if (content.type === 'tool_update')
+        if (content.type === 'tool_update') {
           previous.state = stateForStatus(content.status)
+          if (content.output !== undefined) previous.output = content.output
+        }
         if (content.type === 'tool_result') {
           previous.output = content.output
           previous.state = content.isError ? 'error' : 'done'
@@ -307,7 +309,10 @@ export function toRenderModel(
                 ? stateForStatus(content.status)
                 : 'running',
           input: content.type === 'tool_call' ? content.input : undefined,
-          output: content.type === 'tool_result' ? content.output : undefined,
+          output:
+            content.type === 'tool_result' || content.type === 'tool_update'
+              ? content.output
+              : undefined,
         } satisfies Extract<ChatRenderItem, { kind: 'tool' }>
         result.push(tool)
         if (toolId) toolIds.set(toolId, tool)

@@ -239,6 +239,46 @@ describe('chat render model', () => {
     ])
   })
 
+  it('shows native tool update output and retains it through status-only updates', () => {
+    const update = message({
+      type: 'tool_update',
+      toolCallId: 'native',
+      status: 'running',
+      output: 'native output',
+    })
+    const settled = message(
+      { type: 'tool_update', toolCallId: 'native', status: 'completed' },
+      { seq: 2 },
+    )
+    for (const prefix of [
+      [],
+      [
+        message({
+          type: 'tool_call',
+          toolCallId: 'native',
+          name: 'shell',
+          input: {},
+        }),
+      ],
+    ]) {
+      expect(toRenderModel([...prefix, update, settled])).toMatchObject([
+        { kind: 'tool', state: 'done', output: 'native output' },
+      ])
+      expect(
+        toRenderModel([
+          ...prefix,
+          update,
+          message({
+            type: 'tool_update',
+            toolCallId: 'native',
+            status: 'completed',
+            output: '',
+          }),
+        ]),
+      ).toMatchObject([{ output: '' }])
+    }
+  })
+
   it('folds lifecycle events by toolCallId when itemIds differ', () => {
     const items = toRenderModel([
       message(
