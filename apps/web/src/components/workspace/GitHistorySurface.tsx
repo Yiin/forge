@@ -82,7 +82,7 @@ export function GitHistorySurface({
     const request = ++refsEpoch.current
     setRefsError(undefined)
     void api
-      .gitBranches(projectId, { cwd, limit: 100 })
+      .gitBranches(projectId, { cwd, sessionId, limit: 100 })
       .then((value) => {
         if (request === refsEpoch.current) setRefs((value as GitRefsPage).refs)
       })
@@ -94,7 +94,7 @@ export function GitHistorySurface({
               : 'Could not load branch suggestions',
           )
       })
-  }, [projectId, cwd])
+  }, [projectId, cwd, sessionId])
   useEffect(() => {
     setRefs([])
     loadRefs()

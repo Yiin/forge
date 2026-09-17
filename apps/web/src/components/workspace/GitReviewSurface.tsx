@@ -5,7 +5,13 @@ import {
   MessageSquare,
   RefreshCw,
 } from 'lucide-react'
-import type { GitDiff, GitDiffFile, GitRefsPage } from '@forge/protocol/git'
+import {
+  gitDiffSchema,
+  type GitDiff,
+  type GitDiffFile,
+  type GitRefsPage,
+} from '@forge/protocol/git'
+import { resolvedWorkspaceSchema } from '@forge/protocol/workspace'
 import { api } from '../../lib/api'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
@@ -17,6 +23,13 @@ import {
   type ReviewWorkspace,
   type ReviewRevisionListener,
 } from '../../lib/review-notes'
+
+const responseSchema = gitDiffSchema.extend({
+  workspace: resolvedWorkspaceSchema.pick({
+    workspaceId: true,
+    workspaceRevision: true,
+  }),
+})
 
 export function GitReviewSurface({
   projectId,
@@ -48,7 +61,21 @@ export function GitReviewSurface({
   const baseEdited = useRef(false)
   const effectiveScope = commit ? 'commit' : scope
 
-  const [diff, setDiff] = useState<GitDiff>()
+  const targetKey = JSON.stringify([
+    projectId,
+    sessionId,
+    cwd,
+    workspace.workspaceId,
+    workspace.workspaceRevision,
+  ])
+  const currentTarget = useRef(targetKey)
+  currentTarget.current = targetKey
+  const [loaded, setLoaded] = useState<{
+    diff: GitDiff
+    workspace: ReviewWorkspace
+    targetKey: string
+  }>()
+  const diff = loaded?.targetKey === targetKey ? loaded.diff : undefined
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(false)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
@@ -56,6 +83,11 @@ export function GitReviewSurface({
   revisionListener.current = onRevision
   const load = () => {
     const epoch = ++requestEpoch.current
+    const capturedWorkspace = {
+      workspaceId: workspace.workspaceId,
+      workspaceRevision: workspace.workspaceRevision,
+    }
+    const capturedListener = revisionListener.current
     setLoading(true)
     setError(undefined)
     void api
@@ -67,10 +99,22 @@ export function GitReviewSurface({
         commit,
       })
       .then((value) => {
-        if (epoch !== requestEpoch.current) return
-        const next = value as GitDiff
-        setDiff(next)
-        revisionListener.current?.(workspace, {
+        if (
+          epoch !== requestEpoch.current ||
+          currentTarget.current !== targetKey
+        )
+          return
+        const next = responseSchema.parse(value)
+        if (
+          next.workspace.workspaceId !== capturedWorkspace.workspaceId ||
+          next.workspace.workspaceRevision !==
+            capturedWorkspace.workspaceRevision
+        )
+          throw new Error(
+            'Workspace changed. Refresh the workspace before reviewing this diff.',
+          )
+        setLoaded({ diff: next, workspace: next.workspace, targetKey })
+        capturedListener?.(next.workspace, {
           kind: 'git',
           scope: next.scope,
           revision: next.revision,
@@ -93,7 +137,7 @@ export function GitReviewSurface({
     setBaseRef(undefined)
     baseEdited.current = false
     void api
-      .gitStatus(projectId, cwd)
+      .gitStatus(projectId, cwd, sessionId)
       .then((value) => {
         const status = value as {
           defaultBranch?: string | null
@@ -106,7 +150,13 @@ export function GitReviewSurface({
     return () => {
       active = false
     }
-  }, [projectId, cwd])
+  }, [
+    projectId,
+    cwd,
+    sessionId,
+    workspace.workspaceId,
+    workspace.workspaceRevision,
+  ])
   useEffect(() => {
     if (commit) setScope('commit')
   }, [commit])
@@ -115,11 +165,20 @@ export function GitReviewSurface({
     return () => {
       requestEpoch.current++
     }
-  }, [projectId, sessionId, cwd, scope, baseRef, commit])
+  }, [
+    projectId,
+    sessionId,
+    cwd,
+    scope,
+    baseRef,
+    commit,
+    workspace.workspaceId,
+    workspace.workspaceRevision,
+  ])
   useEffect(() => {
     let active = true
     void api
-      .gitBranches(projectId, { cwd, limit: 100 })
+      .gitBranches(projectId, { cwd, sessionId, limit: 100 })
       .then((value) => {
         if (active) setRefs((value as GitRefsPage).refs)
       })
@@ -127,7 +186,13 @@ export function GitReviewSurface({
     return () => {
       active = false
     }
-  }, [projectId, cwd])
+  }, [
+    projectId,
+    cwd,
+    sessionId,
+    workspace.workspaceId,
+    workspace.workspaceRevision,
+  ])
   return (
     <section className="flex h-full min-h-0 flex-col" aria-label="Git changes">
       <div className="flex min-h-[38px] flex-wrap items-center gap-1 border-b border-border px-2 py-1 pointer-coarse:min-h-11">
@@ -249,7 +314,14 @@ export function GitReviewSurface({
               }
               onComment={(side, line, body) =>
                 onComment(
-                  captureGitReviewNote(workspace, diff, file, side, line, body),
+                  captureGitReviewNote(
+                    loaded!.workspace,
+                    diff,
+                    file,
+                    side,
+                    line,
+                    body,
+                  ),
                 )
               }
               reanchorNote={reanchorNote}

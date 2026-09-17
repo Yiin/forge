@@ -28,3 +28,27 @@ describe('ForgeApi error reporting', () => {
     )
   })
 })
+
+it('uses session Git routes for projectless targets and keeps project routes for project consumers', async () => {
+  const urls: string[] = []
+  const client = new ForgeApi({
+    baseUrl: 'http://forge.test',
+    fetch: (async (url) => {
+      urls.push(String(url))
+      return jsonResponse(200, {})
+    }) as typeof fetch,
+  })
+  await client.gitStatus('', '/tmp', 'session/id')
+  await client.gitBranches('', { sessionId: 'session/id' })
+  await client.gitDiff('', { sessionId: 'session/id' })
+  await client.gitHistory('', { sessionId: 'session/id' })
+  expect(urls.map((url) => new URL(url).pathname)).toEqual(
+    ['status', 'branches', 'diff', 'history'].map(
+      (method) => `/api/sessions/session%2Fid/git/${method}`,
+    ),
+  )
+  await client.gitDiff('project/id')
+  expect(new URL(urls.at(-1)!).pathname).toBe(
+    '/api/projects/project%2Fid/git/diff',
+  )
+})

@@ -32,6 +32,7 @@ const line = (type: 'deletion' | 'addition' | 'context', text: string) => ({
 })
 const diff = (text = 'new') => ({
   scope: 'working',
+  workspace: { workspaceId: 'w', workspaceRevision: 1 },
   revision: 'rev',
   additions: 1,
   deletions: 1,
@@ -41,6 +42,8 @@ const diff = (text = 'new') => ({
       oldPath: 'old.txt',
       newPath: 'new.txt',
       status: 'renamed',
+      oldMode: null,
+      newMode: null,
       additions: 1,
       deletions: 1,
       contentTruncated: true,
@@ -245,4 +248,75 @@ it('keeps a manual base selection when initial status resolves late', async () =
     'p',
     expect.objectContaining({ scope: 'branch', baseRef: 'release' }),
   )
+})
+
+it('keeps loaded diff authority and rejects a held response after workspace replacement', async () => {
+  setup()
+  let release!: (value: unknown) => void
+  const pending = new Promise((resolve) => {
+    release = resolve
+  })
+  vi.mocked(api.gitDiff).mockReturnValue(pending)
+  const comment = vi.fn(),
+    observed = vi.fn()
+  const view = render(
+    <GitReviewSurface
+      workspace={{ workspaceId: 'old', workspaceRevision: 1 }}
+      projectId="p"
+      sessionId="s"
+      cwd="/tmp"
+      onComment={comment}
+      onRevision={observed}
+    />,
+  )
+  await waitFor(() => expect(api.gitDiff).toHaveBeenCalled())
+  vi.mocked(api.gitDiff).mockResolvedValue({
+    ...diff('current authority'),
+    workspace: { workspaceId: 'new', workspaceRevision: 2 },
+  })
+  view.rerender(
+    <GitReviewSurface
+      workspace={{ workspaceId: 'new', workspaceRevision: 2 }}
+      projectId="p"
+      sessionId="s"
+      cwd="/tmp"
+      onComment={comment}
+      onRevision={observed}
+    />,
+  )
+  await screen.findByText('current authority')
+  await act(async () => {
+    release(diff('old authority'))
+  })
+  expect(screen.queryByText('old authority')).toBeNull()
+  expect(
+    observed.mock.calls.every((call) => call[0].workspaceId === 'new'),
+  ).toBe(true)
+  vi.spyOn(window, 'prompt').mockReturnValue('note')
+  fireEvent.click(screen.getByRole('button', { name: 'Comment on new line 1' }))
+  expect(comment.mock.calls[0][0].anchor).toMatchObject({
+    workspaceId: 'new',
+    workspaceRevision: 2,
+  })
+})
+
+it('rejects a server diff from a different resolved workspace', async () => {
+  setup()
+  vi.mocked(api.gitDiff).mockResolvedValue({
+    ...diff('foreign'),
+    workspace: { workspaceId: 'foreign', workspaceRevision: 1 },
+  })
+  render(
+    <GitReviewSurface
+      workspace={{ workspaceId: 'w', workspaceRevision: 1 }}
+      projectId=""
+      sessionId="s"
+      cwd="/tmp"
+      onComment={() => {}}
+    />,
+  )
+  await screen.findByText(
+    'Workspace changed. Refresh the workspace before reviewing this diff.',
+  )
+  expect(screen.queryByText('foreign')).toBeNull()
 })

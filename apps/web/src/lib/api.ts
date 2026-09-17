@@ -93,16 +93,17 @@ export class ForgeApi {
   listDirectories(path?: string) {
     return this.get(`/api/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`)
   }
-  gitStatus(projectId: string, cwd?: string) {
+  gitStatus(projectId: string, cwd?: string, sessionId?: string) {
     const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''
     return this.get(
-      `/api/projects/${encodeURIComponent(projectId)}/git/status${query}`,
+      `${sessionId ? `/api/sessions/${encodeURIComponent(sessionId)}` : `/api/projects/${encodeURIComponent(projectId)}`}/git/status${query}`,
     )
   }
   gitBranches(
     projectId: string,
     params: {
       cwd?: string
+      sessionId?: string
       query?: string
       limit?: number
       cursor?: number
@@ -113,7 +114,7 @@ export class ForgeApi {
       if (value !== undefined) query.set(key, String(value))
     const suffix = query.toString() ? `?${query}` : ''
     return this.get(
-      `/api/projects/${encodeURIComponent(projectId)}/git/branches${suffix}`,
+      `${params.sessionId ? `/api/sessions/${encodeURIComponent(params.sessionId)}` : `/api/projects/${encodeURIComponent(projectId)}`}/git/branches${suffix}`,
     )
   }
   gitDiff(
@@ -130,7 +131,7 @@ export class ForgeApi {
     for (const [key, value] of Object.entries(params))
       if (value !== undefined) query.set(key, String(value))
     return this.get(
-      `/api/projects/${encodeURIComponent(projectId)}/git/diff?${query}`,
+      `${params.sessionId ? `/api/sessions/${encodeURIComponent(params.sessionId)}` : `/api/projects/${encodeURIComponent(projectId)}`}/git/diff?${query}`,
     )
   }
   gitHistory(
@@ -148,7 +149,7 @@ export class ForgeApi {
     for (const [key, value] of Object.entries(params))
       if (value !== undefined) query.set(key, String(value))
     return this.get(
-      `/api/projects/${encodeURIComponent(projectId)}/git/history?${query}`,
+      `${params.sessionId ? `/api/sessions/${encodeURIComponent(params.sessionId)}` : `/api/projects/${encodeURIComponent(projectId)}`}/git/history?${query}`,
     )
   }
   listWorktrees(projectId: string) {
