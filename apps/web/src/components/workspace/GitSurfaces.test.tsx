@@ -85,9 +85,7 @@ it('shows truncation and keeps paired old/new comments under their original side
   // The gitStatus resolution sets baseRef and triggers a diff refetch that
   // hides the content behind a loading state, so the split table can appear
   // a beat after the click.
-  expect(
-    await screen.findByRole('table', { name: 'Split diff' }),
-  ).toBeTruthy()
+  expect(await screen.findByRole('table', { name: 'Split diff' })).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Comment on old line 1' }))
   fireEvent.click(screen.getByRole('button', { name: 'Comment on new line 1' }))
   expect(
