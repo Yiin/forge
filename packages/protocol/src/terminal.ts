@@ -61,7 +61,7 @@ export const terminalDescriptorSchema = z
     id: terminalIdSchema,
     serverEpoch: terminalEpochSchema,
     sessionId: bytes(256).min(1),
-    projectId: bytes(256).min(1),
+    projectId: bytes(256).min(1).nullable(),
     workspace: resolvedWorkspaceSchema,
     title: terminalTitleSchema,
     shell: bytes(256).min(1),
