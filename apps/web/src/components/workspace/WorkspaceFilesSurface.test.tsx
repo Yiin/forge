@@ -345,6 +345,30 @@ it('continues a pending close when its earlier toolbar save has already complete
   expect(files.saveWorkspaceFile).toHaveBeenCalledTimes(1)
 })
 
+it('keeps the second file transition through Cancel and a held original save', async () => {
+  let resolve!: (value: any) => void
+  vi.mocked(files.saveWorkspaceFile).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done
+      }),
+  )
+  mount()
+  await edit('original submitted edit')
+  fireEvent.click(screen.getByRole('treeitem', { name: 'b.ts' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+  fireEvent.click(screen.getByRole('treeitem', { name: 'b.ts' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+  expect(files.readWorkspaceFile).toHaveBeenCalledTimes(1)
+  expect(document.querySelector('.cm-content')?.textContent).toBe(
+    'original submitted edit',
+  )
+  await act(async () =>
+    resolve(snapshot('a.ts', 'original submitted edit', 'saved')),
+  )
+  await waitFor(() =>
+    expect(document.querySelector('.cm-content')?.textContent).toBe('b.ts'),
+  )
   expect(files.saveWorkspaceFile).toHaveBeenCalledTimes(1)
   expect(files.readWorkspaceFile).toHaveBeenCalledTimes(2)
 })
