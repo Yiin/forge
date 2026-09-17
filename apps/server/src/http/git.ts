@@ -126,6 +126,8 @@ export function gitRoutes(options: {
           cwd: resolved.cwd,
           cursor: c.req.query('cursor'),
           limit: Number(c.req.query('limit') ?? 50),
+          ref: c.req.query('ref'),
+          query: c.req.query('query'),
         }),
       )
     } catch (error) {
