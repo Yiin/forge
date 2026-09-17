@@ -589,6 +589,7 @@ export function SessionRoute() {
           onReviewComment={captureReviewNote}
           onReviewRevision={onReviewRevision}
           reanchorNote={reanchorNote}
+          overlayBottomInset={composerHeight}
         />
       )}
     </div>

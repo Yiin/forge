@@ -59,6 +59,7 @@ export function WorkspaceDock({
   onReviewRevision,
   reanchorNote,
   mobile: mobileOverride,
+  overlayBottomInset = 0,
 }: {
   sessionId: string
   target: WorkspaceTarget
@@ -67,6 +68,7 @@ export function WorkspaceDock({
   onReviewRevision?: ReviewRevisionListener
   reanchorNote?: ReviewNote
   mobile?: boolean
+  overlayBottomInset?: number
 }) {
   const detectedMobile = useIsMobile()
   const mobile = mobileOverride ?? detectedMobile
@@ -170,7 +172,10 @@ export function WorkspaceDock({
       style={
         !dock.takeover && !mobile
           ? { width: `min(${width}px, calc(100% - ${DOCK_CHAT_MIN_WIDTH}px))` }
-          : undefined
+          : // In overlay mode the composer chrome floats above the dock
+            // (z-40 over z-30), so the dock must end above it or its lower
+            // content is hidden and unreachable.
+            { bottom: overlayBottomInset }
       }
       aria-label="Workspace dock"
     >
