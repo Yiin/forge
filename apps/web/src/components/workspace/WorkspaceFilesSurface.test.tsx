@@ -344,3 +344,114 @@ it('continues a pending close when its earlier toolbar save has already complete
   )
   expect(files.saveWorkspaceFile).toHaveBeenCalledTimes(1)
 })
+
+it('anchors an unsaved selected line to the displayed document hash', async () => {
+  const { webcrypto, createHash } = await import('node:crypto')
+  vi.stubGlobal('crypto', webcrypto)
+  const captured = vi.fn()
+  const observed = vi.fn()
+  vi.mocked(files.readWorkspaceFile).mockResolvedValueOnce({
+    ...snapshot('a.ts', 'saved text'),
+    workspace: { workspaceId: 'w', workspaceRevision: 1 },
+    file: {
+      ...snapshot('a.ts', 'saved text').file,
+      contentHash: 'a'.repeat(64),
+    },
+  })
+  render(
+    <WorkspaceFilesSurface
+      sessionId={`editor-${++session}`}
+      target={{ workspaceId: 'w', workspaceRevision: 1 }}
+      initialPath="a.ts"
+      onComment={captured}
+      onRevision={observed}
+    />,
+  )
+  try {
+    await edit('unsaved text')
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'File review note' }),
+      { target: { value: 'Keep local edit' } },
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Add note at selected line' }),
+    )
+    await waitFor(() => expect(captured).toHaveBeenCalledOnce())
+    expect(captured.mock.calls[0]![0].anchor.revision).toEqual({
+      kind: 'file',
+      contentHash: createHash('sha256').update('unsaved text').digest('hex'),
+      fileRevision: expect.stringMatching(/^document:/),
+    })
+    expect(observed.mock.calls.at(-1)?.[1]).toEqual(
+      captured.mock.calls[0]![0].anchor.revision,
+    )
+    await edit('another edit')
+    expect(observed.mock.calls.at(-1)?.[1]).toBeNull()
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'File review note' }),
+      { target: { value: 'Recapture' } },
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Add note at selected line' }),
+    )
+    await waitFor(() => expect(captured).toHaveBeenCalledTimes(2))
+    expect(observed.mock.calls.at(-1)?.[1]).toEqual(
+      captured.mock.calls[1]![0].anchor.revision,
+    )
+    expect(files.saveWorkspaceFile).not.toHaveBeenCalled()
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+it('keeps a later note body while the original dirty hash is held', async () => {
+  const { webcrypto } = await import('node:crypto')
+  let release!: (value: ArrayBuffer) => void
+  const digest = vi.fn(
+    () =>
+      new Promise<ArrayBuffer>((resolve) => {
+        release = resolve
+      }),
+  )
+  vi.stubGlobal('crypto', {
+    randomUUID: () => webcrypto.randomUUID(),
+    subtle: { digest },
+  })
+  const captured = vi.fn()
+  vi.mocked(files.readWorkspaceFile).mockResolvedValueOnce({
+    ...snapshot('a.ts', 'saved'),
+    workspace: { workspaceId: 'w', workspaceRevision: 1 },
+    file: { ...snapshot('a.ts', 'saved').file, contentHash: 'a'.repeat(64) },
+  })
+  render(
+    <WorkspaceFilesSurface
+      sessionId={`editor-${++session}`}
+      target={{ workspaceId: 'w', workspaceRevision: 1 }}
+      initialPath="a.ts"
+      onComment={captured}
+    />,
+  )
+  try {
+    await edit('captured text')
+    const input = screen.getByRole('textbox', { name: 'File review note' })
+    fireEvent.change(input, { target: { value: 'Original note' } })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Add note at selected line' }),
+    )
+    expect(digest).toHaveBeenCalledOnce()
+    fireEvent.change(input, { target: { value: 'Later note' } })
+    await act(async () =>
+      release(
+        await webcrypto.subtle.digest(
+          'SHA-256',
+          new TextEncoder().encode('captured text'),
+        ),
+      ),
+    )
+    expect(captured.mock.calls[0]![0].body).toBe('Original note')
+    expect((input as HTMLInputElement).value).toBe('Later note')
+  } finally {
+    release?.(new ArrayBuffer(32))
+    vi.unstubAllGlobals()
+  }
+})

@@ -1,3 +1,8 @@
+import type { ReviewNote } from '@forge/protocol/review'
+import {
+  captureFileReviewNote,
+  type ReviewRevisionListener,
+} from '../../lib/review-notes'
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import {
@@ -52,6 +57,9 @@ type Props = {
   sessionId: string
   target: { workspaceId?: string | null; workspaceRevision?: number | null }
   initialPath?: string
+  onComment?: (note: ReviewNote) => void
+  onRevision?: ReviewRevisionListener
+  reanchorNote?: ReviewNote
   transitionRef?: React.MutableRefObject<((action: () => void) => void) | null>
 }
 type OpenFile = {
@@ -98,6 +106,9 @@ export function WorkspaceFilesSurface({
   sessionId,
   target,
   initialPath,
+  onComment,
+  onRevision,
+  reanchorNote,
   transitionRef,
 }: Props) {
   const selection = useMemo<WorkspaceSelection>(
@@ -114,6 +125,20 @@ export function WorkspaceFilesSurface({
   const [open, updateOpen] = useState<OpenFile | null>(
     () => retainedFiles.get(owner) ?? null,
   )
+  useEffect(() => {
+    if (open?.snapshot.file.contentHash)
+      onRevision?.(
+        open.snapshot.workspace,
+        open.dirty
+          ? null
+          : {
+              kind: 'file',
+              contentHash: open.snapshot.file.contentHash,
+              fileRevision: open.snapshot.file.fileRevision,
+            },
+        open.path,
+      )
+  }, [open?.snapshot, open?.dirty, onRevision])
   const currentOpen = useRef<OpenFile | null>(open)
   const documentIdentity = useRef(0)
   const pendingTransition = useRef<(() => void) | null>(null)
@@ -516,6 +541,9 @@ export function WorkspaceFilesSurface({
           <EditorPanel
             open={open}
             onChange={setOpen}
+            onComment={onComment}
+            onRevision={onRevision}
+            reanchorNote={reanchorNote}
             onSave={() => void save()}
             onClose={close}
             onReload={() => transition(() => void readPath(open.path))}
@@ -565,15 +593,66 @@ function EditorPanel({
   onSave,
   onClose,
   onReload,
+  onComment,
+  onRevision,
+  reanchorNote,
 }: {
   open: OpenFile
   onChange: (update: (file: OpenFile | null) => OpenFile | null) => void
   onSave: () => void
   onClose: () => void
   onReload: () => void
+  onComment?: (note: ReviewNote) => void
+  onRevision?: ReviewRevisionListener
+  reanchorNote?: ReviewNote
 }) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
+  const [noteBody, setNoteBody] = useState('')
+  const [noteError, setNoteError] = useState<string>()
+  const addNote = async () => {
+    const editor = view.current
+    if (!editor || !onComment) return
+    const text = editor.state.doc.toString()
+    const line = editor.state.doc.lineAt(
+      editor.state.selection.main.head,
+    ).number
+    const snapshot = open.snapshot
+    const body = reanchorNote?.body ?? noteBody
+    try {
+      const file =
+        text === snapshot.file.text
+          ? snapshot.file
+          : {
+              ...snapshot.file,
+              text,
+              contentHash: Array.from(
+                new Uint8Array(
+                  await crypto.subtle.digest(
+                    'SHA-256',
+                    new TextEncoder().encode(text),
+                  ),
+                ),
+                (byte) => byte.toString(16).padStart(2, '0'),
+              ).join(''),
+              fileRevision: `document:${open.identity}`,
+            }
+      const note = captureFileReviewNote({ ...snapshot, file }, line, body)
+      onComment(note)
+      onRevision?.(
+        snapshot.workspace,
+        editor.state.doc.toString() === text ? note.anchor.revision : null,
+        open.path,
+      )
+      if (!reanchorNote)
+        setNoteBody((current) => (current === body ? '' : current))
+      setNoteError(undefined)
+    } catch (error) {
+      setNoteError(
+        error instanceof Error ? error.message : 'Could not add review note',
+      )
+    }
+  }
   useEffect(() => {
     if (!host.current) return
     const extension = open.path.endsWith('.json')
@@ -593,6 +672,7 @@ function EditorPanel({
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             const text = update.state.doc.toString()
+            onRevision?.(open.snapshot.workspace, null, open.path)
             onChange((current) =>
               current?.identity === open.identity
                 ? { ...current, text, dirty: text !== current.savedText }
@@ -641,6 +721,29 @@ function EditorPanel({
           <X size={15} />
         </Button>
       </header>
+      {onComment && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b p-2">
+          {!reanchorNote && (
+            <input
+              aria-label="File review note"
+              className="min-w-0 flex-1 rounded border bg-background p-2 text-xs"
+              value={noteBody}
+              maxLength={8192}
+              onChange={(event) => setNoteBody(event.target.value)}
+            />
+          )}
+          <Button
+            size="sm"
+            disabled={open.staleTarget || (!reanchorNote && !noteBody.trim())}
+            onClick={() => void addNote()}
+          >
+            {reanchorNote
+              ? 'Re-anchor to selected file line'
+              : 'Add note at selected line'}
+          </Button>
+          {noteError && <p role="alert">{noteError}</p>}
+        </div>
+      )}
       {open.conflict && (
         <div
           className="flex items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs"

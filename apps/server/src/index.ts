@@ -457,6 +457,7 @@ export function startServer(port?: number): ServerType {
       accountKindForHarness(harness, configState.current.harness[harness]) !==
         null,
     dataDir,
+    workspaceFiles.targets,
   )
   const terminals = new TerminalManager(db, workspaceFiles.targets)
   uploadStore.setTerminalManager(terminals)
