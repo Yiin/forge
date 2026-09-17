@@ -1,3 +1,4 @@
+import { reviewNotesSchema } from './review.js'
 import { z } from 'zod'
 const id = z.string().min(1)
 const page = {
@@ -39,7 +40,7 @@ export const prompt = z.object({
     .record(z.string().min(1), z.union([z.string(), z.boolean()]))
     .optional(),
   delivery: z.enum(['immediate', 'turn-boundary']).optional(),
-  reviewReferences: z.array(z.unknown()).optional(),
+  reviewReferences: reviewNotesSchema.optional(),
   promptParts: z.array(z.unknown()).optional(),
   revision: z.number().int().nonnegative().optional(),
 })

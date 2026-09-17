@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { useEffect, useRef, useState, useId } from 'react'
 import {
   ChevronLeft,
   GripVertical,
@@ -12,9 +13,12 @@ import { Button } from '../ui/button'
 import { cn } from '@/lib/utils'
 import { BrowserPreview } from './BrowserPreview'
 import { TerminalSurface } from './TerminalSurface'
-import { GitReviewSurface, type ReviewComment } from './GitReviewSurface'
+import { GitReviewSurface } from './GitReviewSurface'
+import type { ReviewNote } from '@forge/protocol/review'
+import type { ReviewRevisionListener } from '../../lib/review-notes'
 import { GitHistorySurface } from './GitHistorySurface'
 import { WorkspaceFilesSurface } from './WorkspaceFilesSurface'
+import { NativeChildTranscript } from './NativeChildTranscript'
 import { SubagentTranscript } from '../chat/SubagentTranscript'
 import { connectForgeSocket } from '../../lib/socket'
 import { SessionSnapshot } from '@forge/protocol/ws'
@@ -22,6 +26,8 @@ import { useMessagesStore } from '../../stores/messages'
 import { useSessionsStore } from '../../stores/sessions'
 import {
   DOCK_CHAT_MIN_WIDTH,
+  DOCK_WIDTH_MIN,
+  DOCK_WIDTH_MAX,
   type DockSurfaceKind,
   type DockTab,
   useShellStore,
@@ -50,14 +56,23 @@ export function WorkspaceDock({
   target,
   projectId,
   onReviewComment,
-  mobile = false,
+  onReviewRevision,
+  reanchorNote,
+  mobile: mobileOverride,
+  overlayBottomInset = 0,
 }: {
   sessionId: string
   target: WorkspaceTarget
   projectId: string
-  onReviewComment?: (comment: ReviewComment) => void
+  onReviewComment?: (comment: ReviewNote) => void
+  onReviewRevision?: ReviewRevisionListener
+  reanchorNote?: ReviewNote
   mobile?: boolean
+  overlayBottomInset?: number
 }) {
+  const detectedMobile = useIsMobile()
+  const mobile = mobileOverride ?? detectedMobile
+  const tabPrefix = useId()
   const dock = useShellStore((state) => state.dock(sessionId))
   const width = useShellStore((state) => state.dockWidth)
   const closeDock = useShellStore((state) => state.closeDock)
@@ -67,6 +82,9 @@ export function WorkspaceDock({
   const closeTab = useShellStore((state) => state.closeDockTab)
   const selectTab = useShellStore((state) => state.setActiveDockTab)
   const [adding, setAdding] = useState(false)
+  const transitionRef = useRef<((action: () => void) => void) | null>(null)
+  const transition = (action: () => void) =>
+    transitionRef.current ? transitionRef.current(action) : action()
   const drag = useRef<{ x: number; width: number } | null>(null)
 
   useEffect(() => {
@@ -85,40 +103,49 @@ export function WorkspaceDock({
     }
   }, [setWidth])
 
+  const add = (kind: DockSurfaceKind) =>
+    transition(() => {
+      const tab: DockTab = {
+        id: `${kind}-${crypto.randomUUID()}`,
+        kind,
+        title: surfaceLabels[kind],
+      }
+      openTab(sessionId, tab)
+      setAdding(false)
+    })
+
   if (!dock.open) {
     return (
-      <Button
-        variant="ghost"
-        size="sm"
-        className="pointer-coarse:min-h-11"
-        onClick={() => setAdding(true)}
-        aria-label="Open workspace dock"
-      >
-        <PanelRight size={16} /> Workspace
-      </Button>
+      <div className="absolute right-2 top-2 z-20 rounded-md border border-border bg-background shadow-sm">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="pointer-coarse:min-h-11"
+          onClick={() => setAdding(true)}
+          aria-label="Open workspace dock"
+        >
+          <PanelRight size={16} /> Workspace
+        </Button>
+        {adding && <SurfacePicker onSelect={add} />}
+      </div>
     )
   }
 
-  const add = (kind: DockSurfaceKind) => {
-    const tab: DockTab = {
-      id: `${kind}-${crypto.randomUUID()}`,
-      kind,
-      title: surfaceLabels[kind],
-    }
-    openTab(sessionId, tab)
-    setAdding(false)
-  }
   const active = dock.tabs.find((tab) => tab.id === dock.activeTabId)
   const content = active ? (
     <SurfaceContent
+      transitionRef={transitionRef}
       kind={active.kind}
       target={target}
       sessionId={sessionId}
       projectId={projectId}
       onReviewComment={onReviewComment}
+      onReviewRevision={onReviewRevision}
+      reanchorNote={reanchorNote}
       commit={active.commit}
       path={active.path}
       childSessionId={active.childSessionId}
+      nativeChildId={active.nativeChildId}
       onCommit={(sha) => {
         openTab(sessionId, {
           id: `commit-${sha}`,
@@ -135,6 +162,7 @@ export function WorkspaceDock({
   )
   return (
     <aside
+      data-overlay={dock.takeover || mobile}
       className={cn(
         'workspace-dock flex min-h-0 flex-col border-l border-border bg-background',
         dock.takeover || mobile
@@ -144,7 +172,10 @@ export function WorkspaceDock({
       style={
         !dock.takeover && !mobile
           ? { width: `min(${width}px, calc(100% - ${DOCK_CHAT_MIN_WIDTH}px))` }
-          : undefined
+          : // In overlay mode the composer chrome floats above the dock
+            // (z-40 over z-30), so the dock must end above it or its lower
+            // content is hidden and unreachable.
+            { bottom: overlayBottomInset }
       }
       aria-label="Workspace dock"
     >
@@ -154,6 +185,9 @@ export function WorkspaceDock({
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize workspace dock"
+          aria-valuemin={DOCK_WIDTH_MIN}
+          aria-valuemax={DOCK_WIDTH_MAX}
+          aria-valuenow={width}
           tabIndex={0}
           onKeyDown={(event) => {
             if (event.key === 'ArrowLeft') setWidth(width + 16)
@@ -172,17 +206,25 @@ export function WorkspaceDock({
             variant="ghost"
             size="icon-sm"
             className="pointer-coarse:size-11"
-            onClick={() => setTakeover(sessionId, false)}
+            onClick={() =>
+              transition(() =>
+                mobile ? closeDock(sessionId) : setTakeover(sessionId, false),
+              )
+            }
             aria-label="Return to conversation"
           >
             <ChevronLeft size={16} />
           </Button>
         )}
-        <div
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
-          role="tablist"
-          aria-label="Workspace tabs"
-        >
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          <div
+            role="tablist"
+            className="contents"
+            aria-label="Workspace tabs"
+            aria-owns={dock.tabs
+              .map((tab) => `${tabPrefix}-${tab.id}`)
+              .join(' ')}
+          />
           {dock.tabs.map((tab, index) => (
             <div
               key={tab.id}
@@ -191,26 +233,53 @@ export function WorkspaceDock({
             >
               <button
                 role="tab"
+                id={`${tabPrefix}-${tab.id}`}
+                tabIndex={tab.id === dock.activeTabId ? 0 : -1}
                 aria-selected={tab.id === dock.activeTabId}
                 className="pointer-coarse:min-h-11 px-2 text-xs"
                 onKeyDown={(event) => {
-                  if (event.key === 'Delete') closeTab(sessionId, tab.id)
+                  if (
+                    ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(
+                      event.key,
+                    )
+                  ) {
+                    event.preventDefault()
+                    const next =
+                      event.key === 'Home'
+                        ? 0
+                        : event.key === 'End'
+                          ? dock.tabs.length - 1
+                          : (index +
+                              (event.key === 'ArrowLeft' ? -1 : 1) +
+                              dock.tabs.length) %
+                            dock.tabs.length
+                    transition(() => {
+                      selectTab(sessionId, dock.tabs[next].id)
+                      document
+                        .getElementById(`${tabPrefix}-${dock.tabs[next].id}`)
+                        ?.focus()
+                    })
+                  }
+                  if (event.key === 'Delete')
+                    transition(() => closeTab(sessionId, tab.id))
                   if (event.key === 'Tab' && event.ctrlKey) {
                     event.preventDefault()
-                    selectTab(
-                      sessionId,
-                      dock.tabs[(index + 1) % dock.tabs.length].id,
+                    transition(() =>
+                      selectTab(
+                        sessionId,
+                        dock.tabs[(index + 1) % dock.tabs.length].id,
+                      ),
                     )
                   }
                 }}
-                onClick={() => selectTab(sessionId, tab.id)}
+                onClick={() => transition(() => selectTab(sessionId, tab.id))}
               >
                 {tab.title}
               </button>
               <button
                 className="pointer-coarse:size-11 p-2 text-muted-foreground hover:text-foreground"
                 aria-label={`Close ${tab.title}`}
-                onClick={() => closeTab(sessionId, tab.id)}
+                onClick={() => transition(() => closeTab(sessionId, tab.id))}
               >
                 <X size={13} />
               </button>
@@ -241,7 +310,7 @@ export function WorkspaceDock({
           variant="ghost"
           size="icon-sm"
           className="pointer-coarse:size-11"
-          onClick={() => closeDock(sessionId)}
+          onClick={() => transition(() => closeDock(sessionId))}
           aria-label="Hide workspace dock"
         >
           <X size={16} />
@@ -280,40 +349,60 @@ function SurfacePicker({
 }
 
 function SurfaceContent({
+  transitionRef,
   kind,
   target,
   sessionId,
   projectId,
   onReviewComment = () => undefined,
+  onReviewRevision,
+  reanchorNote,
   commit,
   path,
   childSessionId,
+  nativeChildId,
   onCommit = () => undefined,
 }: {
+  transitionRef?: React.MutableRefObject<((action: () => void) => void) | null>
   kind: DockSurfaceKind
   target: WorkspaceTarget
   sessionId: string
   projectId: string
-  onReviewComment?: (comment: ReviewComment) => void
+  onReviewComment?: (comment: ReviewNote) => void
+  onReviewRevision?: ReviewRevisionListener
+  reanchorNote?: ReviewNote
   commit?: string
   path?: string
   childSessionId?: string
+  nativeChildId?: string
   onCommit?: (sha: string) => void
 }) {
   if (kind === 'subagent')
-    return <ChildTranscriptSurface sessionId={childSessionId} />
+    return nativeChildId ? (
+      <NativeChildTranscript
+        key={`${sessionId}:${nativeChildId}`}
+        sessionId={sessionId}
+        childId={nativeChildId}
+      />
+    ) : (
+      <ChildTranscriptSurface sessionId={childSessionId} />
+    )
   if (kind === 'browser') return <BrowserPreview sessionId={sessionId} />
   if (kind === 'terminal')
     return <TerminalSurface sessionId={sessionId} target={target} />
   if (kind === 'files' || kind === 'file')
     return (
       <WorkspaceFilesSurface
+        transitionRef={transitionRef}
         sessionId={sessionId}
         target={target}
+        onComment={onReviewComment}
+        onRevision={onReviewRevision}
+        reanchorNote={reanchorNote}
         initialPath={kind === 'file' ? path : undefined}
       />
     )
-  if (!target.cwd)
+  if (!target.cwd || !target.workspaceId || !target.workspaceRevision)
     return (
       <div className="p-6 text-sm" role="status">
         No workspace is attached to this session.
@@ -325,6 +414,12 @@ function SurfaceContent({
         projectId={projectId}
         sessionId={sessionId}
         cwd={target.cwd!}
+        workspace={{
+          workspaceId: target.workspaceId,
+          workspaceRevision: target.workspaceRevision,
+        }}
+        onRevision={onReviewRevision}
+        reanchorNote={reanchorNote}
         commit={commit}
         onComment={onReviewComment}
       />

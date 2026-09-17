@@ -1,3 +1,4 @@
+import { closeAcpDiscovery } from './harnesses/acp/discovery.js'
 import { serve, type ServerType } from '@hono/node-server'
 import { Hono } from 'hono'
 import { createRequire } from 'node:module'
@@ -16,6 +17,8 @@ import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { UploadStore } from './uploads/store.js'
 import { uploadRoutes } from './http/uploads.js'
+import { acpArtifactRoutes } from './http/acp-artifacts.js'
+import { nativeChildRoutes } from './http/native-children.js'
 import { attachmentRoutes } from './http/attachments.js'
 import { fsBrowseRoutes } from './http/fsBrowse.js'
 import { WorkspaceFiles } from './workspace/files.js'
@@ -28,8 +31,6 @@ import { migrate } from './db/migrate.js'
 import { EventBus } from './events/bus.js'
 import { searchRoutes } from './http/search.js'
 import { questionRoutes } from './http/questions.js'
-import type { QuestionManager } from './acp/questions.js'
-import { QuestionManager as ServerQuestionManager } from './acp/questions.js'
 import { websocketRoute } from './ws.js'
 import { projectRoutes } from './http/projects.js'
 import { sessionRoutes } from './http/sessions.js'
@@ -63,10 +64,16 @@ import {
   type ConfigState,
 } from './config.js'
 import { ptyHarness } from './pty/harness.js'
-import { acpHarness } from './acp/harness.js'
+import { createProductionAcpAdapter } from './sessions/acp-factory.js'
+import { AcpResourceHost } from './harnesses/acp/limits.js'
+import { createNativeAttachmentLoader } from './uploads/native.js'
 import { nativeHarness } from './sessions/native.js'
+import { NativeInteractions } from './sessions/native-interactions.js'
+import { discoverNativeModels } from './sessions/native-models.js'
+import { NativeCleanupError } from './harnesses/native-cleanup.js'
 import {
   createProductionNativeAdapter,
+  createNativeResources,
   harnessTransport,
 } from './sessions/native-factory.js'
 import {
@@ -146,7 +153,7 @@ function webAssets(webDir: string) {
 export function createApp(
   uploadStore?: UploadStore,
   status?: Parameters<typeof statusRoutes>[0],
-  questions?: QuestionManager,
+  nativeInteractions?: NativeInteractions,
   manager?: SessionManager,
   runner?: EpicRunner,
   webDir?: string,
@@ -160,6 +167,7 @@ export function createApp(
   workspaceFiles?: WorkspaceFiles,
   requestGuard = new RequestGuard(configState?.current.terminalAccess),
   previews?: PreviewManager,
+  acpResources = new AcpResourceHost(),
 ) {
   const app = new Hono()
   app.use('*', async (c, next) => {
@@ -198,12 +206,19 @@ export function createApp(
     if (manager) {
       app.route(
         '/',
-        sessionRoutes(manager, uploadStore, workspaceFiles?.targets, questions),
+        sessionRoutes(
+          manager,
+          uploadStore,
+          workspaceFiles?.targets,
+          nativeInteractions,
+        ),
       )
       app.route('/', forkRoutes(manager))
       app.route('/', sideChatRoutes(manager))
     }
     app.route('/', uploadRoutes(uploadStore))
+    app.route('/', acpArtifactRoutes(uploadStore.database))
+    app.route('/', nativeChildRoutes(uploadStore.database))
     app.route('/', attachmentRoutes(uploadStore))
     app.route('/', projectFileRoutes(uploadStore.database))
     if (workspaceFiles) app.route('/', workspaceFileRoutes(workspaceFiles))
@@ -218,7 +233,7 @@ export function createApp(
     )
     app.route('/', fsBrowseRoutes())
     app.route('/', searchRoutes(uploadStore.database))
-    app.route('/', harnessRoutes({ configState, db: uploadStore.database }))
+    app.route('/', harnessRoutes({ configState, host: acpResources }))
     if (manager && configState)
       app.route(
         '/',
@@ -241,7 +256,7 @@ export function createApp(
     app.route('/', serverConfigRoutes())
     if (previews) app.route('/', previewRoutes(previews))
   }
-  if (questions) app.route('/', questionRoutes(questions))
+  if (nativeInteractions) app.route('/', questionRoutes(nativeInteractions))
   if (status) app.route('/', workspaceRoutes(status.db, uploadStore))
   if (runner && status)
     app.route(
@@ -380,34 +395,56 @@ export function startServer(port?: number): ServerType {
   clearExpiredLimits(db, Date.now())
   const bus = new EventBus()
   const uploadStore = new UploadStore(db, { dataDir, bus })
-  const questions = new ServerQuestionManager({ db, bus })
+  const nativeInteractions = new NativeInteractions(db, bus)
   const configState: ConfigState = { current: config, path: configPath }
   const accountStore = new HarnessAccountStore(db)
+  const nativeResources = createNativeResources()
+  const acpResources = new AcpResourceHost()
+  const loadNativeAttachment = createNativeAttachmentLoader(db, dataDir)
   const factory: HarnessFactory = (key, accountId) => {
     const entry = configState.current.harness[key]
     if (!entry) throw new Error(`Harness ${key} is not configured`)
     const account = accountId ? accountStore.get(accountId) : undefined
     if (account && account.harnessKey !== key)
       throw new Error('Account does not belong to harness')
-    const derived = account ? deriveAccountHarness(entry, account) : entry
+    const transport = harnessTransport(key, entry)
+    const derived =
+      account && transport === 'pty'
+        ? deriveAccountHarness(entry, account)
+        : entry
     const adapter =
-      harnessTransport(key, derived) === 'native'
+      transport === 'native'
         ? createProductionNativeAdapter(key, {
-            command: derived.command,
-            args: derived.args,
-            env: derived.env,
-            accountId: account?.id,
+            entry,
+            account,
+            db,
+            dataDir,
+            uploads: uploadStore,
+            resources: nativeResources,
+            loadAttachment: loadNativeAttachment,
           })
-        : undefined
+        : entry?.protocol === 'acp'
+          ? createProductionAcpAdapter(key, {
+              entry,
+              account,
+              db,
+              bus,
+              host: acpResources,
+              resources: nativeResources,
+              loadAttachment: loadNativeAttachment,
+            })
+          : undefined
     if (adapter)
-      return nativeHarness(adapter, (sessionId, providerSessionId) => {
-        db.prepare(
-          'UPDATE sessions SET provider_session_id = ? WHERE id = ?',
-        ).run(providerSessionId, sessionId)
-      })
+      return nativeHarness(
+        adapter,
+        (sessionId, providerSessionId) => {
+          db.prepare(
+            'UPDATE sessions SET provider_session_id = ? WHERE id = ?',
+          ).run(providerSessionId, sessionId)
+        },
+        nativeInteractions,
+      )
     if (derived?.protocol === 'pty') return ptyHarness(derived)
-    if (derived?.protocol === 'acp')
-      return acpHarness(derived, { db, bus, questions, accountId })
     throw new Error(`Harness ${key} is not configured`)
   }
   const manager = new SessionManager(
@@ -416,9 +453,11 @@ export function startServer(port?: number): ServerType {
     factory,
     undefined,
     (harness) =>
+      configState.current.harness[harness]?.adapterKind !== 'acp' &&
       accountKindForHarness(harness, configState.current.harness[harness]) !==
-      null,
+        null,
     dataDir,
+    workspaceFiles.targets,
   )
   const terminals = new TerminalManager(db, workspaceFiles.targets)
   uploadStore.setTerminalManager(terminals)
@@ -434,8 +473,9 @@ export function startServer(port?: number): ServerType {
     createEpicSessionAdapter(manager),
     bus,
     (harness) =>
+      configState.current.harness[harness]?.adapterKind !== 'acp' &&
       accountKindForHarness(harness, configState.current.harness[harness]) !==
-      null,
+        null,
   )
   const loginManager = new LoginManager(
     accountStore,
@@ -455,49 +495,51 @@ export function startServer(port?: number): ServerType {
       ['pi', unsupportedUsageProbe],
     ]),
   })
+  const modelRefreshes = new Map<
+    string,
+    { controller: AbortController; promise: Promise<void> }
+  >()
+  let modelRefreshStopped = false
   const refreshModels = (accountId: string, signal?: AbortSignal) => {
+    const previous = modelRefreshes.get(accountId)
+    if (previous) return previous.promise
+    if (modelRefreshStopped || signal?.aborted || modelRefreshes.size >= 8)
+      return
     const account = accountStore.get(accountId)
     const entry = account && configState.current.harness[account.harnessKey]
     if (!account || !entry || entry.adapterKind !== 'native') return
-    void refreshAccountModels(db, {
-      accountId,
-      harnessKey: account.harnessKey,
-      signal,
-      probe: async (probeSignal) => {
-        if (probeSignal.aborted)
-          throw new Error('native model discovery cancelled')
-        const harnessProcess = factory(account.harnessKey, accountId)
-        if (!harnessProcess.newSession) return []
-        const started = harnessProcess.newSession(
-          {
-            id: `model-probe-${accountId}`,
-            cwd: globalThis.process.cwd(),
-            harness: account.harnessKey,
-          },
-          () => undefined,
-          () => undefined,
-        )
-        const aborted = new Promise<never>((_, reject) => {
-          if (probeSignal.aborted) {
-            reject(new Error('native model discovery cancelled'))
-            return
-          }
-          probeSignal.addEventListener(
-            'abort',
-            () => reject(new Error('native model discovery cancelled')),
-            { once: true },
-          )
+    const controller = new AbortController()
+    const abort = () => controller.abort(signal?.reason)
+    signal?.addEventListener('abort', abort, { once: true })
+    const promise = Promise.resolve().then(async () => {
+      try {
+        await refreshAccountModels(db, {
+          accountId,
+          harnessKey: account.harnessKey,
+          signal: controller.signal,
+          probe: (probeSignal) =>
+            discoverNativeModels({
+              key: account.harnessKey,
+              entry,
+              account,
+              dataDir,
+              resources: nativeResources,
+              cwd: process.cwd(),
+              signal: probeSignal,
+            }),
         })
-        void started
-          .then(async (result) => {
-            if (probeSignal.aborted) await result.handle.kill()
-          })
-          .catch(() => undefined)
-        const result = await Promise.race([started, aborted])
-        await result.handle.kill()
-        return result.availableModels ?? result.handle.availableModels ?? []
-      },
+      } finally {
+        signal?.removeEventListener('abort', abort)
+      }
     })
+    modelRefreshes.set(accountId, { controller, promise })
+    void promise.then(
+      () => modelRefreshes.delete(accountId),
+      () => {
+        // Failed cleanup retains the original operation for shutdown.
+      },
+    )
+    return promise
   }
   const harnessHealth = createHarnessHealthReader({ db, configState, manager })
   // Settle persisted turns before exposing the port. Respawn work continues
@@ -517,7 +559,7 @@ export function startServer(port?: number): ServerType {
           liveProcesses,
         })),
     },
-    questions,
+    nativeInteractions,
     manager,
     runner,
     productionWebDir(),
@@ -527,6 +569,8 @@ export function startServer(port?: number): ServerType {
     refreshModels,
     workspaceFiles,
     requestGuard,
+    undefined,
+    acpResources,
   )
   const previews = new PreviewManager(
     workspaceFiles.targets,
@@ -567,6 +611,10 @@ export function startServer(port?: number): ServerType {
   const shutdown = new ServerShutdown(
     server as Server,
     () => {
+      void closeAcpDiscovery(acpResources).catch(() => {})
+      modelRefreshStopped = true
+      for (const operation of modelRefreshes.values())
+        operation.controller.abort()
       terminals.stopAccepting()
       terminalRequests.stopAccepting()
       upgrades.stopAccepting()
@@ -580,6 +628,7 @@ export function startServer(port?: number): ServerType {
     },
     terminals.limits.shutdownCallbacks,
   )
+  shutdown.addCleanupHook(() => closeAcpDiscovery(acpResources))
   shutdown.addCleanupHook(() => terminalRequests.settled())
   shutdown.addCleanupHook(async () => {
     if (!(await terminals.closeAll()))
@@ -597,6 +646,27 @@ export function startServer(port?: number): ServerType {
         'WebSocket cleanup is unknown',
       )
   })
+  shutdown.addCleanupHook(() => manager.close())
+  shutdown.addCleanupHook(async () => {
+    const results = await Promise.allSettled(
+      [...modelRefreshes.entries()].map(async ([accountId, operation]) => {
+        try {
+          await operation.promise
+        } catch (error) {
+          if (!(error instanceof NativeCleanupError)) throw error
+          await error.retryCleanup()
+          if (modelRefreshes.get(accountId) === operation)
+            modelRefreshes.delete(accountId)
+        }
+      }),
+    )
+    const failures = results
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason)
+    if (failures.length)
+      throw new AggregateError(failures, 'Native model cleanup failed')
+  })
+  shutdown.addCleanupHook(() => nativeResources.close())
   shutdown.addCleanupHook(() => workspaceFiles.close())
   shutdown.addCleanupHook(() => previews.close())
   shutdown.addCleanupHook(() => {
@@ -606,7 +676,6 @@ export function startServer(port?: number): ServerType {
     loginManager.close()
     usagePoller.stop()
     uploadStore.close()
-    manager.close()
   })
   process.on('SIGTERM', shutdown.signal)
   process.on('SIGINT', shutdown.signal)

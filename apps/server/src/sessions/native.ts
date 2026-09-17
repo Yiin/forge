@@ -1,3 +1,9 @@
+import {
+  permissionReplySchema,
+  questionAnswerSchema,
+} from '@forge/protocol/harness'
+import type { NativeInteractions } from './native-interactions.js'
+import type { HarnessHistoryEvent } from '../harnesses/types.js'
 import type {
   HarnessAdapter,
   HarnessEvent,
@@ -6,8 +12,18 @@ import type {
 } from '../harnesses/types.js'
 import type { HarnessHandle, HarnessItem, HarnessProcess } from './harness.js'
 
-function item(event: HarnessEvent): HarnessItem | undefined {
-  const make = (value: unknown) => value as HarnessItem
+export function nativeItem(
+  event: HarnessEvent | (HarnessHistoryEvent & { turnId: string }),
+): HarnessItem | undefined {
+  const make = (value: unknown) =>
+    ({
+      ...(value as Record<string, unknown>),
+      ...('childId' in event &&
+      typeof event.childId === 'string' &&
+      !['child_started', 'child_finished', 'child_updated'].includes(event.type)
+        ? { childId: event.childId }
+        : {}),
+    }) as HarnessItem
   switch (event.type) {
     case 'turn_started':
       return make({ type: 'turn_start', turnId: event.turnId })
@@ -42,6 +58,7 @@ function item(event: HarnessEvent): HarnessItem | undefined {
         type: 'tool_call',
         toolCallId: event.childId,
         name: 'child',
+        nativeChildId: event.childId,
         input: { description: event.description },
         turnId: event.turnId,
         itemId: event.itemId,
@@ -50,12 +67,14 @@ function item(event: HarnessEvent): HarnessItem | undefined {
       return make({
         type: 'tool_update',
         toolCallId: event.childId,
+        nativeChildId: event.childId,
         status: event.outcome.status,
         output: event.outcome,
         turnId: event.turnId,
         itemId: event.itemId,
       })
     case 'child_updated':
+    case 'content_snapshot':
     case 'content_block':
     case 'file_change':
     case 'source_reference':
@@ -82,7 +101,17 @@ function item(event: HarnessEvent): HarnessItem | undefined {
         type: 'ask_user_question',
         questionId: event.request.requestId,
         questions:
-          'questions' in event.request ? event.request.questions : undefined,
+          'questions' in event.request
+            ? event.request.questions
+            : [
+                {
+                  id: event.request.requestId,
+                  question: event.request.title,
+                  options: event.request.options,
+                  multiSelect: false,
+                  allowFreeInput: false,
+                },
+              ],
         question: 'title' in event.request ? event.request.title : undefined,
         options:
           'options' in event.request
@@ -126,52 +155,91 @@ function permissionReply(
   request: Extract<HarnessEvent, { type: 'permission_requested' }>['request'],
   answer: unknown,
 ): PermissionReply {
-  if (typeof answer === 'object' && answer !== null)
-    return {
-      ...(answer as PermissionReply),
-      requestId: request.requestId,
-    } as PermissionReply
-  const selected = String(answer)
-  const optionId =
-    request.options.find(
-      (option) => option.id === selected || option.label === selected,
-    )?.id ?? selected
-  return optionId === 'deny'
-    ? { type: 'denied', requestId: request.requestId }
-    : { type: 'selected', requestId: request.requestId, optionId }
+  if (typeof answer === 'object' && answer !== null && !Array.isArray(answer)) {
+    const value = answer as Record<string, unknown>
+    if ('type' in value) {
+      const reply = permissionReplySchema.parse({
+        ...value,
+        requestId: request.requestId,
+      })
+      if (
+        reply.type === 'selected' &&
+        !request.options.some((option) => option.id === reply.optionId)
+      )
+        throw Error('Invalid permission option')
+      return reply
+    }
+    if (Object.keys(value).length !== 1 || !(request.requestId in value))
+      throw Error('Invalid permission answer')
+    answer = value[request.requestId]
+  }
+  const selected = request.options.find(
+    (option) => option.id === answer || option.label === answer,
+  )
+  if (!selected) throw Error('Invalid permission option')
+  return {
+    type: 'selected',
+    requestId: request.requestId,
+    optionId: selected.id,
+  }
 }
 
 function questionAnswers(
   request: Extract<HarnessEvent, { type: 'question_requested' }>['request'],
   answer: unknown,
 ): Record<string, QuestionAnswer> {
-  if (typeof answer === 'object' && answer !== null && !Array.isArray(answer))
-    return answer as Record<string, QuestionAnswer>
-  const value = Array.isArray(answer) ? answer.map(String) : String(answer)
+  const values =
+    typeof answer === 'object' && answer !== null && !Array.isArray(answer)
+      ? (answer as Record<string, unknown>)
+      : Object.fromEntries(request.questions.map((q) => [q.id, answer]))
+  if (
+    Object.keys(values).some(
+      (key) => !request.questions.some((q) => q.id === key),
+    )
+  )
+    throw Error('Unknown native question')
   return Object.fromEntries(
-    request.questions.map((question) => [
-      question.id,
-      Array.isArray(value)
-        ? { type: 'selected', optionIds: value }
-        : question.options.some(
-              (option) => option.id === value || option.label === value,
-            )
-          ? {
-              type: 'selected',
-              optionIds: [
-                question.options.find(
-                  (option) => option.id === value || option.label === value,
-                )!.id,
-              ],
-            }
-          : { type: 'free_text', text: value },
-    ]),
+    request.questions.map((q) => {
+      const value = values[q.id]
+      const parsed = questionAnswerSchema.parse(
+        value &&
+          typeof value === 'object' &&
+          !Array.isArray(value) &&
+          'type' in value
+          ? value
+          : Array.isArray(value)
+            ? { type: 'selected', optionIds: value }
+            : typeof value === 'string' &&
+                q.options.some((o) => o.id === value || o.label === value)
+              ? {
+                  type: 'selected',
+                  optionIds: [
+                    q.options.find((o) => o.id === value || o.label === value)!
+                      .id,
+                  ],
+                }
+              : value && typeof value === 'object'
+                ? { type: 'selected_with_text', ...value }
+                : { type: 'free_text', text: value },
+      )
+      if (
+        'optionIds' in parsed &&
+        (new Set(parsed.optionIds).size !== parsed.optionIds.length ||
+          (!q.multiSelect && parsed.optionIds.length > 1) ||
+          parsed.optionIds.some((id) => !q.options.some((o) => o.id === id)))
+      )
+        throw Error('Invalid native question option')
+      if ('text' in parsed && !q.allowFreeInput)
+        throw Error('Native question does not allow free text')
+      return [q.id, parsed]
+    }),
   )
 }
 
 export function nativeHarness(
   adapter: HarnessAdapter,
   onBinding?: (sessionId: string, providerSessionId: string) => void,
+  interactions?: NativeInteractions,
 ): HarnessProcess {
   const open = async (
     session: import('./harness.js').HarnessSession,
@@ -204,7 +272,48 @@ export function nativeHarness(
       string,
       Extract<HarnessEvent, { type: 'question_requested' }>['request']
     >()
+    let generation: string | undefined
     const processEvent = (event: HarnessEvent) => {
+      generation ??= event.runtimeGeneration
+      if (
+        interactions &&
+        (event.type === 'permission_requested' ||
+          event.type === 'question_requested')
+      ) {
+        const original = nativeHandle!
+        const captured = structuredClone(event)
+        interactions.register(
+          session.id,
+          captured,
+          nativeItem(captured)!,
+          (answer, cancelled) => {
+            if (captured.type === 'permission_requested') {
+              const reply: PermissionReply = cancelled
+                ? { type: 'denied', requestId: captured.request.requestId }
+                : permissionReply(captured.request, answer)
+              return async () => {
+                await original.replyPermission!(reply)
+              }
+            }
+            const replies = cancelled
+              ? Object.fromEntries(
+                  captured.request.questions.map((q) => [
+                    q.id,
+                    { type: 'skipped' as const },
+                  ]),
+                )
+              : questionAnswers(captured.request, answer)
+            return async () => {
+              await original.replyQuestion!(captured.request.requestId, replies)
+            }
+          },
+        )
+        return
+      }
+      if (interactions && event.type === 'request_cancelled') {
+        interactions.retire(event.runtimeGeneration, event.requestId)
+        return
+      }
       if (event.type === 'permission_requested')
         permissionRequests.set(event.request.requestId, event.request)
       if (event.type === 'question_requested')
@@ -214,7 +323,7 @@ export function nativeHarness(
         questionRequests.delete(event.requestId)
       }
       if (event.type === 'run_failed') onExit(new Error(event.message))
-      const normalized = item(event)
+      const normalized = nativeItem(event)
       if (normalized) onItem(normalized)
     }
     const handle = await (resume ? adapter.load : adapter.spawn)!(
@@ -235,17 +344,19 @@ export function nativeHarness(
     if (handle.binding)
       onBinding?.(session.id, handle.binding.providerSessionId)
     return {
+      get requiresResume() {
+        return handle.requiresResume
+      },
       prompt: (content) => {
         const input =
           typeof content === 'string'
             ? content
-            : content.map((part) =>
+            : content.map((part: import('./harness.js').PromptContent) =>
                 part.kind === 'text'
                   ? { type: 'text' as const, text: part.text }
                   : {
                       type: 'attachment' as const,
-                      attachmentId:
-                        part.path ?? ('name' in part ? part.name : ''),
+                      attachmentId: part.attachmentId ?? '',
                       mime: part.mime,
                     },
               )
@@ -259,20 +370,26 @@ export function nativeHarness(
             const input =
               typeof content === 'string'
                 ? content
-                : content.map((part: import('./harness.js').PromptContent) => ({
-                    type: 'text' as const,
-                    text:
-                      part.kind === 'text'
-                        ? part.text
-                        : 'name' in part
-                          ? part.name
-                          : (part.path ?? ''),
-                  }))
+                : content.map((part: import('./harness.js').PromptContent) =>
+                    part.kind === 'text'
+                      ? { type: 'text' as const, text: part.text }
+                      : {
+                          type: 'attachment' as const,
+                          attachmentId: part.attachmentId ?? '',
+                          mime: part.mime,
+                        },
+                  )
             await handle.steer!(input)
           }
         : undefined,
       cancel: () => handle.cancel(),
-      kill: () => handle.kill(),
+      kill: async () => {
+        try {
+          await handle.kill()
+        } finally {
+          if (generation) interactions?.retire(generation)
+        }
+      },
       setModel: handle.setModel,
       configOptions: handle.configOptions,
       setConfigOption: handle.setConfigOption,

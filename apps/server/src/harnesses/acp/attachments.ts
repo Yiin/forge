@@ -1,3 +1,4 @@
+import { NativeCleanupError } from '../native-cleanup.js'
 import { createHash } from 'node:crypto'
 import type { ContentBlock, PromptCapabilities } from '@agentclientprotocol/sdk'
 import { promptInputSchema, type PromptInput } from '@forge/protocol/harness'
@@ -62,6 +63,7 @@ type Operation = {
   releases: (() => void)[]
   cleanup?: Promise<void>
   unknownReader: boolean
+  resolverCleanup?: NativeCleanupError
   rejectLogical(error: unknown): void
 }
 function bounded(value: string, maximum: number) {
@@ -118,6 +120,7 @@ export function createAcpAttachments(options: {
       !operation.releaseRequested ||
       operation.released ||
       operation.unknownReader ||
+      operation.resolverCleanup ||
       [...operation.readers].some((reader) => !reader.closed)
     )
       return
@@ -139,9 +142,16 @@ export function createAcpAttachments(options: {
     )
     void operation.work
       .then(async () => {
-        const results = await Promise.allSettled(
-          [...operation.readers].map(closeReader),
-        )
+        const results = await Promise.allSettled([
+          ...[...operation.readers].map(closeReader),
+          ...(operation.resolverCleanup
+            ? [
+                operation.resolverCleanup.retryCleanup().then(() => {
+                  operation.resolverCleanup = undefined
+                }),
+              ]
+            : []),
+        ])
         releaseIfDone(operation)
         const failed = results.find((value) => value.status === 'rejected')
         if (failed?.status === 'rejected') throw failed.reason
@@ -265,14 +275,18 @@ export function createAcpAttachments(options: {
                 name: part.title ?? part.url,
               }
             else {
-              const resolved = await authorizedAttachment(
-                sessionId,
-                part.attachmentId,
-                {
-                  signal: operation.controller.signal,
-                  maxBytes: limits.fileBytes,
-                },
-              )
+              const resolved = await Promise.resolve()
+                .then(() =>
+                  authorizedAttachment(sessionId, part.attachmentId, {
+                    signal: operation.controller.signal,
+                    maxBytes: limits.fileBytes,
+                  }),
+                )
+                .catch((error) => {
+                  if (error instanceof NativeCleanupError)
+                    operation.resolverCleanup = error
+                  throw error
+                })
               operation.unknownReader = true
               const readerProperty = Object.getOwnPropertyDescriptor(
                 resolved,

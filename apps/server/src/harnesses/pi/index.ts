@@ -1,3 +1,6 @@
+import { NativeCleanupError } from '../native-cleanup.js'
+import { readPiCatalog } from './discovery.js'
+export { discoverPi } from './discovery.js'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import {
@@ -276,7 +279,12 @@ export function createPiAdapter(options: PiAdapterOptions): PiAdapter {
       await runtime.start(target)
       return runtime.handle
     } catch (error) {
-      await runtime.close(reason(error))
+      const failure = reason(error)
+      try {
+        await runtime.close(failure)
+      } catch {
+        throw new NativeCleanupError(() => runtime.close(failure))
+      }
       throw error
     } finally {
       if (runtime.isClosed) leased.delete(lease)
@@ -689,25 +697,10 @@ class PiRuntime {
     return response
   }
   private async refreshCatalog(persist = true) {
-    const models = (await this.command('get_available_models')).data as {
-      models: NonNullable<PiStateSnapshot['model']>[]
-    }
-    const thinking = (await this.command('get_available_thinking_levels'))
-      .data as { levels: string[] }
-    const commands = (await this.command('get_commands')).data as {
-      commands: PiCatalogSnapshot['commands']
-    }
     const catalog = freeze({
       ...this.catalog,
-      models: models.models.map((model) => ({
-        ...model,
-        catalogId: modelKey(model.provider, model.id),
-      })),
-      thinkingLevels: thinking.levels,
-      commands: commands.commands,
+      ...(await readPiCatalog((command) => this.command(command))),
     })
-    if (bytes(catalog.models) > 4 * MiB || bytes(catalog.commands) > 2 * MiB)
-      fail('PI_CATALOG_LIMIT')
     this.catalog = catalog
     if (persist) await this.saveSnapshot({ kind: 'catalog', value: catalog })
     return snapshot(catalog, 8 * MiB)

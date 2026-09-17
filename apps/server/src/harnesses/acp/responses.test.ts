@@ -115,6 +115,9 @@ describe('public Grok response boundaries', () => {
         new AbortController().signal,
       )
       expect(result.map((record) => record.value.kind)).toEqual(['disposition'])
+      expect({ owner: subject.owner, ...result[0]!.subject }).toEqual(
+        f.sources[0]!.owner,
+      )
       expect(f.responses.owner('foreign', 'one')).toBeNull()
       expect(f.responses.current(subject, 'assistant')).toBeNull()
       await expect(
@@ -210,6 +213,10 @@ describe('public Grok response boundaries', () => {
           }),
         )[0],
       ).toMatchObject({ subject: { kind: 'item', itemId: 'thought-item' } })
+      expect(f.sources.at(-1)!.owner).toMatchObject({
+        itemId: 'thought-item',
+        responseId: f.responses.current(subject, 'assistant')!.responseId,
+      })
       await f.update({
         sessionUpdate: 'response_completed',
         message_id: 'first',

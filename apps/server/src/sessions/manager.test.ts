@@ -1,8 +1,9 @@
+import { recoverSessions } from './recovery.js'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrate } from '../db/migrate.js'
 import { createProject, createSession } from '../db/queries.js'
 import { EventBus } from '../events/bus.js'
@@ -1293,4 +1294,597 @@ describe('draft promotion idempotency', () => {
         .get(result.sessionId),
     ).toEqual({ status: 'errored' })
   })
+})
+
+describe('saved native session admission', () => {
+  it.each(['confirmed', 'unproven', 'refused'] as const)(
+    'loads the original binding before a new prompt: %s',
+    async (mode) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'Native', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'claude',
+        title: 'Native',
+        cwd: '/tmp',
+      })
+      db.prepare('UPDATE sessions SET provider_session_id=? WHERE id=?').run(
+        'original-native',
+        session.id,
+      )
+      const calls: string[] = []
+      const handle: HarnessHandle = {
+        prompt: async () => {
+          calls.push('prompt')
+        },
+        cancel: () => {},
+        kill: () => {
+          calls.push('kill')
+        },
+      }
+      const manager = new SessionManager(db, new EventBus(), () => ({
+        capabilities: { loadSession: true },
+        spawn: () => {
+          calls.push('spawn')
+          return handle
+        },
+        loadSession: async (saved) => {
+          expect(saved.providerSessionId).toBe('original-native')
+          calls.push('load')
+          if (mode === 'refused') throw Error('synthetic resume refusal')
+          return { handle, proven: mode === 'confirmed' }
+        },
+      }))
+      try {
+        await manager.prompt(session.id, 'next prompt')
+        await vi.waitFor(() =>
+          expect(
+            db
+              .prepare('SELECT status FROM sessions WHERE id=?')
+              .get(session.id),
+          ).toEqual({ status: mode === 'confirmed' ? 'idle' : 'errored' }),
+        )
+        expect(calls).not.toContain('spawn')
+        expect(calls).toContain('load')
+        if (mode === 'confirmed') expect(calls).toContain('prompt')
+        else expect(calls).not.toContain('prompt')
+        if (mode === 'unproven') expect(calls).toContain('kill')
+        expect(
+          db
+            .prepare('SELECT provider_session_id FROM sessions WHERE id=?')
+            .get(session.id),
+        ).toEqual({ provider_session_id: 'original-native' })
+      } finally {
+        manager.close()
+        db.close()
+      }
+    },
+  )
+})
+
+describe('native shutdown ownership', () => {
+  it('joins every original handle and preserves a refused cleanup', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'cleanup', path: '/tmp' })
+    const sessions = [1, 2].map(() =>
+      createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'cleanup',
+        cwd: '/tmp',
+      }),
+    )
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const refused = Error('original cleanup refused')
+    const calls: string[] = []
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async (session) => ({
+        prompt: async () => {},
+        cancel: () => {},
+        kill: async () => {
+          calls.push(session.id)
+          if (session.id === sessions[0].id) throw refused
+          await held
+        },
+      }),
+    }))
+    try {
+      for (const session of sessions) await manager.prompt(session.id, 'hello')
+      await vi.waitFor(() =>
+        expect(
+          db
+            .prepare("SELECT COUNT(*) AS n FROM sessions WHERE status='idle'")
+            .get()?.n,
+        ).toBe(2),
+      )
+      let settled = false
+      const close = manager.close()
+      const observed = close
+        .catch((error) => error)
+        .finally(() => {
+          settled = true
+        })
+      expect(manager.close()).toBe(close)
+      await vi.waitFor(() => expect(calls).toHaveLength(2))
+      expect(settled).toBe(false)
+      release()
+      expect(await observed).toMatchObject({ errors: [refused] })
+      expect(calls).toEqual(sessions.map((session) => session.id))
+    } finally {
+      release()
+      await manager.close().catch(() => {})
+      db.close()
+    }
+  })
+})
+
+describe('native steering admission', () => {
+  it.each(['before', 'after'] as const)(
+    'preserves durable ownership when persistence fails %s delivery',
+    async (stage) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'native', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'native',
+        cwd: '/tmp',
+      })
+      let release!: () => void
+      const active = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const steer = vi.fn(async () => {
+        if (stage === 'after') throw Error('submission uncertain')
+      })
+      const manager = new SessionManager(db, new EventBus(), () => ({
+        spawn: async () => ({
+          prompt: () => active,
+          steer,
+          cancel: () => release(),
+          kill: () => release(),
+        }),
+      }))
+      try {
+        await manager.prompt(session.id, 'first')
+        await vi.waitFor(() => expect(manager.models(session.id)).toEqual([]))
+        if (stage === 'before')
+          db.exec(
+            "CREATE TRIGGER fail_steering BEFORE INSERT ON messages WHEN json_extract(NEW.content,'$.steeringRequestId') IS NOT NULL BEGIN SELECT RAISE(ABORT,'disk failed'); END",
+          )
+        const send = () =>
+          manager.prompt(
+            session.id,
+            'steering',
+            'original-steer',
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            'original-item',
+            undefined,
+            'immediate',
+          )
+        await expect(send()).rejects.toThrow(
+          stage === 'before' ? 'disk failed' : 'submission uncertain',
+        )
+        expect(steer).toHaveBeenCalledTimes(stage === 'before' ? 0 : 1)
+        if (stage === 'before') {
+          db.exec('DROP TRIGGER fail_steering')
+          await send()
+          expect(steer).toHaveBeenCalledTimes(1)
+        }
+        await expect(send()).rejects.toThrow('already admitted')
+        expect(steer).toHaveBeenCalledTimes(1)
+      } finally {
+        release()
+        try {
+          await vi.waitFor(() =>
+            expect(
+              db
+                .prepare('SELECT status FROM sessions WHERE id=?')
+                .get(session.id)?.status,
+            ).toBe('idle'),
+          )
+        } finally {
+          await manager.close()
+          db.close()
+        }
+      }
+    },
+  )
+})
+
+describe('manager startup shutdown ownership', () => {
+  it.each(['spawn', 'load', 'recover', 'refused', 'retry'] as const)(
+    'joins original pending %s and closes its late handle',
+    async (mode) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'test', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'Chat',
+        cwd: '/tmp',
+      })
+      if (mode === 'load' || mode === 'recover')
+        db.prepare(
+          'UPDATE sessions SET provider_session_id = ? WHERE id = ?',
+        ).run('original-native', session.id)
+      let resolveHandle!: (handle: HarnessHandle) => void
+      const held = new Promise<HarnessHandle>((resolve) => {
+        resolveHandle = resolve
+      })
+      let started!: () => void
+      const entered = new Promise<void>((resolve) => {
+        started = resolve
+      })
+      let releaseKill!: () => void
+      const killHeld = new Promise<void>((resolve) => {
+        releaseKill = resolve
+      })
+      let killEntered!: () => void
+      const killing = new Promise<void>((resolve) => {
+        killEntered = resolve
+      })
+      let kills = 0
+      let prompts = 0
+      const manager = new SessionManager(db, new EventBus(), () => ({
+        capabilities: { loadSession: true },
+        spawn: async () => {
+          started()
+          return held
+        },
+        loadSession: async () => {
+          started()
+          return { handle: await held, proven: true }
+        },
+      }))
+      const prompt = (
+        mode === 'recover'
+          ? manager.recover(
+              db
+                .prepare('SELECT * FROM sessions WHERE id = ?')
+                .get(session.id) as Parameters<SessionManager['recover']>[0],
+            )
+          : manager.prompt(session.id, 'first')
+      ).catch((error) => error)
+      await entered
+      const close = manager.close()
+      const closed = close.catch((error) => error)
+      expect(manager.close()).toBe(close)
+      let settled = false
+      void closed.then(() => {
+        settled = true
+      })
+      await expect(manager.prompt(session.id, 'late')).rejects.toThrow(
+        'Session manager is closed',
+      )
+      resolveHandle({
+        prompt: async () => {
+          prompts++
+        },
+        cancel: () => {},
+        kill: async () => {
+          kills++
+          killEntered()
+          await killHeld
+          if (mode === 'refused' || (mode === 'retry' && kills === 1))
+            throw Error('original cleanup refused')
+        },
+      })
+      await killing
+      expect(settled).toBe(false)
+      expect(prompts).toBe(0)
+      releaseKill()
+      const result = await closed
+      if (mode === 'refused') {
+        expect(result).toBeInstanceOf(AggregateError)
+        expect(result.errors[0].name).toBe('NativeCleanupError')
+        expect(manager.close()).toBe(close)
+      } else expect(result).toBeUndefined()
+      await prompt
+      expect(kills).toBe(mode === 'refused' || mode === 'retry' ? 2 : 1)
+      expect(prompts).toBe(0)
+      db.close()
+    },
+  )
+})
+
+describe('unproven recovery ownership', () => {
+  it.each(['load', 'new', 'refused-load', 'refused-new'] as const)(
+    'closes the original unproven handle before rejecting %s',
+    async (mode) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'recovery', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'recovery',
+        cwd: '/tmp',
+      })
+      const load = mode.endsWith('load')
+      if (load)
+        db.prepare('UPDATE sessions SET provider_session_id=? WHERE id=?').run(
+          'original',
+          session.id,
+        )
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const kill = vi.fn(async () => {
+        await held
+        if (mode.startsWith('refused') && kill.mock.calls.length === 1)
+          throw Error('cleanup refused')
+      })
+      const prompt = vi.fn()
+      const open = vi.fn(async () => ({
+        handle: { prompt, cancel() {}, kill },
+        proven: false,
+      }))
+      const spawn = vi.fn()
+      const manager = new SessionManager(db, new EventBus(), () => ({
+        capabilities: { loadSession: true },
+        spawn,
+        loadSession: open,
+        newSession: open,
+      }))
+      try {
+        const row = db
+          .prepare('SELECT * FROM sessions WHERE id=?')
+          .get(session.id) as Parameters<SessionManager['recover']>[0]
+        let settled = false
+        const result = manager
+          .recover(row)
+          .catch((error) => error)
+          .finally(() => {
+            settled = true
+          })
+        await vi.waitFor(() => expect(kill).toHaveBeenCalledTimes(1))
+        expect(settled).toBe(false)
+        release()
+        const failure = await result
+        expect(failure).toBeInstanceOf(Error)
+        if (mode.startsWith('refused'))
+          expect(failure.name).toBe('NativeCleanupError')
+        else expect(failure.message).toContain('not proven')
+        await manager.close()
+        expect(kill).toHaveBeenCalledTimes(mode.startsWith('refused') ? 2 : 1)
+        expect(open).toHaveBeenCalledTimes(1)
+        expect(spawn).not.toHaveBeenCalled()
+        expect(prompt).not.toHaveBeenCalled()
+      } finally {
+        release()
+        await manager.close()
+        db.close()
+      }
+    },
+  )
+})
+
+describe('shutdown preserves durable turn recovery', () => {
+  it.each(['pending', 'admitted-rejected', 'admitted-resolved'] as const)(
+    'recovers the original accepted turn after %s shutdown',
+    async (mode) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'shutdown', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'shutdown',
+        cwd: '/tmp',
+      })
+      db.prepare('UPDATE sessions SET auto_resume=0 WHERE id=?').run(session.id)
+      let resolveSpawn!: (handle: HarnessHandle) => void
+      const heldSpawn = new Promise<HarnessHandle>((resolve) => {
+        resolveSpawn = resolve
+      })
+      let resolvePrompt!: () => void
+      let rejectPrompt!: (error: Error) => void
+      const heldPrompt = new Promise<void>((resolve, reject) => {
+        resolvePrompt = resolve
+        rejectPrompt = reject
+      })
+      void heldPrompt.catch(() => {})
+      let releaseKill!: () => void
+      const heldKill = new Promise<void>((resolve) => {
+        releaseKill = resolve
+      })
+      const prompt = vi.fn(() => heldPrompt)
+      const kill = vi.fn(async () => {
+        if (mode === 'admitted-rejected') rejectPrompt(Error('agent exited'))
+        else resolvePrompt()
+        await heldKill
+      })
+      const handle: HarnessHandle = { prompt, kill, cancel() {} }
+      const spawn = vi.fn(async () => (mode === 'pending' ? heldSpawn : handle))
+      const manager = new SessionManager(db, new EventBus(), () => ({ spawn }))
+      let replacement: SessionManager | undefined
+      try {
+        await manager.prompt(session.id, 'original user text')
+        await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1))
+        if (mode !== 'pending')
+          await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1))
+        const original = db
+          .prepare(
+            "SELECT turn_id FROM messages WHERE session_id=? AND type='turn_start' ORDER BY seq LIMIT 1",
+          )
+          .get(session.id) as { turn_id: string }
+        const closing = manager.close()
+        let closed = false
+        void closing.then(() => {
+          closed = true
+        })
+        resolveSpawn(handle)
+        await vi.waitFor(() => expect(kill).toHaveBeenCalledTimes(1))
+        expect(closed).toBe(false)
+        releaseKill()
+        await closing
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        expect(
+          db.prepare('SELECT status FROM sessions WHERE id=?').get(session.id),
+        ).toEqual({ status: 'running' })
+        expect(
+          db
+            .prepare(
+              "SELECT type FROM messages WHERE session_id=? AND type IN ('turn_end','turn_interrupted','error')",
+            )
+            .all(session.id),
+        ).toEqual([])
+        const user = db
+          .prepare(
+            "SELECT content FROM messages WHERE session_id=? AND role='user' AND type='text_delta'",
+          )
+          .get(session.id) as { content: string }
+        expect(JSON.parse(user.content).text).toBe('original user text')
+        const resume = vi.fn()
+        replacement = new SessionManager(db, new EventBus(), () => ({
+          spawn: resume,
+        }))
+        await recoverSessions(
+          db,
+          replacement,
+          new EventBus(),
+          { version: 'test', stopped_at: 1 },
+          'test',
+        )
+        expect(
+          db
+            .prepare(
+              "SELECT turn_id,type FROM messages WHERE session_id=? AND type='turn_interrupted'",
+            )
+            .all(session.id),
+        ).toEqual([{ turn_id: original.turn_id, type: 'turn_interrupted' }])
+        expect(
+          db.prepare('SELECT status FROM sessions WHERE id=?').get(session.id),
+        ).toEqual({ status: 'idle' })
+        expect(resume).not.toHaveBeenCalled()
+        expect(prompt).toHaveBeenCalledTimes(mode === 'pending' ? 0 : 1)
+      } finally {
+        resolveSpawn(handle)
+        resolvePrompt()
+        releaseKill()
+        await manager.close()
+        await replacement?.close()
+        db.close()
+      }
+    },
+  )
+})
+
+describe('intentional native lifetime retirement', () => {
+  it.each(['resume', 'cleanup-refused', 'shutdown', 'no-load'] as const)(
+    'joins original retirement before exact load: %s',
+    async (mode) => {
+      const db = new DatabaseSync(':memory:')
+      migrate(db)
+      const project = createProject(db, { name: 'retirement', path: '/tmp' })
+      const session = createSession(db, {
+        projectId: project.id,
+        harness: 'mock',
+        title: 'retirement',
+        cwd: '/tmp',
+      })
+      let retired = false,
+        release!: () => void,
+        entered!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const closing = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      let refuse = mode === 'cleanup-refused'
+      const original: HarnessHandle = {
+        get requiresResume() {
+          return retired
+        },
+        prompt: vi.fn(async () => {}),
+        cancel() {},
+        async kill() {
+          entered()
+          await held
+          if (refuse) throw Error('original cleanup refused')
+        },
+      }
+      const replacement: HarnessHandle = {
+        prompt: vi.fn(async () => {}),
+        cancel() {},
+        kill() {},
+      }
+      const spawn = vi.fn(() => original)
+      const loadSession = vi.fn(async (saved) => {
+        expect(saved.providerSessionId).toBe('original-native-binding')
+        return { handle: replacement, proven: true }
+      })
+      const manager = new SessionManager(db, new EventBus(), () => ({
+        spawn,
+        capabilities: { loadSession: mode !== 'no-load' },
+        loadSession,
+      }))
+      try {
+        await manager.prompt(session.id, 'first')
+        await vi.waitFor(() =>
+          expect(
+            db
+              .prepare('SELECT status FROM sessions WHERE id=?')
+              .get(session.id),
+          ).toEqual({ status: 'idle' }),
+        )
+        db.prepare('UPDATE sessions SET provider_session_id=? WHERE id=?').run(
+          'original-native-binding',
+          session.id,
+        )
+        retired = true
+        await manager.prompt(session.id, 'next')
+        await closing
+        expect(loadSession).not.toHaveBeenCalled()
+        expect(original.prompt).toHaveBeenCalledTimes(1)
+        let closeSettled = false
+        const close =
+          mode === 'shutdown'
+            ? manager.close().then(() => {
+                closeSettled = true
+              })
+            : undefined
+        await Promise.resolve()
+        expect(closeSettled).toBe(false)
+        release()
+        if (close) await close
+        else
+          await vi.waitFor(() =>
+            expect(
+              db
+                .prepare('SELECT status FROM sessions WHERE id=?')
+                .get(session.id),
+            ).toEqual({ status: mode === 'resume' ? 'idle' : 'errored' }),
+          )
+        expect(spawn).toHaveBeenCalledTimes(1)
+        expect(loadSession).toHaveBeenCalledTimes(mode === 'resume' ? 1 : 0)
+        expect(replacement.prompt).toHaveBeenCalledTimes(
+          mode === 'resume' ? 1 : 0,
+        )
+        expect(
+          db
+            .prepare('SELECT provider_session_id FROM sessions WHERE id=?')
+            .get(session.id),
+        ).toEqual({ provider_session_id: 'original-native-binding' })
+      } finally {
+        refuse = false
+        release()
+        await manager.close()
+        db.close()
+      }
+    },
+  )
 })

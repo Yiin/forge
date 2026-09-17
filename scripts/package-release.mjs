@@ -58,6 +58,8 @@ await exec(
   [
     'build',
     '--target=node',
+    '--define',
+    'process.env.NODE_ENV=process.env.NODE_ENV',
     'apps/server/src/index.ts',
     '--outfile',
     'dist/forge-server.js',

@@ -160,12 +160,6 @@ export class TerminalManager {
       .get(sessionId) as SessionOwner | undefined
     if (!row || row.deleted_at !== null)
       throw new TerminalError('not_found', 404, 'Session not found')
-    if (!row.project_id)
-      throw new TerminalError(
-        'no_workspace',
-        409,
-        'The session has no workspace',
-      )
     if (create && (row.status === 'archived' || row.archived_at !== null))
       throw new TerminalError(
         'unavailable',
@@ -291,10 +285,10 @@ export class TerminalManager {
         id,
         serverEpoch: this.serverEpoch,
         sessionId,
-        projectId: owner.project_id!,
+        projectId: owner.project_id,
         workspace: {
           target: { kind: 'session', sessionId },
-          projectId: owner.project_id!,
+          projectId: owner.project_id,
           cwd: owner.cwd,
           worktreePath: owner.worktree_path,
           workspaceId: value.expectedWorkspaceId,
@@ -345,7 +339,7 @@ export class TerminalManager {
       this.limits.startupDeadlineMs,
     )
     const startup = this.projects.run(
-      owner.project_id!,
+      owner.project_id ?? `session:${sessionId}`,
       async () => {
         this.assertAccepting()
         controller.signal.throwIfAborted()
@@ -858,7 +852,7 @@ export class TerminalManager {
     const owner = this.owner(sessionId)
     let workspace: WorkspaceResolution
     return this.remove(
-      owner.project_id!,
+      owner.project_id ?? `session:${sessionId}`,
       (record) =>
         record.workspace?.rootIdentity === workspace.rootIdentity &&
         record.workspace?.cwd === workspace.cwd,
@@ -876,7 +870,7 @@ export class TerminalManager {
     )
   }
   private async remove<T>(
-    projectId: string,
+    ownerKey: string,
     match: (record: Record) => boolean,
     operation: () => Promise<T>,
     resolveWorkspace?: () => Promise<WorkspaceResolution>,
@@ -890,7 +884,7 @@ export class TerminalManager {
       )
     this.removals++
     try {
-      return await this.projects.run(projectId, async () => {
+      return await this.projects.run(ownerKey, async () => {
         this.assertAccepting()
         const workspace = await resolveWorkspace?.()
         const owners = [...this.records.values()].filter(match)

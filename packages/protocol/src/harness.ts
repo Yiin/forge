@@ -881,11 +881,12 @@ export const sourceReferenceSchema = z.strictObject({
 })
 export type SourceReference = z.infer<typeof sourceReferenceSchema>
 // Public wire ceilings. Providers can impose smaller retained-state limits.
+export const contentSnapshotTextSchema = utf8String(4 * 1024 * 1024)
 const contentSnapshotFields = {
   ...turnItem,
   type: z.literal('content_snapshot'),
   sourceRef: sourceReferenceSchema.optional(),
-  text: utf8String(4 * 1024 * 1024),
+  text: contentSnapshotTextSchema,
 }
 const textMetadataBytes = 1024 * 1024
 const inlineQuestionsSchema = z.preprocess(

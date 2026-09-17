@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { migrate } from '../db/migrate.js'
@@ -697,5 +703,88 @@ describe('terminal manager lifecycle and resource admission', () => {
     instances[1]!.cleanupComplete = true
     expect(await manager.removeWorkspace('first', remove)).toBe('removed')
     expect(manager.resourceState().terminals).toBe(0)
+  })
+})
+
+describe('projectless terminal ownership', () => {
+  const addProjectless = (db: DatabaseSync, cwd: string, id = 'loose') => {
+    db.prepare(
+      'INSERT INTO sessions(id,project_id,harness,cwd,title,status,created_at,last_activity_at,kind,auto_resume) VALUES(?,NULL,?,?,?,?,?,?,?,?)',
+    ).run(
+      id,
+      'synthetic',
+      cwd,
+      'Loose',
+      'idle',
+      Date.now(),
+      Date.now(),
+      'chat',
+      0,
+    )
+  }
+
+  it('creates, reuses, and closes terminals owned by a projectless session', async () => {
+    const { db, manager, directory, create } = fixture()
+    addProjectless(db, directory)
+    const first = await create('loose')
+    expect(first.projectId).toBeNull()
+    expect(first.workspace.projectId).toBeNull()
+    expect(first.workspace.cwd).toBe(directory)
+    expect(first.state).toBe('running')
+    const second = await create('loose')
+    expect(
+      manager
+        .list('loose')
+        .terminals.map(({ id }) => id)
+        .sort(),
+    ).toEqual([first.id, second.id].sort())
+    expect((await manager.input('loose', first.id, 'YQ==')).writtenBytes).toBe(
+      1,
+    )
+    await manager.close('loose', first.id)
+    expect(() => manager.get('loose', first.id)).toThrow('Terminal not found')
+    expect(manager.get('loose', second.id).state).toBe('running')
+  })
+
+  it('removes projectless terminals with their session through the fallback key', async () => {
+    const { db, manager, directory, create } = fixture()
+    const loose = join(directory, 'loose')
+    mkdirSync(loose)
+    addProjectless(db, loose)
+    const owned = await create('loose')
+    const kept = await create('first')
+    const action = vi.fn(async () => 'removed')
+    expect(await manager.removeSession('loose', action)).toBe('removed')
+    expect(action).toHaveBeenCalledTimes(1)
+    expect(() => manager.get('loose', owned.id)).toThrow('Terminal not found')
+    expect(manager.get('first', kept.id).state).toBe('running')
+  })
+
+  it('removes a projectless workspace without touching project-backed terminals', async () => {
+    const { db, manager, directory, create } = fixture()
+    const loose = join(directory, 'loose')
+    mkdirSync(loose)
+    addProjectless(db, loose)
+    const owned = await create('loose')
+    const kept = await create('first')
+    expect(kept.projectId).toBe('project')
+    expect(await manager.removeWorkspace('loose', async () => 'removed')).toBe(
+      'removed',
+    )
+    expect(() => manager.get('loose', owned.id)).toThrow('Terminal not found')
+    expect(manager.get('first', kept.id).state).toBe('running')
+  })
+
+  it('scopes project removal to project-backed terminals only', async () => {
+    const { db, manager, directory, create } = fixture()
+    const loose = join(directory, 'loose')
+    mkdirSync(loose)
+    addProjectless(db, loose)
+    const owned = await create('loose')
+    const backed = await create('first')
+    await manager.removeProject('project', async () => {})
+    expect(() => manager.get('first', backed.id)).toThrow('Terminal not found')
+    expect(manager.get('loose', owned.id).state).toBe('running')
+    expect(manager.get('loose', owned.id).projectId).toBeNull()
   })
 })

@@ -1,6 +1,4 @@
-import { access, realpath, stat } from 'node:fs/promises'
-import { constants } from 'node:fs'
-import { delimiter, isAbsolute, join } from 'node:path'
+import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { immutableData } from './data.js'
 
@@ -177,32 +175,7 @@ function grokArgs(input: readonly string[]) {
   return [...result, 'stdio']
 }
 
-export async function resolveExecutable(
-  launch: AcpLaunch,
-): Promise<string | null> {
-  const candidates =
-    isAbsolute(launch.command) || launch.command.includes('/')
-      ? [launch.command]
-      : (launch.env.PATH ?? '')
-          .split(delimiter)
-          .filter(Boolean)
-          .slice(0, 128)
-          .map((path) => join(path, launch.command))
-  for (const path of candidates) {
-    try {
-      await access(path, constants.X_OK)
-      if ((await stat(path)).isFile()) return await realpath(path)
-    } catch (error) {
-      if (
-        !['ENOENT', 'ENOTDIR', 'EACCES'].includes(
-          (error as NodeJS.ErrnoException).code ?? '',
-        )
-      )
-        throw error
-    }
-  }
-  return null
-}
+export { resolveExecutable } from '../executable.js'
 
 const variant = z.object({
   model_uid: z

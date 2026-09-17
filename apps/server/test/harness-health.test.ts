@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrate } from '../src/db/migrate.js'
 import { EventBus } from '../src/events/bus.js'
 import {
@@ -122,11 +122,18 @@ describe('harness health', () => {
     await manager.prompt(session.id, 'hello')
     const health = createHarnessHealthReader({ db, configState, manager })
     const app = statusRoutes({ db, bus, version: 'dev', harnesses: health })
-    const status = StatusResponse.parse(
-      await (await app.request('/api/status')).json(),
-    )
-    expect(
-      status.harnesses.find((h) => h.key === 'claude')?.liveProcesses,
-    ).toBe(1)
+    try {
+      await vi.waitFor(async () => {
+        const status = StatusResponse.parse(
+          await (await app.request('/api/status')).json(),
+        )
+        expect(
+          status.harnesses.find((h) => h.key === 'claude')?.liveProcesses,
+        ).toBe(1)
+      })
+    } finally {
+      await manager.close()
+      db.close()
+    }
   })
 })

@@ -1,3 +1,8 @@
+import { DatabaseSync } from 'node:sqlite'
+import { migrate } from '../db/migrate.js'
+import { createProject, createSession } from '../db/queries.js'
+import { EventBus } from '../events/bus.js'
+import { NativeInteractions } from './native-interactions.js'
 import { describe, expect, it } from 'vitest'
 import {
   createCompletionHandle,
@@ -7,6 +12,7 @@ import { nativeHarness } from './native.js'
 
 describe('native session bridge', () => {
   it('keeps the provider completion authoritative and translates typed events', async () => {
+    let expired = false
     let emit!: (event: any) => void
     const completion = createCompletionHandle({
       completionId: 'completion-1',
@@ -27,6 +33,9 @@ describe('native session bridge', () => {
       spawn: async (_session: any, callback: any) => {
         emit = callback
         return {
+          get requiresResume() {
+            return expired
+          },
           binding: {
             provider: 'fake',
             accountId: null,
@@ -51,6 +60,9 @@ describe('native session bridge', () => {
       (value) => received.push(value),
       () => undefined,
     )
+    expect(handle.requiresResume).toBe(false)
+    expired = true
+    expect(handle.requiresResume).toBe(true)
     const delivered = Promise.resolve(handle.prompt('hello'))
     emit({ type: 'turn_started', turnId: 'turn-1' })
     emit({
@@ -143,6 +155,57 @@ describe('native session interaction bridge', () => {
       { type: 'turn_interrupted', reason: 'interrupted', turnId: 'turn-1' },
     ])
     expect(exits).toEqual([])
+  })
+
+  it('rejects a foreign typed option before durable reply admission', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'native', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'native',
+      cwd: '/tmp',
+    })
+    const service = new NativeInteractions(db, new EventBus())
+    const fake = interactiveAdapter()
+    const handle = await nativeHarness(fake.adapter, undefined, service).spawn(
+      { id: session.id, cwd: '/tmp', harness: 'mock' },
+      () => {},
+      () => {},
+    )
+    try {
+      fake.emit({
+        type: 'permission_requested',
+        runtimeGeneration: 'original-generation',
+        turnId: 'turn',
+        itemId: 'item',
+        request: {
+          requestId: 'original',
+          toolCallId: null,
+          title: 'Allow?',
+          options: [{ id: 'allow', label: 'Allow' }],
+        },
+      })
+      await expect(
+        service.answerQuestion(session.id, 'original', {
+          answer: { type: 'selected', optionId: 'unknown' },
+        }),
+      ).rejects.toMatchObject({ status: 400 })
+      expect(
+        db.prepare('SELECT status FROM native_interactions').get()?.status,
+      ).toBe('pending')
+      expect(fake.permissionReplies).toEqual([])
+      await service.answerQuestion(session.id, 'original', {
+        answer: { type: 'selected', optionId: 'allow' },
+      })
+      expect(fake.permissionReplies).toEqual([
+        { type: 'selected', requestId: 'original', optionId: 'allow' },
+      ])
+    } finally {
+      await handle.kill()
+      db.close()
+    }
   })
 
   it('answers a permission request with the option id behind the chosen label', async () => {

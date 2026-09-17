@@ -7,7 +7,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Composer } from './Composer'
 import { accountsApi } from '../../lib/accounts-api'
 import { api } from '../../lib/api'
@@ -15,6 +15,21 @@ import { useMessagesStore } from '../../stores/messages'
 import type { HarnessSelection } from './harness-picker-logic'
 
 describe('Composer', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: false,
+      addEventListener() {},
+      removeEventListener() {},
+    }))
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+  })
   afterEach(() => {
     cleanup()
     useMessagesStore.setState({ volatile: [] })
@@ -688,34 +703,37 @@ describe('Composer', () => {
     expect(screen.queryByRole('button', { name: 'Reasoning' })).toBeNull()
   })
 
-  it('stages a pasted image in a draft and uploads it to the draft project', async () => {
-    const upload = vi.spyOn(api, 'upload').mockResolvedValue({
-      attachmentId: 'attachment-1',
-      putUrl: 'https://uploads.test/attachment-1',
-    })
-    render(
-      <Composer
-        sessionId="draft-1"
-        draftMode
-        draftProjectId="project-1"
-        harness="claude"
-        accountId="main"
-        onSend={vi.fn().mockResolvedValue(undefined)}
-      />,
-    )
-    const composer = screen.getByLabelText('Message composer')
-    const file = new File(['image'], 'pasted.png', { type: 'image/png' })
+  it.each([undefined, 'project-1'])(
+    'stages a pasted draft image with project %s',
+    async (projectId) => {
+      const upload = vi.spyOn(api, 'upload').mockResolvedValue({
+        attachmentId: 'attachment-1',
+        putUrl: 'https://uploads.test/attachment-1',
+      })
+      render(
+        <Composer
+          sessionId="draft-1"
+          draftMode
+          draftProjectId={projectId}
+          harness="claude"
+          accountId="main"
+          onSend={vi.fn().mockResolvedValue(undefined)}
+        />,
+      )
+      const composer = screen.getByLabelText('Message composer')
+      const file = new File(['image'], 'pasted.png', { type: 'image/png' })
 
-    fireEvent.paste(composer, { clipboardData: { files: [file] } })
+      fireEvent.paste(composer, { clipboardData: { files: [file] } })
 
-    await waitFor(() => expect(screen.getByText('pasted.png')).toBeTruthy())
-    expect(upload).toHaveBeenCalledWith(
-      'draft-1',
-      file,
-      expect.any(Function),
-      'project-1',
-    )
-  })
+      await waitFor(() => expect(screen.getByText('pasted.png')).toBeTruthy())
+      expect(upload).toHaveBeenCalledWith(
+        'draft-1',
+        file,
+        expect.any(Function),
+        { draftId: 'draft-1', projectId },
+      )
+    },
+  )
 
   it('prevents the browser from inserting pasted files into the composer', () => {
     vi.spyOn(api, 'upload').mockResolvedValue({
@@ -768,8 +786,10 @@ describe('Composer', () => {
     expect(uploaded.name).toMatch(/^pasted-\d+\.png$/)
   })
 
-  it('keeps uploads disabled in draft mode without a project id', () => {
-    const upload = vi.spyOn(api, 'upload')
+  it('keeps projectless draft uploads available for removal', async () => {
+    const upload = vi
+      .spyOn(api, 'upload')
+      .mockResolvedValue({ attachmentId: 'projectless', putUrl: '/put' })
     render(
       <Composer
         sessionId="draft-1"
@@ -785,7 +805,84 @@ describe('Composer', () => {
       },
     })
 
-    expect(upload).not.toHaveBeenCalled()
-    expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull()
+    await waitFor(() => expect(upload).toHaveBeenCalledOnce())
+    expect(upload.mock.calls[0][3]).toEqual({
+      draftId: 'draft-1',
+      projectId: undefined,
+    })
+    expect(screen.getByRole('button', { name: /Remove/ })).toBeTruthy()
   })
+})
+
+it('keeps an accountless session selection while provider metadata loads', async () => {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    },
+  )
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener() {},
+    removeEventListener() {},
+  }))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({ ok: true, json: async () => [] }),
+  )
+  let resolveHarnesses!: (
+    value: Awaited<ReturnType<typeof accountsApi.listHarnesses>>,
+  ) => void
+  const pending = new Promise<
+    Awaited<ReturnType<typeof accountsApi.listHarnesses>>
+  >((resolve) => {
+    resolveHarnesses = resolve
+  })
+  vi.spyOn(accountsApi, 'listHarnesses').mockReturnValue(pending)
+  vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([])
+  vi.spyOn(accountsApi, 'listHarnessStatus').mockResolvedValue([])
+  const send = vi.fn().mockResolvedValue(undefined)
+  const view = render(
+    <Composer sessionId="accountless" harness="grok" onSend={send} />,
+  )
+  try {
+    fireEvent.change(screen.getByLabelText('Message composer'), {
+      target: { value: 'Preserve selection' },
+    })
+    resolveHarnesses([
+      {
+        key: 'custom-acp',
+        name: 'Custom',
+        enabled: true,
+        protocol: 'acp',
+        adapterKind: 'custom',
+      },
+      {
+        key: 'grok',
+        name: 'Grok',
+        enabled: true,
+        protocol: 'acp',
+        adapterKind: 'acp',
+      },
+    ])
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled'),
+      ).toBe(false),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        'Preserve selection',
+        [],
+        expect.objectContaining({ harness: 'grok', accountId: undefined }),
+      ),
+    )
+  } finally {
+    view.unmount()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  }
 })

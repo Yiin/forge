@@ -34,6 +34,13 @@ const sourceRef = {
 const passthroughFixtures = [
   {
     ...turnItemEnvelope,
+    type: 'content_snapshot',
+    contentType: 'text',
+    role: 'assistant',
+    text: 'Authoritative response',
+  },
+  {
+    ...turnItemEnvelope,
     type: 'content_block',
     blockIndex: 0,
     role: 'assistant',

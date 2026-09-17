@@ -74,12 +74,13 @@ describe('health endpoint', () => {
         'claude-code-acp',
         'codex-acp',
         'kimi',
-        'gemini',
         'opencode',
+        'pi',
+        'cursor',
+        'gemini',
         'grok',
         'devin',
         'hermes',
-        'pi',
         'mock',
       ])
     } finally {

@@ -59,15 +59,57 @@ describe('resolveRunConfig', () => {
 })
 
 describe('default harness configuration', () => {
-  test('classifies legacy entries without changing their commands', () => {
+  test('retains the preview origin and listener through load, save, and conversion', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-preview-config-'))
+    const file = join(root, 'forge.toml')
+    const preview = {
+      publicOrigin: 'https://preview.example.test',
+      listenerHost: '127.0.0.2',
+      listenerPort: 4567,
+    }
+    try {
+      saveConfigSync(file, { ...defaultConfig(false), preview })
+      expect(loadConfigSync(file).preview).toEqual(preview)
+      convertConfigFileSync(file)
+      expect(loadConfigSync(file).preview).toEqual(preview)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps explicit disabled native providers disabled after reload', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-config-disabled-'))
+    try {
+      const path = join(root, 'forge.toml')
+      const config = defaultConfig(false)
+      config.harness.cursor = {
+        ...config.harness.cursor,
+        command: process.execPath,
+        enabled: false,
+      }
+      saveConfigSync(path, config)
+      expect(loadConfigSync(path).harness.cursor.enabled).toBe(false)
+      config.harness.cursor = {
+        ...config.harness.cursor,
+        command: join(root, 'absent-provider'),
+        enabled: true,
+      }
+      saveConfigSync(path, config)
+      expect(loadConfigSync(path).harness.cursor.enabled).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('classifies native defaults with direct provider commands', () => {
     const config = defaultConfig(false)
     const converted = convertConfig(config)
     expect(converted.harness.kimi).toMatchObject({
       adapterKind: 'native',
       command: 'kimi',
-      args: ['acp'],
+      args: [],
     })
-    expect(converted.harness.grok.adapterKind).toBe('custom')
+    expect(converted.harness.grok.adapterKind).toBe('acp')
   })
 
   test('keeps a recovery copy and leaves the original on parse failure', async () => {
@@ -141,20 +183,21 @@ describe('default harness configuration', () => {
     expect(defaultConfig(true).harness).toHaveProperty('mock')
   })
 
-  test('includes the Pi ACP adapter harness', () => {
+  test('includes the native Pi harness', () => {
     expect(defaultConfig(false).harness.pi).toMatchObject({
       name: 'Pi',
-      command: 'npx',
-      args: ['-y', 'pi-acp'],
+      command: 'pi',
+      args: [],
+      adapterKind: 'native',
       protocol: 'acp',
     })
   })
 
-  test('includes the native OpenCode ACP harness', () => {
+  test('includes the native OpenCode harness', () => {
     expect(defaultConfig(false).harness.opencode).toMatchObject({
       name: 'OpenCode',
       command: 'opencode',
-      args: ['acp'],
+      args: [],
       protocol: 'acp',
     })
   })
@@ -200,12 +243,13 @@ describe('default harness configuration', () => {
       'claude-code-acp',
       'codex-acp',
       'kimi',
-      'gemini',
       'opencode',
+      'pi',
+      'cursor',
+      'gemini',
       'grok',
       'devin',
       'hermes',
-      'pi',
     ])
     expect(
       reconcileConfig(
@@ -247,4 +291,36 @@ describe('default harness configuration', () => {
       ).harness.mock,
     ).toMatchObject({ name: 'My mock' })
   })
+})
+
+test('infers dedicated ACP providers and changes only the exact shipped Grok arguments', () => {
+  const defaults = defaultConfig(false)
+  for (const key of ['gemini', 'grok', 'devin', 'hermes']) {
+    expect(defaults.harness[key].adapterKind).toBe('acp')
+    const inferred = { ...defaults.harness[key] }
+    delete inferred.adapterKind
+    expect(
+      convertConfig({ ...defaults, harness: { [key]: inferred } }).harness[key]
+        .adapterKind,
+    ).toBe('acp')
+    expect(
+      convertConfig({
+        ...defaults,
+        harness: { [key]: { ...inferred, adapterKind: 'custom' } },
+      }).harness[key].adapterKind,
+    ).toBe('custom')
+  }
+  const grok = { ...defaults.harness.grok, args: ['agent', 'stdio'] }
+  expect(
+    convertConfig({ ...defaults, harness: { grok } }).harness.grok.args,
+  ).toEqual(defaults.harness.grok.args)
+  for (const entry of [
+    { ...grok, command: '/owned/grok' },
+    { ...grok, args: ['agent', 'stdio', '--custom'] },
+    { ...grok, adapterKind: 'custom' as const },
+  ])
+    expect(
+      convertConfig({ ...defaults, harness: { grok: entry } }).harness.grok
+        .args,
+    ).toEqual(entry.args)
 })

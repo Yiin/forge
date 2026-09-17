@@ -6,7 +6,7 @@ import { createProject, createSession } from '../db/queries.js'
 import { SessionManager } from '../sessions/manager.js'
 import { sessionRoutes } from './sessions.js'
 import { UploadStore } from '../uploads/store.js'
-import { QuestionManager } from '../acp/questions.js'
+import { NativeInteractions } from '../sessions/native-interactions.js'
 
 describe('prompt REST lifecycle', () => {
   it('includes durable native interaction status in the session snapshot', async () => {
@@ -22,12 +22,30 @@ describe('prompt REST lifecycle', () => {
     const manager = new SessionManager(db, new EventBus(), () => {
       throw new Error('snapshot read must not start a harness')
     })
-    const questions = new QuestionManager({ db, now: () => 1000 })
-    void questions.handleExtension('cursor/ask_question', {
-      sessionId: session.id,
-      toolCallId: 'request-1',
-      questions: [{ prompt: 'Continue?', options: [] }],
-    })
+    const questions = new NativeInteractions(db, new EventBus())
+    questions.register(
+      session.id,
+      {
+        type: 'permission_requested',
+        runtimeGeneration: 'generation',
+        deliveryId: 'delivery',
+        runId: 'run',
+        turnId: 'turn',
+        itemId: 'item',
+        request: {
+          requestId: 'request-1',
+          toolCallId: null,
+          title: 'Continue?',
+          options: [{ id: 'allow', label: 'Allow' }],
+        },
+      },
+      {
+        type: 'ask_user_question',
+        questionId: 'request-1',
+        questions: [{ question: 'Continue?', options: [] }],
+      },
+      () => async () => {},
+    )
     const response = await sessionRoutes(
       manager,
       undefined,

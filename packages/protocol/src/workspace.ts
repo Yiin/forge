@@ -12,7 +12,7 @@ export const resolvedWorkspaceSchema = z.object({
     workspaceTargetSchema.options[0],
     workspaceTargetSchema.options[1],
   ]),
-  projectId: id,
+  projectId: id.nullable(),
   cwd: z.string(),
   worktreePath: z.string().nullable(),
   workspaceId: z.string(),

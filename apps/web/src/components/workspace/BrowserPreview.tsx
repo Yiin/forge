@@ -16,9 +16,9 @@ export function normalizeBrowserAddress(value: string) {
   return url
 }
 
-function previewPage(target: PreviewTarget, path: string) {
+export function previewPage(target: PreviewTarget, path: string) {
   if (!target.publicUrl) return null
-  return new URL(normalizePreviewPath(path), target.publicUrl).toString()
+  return new URL(`.${normalizePreviewPath(path)}`, target.publicUrl).toString()
 }
 
 export function normalizePreviewPath(value: string) {

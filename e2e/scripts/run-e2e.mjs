@@ -69,6 +69,7 @@ export async function runE2e(
     startServer = startDevServer,
     spawnChild = spawn,
     signalSource = process,
+    cleanupTimeoutMs = 5000,
   } = {},
 ) {
   let server, child, requestedSignal, primaryFailure
@@ -121,14 +122,29 @@ export async function runE2e(
     throw error
   } finally {
     try {
-      await server?.close().catch((cleanup) => {
+      const cleanup = server?.close().catch((error) => {
         if (primaryFailure)
           throw new AggregateError(
-            [primaryFailure, cleanup],
+            [primaryFailure, error],
             'E2E run and cleanup failed',
           )
-        throw cleanup
+        throw error
       })
+      // A hung server close must not strand the child exit code: bound the
+      // wait, otherwise the runE2e promise never settles and the process
+      // exits 0 on an empty event loop.
+      let timer
+      const timeout = new Promise((resolve) => {
+        timer = setTimeout(() => {
+          console.error('E2E server cleanup timed out')
+          resolve()
+        }, cleanupTimeoutMs)
+      })
+      try {
+        await Promise.race([cleanup, timeout])
+      } finally {
+        clearTimeout(timer)
+      }
     } finally {
       signalSource.off('SIGINT', interrupt)
       signalSource.off('SIGTERM', terminate)

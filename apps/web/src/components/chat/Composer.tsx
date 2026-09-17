@@ -18,7 +18,7 @@ import {
 import { Spinner } from '@/components/ui/spinner'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent } from 'react'
 import { api } from '../../lib/api'
 import { useMessagesStore } from '../../stores/messages'
@@ -37,6 +37,7 @@ import {
   replaceComposerTrigger,
   type ComposerTrigger,
 } from './composer-triggers'
+import { useComposerLayout } from './useComposerLayout'
 import { AskUserQuestionPanel } from './AskUserQuestionPanel'
 import {
   accountsApi,
@@ -62,7 +63,7 @@ import {
 
 /** Ghost pill trigger: the composer footer's shared look for its selects. */
 const PILL_TRIGGER_CLASS =
-  'h-9 w-auto min-w-0 max-w-40 shrink-0 gap-1 border-transparent bg-transparent px-2 text-xs text-muted-foreground/70 shadow-none before:hidden hover:bg-accent/50 hover:text-foreground/80 sm:h-8 sm:max-w-48'
+  'h-9 w-auto min-w-0 max-w-40 shrink-0 gap-1 border-transparent bg-transparent px-2 text-xs text-muted-foreground shadow-none before:hidden hover:bg-accent/50 hover:text-foreground/80 sm:h-8 sm:max-w-48'
 
 const commandDefaults: ComposerCommand[] = [
   { id: 'btw', label: '/btw', group: 'Built-in', value: '/btw ' },
@@ -142,10 +143,8 @@ export function Composer({
   const [configSelections, setConfigSelections] = useState<ConfigSelections>({})
   const [interrupting, setInterrupting] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState(false)
   const modelRequestAccount = useRef<string | undefined>(undefined)
   const submitting = useRef(false)
-  const textarea = useRef<HTMLTextAreaElement>(null)
   const volatile = useMessagesStore((state) => state.volatile)
   const queued = useMessagesStore(
     (state) => state.queuedBySession[sessionId] ?? EMPTY_QUEUED_PROMPTS,
@@ -153,15 +152,6 @@ export function Composer({
   const contextWindow = useSessionsStore(
     (state) => state.contextWindow[sessionId],
   )
-  useLayoutEffect(() => {
-    const node = textarea.current
-    if (!node) return
-    node.style.height = 'auto'
-    const height = expanded
-      ? Math.min(200, Math.max(70, node.scrollHeight))
-      : 49
-    node.style.height = `${height}px`
-  }, [expanded, text])
   useEffect(() => {
     const events = volatile.filter(
       (event): event is Extract<typeof event, { type: 'availableCommands' }> =>
@@ -276,13 +266,20 @@ export function Composer({
       })
   }, [draftMode, sessionId, sending])
   const [harnesses, setHarnesses] = useState<
-    Array<{ key: string; name?: string; enabled?: boolean }>
+    Array<{
+      key: string
+      name?: string
+      enabled?: boolean
+      protocol?: 'acp' | 'pty'
+      adapterKind?: 'native' | 'acp' | 'pty' | 'custom'
+    }>
   >(harness ? [{ key: harness }] : [])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [accountSnapshots, setAccountSnapshots] = useState<
     HarnessAccountSnapshot[]
   >([])
   const [accountsLoaded, setAccountsLoaded] = useState(false)
+  const [harnessesLoaded, setHarnessesLoaded] = useState(false)
   useEffect(() => {
     const requestedAccountId = selection.accountId
     modelRequestAccount.current = requestedAccountId
@@ -312,7 +309,10 @@ export function Composer({
   useEffect(() => {
     void accountsApi
       .listHarnesses()
-      .then(setHarnesses)
+      .then((next) => {
+        setHarnesses(next)
+        setHarnessesLoaded(true)
+      })
       .catch(() => undefined)
   }, [])
   useEffect(() => {
@@ -333,9 +333,10 @@ export function Composer({
   const harnessOptions = buildHarnessOptions(harnesses, accounts, Date.now())
   const showHarnessPicker =
     harnessOptions.length > 0 || (!accountsLoaded && Boolean(selection.harness))
-  const selected = accountsLoaded
-    ? defaultSelection(harnessOptions, selection)
-    : selection
+  const selected =
+    accountsLoaded && harnessesLoaded
+      ? defaultSelection(harnessOptions, selection)
+      : selection
   useEffect(() => {
     if (
       selected.harness !== selection.harness ||
@@ -343,12 +344,14 @@ export function Composer({
     )
       setSelection(selected)
   }, [selected, selection])
+  const canSelectWithoutAccount = harnessOptions.some(
+    (option) => option.harness === selected.harness && option.accountOptional,
+  )
   const update = (
     value: string,
     cursor = textarea.current?.selectionStart ?? value.length,
   ) => {
     setText(value)
-    setExpanded(value.includes('\n') || value.length > 160)
     onTextChange?.(value)
     setTrigger(detectComposerTrigger(value, cursor))
   }
@@ -366,7 +369,6 @@ export function Composer({
     })
   }
   const upload = async (file: File, retryId?: string) => {
-    if (draftMode && !draftProjectId) return
     const temp = `local-${crypto.randomUUID()}`
     const id = retryId ?? temp
     if (retryId)
@@ -396,7 +398,9 @@ export function Composer({
           dispatchUploads((state) =>
             attachmentUploadsReducer(state, { type: 'progress', id, progress }),
           ),
-        draftProjectId,
+        draftMode
+          ? { draftId: sessionId, projectId: draftProjectId }
+          : undefined,
       )
       dispatchUploads((state) =>
         attachmentUploadsReducer(state, {
@@ -456,7 +460,7 @@ export function Composer({
       sending ||
       submitting.current ||
       (!value && !hasAttachments) ||
-      (accountsLoaded && !selected.accountId) ||
+      (accountsLoaded && !selected.accountId && !canSelectWithoutAccount) ||
       !canSendUploads(uploads)
     )
       return
@@ -525,16 +529,32 @@ export function Composer({
     !sending &&
     hasContent &&
     canSendUploads(uploads) &&
-    Boolean(selected.accountId || !accountsLoaded)
+    Boolean(selected.accountId || canSelectWithoutAccount || !accountsLoaded)
   const stopping = running && onInterrupt && !hasContent
   const accountSnapshot = accountSnapshots.find(
     (snapshot) => snapshot.accountId === selected.accountId,
   )
   const modelTrigger = resolveModelTriggerLabel(selection.model, models)
+  const {
+    form,
+    controls,
+    send: sendControls,
+    textarea,
+    expanded,
+  } = useComposerLayout(
+    text,
+    draftMode ||
+      uploads.items.length > 0 ||
+      queued.length > 0 ||
+      Boolean(sendError),
+  )
+
   return (
     <>
       <AskUserQuestionPanel sessionId={sessionId} />
       <form
+        ref={form}
+        data-composer-mode={expanded ? 'expanded' : 'compact'}
         className="composer-root mx-auto w-full min-w-0 max-w-3xl"
         onSubmit={(event) => {
           event.preventDefault()
@@ -554,7 +574,7 @@ export function Composer({
           addFiles(event.dataTransfer.files)
         }}
       >
-        <div className="group relative rounded-[22px] p-px transition-colors duration-200">
+        <div className="group relative rounded-[26px] transition-colors duration-200">
           {dragging && (
             <div className="pointer-events-none absolute -inset-2 z-5 grid place-items-center rounded-[24px] border-2 border-dashed border-primary bg-primary/10 text-sm font-medium text-primary">
               Drop files to upload
@@ -562,7 +582,8 @@ export function Composer({
           )}
           <div
             className={cn(
-              'chat-composer-glass rounded-[20px] border transition-[background-color] duration-200 has-focus-visible:border-foreground/40',
+              'chat-composer-glass rounded-[26px] border transition-[background-color] duration-200 has-focus-visible:border-foreground/40',
+              !expanded && 'grid grid-cols-[minmax(0,1fr)_auto] items-center',
               dragging
                 ? 'border-primary/70 bg-accent/45'
                 : 'border-black/12 dark:border-transparent dark:inset-ring-1 dark:inset-ring-white/5',
@@ -635,7 +656,7 @@ export function Composer({
                 />
               </div>
             )}
-            <div className="relative px-3 pt-3.5 pb-2 sm:px-4 sm:pt-4">
+            <div className="relative min-w-0 px-4">
               {trigger && (
                 <div className="absolute inset-x-0 bottom-full z-20 mb-2">
                   <CommandMenu
@@ -657,8 +678,10 @@ export function Composer({
                 value={text}
                 rows={1}
                 className={cn(
-                  'max-h-50 w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-relaxed text-foreground placeholder:text-muted-foreground/50 focus:outline-none sm:text-[14px]',
-                  expanded ? 'min-h-17.5' : 'min-h-12.25',
+                  'block w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-[22.75px] text-foreground placeholder:text-muted-foreground focus:outline-none sm:text-[14px]',
+                  expanded
+                    ? 'min-h-[76px] max-h-[260px] pt-4 pb-1'
+                    : 'h-[47px] py-3',
                 )}
                 onPaste={paste}
                 onChange={(event) => update(event.target.value)}
@@ -703,8 +726,18 @@ export function Composer({
                 {sendError}
               </p>
             )}
-            <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
-              <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div
+              className={cn(
+                'flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2.5',
+                expanded
+                  ? 'h-[46px] pt-1 pb-2.5 pointer-coarse:h-[58px]'
+                  : 'h-11 py-1.5',
+              )}
+            >
+              <div
+                ref={controls}
+                className="-m-1 flex min-w-0 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              >
                 <TooltipProvider delay={300}>
                   <Tooltip>
                     <TooltipTrigger
@@ -715,7 +748,7 @@ export function Composer({
                               variant: 'ghost',
                               size: 'icon-sm',
                             }),
-                            'shrink-0 cursor-pointer text-muted-foreground/70 hover:text-foreground/80',
+                            'shrink-0 cursor-pointer text-muted-foreground hover:text-foreground/80',
                           )}
                         />
                       }
@@ -746,20 +779,30 @@ export function Composer({
                     value={
                       selection.accountId
                         ? `${selection.harness}:${selection.accountId}`
-                        : ''
+                        : selection.harness
                     }
-                    items={harnessOptions.flatMap((option) =>
-                      option.accounts.map((account) => ({
+                    items={harnessOptions.flatMap((option) => [
+                      ...(option.accountOptional
+                        ? [
+                            {
+                              value: option.harness,
+                              label: option.accounts.length
+                                ? `${option.label} default`
+                                : option.label,
+                            },
+                          ]
+                        : []),
+                      ...option.accounts.map((account) => ({
                         value: `${option.harness}:${account.id}`,
                         label: account.label,
                       })),
-                    )}
+                    ])}
                     onValueChange={(value) => {
                       if (value === null) return
                       const separator = value.indexOf(':')
                       const picked =
                         separator < 0
-                          ? { harness: value }
+                          ? { harness: value, accountId: undefined }
                           : {
                               harness: value.slice(0, separator),
                               accountId: value.slice(separator + 1),
@@ -784,6 +827,13 @@ export function Composer({
                       {harnessOptions.map((option) => (
                         <SelectGroup key={option.harness}>
                           <SelectLabel>{option.label}</SelectLabel>
+                          {option.accountOptional && (
+                            <SelectItem value={option.harness}>
+                              {option.accounts.length
+                                ? `${option.label} default`
+                                : option.label}
+                            </SelectItem>
+                          )}
                           {option.accounts.map((account) => (
                             <SelectItem
                               key={`${option.harness}:${account.id}`}
@@ -897,7 +947,10 @@ export function Composer({
                   />
                 )}
               </div>
-              <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
+              <div
+                ref={sendControls}
+                className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+              >
                 {contextWindow && (
                   <ContextWindowMeter
                     usage={contextWindow}
@@ -906,7 +959,7 @@ export function Composer({
                 )}
                 <button
                   type={stopping ? 'button' : 'submit'}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-solid text-solid-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer hover:scale-105 hover:bg-solid/90 disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none sm:h-8 sm:w-8"
+                  className="flex h-7 w-7 pointer-coarse:h-11 pointer-coarse:w-11 items-center justify-center rounded-full bg-solid text-solid-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer hover:scale-105 hover:bg-solid/90 disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none"
                   disabled={stopping ? interrupting : !canSubmit}
                   title={
                     stopping
@@ -931,7 +984,7 @@ export function Composer({
                         fill="currentColor"
                         aria-hidden="true"
                       >
-                        <rect x="2" y="2" width="8" height="8" rx="1.5" />
+                        <rect x="0.5" y="0.5" width="11" height="11" rx="3" />
                       </svg>
                     )
                   ) : sending ? (

@@ -1,3 +1,4 @@
+import { NativeCleanupError } from './native-cleanup.js'
 import { pbkdf2 } from 'node:crypto'
 import * as processGroups from './process-group.js'
 import { getEventListeners, once } from 'node:events'
@@ -658,3 +659,56 @@ it.each([false, true])(
       await expectStopped(captured!.child.pid)
   },
 )
+
+it('keeps failed startup cleanup typed and joins its original held close', async () => {
+  let runtime: NativeProcess | undefined
+  let close: (() => Promise<void>) | undefined
+  let restore: (() => void) | undefined
+  const entered = deferred<void>(),
+    release = deferred<void>()
+  let settled = false
+  const work = startNativeProcess(
+    {
+      command: process.execPath,
+      args: ['-e', 'setInterval(()=>{},1000)'],
+      onCreated(owner) {
+        runtime = owner
+        close = owner.close.bind(owner)
+        const spy = vi.spyOn(owner, 'close').mockImplementation(async () => {
+          entered.resolve()
+          await release.promise
+          await close!()
+          throw Error('credential=private-cleanup-value')
+        })
+        restore = () => spy.mockRestore()
+      },
+    },
+    async () => {
+      throw Error('startup failed')
+    },
+  )
+  const observed = work
+    .then(
+      (value) => value,
+      (error) => error,
+    )
+    .finally(() => {
+      settled = true
+    })
+  try {
+    await entered.promise
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    release.resolve()
+    const error = await observed
+    expect(error).toBeInstanceOf(NativeCleanupError)
+    expect(error.message).toBe('Native cleanup failed')
+    expect(error.cause).toBeUndefined()
+    await expectStopped(runtime!.child.pid!)
+  } finally {
+    release.resolve()
+    await observed
+    restore?.()
+    await close?.()
+  }
+})

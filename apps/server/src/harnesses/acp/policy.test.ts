@@ -232,3 +232,17 @@ describe('Grok original policy replacement ownership', () => {
     expect(f.old.prompt).not.toHaveBeenCalled()
   })
 })
+
+it('exposes intentional lifetime retirement from the original runtime', async () => {
+  let expired = false
+  const original = peer()
+  Object.defineProperty(original, 'requiresResume', { get: () => expired })
+  const { handle } = await setup(async () => {}, original)
+  try {
+    expect(handle.requiresResume).toBe(false)
+    expired = true
+    expect(handle.requiresResume).toBe(true)
+  } finally {
+    await handle.kill()
+  }
+})

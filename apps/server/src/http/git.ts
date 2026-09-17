@@ -6,6 +6,7 @@ import { gitDiff, gitContent, latestTurnDiff } from '../git/diff.js'
 import { gitHistory } from '../git/history.js'
 import { latestTurnSnapshot } from '../git/turnSnapshots.js'
 import { WorkspaceTargets } from '../workspace/target.js'
+import { WorkspaceError } from '../workspace/paths.js'
 import {
   deleteMergedTemporaryBranch,
   listWorktrees,
@@ -67,6 +68,66 @@ export function gitRoutes(options: {
       }
     return { cwd: workspace.cwd, workspace }
   }
+  for (const operation of ['status', 'branches', 'diff', 'history'] as const) {
+    app.get(`/api/sessions/:sessionId/git/${operation}`, async (c) => {
+      try {
+        const sessionId = c.req.param('sessionId')
+        const resolved = await targets.resolve({ kind: 'session', sessionId })
+        // Every response reports the identity of this one resolved target, so
+        // clients never mix git data and workspace revisions from two reads.
+        const workspace = {
+          workspaceId: resolved.workspaceId,
+          workspaceRevision: resolved.workspaceRevision,
+        }
+        if (operation === 'status')
+          return c.json({
+            ...gitStatusSchema.parse(await gitStatus(resolved.cwd)),
+            workspace,
+          })
+        if (operation === 'branches')
+          return c.json({
+            ...gitRefsPageSchema.parse(
+              await listRefs(resolved.cwd, {
+                query: c.req.query('query'),
+                limit: Number(c.req.query('limit') ?? 50),
+                cursor: Number(c.req.query('cursor') ?? 0),
+              }),
+            ),
+            workspace,
+          })
+        if (operation === 'history') {
+          const result = await gitHistory({
+            cwd: resolved.cwd,
+            cursor: c.req.query('cursor'),
+            limit: Number(c.req.query('limit') ?? 50),
+          })
+          return c.json({ ...result, workspace })
+        }
+        const scope = c.req.query('scope') ?? 'working'
+        if (!['working', 'branch', 'latest-turn', 'commit'].includes(scope))
+          return c.json({ error: 'Invalid diff scope' }, 400)
+        const result =
+          scope === 'latest-turn'
+            ? await latestTurnDiff({
+                cwd: resolved.cwd,
+                snapshot: latestTurnSnapshot(db, sessionId),
+              })
+            : await gitDiff({
+                cwd: resolved.cwd,
+                scope: scope as 'working' | 'branch' | 'commit',
+                baseRef: c.req.query('baseRef'),
+                commit: c.req.query('commit'),
+              })
+        return c.json({ ...result, workspace })
+      } catch (error) {
+        const status = error instanceof WorkspaceError ? error.status : 400
+        return c.json(
+          { error: error instanceof Error ? error.message : String(error) },
+          status,
+        )
+      }
+    })
+  }
   app.get('/api/projects/:id/git/status', async (c) => {
     const result = await cwdFor(c.req.param('id'), c.req.query('cwd'))
     if ('error' in result) return c.json({ error: result.error }, result.status)
@@ -126,6 +187,8 @@ export function gitRoutes(options: {
           cwd: resolved.cwd,
           cursor: c.req.query('cursor'),
           limit: Number(c.req.query('limit') ?? 50),
+          ref: c.req.query('ref'),
+          query: c.req.query('query'),
         }),
       )
     } catch (error) {

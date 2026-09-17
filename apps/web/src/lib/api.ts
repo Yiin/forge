@@ -93,16 +93,17 @@ export class ForgeApi {
   listDirectories(path?: string) {
     return this.get(`/api/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`)
   }
-  gitStatus(projectId: string, cwd?: string) {
+  gitStatus(projectId: string, cwd?: string, sessionId?: string) {
     const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''
     return this.get(
-      `/api/projects/${encodeURIComponent(projectId)}/git/status${query}`,
+      `${sessionId ? `/api/sessions/${encodeURIComponent(sessionId)}` : `/api/projects/${encodeURIComponent(projectId)}`}/git/status${query}`,
     )
   }
   gitBranches(
     projectId: string,
     params: {
       cwd?: string
+      sessionId?: string
       query?: string
       limit?: number
       cursor?: number
@@ -113,7 +114,7 @@ export class ForgeApi {
       if (value !== undefined) query.set(key, String(value))
     const suffix = query.toString() ? `?${query}` : ''
     return this.get(
-      `/api/projects/${encodeURIComponent(projectId)}/git/branches${suffix}`,
+      `${params.sessionId ? `/api/sessions/${encodeURIComponent(params.sessionId)}` : `/api/projects/${encodeURIComponent(projectId)}`}/git/branches${suffix}`,
     )
   }
   gitDiff(
@@ -130,7 +131,7 @@ export class ForgeApi {
     for (const [key, value] of Object.entries(params))
       if (value !== undefined) query.set(key, String(value))
     return this.get(
-      `/api/projects/${encodeURIComponent(projectId)}/git/diff?${query}`,
+      `${params.sessionId ? `/api/sessions/${encodeURIComponent(params.sessionId)}` : `/api/projects/${encodeURIComponent(projectId)}`}/git/diff?${query}`,
     )
   }
   gitHistory(
@@ -140,13 +141,15 @@ export class ForgeApi {
       sessionId?: string
       cursor?: string
       limit?: number
+      ref?: string
+      query?: string
     } = {},
   ) {
     const query = new URLSearchParams()
     for (const [key, value] of Object.entries(params))
       if (value !== undefined) query.set(key, String(value))
     return this.get(
-      `/api/projects/${encodeURIComponent(projectId)}/git/history?${query}`,
+      `${params.sessionId ? `/api/sessions/${encodeURIComponent(params.sessionId)}` : `/api/projects/${encodeURIComponent(projectId)}`}/git/history?${query}`,
     )
   }
   listWorktrees(projectId: string) {
@@ -273,10 +276,10 @@ export class ForgeApi {
     sessionId: string,
     file: File,
     onProgress?: UploadProgress,
-    projectId?: string,
+    draft?: { draftId: string; projectId?: string },
   ) {
-    const path = projectId
-      ? `/api/drafts/${encodeURIComponent(sessionId)}/uploads`
+    const path = draft
+      ? `/api/drafts/${encodeURIComponent(draft.draftId)}/uploads`
       : `/api/sessions/${encodeURIComponent(sessionId)}/uploads`
     const init = (await this.post(
       path,
@@ -287,7 +290,7 @@ export class ForgeApi {
         sizeBytes: file.size,
       },
       undefined,
-      projectId ? { 'X-Project-Id': projectId } : undefined,
+      draft?.projectId ? { 'X-Project-Id': draft.projectId } : undefined,
     )) as { attachmentId: string; putUrl: string }
     await putUpload(init, file, this.baseUrl, onProgress)
     onProgress?.(1)

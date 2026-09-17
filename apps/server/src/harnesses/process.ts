@@ -1,3 +1,4 @@
+import { NativeCleanupError } from './native-cleanup.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
 import * as processGroups from './process-group.js'
@@ -140,14 +141,14 @@ export class NativeProcess {
         throw new Error('Native startup timed out')
       return { process: runtime, value }
     } catch (error) {
-      const safe = diagnosticError(error, options.secrets)
+      const safe =
+        error instanceof NativeCleanupError
+          ? error
+          : diagnosticError(error, options.secrets)
       try {
         await runtime.close(safe)
       } catch {
-        throw diagnosticError(
-          new Error(`${safe.message}; native process cleanup failed`),
-          options.secrets,
-        )
+        throw new NativeCleanupError(() => runtime.close(safe))
       }
       throw safe
     } finally {

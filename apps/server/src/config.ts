@@ -23,6 +23,7 @@ import {
 import { epicRunConfig, type EpicRunConfig } from '@forge/protocol/rolePolicy'
 import { join } from 'node:path'
 import { validateTerminalAccess } from './terminals/origin.js'
+import { acpProviderDescriptors } from './harnesses/acp/profiles.js'
 
 type SqliteDb = {
   exec(sql: string): unknown
@@ -87,19 +88,37 @@ export function defaultConfig(
   dev = process.env.NODE_ENV !== 'production',
 ): ForgeConfig {
   const harness: Record<string, HarnessConfig> = {
-    'claude-code-acp': defaultEntry('Claude Code ACP', 'npx', [
-      '@zed-industries/claude-code-acp',
-    ]),
-    'codex-acp': defaultEntry('Codex ACP', 'npx', [
-      '@zed-industries/codex-acp',
-    ]),
-    kimi: defaultEntry('Kimi', 'kimi', ['acp']),
-    gemini: defaultEntry('Gemini', 'gemini', ['--experimental-acp']),
-    opencode: defaultEntry('OpenCode', 'opencode', ['acp']),
-    grok: defaultEntry('Grok', 'grok', ['agent', 'stdio']),
-    devin: defaultEntry('Devin', 'devin', ['acp']),
-    hermes: defaultEntry('Hermes', 'hermes', ['acp']),
-    pi: defaultEntry('Pi', 'npx', ['-y', 'pi-acp']),
+    'claude-code-acp': {
+      ...defaultEntry('Claude Code', 'claude', []),
+      adapterKind: 'native',
+    },
+    'codex-acp': {
+      ...defaultEntry('Codex', 'codex', []),
+      adapterKind: 'native',
+    },
+    kimi: { ...defaultEntry('Kimi', 'kimi', []), adapterKind: 'native' },
+    opencode: {
+      ...defaultEntry('OpenCode', 'opencode', []),
+      adapterKind: 'native',
+    },
+    pi: { ...defaultEntry('Pi', 'pi', []), adapterKind: 'native' },
+    cursor: {
+      ...defaultEntry('Cursor', process.execPath, []),
+      adapterKind: 'native',
+    },
+    ...Object.fromEntries(
+      ['gemini', 'grok', 'devin', 'hermes'].map((key) => {
+        const profile =
+          acpProviderDescriptors[key as 'gemini' | 'grok' | 'devin' | 'hermes']
+        return [
+          key,
+          {
+            ...defaultEntry(profile.name, profile.command, [...profile.args]),
+            adapterKind: 'acp' as const,
+          },
+        ]
+      }),
+    ),
   }
   if (dev)
     harness.mock = {
@@ -260,6 +279,7 @@ export function loadConfigSync(path?: string): ForgeConfig {
     dataDir?: unknown
     port?: unknown
     terminalAccess?: unknown
+    preview?: unknown
     harness?: Record<string, unknown>
     settings?: Record<string, unknown>
   }
@@ -280,7 +300,7 @@ export function loadConfigSync(path?: string): ForgeConfig {
     }
     result[key] = {
       ...checked.data,
-      enabled: commandAvailable(checked.data.command),
+      enabled: checked.data.enabled && commandAvailable(checked.data.command),
     }
   }
   const checked = forgeConfigSchema.safeParse({
@@ -290,6 +310,7 @@ export function loadConfigSync(path?: string): ForgeConfig {
       document.terminalAccess ?? { mode: 'loopback' },
     ),
     harness: result,
+    preview: document.preview,
     settings: document.settings,
   })
   if (!checked.success)
@@ -308,11 +329,15 @@ const configBody = (config: ForgeConfig) => ({
   dataDir: config.dataDir,
   port: config.port,
   terminalAccess: validateTerminalAccess(config.terminalAccess),
+  preview: config.preview,
   harness: config.harness,
   settings: config.settings,
 })
 
 const nativeHarnesses = new Set([
+  'claude',
+  'claude-code',
+  'codex',
   'claude-code-acp',
   'codex-acp',
   'kimi',
@@ -325,17 +350,68 @@ function inferredAdapterKind(key: string, entry: HarnessConfig) {
   if (entry.adapterKind) return entry.adapterKind
   if (entry.protocol === 'pty') return 'pty' as const
   if (nativeHarnesses.has(key)) return 'native' as const
+  if (key !== 'custom-acp' && Object.hasOwn(acpProviderDescriptors, key))
+    return 'acp' as const
   return 'custom' as const
 }
 
-/** Convert an old config without changing its executable cutover semantics. */
+/** Preserve configured IDs while replacing the exact shipped ACP wrapper commands. */
+function nativeEntry(key: string, entry: HarnessConfig): HarnessConfig {
+  const adapterKind = inferredAdapterKind(key, entry)
+  if (
+    adapterKind === 'acp' &&
+    key === 'grok' &&
+    entry.command === 'grok' &&
+    JSON.stringify(entry.args) === JSON.stringify(['agent', 'stdio'])
+  )
+    return {
+      ...entry,
+      adapterKind,
+      args: [...acpProviderDescriptors.grok.args],
+    }
+  if (adapterKind !== 'native') return { ...entry, adapterKind }
+  const args = JSON.stringify(entry.args)
+  const wrappers: Record<
+    string,
+    { command: string; args: string[]; native: string }
+  > = {
+    'claude-code-acp': {
+      command: 'npx',
+      args: ['@zed-industries/claude-code-acp'],
+      native: 'claude',
+    },
+    'codex-acp': {
+      command: 'npx',
+      args: ['@zed-industries/codex-acp'],
+      native: 'codex',
+    },
+    pi: { command: 'npx', args: ['-y', 'pi-acp'], native: 'pi' },
+    kimi: { command: 'kimi', args: ['acp'], native: 'kimi' },
+    opencode: { command: 'opencode', args: ['acp'], native: 'opencode' },
+  }
+  const wrapper = wrappers[key]
+  if (
+    wrapper &&
+    entry.command === wrapper.command &&
+    args === JSON.stringify(wrapper.args)
+  )
+    return {
+      ...entry,
+      adapterKind,
+      command: wrapper.native,
+      args: [],
+      name: entry.name?.replace(/ ACP$/, ''),
+    }
+  return { ...entry, adapterKind }
+}
+
 export function convertConfig(config: ForgeConfig): ForgeConfig {
   return {
     ...config,
     harness: Object.fromEntries(
       Object.entries(config.harness).map(([key, entry]) => [
         key,
-        { ...entry, adapterKind: inferredAdapterKind(key, entry) },
+        nativeEntry(key, entry),
       ]),
     ),
   }

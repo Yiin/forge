@@ -102,7 +102,7 @@ const server = createServer(async (req, res) => {
       stream.write(
         `data: ${JSON.stringify({ directory: cwd, payload: { id: `evt_${++eventId}`, type: 'session.updated', properties: { sessionID: session.id, info: session } } })}\n\n`,
       )
-    if (config.mode === 'automatic') {
+    if (config.mode === 'automatic' || config.mode === 'complete') {
       const user = {
         info: {
           id: body.messageID,
@@ -134,7 +134,7 @@ const server = createServer(async (req, res) => {
       const final = {
         info: {
           id: 'msg_final',
-          parentID: 'msg_auto',
+          parentID: config.mode === 'complete' ? body.messageID : 'msg_auto',
           sessionID: 'ses_fixture',
           role: 'assistant',
           time: { created: 3, completed: 4 },
@@ -150,7 +150,9 @@ const server = createServer(async (req, res) => {
           },
         ],
       }
-      history.push(user, auto, final)
+      history.push(
+        ...(config.mode === 'complete' ? [user, final] : [user, auto, final]),
+      )
       for (const stream of streams) {
         stream.write(
           `data: ${JSON.stringify({ directory: cwd, payload: { id: `evt_${++eventId}`, type: 'message.updated', properties: { sessionID: 'ses_fixture', info: user.info } } })}\n\n`,

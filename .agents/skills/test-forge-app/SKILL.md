@@ -22,7 +22,7 @@ The values are on one line for easy capture.
 It starts the normal Node server through the production request loader.
 It sets `FORGE_CONFIG` to the isolated config file.
 It does not set `FORGE_E2E`, so the in-memory stub is not used.
-The helper also seeds a `harness_accounts` row for the mock harness.
+Native fixtures seed an isolated selected account. Explicit custom ACP fixtures use the native-default scope.
 
 Specs that call `launchForge()` use the same real-server path.
 Do not use `FORGE_E2E=1` for browser QA.
@@ -35,18 +35,35 @@ Create a project, open a session, and send a prompt from the composer.
 The fake ACP agent returns three streamed text chunks.
 Reload during the turn and verify the complete reply remains visible.
 
-## Fake agent controls
+## Production fixture scenarios
 
-The e2e helper starts the fake agent for the test server.
-Set these environment flags before launching when needed:
+`launchForge()` defaults to the source-shaped custom ACP peer in `apps/server/test/fixtures/acp-mock-agent.ts`.
+Pass fixture controls through `fakeAgentEnv`; ambient server environment flags do not configure the peer.
+For example:
 
-- `FORGE_FAKE_HANG=1` keeps a turn open for reconnect tests.
-- `FORGE_FAKE_DELAY_MS=120` slows each streamed chunk.
-- `FORGE_FAKE_NO_LOAD_SESSION=1` removes load-session capability.
+```ts
+await launchForge({
+  fakeAgentEnv: {
+    FORGE_MOCK_HANG_PROMPT: '1',
+    FORGE_MOCK_REQUEST_LOG_PATH: '/tmp/owned-fixture/requests.jsonl',
+  },
+})
+```
 
-AskUserQuestion and tool-call scenarios use the server mock fixture. They are
-not available from the browser launcher yet. Use `FORGE_MOCK_ASK_QUESTION=1`,
-`FORGE_MOCK_EMIT_TOOL_CALLS=1`, or `FORGE_MOCK_EMIT_SUBAGENT=1` in server tests.
+The fixture also supports `FORGE_MOCK_PROMPT_DELAY_MS`, `FORGE_MOCK_EMIT_TOOL_CALLS`, and `FORGE_MOCK_OMIT_LOAD_SESSION_CAPABILITY`.
+Custom ACP approvals remain permissions. Tool-name guessing does not convert them into native questions or child sessions.
+
+For native questions, images, steering, and resume, use:
+
+```ts
+await launchForge({ fakeNative: { kind: 'claude', directory: peerDirectory } })
+```
+
+Create `scenario.json` inside the owned peer directory before launch.
+Use the source-shaped frames in `e2e/specs/native-claude.spec.ts` and `ask-question.spec.ts`.
+The peer records original stdin frames for exact request and binding assertions.
+The specs cover typed answers, queued requests, phone layout, reload, tool output, images, and postrestart prompts.
+These peers do not call live providers. Their success does not prove live authentication or model availability.
 
 ## Inspect SQLite safely
 
@@ -65,12 +82,8 @@ Stop the Forge server before writing database state.
 
 ## Teardown
 
-Send SIGINT to the launcher and wait for it to exit.
-Check for orphan agents:
-
-```sh
-pgrep -af fake-acp-agent || true
-```
-
-Kill only orphan fake-agent processes from this test.
-Remove only the printed temporary data directory when no evidence is needed.
+Send SIGINT to the launcher and wait for its original child to close.
+Programmatic specs must await `stopProxiedForge(page, forge)` in `finally`.
+This joins in-flight proxy work and the original server cleanup.
+Do not signal a process based only on its name or a reused PID.
+Remove only the owned temporary directory after cleanup succeeds, unless evidence must remain.

@@ -93,6 +93,9 @@ export async function openGrokPolicySession(
     })
   }
   const handle: HarnessHandle = {
+    get requiresResume() {
+      return current.requiresResume
+    },
     get binding() {
       return current.binding
     },

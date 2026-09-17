@@ -39,6 +39,38 @@ async function fixture() {
 }
 
 describe('UploadStore', () => {
+  it('stores native output for a live projectless session and rejects deleted project owners', async () => {
+    const { store, db, dir } = await fixture()
+    db.prepare('INSERT INTO sessions(id, project_id) VALUES (?, NULL)').run(
+      'projectless',
+    )
+    const upload = store.init('projectless', {
+      filename: 'output.txt',
+      mime: 'text/plain',
+      sizeBytes: 5,
+    })
+    await store.put(upload.attachmentId, new Response('hello').body!)
+    const row = store.attachment(upload.attachmentId)!
+    expect(row.rel_path).toMatch(/^sessions\/projectless\/files\//)
+    expect(await readFile(join(dir, row.rel_path!), 'utf8')).toBe('hello')
+    const original = store.init('session-one', {
+      filename: 'stale.txt',
+      mime: 'text/plain',
+      sizeBytes: 1,
+    })
+    db.prepare('UPDATE projects SET deleted_at = 1').run()
+    expect(() =>
+      store.init('session-one', {
+        filename: 'no.txt',
+        mime: 'text/plain',
+        sizeBytes: 1,
+      }),
+    ).toThrow('Session not found')
+    await expect(
+      store.put(original.attachmentId, new Response('x').body!),
+    ).rejects.toThrow('Session not found')
+  })
+
   it('promotes a projectless draft attachment into its filesystem session', async () => {
     const { store, db, dir } = await fixture()
     const draft = store.initDraft('draft:filesystem', undefined, {

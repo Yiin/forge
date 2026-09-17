@@ -22,6 +22,46 @@ const command = fileURLToPath(
   new URL('./__fixtures__/agent.mjs', import.meta.url),
 )
 const session = { id: 'session', provider: 'instance', cwd: '/var/tmp' }
+
+it('retains child history until the original snapshot persistence succeeds', async () => {
+  const f = await fixture()
+  const entered = deferred<void>(),
+    release = deferred<void>()
+  const snapshots: unknown[] = []
+  let refuse = true
+  f.deps.saveChildHistory = async (owner, history) => {
+    expect(owner).toEqual(session)
+    snapshots.push(history)
+    entered.resolve()
+    await release.promise
+    if (refuse) throw Error('Original history persistence refused')
+  }
+  let handle: HarnessHandle | undefined
+  try {
+    handle = await createTypedAcpAdapter(f.deps).spawn(session, (event) =>
+      f.events.push(event),
+    )
+    const closing = Promise.resolve(handle.kill())
+    const rejection = expect(closing).rejects.toThrow(
+      'Original history persistence refused',
+    )
+    await entered.promise
+    expect(() =>
+      f.deps.host.reserve('instance', 'retained', 128 * 1024 * 1024),
+    ).toThrow('resource limit')
+    release.resolve()
+    await rejection
+    refuse = false
+    await handle.kill()
+    expect(snapshots).toHaveLength(2)
+    expect(snapshots[1]).toEqual(snapshots[0])
+    f.deps.host.reserve('instance', 'retained', 128 * 1024 * 1024)()
+  } finally {
+    release.resolve()
+    refuse = false
+    await f.cleanup(handle)
+  }
+})
 async function fixture(
   scenario = 'normal',
   beforeCommit?: (transaction: PrefixTransaction) => Promise<void>,
@@ -436,6 +476,7 @@ describe('typed ACP root runtime', () => {
           .spyOn(Date, 'now')
           .mockReturnValue(Date.now() + 24 * 60 * 60 * 1000 + 60000)
         restore = () => clock.mockRestore()
+        expect(handle.requiresResume).toBe(true)
         callback()
         if (active) {
           expect(() => f.deps.host.reserve('instance', 'processes')).toThrow(
@@ -696,3 +737,29 @@ describe('typed ACP root runtime', () => {
     }
   })
 })
+
+it('marks the original handle for exact resume after 256 completed roots', async () => {
+  const f = await fixture()
+  let handle: HarnessHandle | undefined
+  try {
+    handle = await createTypedAcpAdapter(f.deps).spawn(session, (event) =>
+      f.events.push(event),
+    )
+    expect(handle.requiresResume).toBe(false)
+    for (let index = 0; index < 256; index++) {
+      const receipt = await handle.prompt(`root ${index}`)
+      expect(await receipt.completion).toMatchObject({ status: 'completed' })
+    }
+    expect(handle.requiresResume).toBe(true)
+    expect(() => handle!.prompt('root 257')).toThrow()
+    await handle.kill()
+    expect(
+      f.events.filter((event) => event.type === 'turn_completed'),
+    ).toHaveLength(256)
+    expect(
+      f.events.filter((event) => event.type === 'run_failed'),
+    ).toHaveLength(0)
+  } finally {
+    await f.cleanup(handle)
+  }
+}, 30000)

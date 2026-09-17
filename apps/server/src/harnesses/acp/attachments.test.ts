@@ -1,3 +1,4 @@
+import { NativeCleanupError } from '../native-cleanup.js'
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
@@ -504,3 +505,49 @@ describe('ACP authorized input attachments', () => {
     await Promise.all([first.close(), second.close()])
   })
 })
+
+test.each(['held', 'refused'] as const)(
+  'retains metadata cleanup ownership before a reader exists: %s',
+  async (mode) => {
+    const held = deferred<void>()
+    const cleanup = vi.fn(async () => {
+      await held.promise
+      if (mode === 'refused' && cleanup.mock.calls.length === 1)
+        throw Error('original cleanup refused')
+    })
+    const failure = new NativeCleanupError(cleanup)
+    const host = new AcpResourceHost({ attachments: [1, 1] })
+    const helper = createAcpAttachments({
+      host,
+      instanceId: 'instance',
+      authorizedAttachment: async () => {
+        throw failure
+      },
+    })
+    await expect(
+      helper.prepare('session', [input()], capabilities, signal()),
+    ).rejects.toBe(failure)
+    expect(() => host.reserve('instance', 'attachments')).toThrow(
+      'ACP resource limit',
+    )
+    const close = helper.close()
+    expect(helper.close()).toBe(close)
+    const observed = close.catch((error) => error)
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledTimes(1))
+    expect(() => host.reserve('instance', 'attachments')).toThrow(
+      'ACP resource limit',
+    )
+    held.resolve()
+    const result = await observed
+    if (mode === 'refused') {
+      expect(result).toBe(failure)
+      expect(() => host.reserve('instance', 'attachments')).toThrow(
+        'ACP resource limit',
+      )
+      await helper.close()
+      expect(cleanup).toHaveBeenCalledTimes(2)
+    } else expect(result).toBeUndefined()
+    host.reserve('instance', 'attachments')()
+    host.reserve('instance', 'retained', 128 * MiB)()
+  },
+)

@@ -1,5 +1,14 @@
 import {
+  reviewNotesSchema,
+  serializeReviewNotes,
+  type ReviewNote,
+} from '@forge/protocol/review'
+import { WorkspaceTargets } from '../workspace/target.js'
+import { NativeCleanupError } from '../harnesses/native-cleanup.js'
+import {
   appendMessage,
+  appendMessageInTransaction,
+  publishAppendedMessage,
   createSession,
   getActiveSession,
   getSession,
@@ -111,6 +120,7 @@ export class SessionManager {
     private readonly idleMs = 15 * 60 * 1000,
     private readonly requiresAccount: (harness: string) => boolean = () => true,
     private readonly dataDir = process.env.FORGE_DATA_DIR ?? 'data',
+    private readonly reviewTargets = new WorkspaceTargets(db),
   ) {}
   get database() {
     return this.db
@@ -257,11 +267,69 @@ export class SessionManager {
     })
   }
 
-  private async spawn(row: SessionRow) {
+  private readonly pendingStarts = new Set<Promise<void>>()
+  private assertOpen() {
+    if (this.closeWork) throw new Error('Session manager is closed')
+  }
+  private startOwned<T>(start: () => Promise<T>): Promise<T> {
+    this.assertOpen()
+    const work = Promise.resolve().then(() => {
+      this.assertOpen()
+      return start()
+    })
+    const settled = work.then(
+      () => undefined,
+      (error) => {
+        if (error instanceof NativeCleanupError) throw error
+      },
+    )
+    this.pendingStarts.add(settled)
+    void settled.then(
+      () => this.pendingStarts.delete(settled),
+      () => {
+        // Retain failed cleanup and its original retry callback through close.
+      },
+    )
+    return work
+  }
+  private async disposeHandle(handle: HarnessHandle): Promise<void> {
+    try {
+      await handle.kill()
+    } catch {
+      throw new NativeCleanupError(async () => {
+        await handle.kill()
+      })
+    }
+  }
+  private async disposeLate(handle: HarnessHandle): Promise<never> {
+    await this.disposeHandle(handle)
+    throw new Error('Session manager is closed')
+  }
+  private spawn(row: SessionRow) {
+    return this.startOwned(() => this.spawnOriginal(row))
+  }
+  private promptHandle(row: SessionRow): Promise<HarnessHandle> {
+    const original = this.handles.get(row.id)
+    if (!original) return this.spawn(row)
+    if (!original.requiresResume) return Promise.resolve(original)
+    return this.startOwned(async () => {
+      await this.disposeHandle(original)
+      this.assertOpen()
+      if (this.handles.get(row.id) !== original)
+        throw new Error('Session handle changed during retirement')
+      this.forgetHandle(row.id)
+      const saved = getActiveSession(this.db, row.id) as SessionRow | undefined
+      if (!saved) throw new Error('Session not found')
+      if (!saved.provider_session_id)
+        throw new Error('Retired harness has no saved native session')
+      return this.spawnOriginal(saved)
+    })
+  }
+  private async spawnOriginal(row: SessionRow) {
     const generation = (this.generations.get(row.id) ?? 0) + 1
     this.generations.set(row.id, generation)
     const onItem = (item: HarnessItem) => {
-      if (this.generations.get(row.id) !== generation) return
+      if (this.closeWork || this.generations.get(row.id) !== generation) return
       const turnId = item.turnId ?? this.turns.get(row.id) ?? makeId('turn_')
       const itemId = item.itemId ?? makeId('item_')
       const { itemId: _itemId, turnId: _turnId, ...normalized } = item
@@ -291,7 +359,7 @@ export class SessionManager {
       }
     }
     const onExit = () => {
-      if (this.generations.get(row.id) !== generation) return
+      if (this.closeWork || this.generations.get(row.id) !== generation) return
       const turnId = this.turns.get(row.id)
       this.forgetHandle(row.id)
       if (turnId) this.finishTurn(row, turnId, new Error('Harness exited'))
@@ -301,17 +369,30 @@ export class SessionManager {
         this.status(row.id, 'errored')
     }
     this.markAccountUsed(row.account_id)
-    const handle = await this.factory(row.harness, row.account_id).spawn(
-      {
-        id: row.id,
-        cwd: row.cwd,
-        harness: row.harness,
-        accountId: row.account_id,
-        providerSessionId: row.provider_session_id,
-      },
-      onItem,
-      onExit,
-    )
+    const process = this.factory(row.harness, row.account_id)
+    this.assertOpen()
+    const session = {
+      id: row.id,
+      cwd: row.cwd,
+      harness: row.harness,
+      accountId: row.account_id,
+      providerSessionId: row.provider_session_id,
+    }
+    let handle: HarnessHandle
+    if (row.provider_session_id) {
+      if (!process.capabilities?.loadSession || !process.loadSession)
+        throw new Error('Harness cannot resume the saved native session')
+      const loaded = await process.loadSession(session, onItem, onExit)
+      if (this.closeWork) return this.disposeLate(loaded.handle)
+      if (!loaded.proven) {
+        await this.disposeHandle(loaded.handle)
+        throw new Error('Provider session load was not proven')
+      }
+      handle = loaded.handle
+    } else {
+      handle = await process.spawn(session, onItem, onExit)
+    }
+    if (this.closeWork) return this.disposeLate(handle)
     this.rememberModels(row.id, handle.availableModels)
     this.handles.set(row.id, handle)
     this.handleHarnesses.set(row.id, row.harness)
@@ -328,13 +409,17 @@ export class SessionManager {
     )
   }
 
-  async recover(row: SessionRow, recap?: string) {
+  recover(row: SessionRow, recap?: string) {
+    return this.startOwned(() => this.recoverOriginal(row, recap))
+  }
+  private async recoverOriginal(row: SessionRow, recap?: string) {
     const generation = (this.generations.get(row.id) ?? 0) + 1
     this.generations.set(row.id, generation)
     const process = this.factory(row.harness, row.account_id)
+    this.assertOpen()
     const fallbackTurnId = makeId('turn_')
     const onItem = (item: HarnessItem) => {
-      if (this.generations.get(row.id) !== generation) return
+      if (this.closeWork || this.generations.get(row.id) !== generation) return
       const { itemId: _itemId, turnId: _turnId, ...content } = item
       appendMessage(this.db, {
         sessionId: row.id,
@@ -347,7 +432,7 @@ export class SessionManager {
       })
     }
     const onExit = () => {
-      if (this.generations.get(row.id) !== generation) return
+      if (this.closeWork || this.generations.get(row.id) !== generation) return
       this.forgetHandle(row.id)
       this.status(row.id, 'errored')
     }
@@ -371,9 +456,13 @@ export class SessionManager {
     if (canLoad) {
       try {
         result = await process.loadSession!(session, onItem, onExit)
-        if (!result.proven)
+        if (this.closeWork) return this.disposeLate(result.handle)
+        if (!result.proven) {
+          await this.disposeHandle(result.handle)
           throw new Error('Provider session load was not proven')
+        }
       } catch (error) {
+        if (error instanceof NativeCleanupError) throw error
         // A failed native resume is not permission to create a replacement.
         // Keep the persisted binding and expose the provider failure instead.
         throw new Error(
@@ -384,8 +473,13 @@ export class SessionManager {
       if (!process.newSession)
         throw new Error('Harness cannot create a session')
       result = await process.newSession(session, onItem, onExit)
-      if (!result.proven) throw new Error('New session was not proven')
+      if (this.closeWork) return this.disposeLate(result.handle)
+      if (!result.proven) {
+        await this.disposeHandle(result.handle)
+        throw new Error('New session was not proven')
+      }
     }
+    if (this.closeWork) return this.disposeLate(result.handle)
     this.rememberModels(
       row.id,
       result.availableModels ?? result.handle.availableModels,
@@ -424,6 +518,7 @@ export class SessionManager {
       if (error) waiter.reject(error)
       else waiter.resolve()
     }
+    if (this.closeWork) return
     if (!error) {
       this.status(row.id, 'idle')
       this.maybeTitle(row.id, row.title, this.firstPrompt.get(row.id) ?? '')
@@ -558,6 +653,7 @@ export class SessionManager {
   }
 
   async sendQueuedPromptNow(sessionId: string, promptId: string) {
+    this.assertOpen()
     const row = this.db
       .prepare('SELECT * FROM queued_prompts WHERE id = ? AND session_id = ?')
       .get(promptId, sessionId) as
@@ -573,6 +669,16 @@ export class SessionManager {
         }
       | undefined
     if (!row) return false
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM messages WHERE session_id=? AND json_extract(content,'$.steeringRequestId')=?",
+        )
+        .get(sessionId, `queue_now_${promptId}_${row.revision}`)
+    )
+      throw new Error(
+        'Native steering was already admitted; delivery cannot be repeated',
+      )
     const activeTurn = this.turns.get(sessionId)
     // Interrupting a turn whose harness is still spawning is a no-op, so the
     // wait below would run for the whole turn. Refuse instead of hanging.
@@ -600,25 +706,27 @@ export class SessionManager {
     // head while this prompt takes its place.
     this.queueBusy.add(sessionId)
     try {
-      const stopped = activeTurn
-        ? new Promise<void>((resolve) => {
-            // Chain any waiter already registered for this turn. Replacing it
-            // would strand a caller that awaits turn completion.
-            const key = `${sessionId}:${activeTurn}`
-            const waiting = this.turnWaiters.get(key)
-            this.turnWaiters.set(key, {
-              resolve: () => {
-                waiting?.resolve()
-                resolve()
-              },
-              reject: (error) => {
-                waiting?.reject(error)
-                resolve()
-              },
+      const steer = Boolean(activeTurn && this.handles.get(sessionId)?.steer)
+      const stopped =
+        activeTurn && !steer
+          ? new Promise<void>((resolve) => {
+              // Chain any waiter already registered for this turn. Replacing it
+              // would strand a caller that awaits turn completion.
+              const key = `${sessionId}:${activeTurn}`
+              const waiting = this.turnWaiters.get(key)
+              this.turnWaiters.set(key, {
+                resolve: () => {
+                  waiting?.resolve()
+                  resolve()
+                },
+                reject: (error) => {
+                  waiting?.reject(error)
+                  resolve()
+                },
+              })
             })
-          })
-        : undefined
-      await this.interrupt(sessionId)
+          : undefined
+      if (!steer) await this.interrupt(sessionId)
       if (stopped) await stopped
       // The wait is unbounded, so the lease may have expired and been taken
       // over by a second send now. Re-assert it before delivering.
@@ -631,7 +739,7 @@ export class SessionManager {
       await this.prompt(
         sessionId,
         row.text,
-        makeId('queue_now_'),
+        `queue_now_${promptId}_${row.revision}`,
         row.attachment_ids ? JSON.parse(row.attachment_ids) : undefined,
         undefined,
         undefined,
@@ -670,6 +778,7 @@ export class SessionManager {
   }
 
   private async drainQueue(sessionId: string) {
+    if (this.closeWork) return
     if (this.queueBusy.has(sessionId) || this.turns.has(sessionId)) return
     const queued = this.db
       .prepare(
@@ -767,6 +876,7 @@ export class SessionManager {
     })
   }
   private scheduleReap(id: string) {
+    if (this.closeWork) return
     const old = this.reapTimers.get(id)
     if (old) clearTimeout(old)
     const timer = setTimeout(() => {
@@ -794,13 +904,28 @@ export class SessionManager {
     clientItemId?: string,
     configOptions?: Record<string, string | boolean>,
     delivery?: 'immediate' | 'turn-boundary',
-    reviewReferences?: unknown[],
+    reviewReferences?: ReviewNote[],
     promptParts?: unknown[],
     revision?: number,
   ) {
     const owner = getActiveSession(this.db, id) as SessionRow | undefined
     if (!owner) throw new Error('Session not found')
     const run = async () => {
+      if (reviewReferences?.length) {
+        const workspace = await this.reviewTargets.resolve({
+          kind: 'session',
+          sessionId: id,
+        })
+        this.assertOpen()
+        if (
+          reviewReferences.some(
+            ({ anchor }) =>
+              anchor.workspaceId !== workspace.workspaceId ||
+              anchor.workspaceRevision > workspace.workspaceRevision,
+          )
+        )
+          throw new Error('Review notes belong to another workspace revision')
+      }
       let row = owner
       if (requestId) {
         const seen = this.db
@@ -917,6 +1042,7 @@ export class SessionManager {
           if (attachment.mime.startsWith('image/'))
             attachments.push({
               kind: 'image',
+              attachmentId: attachment.id,
               mime: attachment.mime,
               bytes: await readFile(absolutePath),
               path: absolutePath,
@@ -924,6 +1050,7 @@ export class SessionManager {
           else
             attachments.push({
               kind: 'file',
+              attachmentId: attachment.id,
               path: absolutePath,
               name: attachment.filename,
               mime: attachment.mime,
@@ -946,14 +1073,18 @@ export class SessionManager {
           })
         }
       }
-      if (text)
+      if (text || reviewReferences?.length)
         appendMessage(this.db, {
           sessionId: id,
           turnId,
           itemId: clientItemId ?? makeId('item_'),
           role: 'user',
           type: 'text_delta',
-          content: { type: 'text_delta', text } as never,
+          content: {
+            type: 'text_delta',
+            text: text + serializeReviewNotes(reviewReferences ?? []),
+            ...(reviewReferences?.length ? { reviewReferences } : {}),
+          } as never,
           eventBus: this.bus,
         })
       this.status(id, 'running')
@@ -976,16 +1107,134 @@ export class SessionManager {
     configOptions?: Record<string, string | boolean>,
     delivery?: 'immediate' | 'turn-boundary',
     waitForCompletion = false,
-    reviewReferences?: unknown[],
+    reviewReferences?: ReviewNote[],
     promptParts?: unknown[],
     revision?: number,
   ) {
+    this.assertOpen()
+    reviewReferences = reviewNotesSchema.parse(reviewReferences ?? [])
+    const citedText = text + serializeReviewNotes(reviewReferences)
     if (delivery === 'immediate' && this.turns.has(id)) {
       const handle = this.handles.get(id)
       if (handle?.steer) {
-        if (!text && !(attachmentIds?.length || promptParts?.length))
-          throw new Error('Native steering requires text or content')
-        await handle.steer(text)
+        if (reviewReferences.length) {
+          const workspace = await this.reviewTargets.resolve({
+            kind: 'session',
+            sessionId: id,
+          })
+          this.assertOpen()
+          if (
+            reviewReferences.some(
+              ({ anchor }) =>
+                anchor.workspaceId !== workspace.workspaceId ||
+                anchor.workspaceRevision > workspace.workspaceRevision,
+            )
+          )
+            throw new Error('Review notes belong to another workspace revision')
+        }
+        if (promptParts?.length)
+          throw new Error('Native steering does not support these prompt parts')
+        if (!citedText && !attachmentIds?.length)
+          throw new Error('Native steering requires text or attachments')
+        const owner = getActiveSession(this.db, id) as SessionRow | undefined
+        if (!owner) throw new Error('Session not found')
+        if (
+          (harness && harness !== owner.harness) ||
+          (accountId !== undefined && accountId !== owner.account_id)
+        )
+          throw new Error('Cannot change harness during a turn')
+        const turnId = this.turns.get(id)!
+        const itemId = clientItemId ?? makeId('item_')
+        const admissionId = requestId ?? itemId
+        if (
+          this.db
+            .prepare(
+              "SELECT 1 FROM messages WHERE session_id=? AND (item_id=? OR (json_extract(content,'$.steeringRequestId')=?))",
+            )
+            .get(id, itemId, admissionId)
+        )
+          throw new Error(
+            'Native steering was already admitted; delivery cannot be repeated',
+          )
+        const content: import('./harness.js').PromptContent[] = []
+        const references: Array<{
+          attachmentId: string
+          filename: string
+          mime: string
+          sizeBytes: number
+          path: string
+        }> = []
+        for (const attachmentId of attachmentIds ?? []) {
+          const attachment = this.db
+            .prepare(
+              "SELECT filename, mime, size_bytes, rel_path FROM attachments WHERE id=? AND session_id=? AND status='complete'",
+            )
+            .get(attachmentId, id) as
+            | {
+                filename: string
+                mime: string
+                size_bytes: number
+                rel_path: string | null
+              }
+            | undefined
+          if (!attachment?.rel_path)
+            throw new Error('Attachment is not available')
+          content.push({
+            kind: 'file',
+            attachmentId,
+            name: attachment.filename,
+            mime: attachment.mime,
+            path: join(this.dataDir, attachment.rel_path),
+          })
+          references.push({
+            attachmentId,
+            filename: attachment.filename,
+            mime: attachment.mime,
+            sizeBytes: attachment.size_bytes,
+            path: attachment.rel_path,
+          })
+        }
+        if (citedText) content.push({ kind: 'text', text: citedText })
+        const saved = []
+        this.db.exec('BEGIN')
+        try {
+          saved.push(
+            appendMessageInTransaction(this.db, {
+              sessionId: id,
+              turnId,
+              itemId,
+              role: 'user',
+              type: 'text_delta',
+              content: {
+                type: 'text_delta',
+                text: citedText,
+                ...(reviewReferences.length ? { reviewReferences } : {}),
+                steeringRequestId: admissionId,
+              } as never,
+            }),
+          )
+          for (const reference of references)
+            saved.push(
+              appendMessageInTransaction(this.db, {
+                sessionId: id,
+                turnId,
+                itemId: makeId('item_'),
+                role: 'user',
+                type: 'attachment_ref',
+                content: { type: 'attachment_ref', ...reference },
+              }),
+            )
+          this.db.exec('COMMIT')
+        } catch (error) {
+          this.db.exec('ROLLBACK')
+          throw error
+        }
+        for (const message of saved) publishAppendedMessage(this.bus, message)
+        await handle.steer(
+          content.length === 1 && content[0]!.kind === 'text'
+            ? content[0]!.text
+            : content,
+        )
         return
       }
     }
@@ -1016,8 +1265,11 @@ export class SessionManager {
     // Startup errors become timeline errors after acceptance. This keeps the
     // user row visible and leaves the session reachable for inspection.
     void (async () => {
+      const existing = this.handles.get(accepted.row.id)
       const handle =
-        this.handles.get(accepted.row.id) ?? (await this.spawn(accepted.row))
+        existing && !existing.requiresResume
+          ? existing
+          : await this.promptHandle(accepted.row)
       let row = accepted.row
       if (accepted.model !== undefined && accepted.model !== row.model) {
         if (!handle.setModel)
@@ -1052,9 +1304,10 @@ export class SessionManager {
           .run(JSON.stringify(merged), row.id)
         row = { ...row, config_options: JSON.stringify(merged) }
       }
-      const dispatchText = /^\$[a-z0-9][a-z0-9-]*(?=\s|$)/.test(text)
-        ? await rewriteSkillInvocation(row.cwd, text)
-        : text
+      const dispatchText =
+        (/^\$[a-z0-9][a-z0-9-]*(?=\s|$)/.test(text)
+          ? await rewriteSkillInvocation(row.cwd, text)
+          : text) + serializeReviewNotes(reviewReferences)
       const content = [...accepted.attachments]
       if (dispatchText) content.push({ kind: 'text', text: dispatchText })
       this.runPrompt(handle, row, accepted.turnId, content)
@@ -1071,6 +1324,7 @@ export class SessionManager {
     content: import('./harness.js').PromptContent[],
   ) {
     try {
+      this.assertOpen()
       const result = handle.prompt(content)
       if (result && typeof result === 'object' && 'then' in result)
         void Promise.resolve(result).then(
@@ -1085,6 +1339,14 @@ export class SessionManager {
 
   private failPrompt(row: SessionRow, turnId: string, error: unknown) {
     if (this.turns.get(row.id) !== turnId) return
+    if (this.closeWork) {
+      this.finishTurn(
+        row,
+        turnId,
+        new Error('Session interrupted by server shutdown'),
+      )
+      return
+    }
     const message = errorMessage(error)
     const match = detectProviderError(message)
     if (match && row.account_id) {
@@ -1120,6 +1382,14 @@ export class SessionManager {
   }
 
   private finishPrompt(row: SessionRow, turnId: string) {
+    if (this.closeWork) {
+      this.finishTurn(
+        row,
+        turnId,
+        new Error('Session interrupted by server shutdown'),
+      )
+      return
+    }
     // A harness may emit its own framing. Complete the turn when it does not.
     if (this.turns.get(row.id) === turnId) {
       appendMessage(this.db, {
@@ -1140,6 +1410,7 @@ export class SessionManager {
     requestId: string,
     uploads?: UploadStore,
   ) {
+    this.assertOpen()
     const retained = this.promotions.get(requestId)
     const run = async () => {
       if (retained)
@@ -1484,9 +1755,37 @@ export class SessionManager {
     })
     await this.handles.get(id)?.answerQuestion?.(questionId, answer)
   }
-  close() {
+  private closeWork?: Promise<void>
+  close(): Promise<void> {
+    if (this.closeWork) return this.closeWork
     for (const timer of this.reapTimers.values()) clearTimeout(timer)
-    for (const handle of this.handles.values()) void handle.kill()
+    const original = [...this.handles.values()]
+    this.closeWork = Promise.resolve().then(async () => {
+      const settled = await Promise.allSettled([
+        ...original.map((handle) =>
+          Promise.resolve().then(() => handle.kill()),
+        ),
+        ...[...this.pendingStarts].map(async (start) => {
+          try {
+            await start
+          } catch (error) {
+            if (!(error instanceof NativeCleanupError)) throw error
+            await error.retryCleanup()
+            this.pendingStarts.delete(start)
+          }
+        }),
+      ])
+      const failures = settled.filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected',
+      )
+      if (failures.length)
+        throw new AggregateError(
+          failures.map((result) => result.reason),
+          'Session cleanup failed',
+        )
+    })
+    return this.closeWork
   }
 }
 
