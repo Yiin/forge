@@ -22,7 +22,8 @@
     "./harness": "./src/harness.ts",
     "./timeline": "./src/timeline.ts",
     "./workspace": "./src/workspace.ts",
-    "./preview": "./src/preview.ts"
+    "./preview": "./src/preview.ts",
+    "./review": "./src/review.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

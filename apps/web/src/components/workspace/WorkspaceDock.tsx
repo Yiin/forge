@@ -13,7 +13,9 @@ import { Button } from '../ui/button'
 import { cn } from '@/lib/utils'
 import { BrowserPreview } from './BrowserPreview'
 import { TerminalSurface } from './TerminalSurface'
-import { GitReviewSurface, type ReviewComment } from './GitReviewSurface'
+import { GitReviewSurface } from './GitReviewSurface'
+import type { ReviewNote } from '@forge/protocol/review'
+import type { ReviewRevisionListener } from '../../lib/review-notes'
 import { GitHistorySurface } from './GitHistorySurface'
 import { WorkspaceFilesSurface } from './WorkspaceFilesSurface'
 import { NativeChildTranscript } from './NativeChildTranscript'
@@ -54,12 +56,16 @@ export function WorkspaceDock({
   target,
   projectId,
   onReviewComment,
+  onReviewRevision,
+  reanchorNote,
   mobile: mobileOverride,
 }: {
   sessionId: string
   target: WorkspaceTarget
   projectId: string
-  onReviewComment?: (comment: ReviewComment) => void
+  onReviewComment?: (comment: ReviewNote) => void
+  onReviewRevision?: ReviewRevisionListener
+  reanchorNote?: ReviewNote
   mobile?: boolean
 }) {
   const detectedMobile = useIsMobile()
@@ -132,6 +138,8 @@ export function WorkspaceDock({
       sessionId={sessionId}
       projectId={projectId}
       onReviewComment={onReviewComment}
+      onReviewRevision={onReviewRevision}
+      reanchorNote={reanchorNote}
       commit={active.commit}
       path={active.path}
       childSessionId={active.childSessionId}
@@ -342,6 +350,8 @@ function SurfaceContent({
   sessionId,
   projectId,
   onReviewComment = () => undefined,
+  onReviewRevision,
+  reanchorNote,
   commit,
   path,
   childSessionId,
@@ -353,7 +363,9 @@ function SurfaceContent({
   target: WorkspaceTarget
   sessionId: string
   projectId: string
-  onReviewComment?: (comment: ReviewComment) => void
+  onReviewComment?: (comment: ReviewNote) => void
+  onReviewRevision?: ReviewRevisionListener
+  reanchorNote?: ReviewNote
   commit?: string
   path?: string
   childSessionId?: string
@@ -379,10 +391,13 @@ function SurfaceContent({
         transitionRef={transitionRef}
         sessionId={sessionId}
         target={target}
+        onComment={onReviewComment}
+        onRevision={onReviewRevision}
+        reanchorNote={reanchorNote}
         initialPath={kind === 'file' ? path : undefined}
       />
     )
-  if (!target.cwd)
+  if (!target.cwd || !target.workspaceId || !target.workspaceRevision)
     return (
       <div className="p-6 text-sm" role="status">
         No workspace is attached to this session.
@@ -394,6 +409,12 @@ function SurfaceContent({
         projectId={projectId}
         sessionId={sessionId}
         cwd={target.cwd!}
+        workspace={{
+          workspaceId: target.workspaceId,
+          workspaceRevision: target.workspaceRevision,
+        }}
+        onRevision={onReviewRevision}
+        reanchorNote={reanchorNote}
         commit={commit}
         onComment={onReviewComment}
       />

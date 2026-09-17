@@ -1,3 +1,9 @@
+import {
+  reviewNotesSchema,
+  serializeReviewNotes,
+  type ReviewNote,
+} from '@forge/protocol/review'
+import { WorkspaceTargets } from '../workspace/target.js'
 import { NativeCleanupError } from '../harnesses/native-cleanup.js'
 import {
   appendMessage,
@@ -114,6 +120,7 @@ export class SessionManager {
     private readonly idleMs = 15 * 60 * 1000,
     private readonly requiresAccount: (harness: string) => boolean = () => true,
     private readonly dataDir = process.env.FORGE_DATA_DIR ?? 'data',
+    private readonly reviewTargets = new WorkspaceTargets(db),
   ) {}
   get database() {
     return this.db
@@ -897,13 +904,28 @@ export class SessionManager {
     clientItemId?: string,
     configOptions?: Record<string, string | boolean>,
     delivery?: 'immediate' | 'turn-boundary',
-    reviewReferences?: unknown[],
+    reviewReferences?: ReviewNote[],
     promptParts?: unknown[],
     revision?: number,
   ) {
     const owner = getActiveSession(this.db, id) as SessionRow | undefined
     if (!owner) throw new Error('Session not found')
     const run = async () => {
+      if (reviewReferences?.length) {
+        const workspace = await this.reviewTargets.resolve({
+          kind: 'session',
+          sessionId: id,
+        })
+        this.assertOpen()
+        if (
+          reviewReferences.some(
+            ({ anchor }) =>
+              anchor.workspaceId !== workspace.workspaceId ||
+              anchor.workspaceRevision > workspace.workspaceRevision,
+          )
+        )
+          throw new Error('Review notes belong to another workspace revision')
+      }
       let row = owner
       if (requestId) {
         const seen = this.db
@@ -1051,14 +1073,18 @@ export class SessionManager {
           })
         }
       }
-      if (text)
+      if (text || reviewReferences?.length)
         appendMessage(this.db, {
           sessionId: id,
           turnId,
           itemId: clientItemId ?? makeId('item_'),
           role: 'user',
           type: 'text_delta',
-          content: { type: 'text_delta', text } as never,
+          content: {
+            type: 'text_delta',
+            text: text + serializeReviewNotes(reviewReferences ?? []),
+            ...(reviewReferences?.length ? { reviewReferences } : {}),
+          } as never,
           eventBus: this.bus,
         })
       this.status(id, 'running')
@@ -1081,17 +1107,34 @@ export class SessionManager {
     configOptions?: Record<string, string | boolean>,
     delivery?: 'immediate' | 'turn-boundary',
     waitForCompletion = false,
-    reviewReferences?: unknown[],
+    reviewReferences?: ReviewNote[],
     promptParts?: unknown[],
     revision?: number,
   ) {
     this.assertOpen()
+    reviewReferences = reviewNotesSchema.parse(reviewReferences ?? [])
+    const citedText = text + serializeReviewNotes(reviewReferences)
     if (delivery === 'immediate' && this.turns.has(id)) {
       const handle = this.handles.get(id)
       if (handle?.steer) {
+        if (reviewReferences.length) {
+          const workspace = await this.reviewTargets.resolve({
+            kind: 'session',
+            sessionId: id,
+          })
+          this.assertOpen()
+          if (
+            reviewReferences.some(
+              ({ anchor }) =>
+                anchor.workspaceId !== workspace.workspaceId ||
+                anchor.workspaceRevision > workspace.workspaceRevision,
+            )
+          )
+            throw new Error('Review notes belong to another workspace revision')
+        }
         if (promptParts?.length)
           throw new Error('Native steering does not support these prompt parts')
-        if (!text && !attachmentIds?.length)
+        if (!citedText && !attachmentIds?.length)
           throw new Error('Native steering requires text or attachments')
         const owner = getActiveSession(this.db, id) as SessionRow | undefined
         if (!owner) throw new Error('Session not found')
@@ -1151,7 +1194,7 @@ export class SessionManager {
             path: attachment.rel_path,
           })
         }
-        if (text) content.push({ kind: 'text', text })
+        if (citedText) content.push({ kind: 'text', text: citedText })
         const saved = []
         this.db.exec('BEGIN')
         try {
@@ -1164,7 +1207,8 @@ export class SessionManager {
               type: 'text_delta',
               content: {
                 type: 'text_delta',
-                text,
+                text: citedText,
+                ...(reviewReferences.length ? { reviewReferences } : {}),
                 steeringRequestId: admissionId,
               } as never,
             }),
@@ -1187,7 +1231,9 @@ export class SessionManager {
         }
         for (const message of saved) publishAppendedMessage(this.bus, message)
         await handle.steer(
-          content.length === 1 && content[0]!.kind === 'text' ? text : content,
+          content.length === 1 && content[0]!.kind === 'text'
+            ? content[0]!.text
+            : content,
         )
         return
       }
@@ -1258,9 +1304,10 @@ export class SessionManager {
           .run(JSON.stringify(merged), row.id)
         row = { ...row, config_options: JSON.stringify(merged) }
       }
-      const dispatchText = /^\$[a-z0-9][a-z0-9-]*(?=\s|$)/.test(text)
-        ? await rewriteSkillInvocation(row.cwd, text)
-        : text
+      const dispatchText =
+        (/^\$[a-z0-9][a-z0-9-]*(?=\s|$)/.test(text)
+          ? await rewriteSkillInvocation(row.cwd, text)
+          : text) + serializeReviewNotes(reviewReferences)
       const content = [...accepted.attachments]
       if (dispatchText) content.push({ kind: 'text', text: dispatchText })
       this.runPrompt(handle, row, accepted.turnId, content)

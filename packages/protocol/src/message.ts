@@ -1,3 +1,4 @@
+import { reviewNotesSchema } from './review.js'
 import { z } from 'zod'
 import { contentSnapshotTextSchema } from './harness.js'
 
@@ -28,6 +29,7 @@ export const MessageContent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('text_delta'),
     text: z.string(),
+    reviewReferences: reviewNotesSchema.optional(),
     childId: id.optional(),
   }),
   z.object({

@@ -1,7 +1,13 @@
 import { Timeline } from '../components/chat/Timeline'
 import { Composer } from '../components/chat/Composer'
 import { WorkspaceBar } from '../components/chat/WorkspaceBar'
-import { useEffect, useLayoutEffect, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
 import { useWorkspaceTarget } from '../lib/useWorkspaceTarget'
@@ -17,10 +23,18 @@ import type { HarnessSelection } from '../components/chat/harness-picker-logic'
 import type { QueuedPrompt } from '@forge/protocol/session'
 import { SessionSnapshot } from '@forge/protocol/ws'
 import { WorkspaceDock } from '../components/workspace/WorkspaceDock'
-import type { ReviewComment } from '../components/workspace/GitReviewSurface'
+import {
+  reviewCitation,
+  serializeReviewNotes,
+  type ReviewNote,
+} from '@forge/protocol/review'
+import { useReviewNotes, emptyReviewNotes } from '../stores/review-notes'
+import { revisionKey, type ReviewRevisionListener } from '../lib/review-notes'
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
+  const activeReviewSession = useRef(sessionId)
+  activeReviewSession.current = sessionId
   const navigate = useNavigate()
   const [composerOverlay, setComposerOverlay] = useState<HTMLDivElement | null>(
     null,
@@ -38,7 +52,97 @@ export function SessionRoute() {
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [skills, setSkills] = useState<string[]>([])
-  const [reviewComments, setReviewComments] = useState<ReviewComment[]>([])
+  const reviewComments = useReviewNotes(
+    (state) => state.sessions[sessionId] ?? emptyReviewNotes,
+  )
+  const [reviewError, setReviewError] = useState<string>()
+  const [reanchor, setReanchor] = useState<{ sessionId: string; id: string }>()
+  const [observations, setObservations] = useState<{
+    sessionId: string
+    values: Record<string, string>
+  }>()
+  useEffect(() => {
+    useReviewNotes.getState().hydrate()
+  }, [])
+  const reanchorNote =
+    reanchor?.sessionId === sessionId
+      ? reviewComments.find((note) => note.id === reanchor.id)
+      : undefined
+  const onReviewRevision: ReviewRevisionListener = useCallback(
+    (workspace, revision, path) => {
+      if (activeReviewSession.current !== sessionId) return
+      const key = revisionKey(revision, path)
+      const value = JSON.stringify([
+        workspace.workspaceId,
+        workspace.workspaceRevision,
+        revision,
+      ])
+      const keep = new Set(
+        (useReviewNotes.getState().sessions[sessionId] ?? []).map(
+          ({ anchor }) =>
+            revisionKey(
+              anchor.revision,
+              anchor.newPath ?? anchor.oldPath ?? undefined,
+            ),
+        ),
+      )
+      keep.add(key)
+      setObservations((prior) =>
+        activeReviewSession.current !== sessionId
+          ? prior
+          : prior?.sessionId === sessionId && prior.values[key] === value
+            ? prior
+            : {
+                sessionId,
+                values: {
+                  ...Object.fromEntries(
+                    Object.entries(
+                      prior?.sessionId === sessionId ? prior.values : {},
+                    ).filter(([name]) => keep.has(name)),
+                  ),
+                  [key]: value,
+                },
+              },
+      )
+    },
+    [sessionId],
+  )
+  useEffect(() => {
+    setReviewError(undefined)
+  }, [sessionId])
+  const acknowledgeReviewNotes = (notes: ReviewNote[]) => {
+    const warning = useReviewNotes.getState().acknowledge(sessionId, notes)
+    if (activeReviewSession.current === sessionId) setReviewError(warning)
+  }
+  const captureReviewNote = (note: ReviewNote) => {
+    try {
+      if (reanchorNote)
+        useReviewNotes
+          .getState()
+          .reanchor(sessionId, reanchorNote.id, note.anchor)
+      else
+        useReviewNotes
+          .getState()
+          .save(sessionId, [
+            ...(useReviewNotes.getState().sessions[sessionId] ?? []),
+            note,
+          ])
+      if (activeReviewSession.current === sessionId) {
+        setReanchor((current) =>
+          current?.sessionId === sessionId && current.id === reanchorNote?.id
+            ? undefined
+            : current,
+        )
+        setReviewError(undefined)
+      }
+    } catch (error) {
+      if (activeReviewSession.current === sessionId)
+        setReviewError(
+          error instanceof Error ? error.message : 'Could not save review note',
+        )
+      throw error
+    }
+  }
   const workspaceKey = useSessionsStore((state) => {
     const session = state.sessions.find((item) => item.id === sessionId)
     return JSON.stringify([session?.cwd ?? null, session?.worktreePath ?? null])
@@ -220,14 +324,17 @@ export function SessionRoute() {
     attachmentIds: string[],
     selection: HarnessSelection,
   ) => {
-    if (!text.trim()) return
+    if (!text.trim() && !attachmentIds.length && !reviewComments.length) return
     setSending(true)
     try {
       const value = text.trim()
-      const reviewText = reviewComments.length
-        ? `\n\nReview comments:\n${reviewComments.map((comment) => `- ${comment.path}:${comment.line} (${comment.side}): ${comment.text}`).join('\n')}`
-        : ''
+      const submittedNotes = reviewComments
+      const reviewText = serializeReviewNotes(submittedNotes)
       if (value === '/btw' || value.startsWith('/btw ')) {
+        if (submittedNotes.length)
+          throw new Error(
+            'Review notes stay in this session. Send or remove them before starting a side chat.',
+          )
         const result = (await api.btw({
           sessionId,
           text: value.slice(4).trim(),
@@ -265,7 +372,8 @@ export function SessionRoute() {
         try {
           await api.prompt({
             sessionId,
-            text: value + reviewText,
+            text: value,
+            reviewReferences: submittedNotes,
             attachmentIds,
             harness: selection.harness || harness,
             accountId: selection.accountId,
@@ -277,7 +385,7 @@ export function SessionRoute() {
           useMessagesStore.getState().removePending(sessionId, clientItemId)
           throw error
         }
-        setReviewComments([])
+        acknowledgeReviewNotes(submittedNotes)
         setHarness(selection.harness || harness)
         setAccountId(selection.accountId)
         setModel(selection.model)
@@ -291,9 +399,11 @@ export function SessionRoute() {
     attachmentIds: string[],
     selection: HarnessSelection,
   ) => {
+    const submittedNotes = reviewComments
     await api.prompt({
       sessionId,
       text,
+      reviewReferences: submittedNotes,
       attachmentIds,
       harness: selection.harness || harness,
       accountId: selection.accountId,
@@ -301,6 +411,7 @@ export function SessionRoute() {
       configOptions: selection.configOptions,
       delivery: 'turn-boundary',
     })
+    acknowledgeReviewNotes(submittedNotes)
   }
   return (
     <div className="session-view flex h-full min-h-0 min-w-0">
@@ -364,6 +475,90 @@ export function SessionRoute() {
                 sessionId={sessionId}
                 disabled={(sessionStatus ?? loadedStatus) === 'running'}
               />
+              {reviewComments.length > 0 && (
+                <section
+                  aria-label="Review notes"
+                  className="mx-auto max-h-48 max-w-3xl overflow-y-auto rounded border p-2 text-xs"
+                >
+                  {reanchorNote && (
+                    <p role="status">
+                      Select a current Git or file line to re-anchor this note.{' '}
+                      <button
+                        className="underline"
+                        onClick={() => setReanchor(undefined)}
+                      >
+                        Cancel re-anchor
+                      </button>
+                    </p>
+                  )}
+                  {reviewComments.map((note) => {
+                    const a = note.anchor
+                    const observed =
+                      observations?.sessionId === sessionId
+                        ? observations.values[
+                            revisionKey(
+                              a.revision,
+                              a.newPath ?? a.oldPath ?? undefined,
+                            )
+                          ]
+                        : undefined
+                    const workspaceChanged =
+                      'workspaceId' in workspaceTarget &&
+                      (workspaceTarget.workspaceId !== a.workspaceId ||
+                        workspaceTarget.workspaceRevision !==
+                          a.workspaceRevision)
+                    const stale =
+                      workspaceChanged ||
+                      ((a.revision.kind !== 'git' ||
+                        a.revision.scope !== 'commit') &&
+                        observed !== undefined &&
+                        observed !==
+                          JSON.stringify([
+                            a.workspaceId,
+                            a.workspaceRevision,
+                            a.revision,
+                          ]))
+                    return (
+                      <div
+                        key={note.id}
+                        className="border-b py-2 last:border-0"
+                      >
+                        <p className="break-all">
+                          {reviewCitation(note)}{' '}
+                          {stale && <strong>Stale anchor</strong>}
+                        </p>
+                        <p className="whitespace-pre-wrap">{note.body}</p>
+                        <button
+                          className="min-h-9 underline"
+                          onClick={() =>
+                            setReanchor({ sessionId, id: note.id })
+                          }
+                        >
+                          Re-anchor note
+                        </button>{' '}
+                        <button
+                          className="min-h-9 underline"
+                          onClick={() => {
+                            try {
+                              useReviewNotes.getState().save(
+                                sessionId,
+                                reviewComments.filter(
+                                  (entry) => entry.id !== note.id,
+                                ),
+                              )
+                            } catch {
+                              setReviewError('Could not remove review note')
+                            }
+                          }}
+                        >
+                          Remove note
+                        </button>
+                      </div>
+                    )
+                  })}
+                </section>
+              )}
+              {reviewError && <p role="alert">{reviewError}</p>}
               <Composer
                 sessionId={sessionId}
                 harness={harness}
@@ -391,9 +586,9 @@ export function SessionRoute() {
               .sessions.find((item) => item.id === sessionId)?.projectId ?? ''
           }
           target={workspaceTarget}
-          onReviewComment={(comment) =>
-            setReviewComments((items) => [...items, comment])
-          }
+          onReviewComment={captureReviewNote}
+          onReviewRevision={onReviewRevision}
+          reanchorNote={reanchorNote}
         />
       )}
     </div>

@@ -1,3 +1,4 @@
+import { reviewNotesSchema } from './review.js'
 import { z } from 'zod'
 
 const nullableId = z.string().nullable()
@@ -40,7 +41,7 @@ export const queuedPromptSchema = z.object({
   order: z.number().int().nonnegative().optional(),
   attachmentIds: z.array(z.string()).optional(),
   promptParts: z.array(z.unknown()).optional(),
-  reviewReferences: z.array(z.unknown()).optional(),
+  reviewReferences: reviewNotesSchema.optional(),
   model: z.string().nullable().optional(),
   configOptions: z
     .record(z.string(), z.union([z.string(), z.boolean()]))
