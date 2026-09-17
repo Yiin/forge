@@ -39,7 +39,6 @@ jobs:
       - run: bun run test
 
   e2e:
-    if: github.event_name != 'schedule'
     needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -56,38 +55,14 @@ jobs:
       - run: node scripts/build-node-pty.mjs
       - run: node scripts/check-node-pty.mjs
       - name: Cache Playwright browsers
+        id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package.json', 'bun.lock') }}
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: cd e2e && bunx playwright install-deps chromium
       # Install from e2e/ so bunx resolves the pinned @playwright/test, not the
       # latest release (which deletes the pinned browsers from the cache).
-      - run: cd e2e && bunx playwright install --with-deps chromium
-      - run: bun run e2e
-
-  e2e-full:
-    if: github.event_name == 'schedule'
-    needs: checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-          cache: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-      - run: bun install --frozen-lockfile --ignore-scripts --backend=copyfile
-      - run: node scripts/build-node-pty.mjs
-      - run: node scripts/check-node-pty.mjs
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package.json') }}
-      # Install from e2e/ so bunx resolves the pinned @playwright/test, not the
-      # latest release (which deletes the pinned browsers from the cache).
-      - run: cd e2e && bunx playwright install --with-deps chromium
+      - run: cd e2e && bunx playwright install chromium
       - run: bun run e2e

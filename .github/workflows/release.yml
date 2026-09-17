@@ -85,10 +85,25 @@ jobs:
           set -euo pipefail
           data_dir="$(mktemp -d)"
           pid=""
-          # Wait for the server to exit before removing the data dir: it writes
-          # shutdown state on SIGTERM, and a racing rm -rf fails the step under
-          # bash -e even when the smoke itself passed.
-          trap 'code=$?; [ "$code" -ne 0 ] && cat "$data_dir/server.log" 2>/dev/null; kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; rm -rf "$data_dir" || true; exit "$code"' EXIT
+          cleanup() {
+            local code=$?
+            [ "$code" -ne 0 ] && cat "$data_dir/server.log" 2>/dev/null
+            kill "$pid" 2>/dev/null || true
+            # Wait for the server to exit before removing the data dir: it
+            # writes shutdown state on SIGTERM, and a racing rm -rf fails the
+            # step under bash -e even when the smoke itself passed. Bound the
+            # wait: a hung cleanup hook keeps the process alive past its 6s
+            # shutdown deadline, so escalate to SIGKILL after 10s.
+            local attempt
+            for attempt in $(seq 1 10); do
+              kill -0 "$pid" 2>/dev/null || break
+              sleep 1
+            done
+            kill -9 "$pid" 2>/dev/null || true
+            rm -rf "$data_dir" || true
+            exit "$code"
+          }
+          trap cleanup EXIT
           # The packed release contains no test fixtures, so the mock harness
           # points at the checkout's ACP fixture. FORGE_CONFIG makes the server
           # read this file instead of seeding ~/.forge/forge.toml defaults
