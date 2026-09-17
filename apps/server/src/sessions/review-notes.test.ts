@@ -9,7 +9,7 @@ import { createProject, createSession } from '../db/queries.js'
 import { EventBus } from '../events/bus.js'
 import { SessionManager } from './manager.js'
 import { WorkspaceTargets } from '../workspace/target.js'
-import type { ReviewNote } from '@forge/protocol/review'
+import { serializeReviewNotes, type ReviewNote } from '@forge/protocol/review'
 
 it('persists exact structured anchors and sends one citation through a queued turn', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'forge-review-'))
@@ -139,6 +139,175 @@ it('persists exact structured anchors and sends one citation through a queued tu
         .prepare("SELECT count(*) AS n FROM messages WHERE type='turn_start'")
         .get(),
     ).toEqual({ n: 2 })
+  } finally {
+    release?.()
+    await manager.close()
+    db.close()
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+it('sends the serialized citation through native steering', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'forge-review-'))
+  const db = new DatabaseSync(':memory:')
+  migrate(db)
+  const project = createProject(db, { name: 'Review', path: cwd })
+  const session = createSession(db, {
+    projectId: project.id,
+    harness: 'mock',
+    title: 'Review',
+    cwd,
+  })
+  const targets = new WorkspaceTargets(db)
+  const w = await targets.resolve({ kind: 'session', sessionId: session.id })
+  const note: ReviewNote = {
+    id: 'note-1',
+    body: 'Keep old-side evidence',
+    anchor: {
+      workspaceId: w.workspaceId,
+      workspaceRevision: w.workspaceRevision,
+      revision: { kind: 'git', scope: 'working', revision: 'original-diff' },
+      oldPath: 'before.ts',
+      newPath: 'after.ts',
+      side: 'old',
+      line: 3,
+    },
+  }
+  let release!: () => void
+  const prompts: unknown[] = []
+  const steered: unknown[] = []
+  const manager = new SessionManager(
+    db,
+    new EventBus(),
+    () => ({
+      spawn: async () => ({
+        prompt: (input: unknown) => {
+          prompts.push(input)
+          return new Promise<void>((resolve) => {
+            release = resolve
+          })
+        },
+        steer: (input: unknown) => {
+          steered.push(input)
+          return Promise.resolve()
+        },
+        cancel: () => {},
+        kill: () => {
+          release?.()
+        },
+      }),
+    }),
+    undefined,
+    () => false,
+    cwd,
+    targets,
+  )
+  try {
+    await manager.prompt(session.id, 'held')
+    await vi.waitFor(() => expect(prompts).toHaveLength(1))
+    await manager.prompt(
+      session.id,
+      'Fix this',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'immediate',
+      false,
+      [note],
+    )
+    expect(steered).toEqual(['Fix this' + serializeReviewNotes([note])])
+    const row = db
+      .prepare(
+        "SELECT content FROM messages WHERE role='user' AND type='text_delta' AND json_extract(content,'$.reviewReferences[0].id')='note-1'",
+      )
+      .get() as any
+    expect(JSON.parse(row.content).text).toBe(steered[0])
+  } finally {
+    release?.()
+    await manager.close()
+    db.close()
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+it('accepts a notes-only steer without text or attachments', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'forge-review-'))
+  const db = new DatabaseSync(':memory:')
+  migrate(db)
+  const project = createProject(db, { name: 'Review', path: cwd })
+  const session = createSession(db, {
+    projectId: project.id,
+    harness: 'mock',
+    title: 'Review',
+    cwd,
+  })
+  const targets = new WorkspaceTargets(db)
+  const w = await targets.resolve({ kind: 'session', sessionId: session.id })
+  const note: ReviewNote = {
+    id: 'note-1',
+    body: 'Keep old-side evidence',
+    anchor: {
+      workspaceId: w.workspaceId,
+      workspaceRevision: w.workspaceRevision,
+      revision: { kind: 'git', scope: 'working', revision: 'original-diff' },
+      oldPath: 'before.ts',
+      newPath: 'after.ts',
+      side: 'old',
+      line: 3,
+    },
+  }
+  let release!: () => void
+  const prompts: unknown[] = []
+  const steered: unknown[] = []
+  const manager = new SessionManager(
+    db,
+    new EventBus(),
+    () => ({
+      spawn: async () => ({
+        prompt: (input: unknown) => {
+          prompts.push(input)
+          return new Promise<void>((resolve) => {
+            release = resolve
+          })
+        },
+        steer: (input: unknown) => {
+          steered.push(input)
+          return Promise.resolve()
+        },
+        cancel: () => {},
+        kill: () => {
+          release?.()
+        },
+      }),
+    }),
+    undefined,
+    () => false,
+    cwd,
+    targets,
+  )
+  try {
+    await manager.prompt(session.id, 'held')
+    await vi.waitFor(() => expect(prompts).toHaveLength(1))
+    await manager.prompt(
+      session.id,
+      '',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'immediate',
+      false,
+      [note],
+    )
+    expect(steered).toEqual([serializeReviewNotes([note])])
+    expect(steered[0]).toContain('before.ts:3 (old; workspace')
   } finally {
     release?.()
     await manager.close()

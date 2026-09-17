@@ -1134,7 +1134,7 @@ export class SessionManager {
         }
         if (promptParts?.length)
           throw new Error('Native steering does not support these prompt parts')
-        if (!text && !attachmentIds?.length)
+        if (!citedText && !attachmentIds?.length)
           throw new Error('Native steering requires text or attachments')
         const owner = getActiveSession(this.db, id) as SessionRow | undefined
         if (!owner) throw new Error('Session not found')
@@ -1231,7 +1231,9 @@ export class SessionManager {
         }
         for (const message of saved) publishAppendedMessage(this.bus, message)
         await handle.steer(
-          content.length === 1 && content[0]!.kind === 'text' ? text : content,
+          content.length === 1 && content[0]!.kind === 'text'
+            ? content[0]!.text
+            : content,
         )
         return
       }
