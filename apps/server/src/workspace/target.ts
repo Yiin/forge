@@ -34,7 +34,7 @@ export type WorkspaceObservations = {
   checkouts: Map<string, string>
 }
 type StoredTarget = {
-  projectId: string
+  projectId: string | null
   projectPath: string
   cwd: string
   worktreePath: string | null
@@ -102,21 +102,21 @@ export class WorkspaceTargets {
     }
     const row = this.db
       .prepare(
-        `SELECT s.project_id, s.cwd, s.worktree_path, p.path FROM sessions s JOIN projects p ON s.project_id = p.id AND p.deleted_at IS NULL WHERE s.id = ? AND s.deleted_at IS NULL`,
+        `SELECT s.project_id, s.cwd, s.worktree_path, p.path FROM sessions s LEFT JOIN projects p ON s.project_id = p.id AND p.deleted_at IS NULL WHERE s.id = ? AND s.deleted_at IS NULL AND (s.project_id IS NULL OR p.id IS NOT NULL)`,
       )
       .get(target.sessionId) as
       | {
-          project_id: string
+          project_id: string | null
           cwd: string
           worktree_path: string | null
-          path: string
+          path: string | null
         }
       | undefined
     if (!row)
       throw new WorkspaceError('target_not_found', 404, 'Session not found')
     return {
       projectId: row.project_id,
-      projectPath: row.path,
+      projectPath: row.project_id === null ? row.cwd : row.path!,
       cwd: row.cwd,
       worktreePath: row.worktree_path,
     }

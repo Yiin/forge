@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { fixture } from './fixtures.js'
@@ -210,5 +210,98 @@ describe('persisted provider-independent workspace targets', () => {
     const after = await f.service.resolve(target)
     expect(after.workspaceId).toBe(before.workspaceId)
     expect(after.workspaceRevision).toBeGreaterThan(before.workspaceRevision)
+  })
+})
+
+describe('projectless workspace targets', () => {
+  it('resolves a plain projectless cwd with the session cwd as its authority', async () => {
+    const f = await fixture()
+    const session = createSession(f.db, {
+      projectId: null,
+      cwd: f.root,
+      harness: 'missing',
+      title: 'Projectless',
+    })
+    const target = { kind: 'session' as const, sessionId: session.id }
+    const resolved = await f.service.resolve(target)
+    expect(resolved.projectId).toBeNull()
+    expect(resolved.cwd).toBe(f.root)
+    expect(resolved.worktreePath).toBeNull()
+    const internal = await f.service.targets.resolve(target)
+    expect(internal.gitDirectory).toBeNull()
+    expect(internal.checkoutState).toBe('plain')
+    expect((await f.snapshot('file.txt', target)).file.text).toBe('original\n')
+    expect((await f.app.request(f.url('target', {}, target))).status).toBe(200)
+  })
+  it('resolves a projectless git cwd and keeps project sessions project-addressed', async () => {
+    const f = await fixture(true)
+    const session = createSession(f.db, {
+      projectId: null,
+      cwd: f.root,
+      harness: 'missing',
+      title: 'Projectless git',
+    })
+    const resolved = await f.service.targets.resolve({
+      kind: 'session',
+      sessionId: session.id,
+    })
+    expect(resolved.projectId).toBeNull()
+    expect(resolved.gitDirectory).toBe(await realpath(join(f.root, '.git')))
+    expect(resolved.checkoutState).not.toBe('plain')
+    expect((await f.service.resolve(f.target)).projectId).toBe(f.project.id)
+  })
+  it('resolves a projectless session rooted in a separate worktree', async () => {
+    const f = await fixture(true)
+    const worktree = join(f.dir, 'linked')
+    await runGit(f.root, ['worktree', 'add', '-b', 'linked', worktree])
+    const session = createSession(f.db, {
+      projectId: null,
+      cwd: worktree,
+      harness: 'missing',
+      title: 'Projectless worktree',
+    })
+    const resolved = await f.service.resolve({
+      kind: 'session',
+      sessionId: session.id,
+    })
+    expect(resolved.projectId).toBeNull()
+    expect(resolved.cwd).toBe(worktree)
+    expect(resolved.worktreePath).toBe(worktree)
+  })
+  it('rejects a session whose project was deleted instead of reviving it as projectless', async () => {
+    const f = await fixture()
+    f.db
+      .prepare('UPDATE projects SET deleted_at = 1 WHERE id = ?')
+      .run(f.project.id)
+    expect((await f.app.request(f.url('target'))).status).toBe(404)
+    await expect(f.service.resolve(f.target)).rejects.toMatchObject({
+      code: 'target_not_found',
+      status: 404,
+    })
+  })
+  it('rejects projectless sessions with contradicting or unavailable worktree hints', async () => {
+    const f = await fixture(true)
+    const contradicting = createSession(f.db, {
+      projectId: null,
+      cwd: f.root,
+      worktreePath: f.root,
+      harness: 'missing',
+      title: 'Contradicting hint',
+    })
+    const unavailable = createSession(f.db, {
+      projectId: null,
+      cwd: f.root,
+      worktreePath: join(f.dir, 'absent'),
+      harness: 'missing',
+      title: 'Unavailable hint',
+    })
+    for (const session of [contradicting, unavailable])
+      expect(
+        (
+          await f.app.request(
+            f.url('target', {}, { kind: 'session', sessionId: session.id }),
+          )
+        ).status,
+      ).toBe(403)
   })
 })
