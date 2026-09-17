@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'vitest'
+import { gitRoutes } from '../src/http/git.js'
+import { createSession } from '../src/db/queries.js'
+import { WorkspaceTargets } from '../src/workspace/target.js'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -227,4 +230,116 @@ describe('git routes', () => {
       await rm(dataDir, { recursive: true, force: true })
     }
   })
+})
+
+test('session Git routes retain exact workspace authority', async () => {
+  const db = new DatabaseSync(':memory:')
+  migrate(db)
+  const cwd = await mkdtemp(`${tmpdir()}/forge-session-git-`)
+  const outside = await mkdtemp(`${tmpdir()}/forge-session-git-foreign-`)
+  try {
+    for (const [path, name] of [
+      [cwd, 'owned'],
+      [outside, 'foreign'],
+    ] as const) {
+      await runGit(path, ['init', '-b', name])
+      await runGit(path, ['config', 'user.email', 'fixture@example.invalid'])
+      await runGit(path, ['config', 'user.name', 'Fixture'])
+      await writeFile(`${path}/${name}.txt`, `${name} original\n`)
+      await runGit(path, ['add', '.'])
+      await runGit(path, ['commit', '-m', `${name} commit`])
+    }
+    await writeFile(`${cwd}/owned.txt`, 'owned changed\n')
+    db.prepare(
+      'INSERT INTO projects (id,name,path,created_at) VALUES (?,?,?,?)',
+    ).run('owned', 'owned', cwd, 1)
+    const session = createSession(db, {
+      projectId: 'owned',
+      harness: 'mock',
+      title: 'session workspace',
+      cwd,
+    })
+    const targets = new WorkspaceTargets(db)
+    const app = gitRoutes({ db, dataDir: cwd, targets })
+    // Query params naming foreign roots must not redirect a session route.
+    const misleading = `?cwd=${encodeURIComponent(outside)}&sessionId=foreign&projectId=foreign`
+    const expected = await targets.resolve({
+      kind: 'session',
+      sessionId: session.id,
+    })
+    const identity = {
+      workspaceId: expected.workspaceId,
+      workspaceRevision: expected.workspaceRevision,
+    }
+    const status = await app.request(
+      `/api/sessions/${session.id}/git/status${misleading}`,
+    )
+    expect(status.status).toBe(200)
+    expect(await status.json()).toMatchObject({
+      isRepo: true,
+      branch: 'owned',
+      dirty: true,
+      workspace: identity,
+    })
+    const branches = await app.request(
+      `/api/sessions/${session.id}/git/branches${misleading}`,
+    )
+    expect(branches.status).toBe(200)
+    const refs = (await branches.json()) as {
+      workspace: unknown
+      refs: Array<{ name: string }>
+    }
+    expect(refs.workspace).toEqual(identity)
+    expect(refs.refs.some((ref) => ref.name.includes('owned'))).toBe(true)
+    expect(refs.refs.some((ref) => ref.name.includes('foreign'))).toBe(false)
+    const history = await app.request(
+      `/api/sessions/${session.id}/git/history${misleading}`,
+    )
+    expect(history.status).toBe(200)
+    const page = (await history.json()) as {
+      workspace: unknown
+      commits: Array<{ subject: string }>
+    }
+    expect(page.workspace).toEqual(identity)
+    expect(page.commits.map((commit) => commit.subject)).toEqual([
+      'owned commit',
+    ])
+    const diff = await app.request(
+      `/api/sessions/${session.id}/git/diff${misleading}`,
+    )
+    expect(diff.status).toBe(200)
+    const body = (await diff.json()) as {
+      workspace: unknown
+      files: Array<{ newPath: string }>
+    }
+    expect(body.workspace).toEqual(identity)
+    expect(body.files.map((file) => file.newPath)).toEqual(['owned.txt'])
+    db.prepare(
+      'INSERT INTO projects (id,name,path,created_at) VALUES (?,?,?,?)',
+    ).run('foreign', 'foreign', outside, 1)
+    expect(
+      (
+        await app.request(
+          `/api/projects/foreign/git/diff?sessionId=${session.id}`,
+        )
+      ).status,
+    ).toBe(400)
+    db.prepare('UPDATE sessions SET deleted_at=1 WHERE id=?').run(session.id)
+    for (const operation of ['status', 'branches', 'diff', 'history']) {
+      expect(
+        (
+          await app.request(
+            `/api/sessions/${session.id}/git/${operation}${misleading}`,
+          )
+        ).status,
+      ).toBe(404)
+      expect(
+        (await app.request(`/api/sessions/missing/git/${operation}`)).status,
+      ).toBe(404)
+    }
+  } finally {
+    db.close()
+    await rm(cwd, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
+  }
 })
