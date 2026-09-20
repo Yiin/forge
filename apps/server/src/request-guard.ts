@@ -25,9 +25,15 @@ function values(
 export class RequestGuard {
   private readonly origins: Set<string>
   private readonly hosts: Set<string>
+  private readonly notified = new Set<string>()
   private bound = false
 
-  constructor(private readonly access: TerminalAccess = { mode: 'loopback' }) {
+  constructor(
+    private readonly access: TerminalAccess = { mode: 'loopback' },
+    private readonly onLoopbackHostRejection: (
+      authority: string,
+    ) => void = () => {},
+  ) {
     if (access.mode === 'explicit') {
       this.origins = new Set(access.allowedOrigins.map(canonicalOrigin))
       this.hosts = new Set(
@@ -54,6 +60,21 @@ export class RequestGuard {
     this.bound = true
   }
 
+  private notifyLoopbackHostRejection(authority: string) {
+    if (this.access.mode !== 'loopback') return
+    const bracketEnd = authority.indexOf(']')
+    const host =
+      (bracketEnd < 0
+        ? authority.split(':', 1)[0]
+        : authority.slice(1, bracketEnd)) ?? ''
+    const lower = host.toLowerCase()
+    if (lower === 'localhost' || lower === '::1' || lower.startsWith('127.'))
+      return
+    if (this.notified.has(authority)) return
+    this.notified.add(authority)
+    this.onLoopbackHostRejection(authority)
+  }
+
   check(
     request: Request,
     options: { mutation?: boolean; incoming?: IncomingMessage } = {},
@@ -75,7 +96,10 @@ export class RequestGuard {
     } catch {
       return 'Host is not allowed'
     }
-    if (!this.hosts.has(parsedHost)) return 'Host is not allowed'
+    if (!this.hosts.has(parsedHost)) {
+      this.notifyLoopbackHostRejection(parsedHost)
+      return 'Host is not allowed'
+    }
 
     const origin = values(request, incoming, 'origin')[0]
     if (origin !== undefined) {

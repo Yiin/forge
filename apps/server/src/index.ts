@@ -165,7 +165,10 @@ export function createApp(
     signal?: AbortSignal,
   ) => void | Promise<void>,
   workspaceFiles?: WorkspaceFiles,
-  requestGuard = new RequestGuard(configState?.current.terminalAccess),
+  requestGuard = new RequestGuard(
+    configState?.current.terminalAccess,
+    logLoopbackHostRejection,
+  ),
   previews?: PreviewManager,
   acpResources = new AcpResourceHost(),
 ) {
@@ -463,7 +466,10 @@ export function startServer(port?: number): ServerType {
   uploadStore.setTerminalManager(terminals)
   manager.setTerminalManager(terminals)
   const terminalAuthority = new TerminalAuthority(config.terminalAccess)
-  const requestGuard = new RequestGuard(config.terminalAccess)
+  const requestGuard = new RequestGuard(
+    config.terminalAccess,
+    logLoopbackHostRejection,
+  )
   const terminalRequests = new TerminalRequests(
     terminals.limits.http,
     terminals.limits.requestDeadlineMs,
@@ -684,4 +690,27 @@ export function startServer(port?: number): ServerType {
 
 if (process.env.NODE_ENV !== 'test') {
   startServer()
+}
+
+function forgeConfigPathHint() {
+  return process.env.FORGE_CONFIG ?? '~/.forge/forge.toml'
+}
+
+function logLoopbackHostRejection(authority: string) {
+  const host = authority.replace(/:\d+$/, '')
+  console.warn(
+    `forge: the request guard is in "loopback" mode and refused Host ` +
+      `"${authority}". Loopback mode accepts only localhost, 127.0.0.1, and ` +
+      `[::1] on the bound port, so a reverse proxy that forwards the real ` +
+      `Host header gets a 403 "Host is not allowed" for every request, ` +
+      `including the page load. For a proxied deployment, set the public host ` +
+      `in ${forgeConfigPathHint()}:\n` +
+      `  [terminalAccess]\n` +
+      `  mode = "explicit"\n` +
+      `  allowedHostAuthorities = ["${host}"]\n` +
+      `  allowedOrigins = ["https://${host}"]\n` +
+      `Do not make the guard trust a client-supplied X-Forwarded-Host; that ` +
+      `defeats the Host check the guard exists to enforce. Keep the allowlist ` +
+      `explicit.`,
+  )
 }

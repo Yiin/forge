@@ -219,4 +219,52 @@ describe('Forge request guard', () => {
       ),
     ).toBeUndefined()
   })
+
+  it('warns once per distinct external host when loopback mode rejects a proxied authority', () => {
+    const seen: string[] = []
+    const proxied = new RequestGuard({ mode: 'loopback' }, (host) =>
+      seen.push(host),
+    )
+    proxied.bind(3900)
+    const requestTo = () =>
+      new Request('http://forge.example/api/projects', {
+        method: 'GET',
+        headers: { host: 'forge.example' },
+      })
+    expect(proxied.check(requestTo())).toBe('Host is not allowed')
+    expect(proxied.check(requestTo())).toBe('Host is not allowed')
+    expect(seen).toEqual(['forge.example'])
+  })
+
+  it('does not warn for a wrong-port loopback host or in explicit mode', () => {
+    const seen: string[] = []
+    const wrongPort = new RequestGuard({ mode: 'loopback' }, (host) =>
+      seen.push(host),
+    )
+    wrongPort.bind(3900)
+    expect(
+      wrongPort.check(
+        new Request('http://127.0.0.1:1/api/projects', {
+          headers: { host: '127.0.0.1:1' },
+        }),
+      ),
+    ).toBe('Host is not allowed')
+    expect(seen).toEqual([])
+    const explicit = new RequestGuard(
+      {
+        mode: 'explicit',
+        allowedOrigins: ['https://forge.example'],
+        allowedHostAuthorities: ['forge.example'],
+      },
+      (host) => seen.push(host),
+    )
+    expect(
+      explicit.check(
+        new Request('http://other.example/api/projects', {
+          headers: { host: 'other.example' },
+        }),
+      ),
+    ).toBe('Host is not allowed')
+    expect(seen).toEqual([])
+  })
 })
