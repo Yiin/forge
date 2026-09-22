@@ -46,8 +46,10 @@ export async function packedNativeSmoke(releaseArgument) {
     await mkdir(fixtureData)
     await mkdir(home)
     // Only this standalone driver changes its environment. The packed server uses its real startup path.
+    const version = process.env.FORGE_VERSION
     for (const name of Object.keys(process.env)) delete process.env[name]
     Object.assign(process.env, {
+      ...(version ? { FORGE_VERSION: version } : {}),
       PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
       HOME: home,
       XDG_CONFIG_HOME: join(home, '.config'),
@@ -160,6 +162,16 @@ export async function packedNativeSmoke(releaseArgument) {
       assert.equal(response.ok, true, JSON.stringify(body))
       return body
     }
+    const health = await request('/api/health')
+    assert.equal(health.ok, true)
+    if (version) assert.equal(health.version, version)
+    const index = await fetch(base + '/', { signal: AbortSignal.timeout(5000) })
+    assert.equal(index.ok, true)
+    assert.ok((await index.text()).includes('<script'))
+    const missing = await fetch(base + '/assets/does-not-exist.js', {
+      signal: AbortSignal.timeout(5000),
+    })
+    assert.equal(missing.ok, false, 'missing web asset returned success')
     const project = await request('/api/projects', {
       method: 'POST',
       body: JSON.stringify({ name: 'Packed native smoke', path: serverData }),

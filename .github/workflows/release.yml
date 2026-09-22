@@ -78,70 +78,10 @@ jobs:
           printf 'version=%s\nclient_tarball=dist/forge-client-%s.tgz\n' "$version" "$version" >> "$GITHUB_OUTPUT"
       - name: Extracted terminal smoke
         run: node scripts/terminal-release-smoke.mjs dist/forge-linux-x64.tar.gz "$RUNNER_TEMP/forge-terminal-smoke"
-      - name: Boot smoke
+      - name: Packed native smoke
         env:
           FORGE_VERSION: ${{ steps.pack.outputs.version }}
-        run: |
-          set -euo pipefail
-          data_dir="$(mktemp -d)"
-          pid=""
-          cleanup() {
-            local code=$?
-            [ "$code" -ne 0 ] && cat "$data_dir/server.log" 2>/dev/null
-            kill "$pid" 2>/dev/null || true
-            # Wait for the server to exit before removing the data dir: it
-            # writes shutdown state on SIGTERM, and a racing rm -rf fails the
-            # step under bash -e even when the smoke itself passed. Bound the
-            # wait: a hung cleanup hook keeps the process alive past its 6s
-            # shutdown deadline, so escalate to SIGKILL after 10s.
-            local attempt
-            for attempt in $(seq 1 10); do
-              kill -0 "$pid" 2>/dev/null || break
-              sleep 1
-            done
-            kill -9 "$pid" 2>/dev/null || true
-            rm -rf "$data_dir" || true
-            exit "$code"
-          }
-          trap cleanup EXIT
-          # The packed release contains no test fixtures, so the mock harness
-          # points at the checkout's ACP fixture. FORGE_CONFIG makes the server
-          # read this file instead of seeding ~/.forge/forge.toml defaults
-          # whose mock path does not exist in the packed tree.
-          cat > "$data_dir/forge.toml" <<EOF
-          [harness.mock]
-          name = "Fake ACP agent"
-          command = "bun"
-          args = ["$GITHUB_WORKSPACE/apps/server/test/fixtures/acp-mock-agent.ts"]
-          protocol = "acp"
-          enabled = true
-          [harness.mock.env]
-          EOF
-          FORGE_DATA_DIR="$data_dir" FORGE_PORT=3900 FORGE_VERSION="$FORGE_VERSION" \
-            FORGE_CONFIG="$data_dir/forge.toml" \
-            node "$RUNNER_TEMP/forge-linux-x64/apps/server/src/index.js" > "$data_dir/server.log" 2>&1 &
-          pid=$!
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:3900/api/health | tee "$data_dir/health.json" | grep -q '"ok":true'; then
-              break
-            fi
-            if [ "$attempt" = 30 ]; then
-              cat "$data_dir/server.log"
-              exit 1
-            fi
-            sleep 1
-          done
-          grep -q "\"version\":\"$FORGE_VERSION\"" "$data_dir/health.json"
-          curl --fail --silent http://127.0.0.1:3900/ | grep -q '<script'
-          if curl --silent --show-error --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3900/assets/does-not-exist.js | grep -q '^2'; then
-            echo 'missing web asset unexpectedly returned success' >&2
-            exit 1
-          fi
-          project="$(curl --fail --silent -X POST http://127.0.0.1:3900/api/projects -H 'content-type: application/json' -d '{"name":"Release smoke","path":"."}')"
-          project_id="$(printf '%s' "$project" | node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.parse(s).id))')"
-          session="$(curl --fail --silent -X POST "http://127.0.0.1:3900/api/sessions" -H 'content-type: application/json' -d "{\"projectId\":\"$project_id\",\"harness\":\"mock\",\"title\":\"Smoke\",\"cwd\":\".\"}")"
-          session_id="$(printf '%s' "$session" | node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.parse(s).id))')"
-          curl --fail --silent -X POST "http://127.0.0.1:3900/api/sessions/$session_id/prompt" -H 'content-type: application/json' -d '{"text":"hello"}'
+        run: node scripts/packed-native-smoke.mjs "$RUNNER_TEMP/forge-linux-x64"
       - uses: actions/upload-artifact@v4
         with:
           name: forge-linux-x64
