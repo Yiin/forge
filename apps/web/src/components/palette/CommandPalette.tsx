@@ -142,13 +142,13 @@ export function CommandPalette() {
   }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogHeader className="sr-only">
-        <DialogTitle>Command palette</DialogTitle>
-        <DialogDescription>
-          Search actions, sessions, and messages
-        </DialogDescription>
-      </DialogHeader>
       <DialogContent className="overflow-hidden p-0" showCloseButton={false}>
+        <DialogHeader className="sr-only">
+          <DialogTitle>Command palette</DialogTitle>
+          <DialogDescription>
+            Search actions, sessions, and messages
+          </DialogDescription>
+        </DialogHeader>
         <Command
           loop
           shouldFilter={!results.messages.length && !results.runs.length}
