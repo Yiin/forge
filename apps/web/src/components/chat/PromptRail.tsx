@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from 'react'
 import type { VirtualizerHandle } from 'virtua'
 import {
   activePrompt,
-  easeInOut,
   GLIDE_MS,
   previewText,
   PROMPT_PREVIEW_CHARS,
@@ -14,6 +13,7 @@ import {
   showRail,
   type RailPrompt,
 } from './prompt-rail'
+import { easeInOut } from './motion'
 import { cn } from '../../lib/utils'
 
 /**

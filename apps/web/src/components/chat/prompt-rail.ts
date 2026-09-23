@@ -80,37 +80,3 @@ export function previewText(text: string, max: number) {
   if (flat.length <= max) return flat
   return `${flat.slice(0, max - 1).trimEnd()}…`
 }
-
-/**
- * CSS cubic-bezier as a function of time: solves x(t) by Newton steps with
- * a bisection fallback, then returns y.
- */
-export function cubicBezier(x1: number, y1: number, x2: number, y2: number) {
-  const curve = (a: number, b: number, t: number) =>
-    3 * a * t * (1 - t) ** 2 + 3 * b * t ** 2 * (1 - t) + t ** 3
-  const slope = (a: number, b: number, t: number) =>
-    3 * a * (1 - t) ** 2 + 6 * (b - a) * t * (1 - t) + 3 * (1 - b) * t ** 2
-  return (x: number) => {
-    if (x <= 0) return 0
-    if (x >= 1) return 1
-    let t = x
-    for (let step = 0; step < 8; step += 1) {
-      const error = curve(x1, x2, t) - x
-      if (Math.abs(error) < 1e-6) return curve(y1, y2, t)
-      const d = slope(x1, x2, t)
-      if (Math.abs(d) < 1e-6) break
-      t -= error / d
-    }
-    let low = 0
-    let high = 1
-    t = x
-    while (high - low > 1e-6) {
-      if (curve(x1, x2, t) < x) low = t
-      else high = t
-      t = (low + high) / 2
-    }
-    return curve(y1, y2, t)
-  }
-}
-
-export const easeInOut = cubicBezier(0.42, 0, 0.58, 1)

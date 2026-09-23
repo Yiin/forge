@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { ChatRenderItem } from './render-model'
 import {
   activePrompt,
-  cubicBezier,
-  easeInOut,
   previewText,
   railBuckets,
   railCapacity,
@@ -80,14 +78,5 @@ describe('prompt rail', () => {
     expect(previewText('a\n\n  b', 10)).toBe('a b')
     expect(previewText('abcdefghij', 5)).toBe('abcd…')
     expect(previewText('abc   defgh', 5)).toBe('abc…')
-  })
-
-  it('eases the glide like the CSS curve', () => {
-    expect(easeInOut(0)).toBe(0)
-    expect(easeInOut(1)).toBe(1)
-    expect(easeInOut(0.5)).toBeCloseTo(0.5, 5)
-    // The first 16ms frame of a 500ms glide moves less than 2%.
-    expect(easeInOut(16 / 500)).toBeLessThan(0.02)
-    expect(cubicBezier(0, 0, 1, 1)(0.3)).toBeCloseTo(0.3, 5)
   })
 })
