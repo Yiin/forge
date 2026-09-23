@@ -11,7 +11,15 @@ const dirs: string[] = []
 const script = join(process.cwd(), 'ops/forge-update')
 
 async function fixture(
-  mode: 'same' | 'update' | 'tagged-build' | 'rollback' | 'active' | 'tarball',
+  mode:
+    | 'same'
+    | 'update'
+    | 'tagged-build'
+    | 'rollback'
+    | 'active'
+    | 'tarball'
+    | 'explicit-host'
+    | 'rejected',
 ) {
   const root = await mkdtemp(join(tmpdir(), 'forge-update-'))
   dirs.push(root)
@@ -72,6 +80,10 @@ fi
   await writeFile(
     join(tools, 'curl'),
     `#!/bin/sh
+# Mimic the server guard in explicit host mode: refuse any other Host.
+if [ "$FORGE_MODE" = explicit-host ] || [ "$FORGE_MODE" = rejected ]; then
+  case "$*" in *"Host: forge.example.test"*) ;; *) exit 22;; esac
+fi
 case "$*" in *api/status*)
   [ "$FORGE_MODE" = active ] && echo '{"epicRuns":{"running":1}}' || echo '{"epicRuns":{"running":0}}'
 ;; *)
@@ -79,7 +91,7 @@ case "$*" in *api/status*)
   elif [ "$FORGE_MODE" = tagged-build ]; then
     if [ ! -e "$FORGE_FIXTURE/health-seen" ]; then touch "$FORGE_FIXTURE/health-seen"; echo '{"ok":true,"version":"v1.0.0"}'
     else echo '{"ok":true,"version":"v2.0.0-abc1234"}'; fi
-  elif { [ "$FORGE_MODE" = update ] || [ "$FORGE_MODE" = tarball ]; } && [ ! -e "$FORGE_FIXTURE/health-seen" ]; then touch "$FORGE_FIXTURE/health-seen"; echo '{"ok":true,"version":"v1.0.0"}'
+  elif { [ "$FORGE_MODE" = update ] || [ "$FORGE_MODE" = tarball ] || [ "$FORGE_MODE" = explicit-host ]; } && [ ! -e "$FORGE_FIXTURE/health-seen" ]; then touch "$FORGE_FIXTURE/health-seen"; echo '{"ok":true,"version":"v1.0.0"}'
   else echo '{"ok":true,"version":"v2.0.0"}'; fi
 ;; esac
 `,
@@ -102,7 +114,16 @@ case "$*" in *api/status*)
     FORGE_SYSTEMCTL_LOG: join(root, 'systemctl.log'),
     FORGE_HEALTH_ATTEMPTS: '1',
     FORGE_HEALTH_SLEEP: '0',
+    FORGE_HOST: '',
+    FORGE_CONFIG:
+      mode === 'explicit-host'
+        ? join(root, 'forge.toml')
+        : join(root, 'missing.toml'),
   }
+  await writeFile(
+    join(root, 'forge.toml'),
+    '[terminalAccess]\nmode = "explicit"\nallowedOrigins = ["https://forge.example.test"]\nallowedHostAuthorities = ["forge.example.test"]\n',
+  )
   return { env, bin, state, root, lib }
 }
 
@@ -118,16 +139,19 @@ describe('forge updater', () => {
     ['rollback', 'health rollback'],
     ['active', 'active epic skip'],
     ['tarball', 'tree swap from release archive'],
+    ['explicit-host', 'Host header from the explicit-mode config'],
+    ['rejected', 'status refused by the host guard'],
   ] as const)('%s path: %s', async (mode) => {
     const f = await fixture(mode)
     const result = await exec(script, [], { env: f.env }).catch(
       (error) => error,
     )
-    if (mode === 'rollback') expect(result.code).not.toBe(0)
+    if (mode === 'rollback' || mode === 'rejected')
+      expect(result.code).not.toBe(0)
     else expect(result.code ?? 0).toBe(0)
     const installed = await readFile(join(f.state, 'installed-version'), 'utf8')
     const binary = await readFile(f.bin, 'utf8')
-    if (mode === 'update') {
+    if (mode === 'update' || mode === 'explicit-host') {
       expect(installed).toBe('v2.0.0\n')
       expect(binary).toContain('new')
     } else if (mode === 'tarball') {
