@@ -163,6 +163,16 @@ export function Timeline({
           }
           return height
         },
+        // The bottom spacer's lower edge, so a minimum height on the box
+        // does not count.
+        contentHeight: () => {
+          const box = content.current
+          const end = box?.lastElementChild
+          if (!box || !end) return 0
+          return (
+            end.getBoundingClientRect().bottom - box.getBoundingClientRect().top
+          )
+        },
         bottomInset: () => latest.current.bottomInset,
         reducedMotion: prefersReducedMotion,
         onFollow: (state) => setJump(state.jump),

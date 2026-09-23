@@ -31,6 +31,8 @@ import {
   SETTLE_GRACE_MS,
   stepGlide,
   stepSpring,
+  stepTailFloor,
+  type TailFloor,
 } from './scroll-motion'
 
 /** Rows that land this soon after the transcript fills snap, not glide. */
@@ -46,6 +48,11 @@ export type ScrollHost = {
    * the runway: the rows as laid out, plus the bottom spacer.
    */
   tailHeight: (index: number) => number
+  /**
+   * Height of the rows plus the bottom spacer as laid out this frame,
+   * without the runway or the tail floor.
+   */
+  contentHeight: () => number
   /** Overlaid chrome at the bottom of the scroller, such as the composer. */
   bottomInset: () => number
   reducedMotion: () => boolean
@@ -81,6 +88,11 @@ export class TranscriptScroll {
   private position?: number
   private runway?: Runway
   private reserved = 0
+  /** The content height at the last frame, and the floor held under it. */
+  private tail = 0
+  private floor?: TailFloor
+  private floorTick?: number
+  private minHeight = 0
   private fold?: Fold
   private inputAt = -Infinity
   private attachedAt?: number
@@ -187,6 +199,7 @@ export class TranscriptScroll {
   /** Wheel, touch or key input: motion the view runs itself stands down. */
   userInput() {
     this.inputAt = performance.now()
+    this.position = undefined
     this.fold = undefined
     this.spring = restingSpring()
     this.springTick = undefined
@@ -259,6 +272,8 @@ export class TranscriptScroll {
       viewportHeight: this.scroller.clientHeight,
       bottomInset: this.host.bottomInset(),
       targetHeight: rect.height + heightChange,
+      scrollTop: this.read(),
+      endScrollHeight: this.scroller.scrollHeight + heightChange,
     })
     if (Math.abs(to - from) <= 0.5) return
     if (this.host.reducedMotion()) {
@@ -279,12 +294,51 @@ export class TranscriptScroll {
   private tick = (now: number) => {
     this.frame = 0
     this.reserve()
+    const floored = this.holdTail(now)
     const yielding = now - this.inputAt < INPUT_YIELD_MS
     let again = false
     if (this.fold) again = this.stepFold(now)
     else if (this.runway?.held) again = yielding || this.stepRunway(now)
-    else if (this.follow.pinned) again = yielding || this.stepFollow(now)
-    if (again) this.kick()
+    // A held tail keeps the view still; the spring would only chase into
+    // space that is about to go.
+    else if (this.follow.pinned && !floored)
+      again = yielding || this.stepFollow(now)
+    if (again || floored) this.kick()
+  }
+
+  /**
+   * Keep a pinned view's content from shrinking under it for a moment, so a
+   * row that swaps for another does not clamp the view up and back. A tail
+   * that stays short glides down instead of jumping.
+   */
+  private holdTail(now: number) {
+    const height = this.host.contentHeight()
+    const previous = this.tail
+    this.tail = height
+    const started = !this.floor
+    this.floor =
+      this.follow.pinned && !this.runway && !this.fold && !this.attaching(now)
+        ? stepTailFloor({
+            floor: this.floor,
+            previous,
+            height,
+            maxDrop: this.scroller.clientHeight,
+            now,
+            frames: this.host.reducedMotion()
+              ? Infinity
+              : framesSince(this.floorTick, now),
+          })
+        : undefined
+    this.floorTick = this.floor ? now : undefined
+    this.applyMinHeight()
+    // The shrink already clamped the view while it was measured; put it
+    // back where it was before anything paints. A pinned view the user
+    // moved last sat at the end.
+    if (this.floor && started) {
+      if (this.position === undefined) this.snapToEnd()
+      else this.write(this.position)
+    }
+    return this.floor !== undefined
   }
 
   /**
@@ -323,8 +377,15 @@ export class TranscriptScroll {
   }
 
   private setReserved(height: number) {
-    if (Math.abs(height - this.reserved) < 0.5) return
     this.reserved = height
+    this.applyMinHeight()
+  }
+
+  /** The runway's reservation or the tail floor, whichever is taller. */
+  private applyMinHeight() {
+    const height = Math.max(this.reserved, this.floor?.height ?? 0)
+    if (Math.abs(height - this.minHeight) < 0.5) return
+    this.minHeight = height
     this.content.style.minHeight = height ? `${height}px` : ''
   }
 

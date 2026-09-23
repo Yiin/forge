@@ -158,6 +158,51 @@ export function holdDrifted(position: number, hold: number) {
   return hold - position > 0.5 || position - hold > RUNWAY_SLACK + 2
 }
 
+/**
+ * A shrinking tail holds its old height this long. When a turn ends, the
+ * working line leaves a frame before virtua measures the reply's footer, so
+ * the content shrinks and grows back; without the hold, a pinned view would
+ * clamp up and then glide back down.
+ */
+export const TAIL_HOLD_MS = 100
+
+export type TailFloor = {
+  /** The content height held under the view. */
+  height: number
+  since: number
+}
+
+/**
+ * The floor under a pinned view's content, one frame at a time. A tail that
+ * shrinks keeps its old height for TAIL_HOLD_MS, then glides down to the
+ * real height on the runway's curve. A drop larger than `maxDrop` (a new
+ * transcript) and content that grows back need no floor.
+ */
+export function stepTailFloor({
+  floor,
+  previous,
+  height,
+  maxDrop,
+  now,
+  frames,
+}: {
+  floor: TailFloor | undefined
+  /** The content height at the previous frame. */
+  previous: number
+  /** The content height now. */
+  height: number
+  maxDrop: number
+  now: number
+  frames: number
+}): TailFloor | undefined {
+  const held = floor?.height ?? previous
+  if (height >= held - 0.5 || held - height > maxDrop) return undefined
+  if (!floor) return { height: previous, since: now }
+  if (now - floor.since < TAIL_HOLD_MS) return floor
+  const next = stepGlide(floor.height, height, frames)
+  return next === height ? undefined : { ...floor, height: next }
+}
+
 /** The top fade band plus 28px: a revealed prompt reads below the fade. */
 export const FOLD_TOP_BAND = 24 + 28
 export const FOLD_BOTTOM_GAP = 12
@@ -180,24 +225,34 @@ export function foldCurveCss(heightDelta: number) {
 
 /**
  * Where a folding row's top should end, in viewport px: between 52px below
- * the top and far enough above the bottom that its new height fits.
+ * the top and far enough above the bottom that its new height fits, but
+ * never where the scroll range, once the fold lands, cannot take it. The
+ * range shrinks on the fold's own curve, so a glide on that curve toward a
+ * reachable end never hits the edge on the way.
  */
 export function foldTargetTop({
   rowTop,
   viewportHeight,
   bottomInset,
   targetHeight,
+  scrollTop,
+  endScrollHeight,
 }: {
   rowTop: number
   viewportHeight: number
   /** Overlaid chrome at the bottom, such as the composer. */
   bottomInset: number
   targetHeight: number
+  scrollTop: number
+  /** The scroll height once the fold lands. */
+  endScrollHeight: number
 }) {
   const top = FOLD_TOP_BAND
   const bottom = viewportHeight - bottomInset - targetHeight - FOLD_BOTTOM_GAP
-  if (bottom < top) return top
-  return Math.min(Math.max(rowTop, top), bottom)
+  const wanted = bottom < top ? top : Math.min(Math.max(rowTop, top), bottom)
+  const offset = rowTop + scrollTop
+  const maxScroll = Math.max(0, endScrollHeight - viewportHeight)
+  return Math.min(Math.max(wanted, offset - maxScroll), offset)
 }
 
 /** The row's top at `elapsed` ms into the fold, on the fold's own curve. */

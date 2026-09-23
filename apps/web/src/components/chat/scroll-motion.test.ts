@@ -19,6 +19,8 @@ import {
   springIdle,
   stepGlide,
   stepSpring,
+  stepTailFloor,
+  TAIL_HOLD_MS,
   type Spring,
 } from './scroll-motion'
 import { easeInOut, easeOut } from './motion'
@@ -147,6 +149,64 @@ describe('own-send runway', () => {
   })
 })
 
+describe('tail floor', () => {
+  const at = { maxDrop: 900, frames: 1 }
+
+  it('holds a shrunk tail and lets go when it grows back', () => {
+    // The working line leaves: 3525px becomes 3491px.
+    const floor = stepTailFloor({
+      ...at,
+      floor: undefined,
+      previous: 3525,
+      height: 3491,
+      now: 0,
+    })
+    expect(floor).toEqual({ height: 3525, since: 0 })
+    // The reply's footer lands a frame later.
+    expect(
+      stepTailFloor({ ...at, floor, previous: 3491, height: 3523, now: 17 }),
+    ).toEqual(floor)
+    expect(
+      stepTailFloor({ ...at, floor, previous: 3523, height: 3525, now: 34 }),
+    ).toBeUndefined()
+  })
+
+  it('glides down on the runway curve after the hold', () => {
+    let floor = stepTailFloor({
+      ...at,
+      floor: undefined,
+      previous: 1000,
+      height: 900,
+      now: 0,
+    })
+    floor = stepTailFloor({ ...at, floor, previous: 900, height: 900, now: 50 })
+    expect(floor?.height).toBe(1000)
+    const heights: number[] = []
+    for (let now = TAIL_HOLD_MS; floor; now += 17) {
+      floor = stepTailFloor({ ...at, floor, previous: 900, height: 900, now })
+      heights.push(floor?.height ?? 900)
+    }
+    expect(heights[0]).toBeCloseTo(1000 - 100 * (1 - 0.85), 6)
+    expect(heights.every((h, i) => i === 0 || h < heights[i - 1])).toBe(true)
+    expect(heights.at(-1)).toBe(900)
+  })
+
+  it('needs no floor for growth or a whole new transcript', () => {
+    const grow = { ...at, floor: undefined, previous: 900, now: 0 }
+    expect(stepTailFloor({ ...grow, height: 950 })).toBeUndefined()
+    expect(stepTailFloor({ ...grow, height: 899.8 })).toBeUndefined()
+    expect(
+      stepTailFloor({
+        ...at,
+        floor: undefined,
+        previous: 5000,
+        height: 400,
+        now: 0,
+      }),
+    ).toBeUndefined()
+  })
+})
+
 describe('fold correction', () => {
   it('times and curves the fold like zeron', () => {
     expect(foldDuration(0)).toBe(220)
@@ -157,7 +217,14 @@ describe('fold correction', () => {
   })
 
   it('keeps the row top inside the band under the top fade', () => {
-    const view = { viewportHeight: 800, bottomInset: 100, targetHeight: 200 }
+    const view = {
+      viewportHeight: 800,
+      bottomInset: 100,
+      targetHeight: 200,
+      // Plenty of content above and below.
+      scrollTop: 5000,
+      endScrollHeight: 20_000,
+    }
     // Above the band: brought down to 52px.
     expect(foldTargetTop({ ...view, rowTop: -300 })).toBe(52)
     // Inside the band: left alone.
@@ -166,6 +233,29 @@ describe('fold correction', () => {
     expect(foldTargetTop({ ...view, rowTop: 600 })).toBe(800 - 100 - 200 - 12)
     // Taller than the band: its top wins.
     expect(foldTargetTop({ ...view, targetHeight: 2000, rowTop: 400 })).toBe(52)
+  })
+
+  it('never aims past the scroll range the fold leaves', () => {
+    // A prompt near the end folds: the row sits 3700px down the content,
+    // which ends at 4000px once the fold lands, in an 800px view. The view
+    // can scroll to 3200 at most, so the row top can rise to 500px only.
+    const end = {
+      viewportHeight: 800,
+      bottomInset: 100,
+      targetHeight: 150,
+      scrollTop: 4000,
+      endScrollHeight: 4000,
+    }
+    expect(foldTargetTop({ ...end, rowTop: -300 })).toBe(500)
+    // The first row of a chat cannot sink below where scrollTop 0 puts it.
+    expect(
+      foldTargetTop({
+        ...end,
+        rowTop: -10,
+        scrollTop: 10,
+        endScrollHeight: 900,
+      }),
+    ).toBe(0)
   })
 
   it('moves the row top on the fold curve', () => {

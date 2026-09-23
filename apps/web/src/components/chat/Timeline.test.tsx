@@ -113,11 +113,14 @@ function mount(props: Parameters<typeof Timeline>[0] = {}) {
     return Math.max(rows + spacer, parseFloat(content.style.minHeight || '0'))
   }
   let top = 0
+  // Layout clamps the offset once the content shrinks.
+  const clamp = () =>
+    (top = Math.min(top, Math.max(0, scrollHeight() - box.clientHeight)))
   Object.defineProperties(timeline, {
     scrollHeight: { get: scrollHeight, configurable: true },
     clientHeight: { get: () => box.clientHeight, configurable: true },
     scrollTop: {
-      get: () => top,
+      get: clamp,
       set: (value: number) => {
         top = Math.min(Math.max(0, value), scrollHeight() - box.clientHeight)
       },
@@ -128,6 +131,15 @@ function mount(props: Parameters<typeof Timeline>[0] = {}) {
       configurable: true,
     },
   })
+  // The rows and the spacer as laid out, without the content's minimum.
+  const spacer = content.lastElementChild as HTMLElement
+  content.getBoundingClientRect = () => ({ top: 0 }) as DOMRect
+  spacer.getBoundingClientRect = () =>
+    ({
+      bottom:
+        layout.rowHeights.reduce((sum, height) => sum + height, 0) +
+        parseFloat(spacer.style.height || '0'),
+    }) as DOMRect
   const max = () => scrollHeight() - box.clientHeight
   const rerender = (next: Parameters<typeof Timeline>[0] = props) =>
     view.rerender(<Timeline {...next} />)
@@ -426,6 +438,46 @@ describe('Timeline', () => {
       rerender()
       run(30)
       expect(timeline.scrollTop).toBe(before)
+    })
+  })
+
+  describe('tail floor', () => {
+    it('holds the end when the working line leaves before the reply grows', () => {
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [2000, 34]
+      const { timeline, run, max, rerender, land } = mount({ running: true })
+      land()
+      const end = timeline.scrollTop
+      expect(end).toBe(max())
+      // The turn ends. The working line leaves at once; virtua measures the
+      // reply's new footer a frame later. Layout clamps the view meanwhile.
+      layout.rowHeights = [2000]
+      rerender({})
+      expect(timeline.scrollTop).toBe(end - 34)
+      expect(run(1)).toEqual([end])
+      layout.rowHeights = [2032]
+      const rest = run(30)
+      expect(Math.min(...rest)).toBeGreaterThanOrEqual(end - 2)
+      expect(rest.at(-1)).toBe(max())
+    })
+
+    it('glides down when the tail stays short', () => {
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [2000, 300]
+      const { timeline, run, max, rerender, land } = mount({ running: true })
+      land()
+      const end = timeline.scrollTop
+      layout.rowHeights = [2000]
+      rerender({})
+      const trace = run(60)
+      const steps = trace.map(
+        (top, index) => (index ? trace[index - 1] : end) - top,
+      )
+      // It holds for 100ms, then eases down with no step near the full drop.
+      expect(trace.slice(0, 5).every((top) => top === end)).toBe(true)
+      expect(Math.max(...steps)).toBeLessThan(60)
+      expect(steps.every((step) => step >= 0)).toBe(true)
+      expect(trace.at(-1)).toBe(max())
     })
   })
 
