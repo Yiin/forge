@@ -6,7 +6,10 @@ import {
   type HarnessAccountConfig,
   type PatchHarnessAccount,
 } from '@forge/protocol/accounts'
-import { harnessHealthResponseSchema } from '@forge/protocol/status'
+import {
+  harnessHealthResponseSchema,
+  type HarnessStatus,
+} from '@forge/protocol/status'
 import type { ModelCatalog } from '@forge/protocol/models'
 import {
   KIND_LABELS,
@@ -76,6 +79,12 @@ export type HarnessPickerEntry = {
   adapterKind?: 'native' | 'acp' | 'pty' | 'custom'
 }
 
+/** One harness as the health endpoint reports it, without account details. */
+export type HarnessHealthSummary = Pick<
+  HarnessStatus,
+  'key' | 'name' | 'command' | 'enabled' | 'installed'
+> & { accountCount: number }
+
 export { harnessAccountSnapshotSchema }
 
 type FetchLike = typeof globalThis.fetch
@@ -118,7 +127,7 @@ export class AccountsApi {
             identity: account.identity,
           }),
           enabled: entry.enabled,
-          installed: entry.enabled,
+          installed: entry.installed,
           version: 'unknown',
           status: account.disabled
             ? 'disabled'
@@ -164,6 +173,20 @@ export class AccountsApi {
         }),
       ),
     )
+  }
+
+  async listHarnessHealth(): Promise<HarnessHealthSummary[]> {
+    const health = harnessHealthResponseSchema.parse(
+      await this.get<unknown>('/api/harnesses/health'),
+    )
+    return health.map((entry) => ({
+      key: entry.key,
+      name: entry.name,
+      command: entry.command,
+      enabled: entry.enabled,
+      installed: entry.installed,
+      accountCount: entry.accounts.length,
+    }))
   }
 
   refreshHarnessStatus() {
@@ -410,6 +433,7 @@ export class AccountsApi {
 export const accountsApi = new AccountsApi()
 export const listHarnessStatus = () => accountsApi.listHarnessStatus()
 export const refreshHarnessStatus = () => accountsApi.refreshHarnessStatus()
+export const listHarnessHealth = () => accountsApi.listHarnessHealth()
 export const loginStart = (input: {
   accountId: string
   provider?: string

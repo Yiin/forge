@@ -186,6 +186,18 @@ describe('accountKindForHarness', () => {
     expect(accountKindForHarness('shell', { command: 'bash' })).toBeNull()
     expect(accountKindForHarness('gemini', { command: 'gemini' })).toBeNull()
     expect(
+      accountKindForHarness('pipeline', { command: 'pipeline-tool' }),
+    ).toBeNull()
+  })
+  it('leaves out server account kinds that have no login command', () => {
+    expect(
+      accountKindForHarness('cursor', { command: 'cursor-agent' }),
+    ).toBeNull()
+    expect(accountKindForHarness('devin', { command: 'devin' })).toBeNull()
+    expect(accountKindForHarness('hermes', { command: 'hermes' })).toBeNull()
+  })
+  it('returns null for the dev mock harness', () => {
+    expect(
       accountKindForHarness('mock', {
         command: 'bun',
         args: ['apps/server/test/fixtures/acp-mock-agent.ts'],

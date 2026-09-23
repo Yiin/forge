@@ -55,6 +55,7 @@ export const harnessStatusSchema = z.object({
   args: z.array(z.string()),
   protocol: z.enum(['acp', 'pty']),
   enabled: z.boolean(),
+  installed: z.boolean(),
   accounts: z.array(harnessAccountHealthSchema),
   liveProcesses: z.number().int().nonnegative(),
 })

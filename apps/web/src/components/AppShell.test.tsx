@@ -68,6 +68,7 @@ beforeEach(() => {
             args: [],
             protocol: 'acp',
             enabled: true,
+            installed: true,
             liveProcesses: 0,
             accounts: [
               {
@@ -245,6 +246,7 @@ it('uses the configured command to identify an aliased provider after its accoun
           args: [],
           protocol: 'acp',
           enabled: true,
+          installed: true,
           liveProcesses: 0,
           accounts: [],
         },

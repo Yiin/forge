@@ -1,8 +1,11 @@
 import {
+  accessSync,
+  constants as fsConstants,
   existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
+  statSync,
   copyFileSync,
   writeFileSync,
   unlinkSync,
@@ -71,9 +74,19 @@ const defaultEntry = (
   enabled: commandAvailable(command),
 })
 
-function commandAvailable(command: string) {
-  if (command.includes('/') || command.startsWith('.'))
-    return existsSync(command)
+/**
+ * Reports whether a harness command can run: a path must point at an
+ * executable file, and a bare name must resolve on PATH.
+ */
+export function commandAvailable(command: string) {
+  if (command.includes('/') || command.startsWith('.')) {
+    try {
+      accessSync(command, fsConstants.X_OK)
+      return statSync(command).isFile()
+    } catch {
+      return false
+    }
+  }
   try {
     execFileSync('sh', ['-c', `command -v "$1"`, '--', command], {
       stdio: 'ignore',

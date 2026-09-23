@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { harnessHealthResponseSchema } from '@forge/protocol/status'
-import type { ConfigState } from '../config.js'
+import { commandAvailable, type ConfigState } from '../config.js'
 import { clearExpiredLimits } from '../accounts/limits.js'
 import { accountAuthenticated, HarnessAccountStore } from '../accounts/store.js'
 import { clearExpiredUsage, readUsage } from '../accounts/usage.js'
@@ -9,12 +9,26 @@ import type { SessionManager } from '../sessions/manager.js'
 
 type Db = { prepare(sql: string): any; exec(sql: string): unknown }
 
+const INSTALLED_TTL_MS = 30_000
+
 export function createHarnessHealthReader(options: {
   db: Db
   configState: ConfigState
   manager: SessionManager
+  commandAvailable?: (command: string) => boolean
 }) {
   const accounts = new HarnessAccountStore(options.db)
+  const probe = options.commandAvailable ?? commandAvailable
+  // Health is polled; resolving a command spawns a shell, so reuse each
+  // answer for a short window.
+  const installedCache = new Map<string, { installed: boolean; at: number }>()
+  const installed = (command: string, now: number) => {
+    const cached = installedCache.get(command)
+    if (cached && now - cached.at < INSTALLED_TTL_MS) return cached.installed
+    const value = probe(command)
+    installedCache.set(command, { installed: value, at: now })
+    return value
+  }
   const read = () => {
     const now = Date.now()
     clearExpiredLimits(options.db, now)
@@ -28,6 +42,7 @@ export function createHarnessHealthReader(options: {
           args: config.args,
           protocol: config.protocol,
           enabled: config.enabled,
+          installed: installed(config.command, now),
           accounts: accounts.list(key).map((account) => {
             if (
               account.identity === null &&

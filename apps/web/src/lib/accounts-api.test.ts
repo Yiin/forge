@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { harnessAccountSnapshotSchema } from './accounts-api'
+import { AccountsApi, harnessAccountSnapshotSchema } from './accounts-api'
 
 const base = {
   accountId: 'claude-primary',
@@ -72,5 +72,78 @@ describe('harnessAccountSnapshotSchema', () => {
     })
 
     expect(snapshot.limit).toBeNull()
+  })
+})
+
+describe('harness health', () => {
+  const health = [
+    {
+      key: 'claude-code-acp',
+      name: 'Claude Code',
+      command: 'claude',
+      args: [],
+      protocol: 'acp',
+      enabled: true,
+      installed: false,
+      liveProcesses: 0,
+      accounts: [
+        {
+          id: 'a1',
+          label: 'Work',
+          kind: 'claude',
+          homePath: '/accounts/claude/a1',
+          order: 0,
+          disabled: false,
+          authenticated: true,
+          cooldown: null,
+        },
+      ],
+    },
+    {
+      key: 'codex-acp',
+      name: 'Codex',
+      command: 'codex',
+      args: [],
+      protocol: 'acp',
+      enabled: false,
+      installed: true,
+      liveProcesses: 0,
+      accounts: [],
+    },
+  ]
+  const api = () =>
+    new AccountsApi({
+      baseUrl: 'http://forge.test',
+      fetch: async () => new Response(JSON.stringify(health)),
+    })
+
+  it('reports installed from CLI detection, not from enabled', async () => {
+    const [snapshot] = await api().listHarnessStatus()
+    expect(snapshot).toMatchObject({
+      harnessKey: 'claude-code-acp',
+      enabled: true,
+      installed: false,
+    })
+  })
+
+  it('lists enabled and installed per harness with account counts', async () => {
+    expect(await api().listHarnessHealth()).toEqual([
+      {
+        key: 'claude-code-acp',
+        name: 'Claude Code',
+        command: 'claude',
+        enabled: true,
+        installed: false,
+        accountCount: 1,
+      },
+      {
+        key: 'codex-acp',
+        name: 'Codex',
+        command: 'codex',
+        enabled: false,
+        installed: true,
+        accountCount: 0,
+      },
+    ])
   })
 })

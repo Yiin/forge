@@ -1,6 +1,12 @@
 import type { HarnessConfig } from '@forge/protocol/config'
 import type { HarnessAccount } from '@forge/protocol/accounts'
 
+/**
+ * Account kinds the web manages. This is the server's ACCOUNT_KINDS
+ * (apps/server/src/accounts/store.ts) minus cursor, devin, and hermes: the
+ * server has no login command for those (cliFor in accounts/login.ts), so an
+ * account for them could never sign in.
+ */
 export const HARNESS_KINDS = [
   'claude',
   'codex',
@@ -33,7 +39,8 @@ export function formatAccountDisplayName(input: {
 /**
  * Maps a harness config entry to the account kind that owns its credential
  * isolation, matching kind tokens in the key, command, or args. Harnesses
- * with no managed-account support (shell, gemini, mock) return null.
+ * with no managed-account support (shell, gemini, mock, cursor, devin,
+ * hermes) return null.
  */
 export function accountKindForHarness(
   key: string,

@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -10,6 +10,7 @@ import {
   harnessHealthRoutes,
 } from '../src/http/harnessHealth.js'
 import { statusRoutes } from '../src/http/status.js'
+import { commandAvailable } from '../src/config.js'
 import { SessionManager } from '../src/sessions/manager.js'
 import { createProject, createSession } from '../src/db/queries.js'
 import { StatusResponse } from '@forge/protocol/status'
@@ -100,6 +101,56 @@ describe('harness health', () => {
         )
         .all(),
     ).toEqual([])
+  })
+
+  it('reports CLI detection apart from enabled and caches it briefly', () => {
+    vi.useFakeTimers()
+    try {
+      const { db, configState } = setup()
+      configState.current.harness.codex.enabled = false
+      const manager = new SessionManager(db, new EventBus(), () => ({
+        spawn: () => ({ prompt() {}, cancel() {}, kill() {} }),
+      }))
+      const probe = vi.fn((command: string) => command === 'codex')
+      const read = createHarnessHealthReader({
+        db,
+        configState,
+        manager,
+        commandAvailable: probe,
+      })
+      expect(
+        read().map(({ key, enabled, installed }) => ({
+          key,
+          enabled,
+          installed,
+        })),
+      ).toEqual([
+        { key: 'claude', enabled: true, installed: false },
+        { key: 'codex', enabled: false, installed: true },
+      ])
+      read()
+      expect(probe).toHaveBeenCalledTimes(2)
+      vi.advanceTimersByTime(30_000)
+      read()
+      expect(probe).toHaveBeenCalledTimes(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resolves commands on PATH and executable paths', () => {
+    const root = mkdtempSync(join(tmpdir(), 'forge-command-'))
+    const script = join(root, 'agent')
+    writeFileSync(script, '#!/bin/sh\n')
+    chmodSync(script, 0o644)
+    expect(commandAvailable('sh')).toBe(true)
+    expect(commandAvailable(process.execPath)).toBe(true)
+    expect(commandAvailable('forge-missing-cli-7f3a')).toBe(false)
+    expect(commandAvailable(join(root, 'missing'))).toBe(false)
+    expect(commandAvailable(root)).toBe(false)
+    expect(commandAvailable(script)).toBe(false)
+    chmodSync(script, 0o755)
+    expect(commandAvailable(script)).toBe(true)
   })
 
   it('feeds dynamic process counts into status', async () => {
