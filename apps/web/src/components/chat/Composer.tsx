@@ -852,7 +852,7 @@ export function Composer({
                   </Select>
                 ) : (
                   <a
-                    href="/settings/harnesses"
+                    href="/settings/accounts"
                     className={cn(
                       buttonVariants({ variant: 'ghost', size: 'sm' }),
                       'px-2 text-xs',

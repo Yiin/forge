@@ -124,7 +124,7 @@ react-markdown 10 + remark-gfm + remark-breaks + rehype-raw/sanitize for chat; @
 - `/runs` → epic runs index (active + history). `/runs/:runId` → run view.
 - `/files/:projectId/$` → file browser + viewer (path in splat). Viewer is the same route; the tree collapses on phone.
 - `/search` → full search page (FTS5). On desktop the command palette covers quick search; this route is the phone surface and the "see all results" target.
-- `/settings` → nested: `/settings/general`, `/settings/harnesses`, `/settings/projects`, `/settings/epics`, `/settings/about` (update status). Mirrors t3code's settings.* route family (apps/web/src/routes/settings.*.tsx) with SettingsSidebarNav swapped into the sidebar slot (AppSidebarLayout.tsx:176-183 pattern).
+- `/settings` → nested: `/settings/general`, `/settings/agents`, `/settings/accounts`, `/settings/projects`, `/settings/epics`, `/settings/about` (update status). Mirrors t3code's settings.* route family (apps/web/src/routes/settings.*.tsx) with SettingsSidebarNav swapped into the sidebar slot (AppSidebarLayout.tsx:176-183 pattern).
 
 ## Layout: desktop vs phone
 - Desktop (≥1024px): left sidebar (resizable, persisted width, offcanvas-collapsible — copy AppSidebarLayout.tsx:160-175) + main column. Right panel (file browser, run detail) is an inline third column ≥1280px, a right Sheet below that (copy RightPanelSheet.tsx).

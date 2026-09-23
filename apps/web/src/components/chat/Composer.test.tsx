@@ -477,7 +477,7 @@ describe('Composer', () => {
         screen
           .getByRole('link', { name: 'Add an account' })
           .getAttribute('href'),
-      ).toBe('/settings/harnesses')
+      ).toBe('/settings/accounts')
     })
   })
 

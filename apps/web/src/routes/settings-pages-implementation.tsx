@@ -5,7 +5,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
-import { AlertCircle, ArrowLeft } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 import { api } from '../lib/api'
 import { useShellStore } from '../stores/shell'
 import { useSettingsStore } from '../stores/settings'
@@ -19,6 +19,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { SettingsPage } from '../components/settings/settings-layout'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { Spinner } from '@/components/ui/spinner'
@@ -1310,39 +1311,4 @@ export function SettingsRow({
   )
 }
 
-export function SettingsPage({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string
-  subtitle: string
-  children: ReactNode
-}) {
-  const headingRef = useRef<HTMLHeadingElement>(null)
-  useEffect(() => headingRef.current?.focus(), [title])
-  return (
-    <section className="mx-auto max-w-3xl px-4 py-6 sm:px-6 md:py-10">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="-ml-2 mb-2"
-        onClick={() => window.history.back()}
-        aria-label="Back to workspace"
-      >
-        <ArrowLeft className="size-4" />
-        Back
-      </Button>
-      <h1
-        ref={headingRef}
-        tabIndex={-1}
-        className="text-xl font-semibold tracking-tight outline-none"
-        style={{ outline: 'none', boxShadow: 'none' }}
-      >
-        {title}
-      </h1>
-      <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-      <div className="mt-6 flex flex-col gap-6">{children}</div>
-    </section>
-  )
-}
+export { SettingsPage }

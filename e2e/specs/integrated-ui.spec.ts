@@ -99,7 +99,8 @@ test('settings routes expose stable navigation, focus, and accessible controls',
     for (const [path, heading] of [
       ['/settings/general', 'General'],
       ['/settings/keybindings', 'Keybindings'],
-      ['/settings/harnesses', 'Harnesses'],
+      ['/settings/agents', 'Agents'],
+      ['/settings/accounts', 'Accounts'],
       ['/settings/projects', 'Projects'],
       ['/settings/epics', 'Epics'],
     ] as const) {
