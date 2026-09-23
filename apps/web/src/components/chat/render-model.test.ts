@@ -331,12 +331,14 @@ describe('chat render model', () => {
   })
 
   it('keeps the call input on a row the store folded into an update', () => {
+    // The store spreads the update over the call, keeping name and input.
     const folded = message({
       type: 'tool_update',
       toolCallId: 'folded',
       status: 'completed',
       output: '/tmp',
-      ...{ name: 'Bash', input: { command: 'pwd' } },
+      name: 'Bash',
+      input: { command: 'pwd' },
     } as Message['content'])
     expect(toRenderModel([folded])).toMatchObject([
       {
