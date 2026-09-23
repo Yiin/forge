@@ -13,7 +13,7 @@ it('joins only the present meta pieces with dot separators', () => {
       <span>2 accounts</span>
     </SettingsMeta>,
   )
-  expect(container.textContent).toBe('Blurb·2 accounts')
+  expect(container.textContent).toBe('Blurb· 2 accounts')
 })
 
 it('exposes usage as a meter with a warning fill from 80%', () => {

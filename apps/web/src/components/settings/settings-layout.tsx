@@ -321,7 +321,11 @@ export function SettingsIconTile({
   )
 }
 
-/** Quiet meta line under a row title; skips empty children, joins with "·". */
+/**
+ * Quiet meta line under a row title; skips empty children, joins with "·".
+ * Pieces flow as inline text, and the dot sticks to the piece before it, so a
+ * wrapped line never starts with a dot.
+ */
 export function SettingsMeta({
   children,
   className,
@@ -334,16 +338,18 @@ export function SettingsMeta({
   return (
     <div
       className={cn(
-        'mt-px flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted-foreground/80',
+        'mt-px text-xs leading-[18px] text-muted-foreground/80',
         className,
       )}
     >
       {pieces.map((piece, index) => (
         <Fragment key={index}>
           {index > 0 && (
-            <span aria-hidden className="text-muted-foreground/40">
-              ·
-            </span>
+            <>
+              <span aria-hidden className="mr-1 ml-2 text-muted-foreground/40">
+                ·
+              </span>{' '}
+            </>
           )}
           {piece}
         </Fragment>

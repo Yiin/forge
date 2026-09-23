@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Check, Circle, Cpu } from 'lucide-react'
+import { Check, Circle } from 'lucide-react'
 import type { HarnessConfig } from '@forge/protocol/config'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,7 @@ import {
   validateAccountId,
   type HarnessKind,
 } from './add-harness-logic'
+import { HarnessMark } from './HarnessMark'
 
 type Draft = Pick<HarnessConfig, 'command' | 'args' | 'env' | 'protocol'>
 const defaults: Record<HarnessKind, Draft> = {
@@ -82,8 +83,8 @@ export function AddHarnessDialog({
       return
     }
     onAdd(id, { name: label.trim() || id, ...draft, enabled: true })
-    toast.success('Harness added', {
-      description: `${kind} harness '${id}' was added.`,
+    toast.success('Agent added', {
+      description: `${kind} agent '${id}' was added.`,
     })
     onOpenChange(false)
   }
@@ -91,9 +92,11 @@ export function AddHarnessDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Add harness</DialogTitle>
+          <DialogTitle className="text-[15px] tracking-tight">
+            Add agent
+          </DialogTitle>
           <DialogDescription>
-            Set the harness identity and command Forge will start.
+            Set the agent identity and the command Forge starts.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="grid gap-4">
@@ -147,7 +150,7 @@ export function AddHarnessDialog({
                   )}
                   onClick={() => setKind(value)}
                 >
-                  <Cpu className="size-5" />
+                  <HarnessMark kind={value} />
                   <span className="capitalize">{value}</span>
                 </button>
               ))}
@@ -163,7 +166,7 @@ export function AddHarnessDialog({
                   onChange={(event) => setLabel(event.target.value)}
                 />
                 <span className="text-xs text-muted-foreground">
-                  Shown in the harness list. Optional.
+                  Shown in the agent list. Optional.
                 </span>
               </label>
               <label className="grid gap-2 text-sm">
@@ -256,7 +259,7 @@ export function AddHarnessDialog({
         </DialogPanel>
         <DialogFooter>
           <Button
-            variant="outline"
+            variant="ghost"
             onClick={() =>
               step === 0 ? onOpenChange(false) : setStep((value) => value - 1)
             }
@@ -266,7 +269,7 @@ export function AddHarnessDialog({
           {step < 2 ? (
             <Button onClick={() => navigate(step + 1)}>Next</Button>
           ) : (
-            <Button onClick={add}>Add harness</Button>
+            <Button onClick={add}>Add agent</Button>
           )}
         </DialogFooter>
       </DialogContent>
