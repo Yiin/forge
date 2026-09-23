@@ -1,17 +1,16 @@
+import type { CSSProperties } from 'react'
 import {
-  Check,
-  ChevronDown,
-  Circle,
-  File,
-  FileImage,
-  LoaderCircle,
-  X,
-} from 'lucide-react'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Virtualizer } from 'virtua'
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { useParams } from '@tanstack/react-router'
 import { useMessagesStore } from '../../stores/messages'
-import { MessageRow, RunningDots } from './MessageRow'
+import { MessageRow, RELEASE_FOLLOW_EVENT } from './MessageRow'
 import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
 import { AnsweredQuestionRow } from './AnsweredQuestionRow'
@@ -20,10 +19,39 @@ import { AgentToolCard, ToolGroup } from './ToolGroup'
 import { EpicTriageCard } from './EpicTriageCard'
 import { useSessionsStore } from '../../stores/sessions'
 import { cn } from '../../lib/utils'
-import { Button } from '../ui/button'
 import { NativeContentRow } from './NativeContentRow'
+import { AttachmentItem, PlanCard, SystemItem } from './TranscriptItems'
+import { WorkingLine } from './WorkingLine'
+import { PromptRail } from './PromptRail'
+import { railPrompts } from './prompt-rail'
+import {
+  BOTTOM_CLEARANCE,
+  rowMeta,
+  sendingBridge,
+  type RowMeta,
+} from './transcript-layout'
+import {
+  distanceFromBottom,
+  followAfterScroll,
+  initialFollow,
+  jumpStart,
+  releaseFollow,
+  restoreFollow,
+} from './scroll-follow'
+import './transcript.css'
 
 const EMPTY_MESSAGES: never[] = []
+/** A scroll this soon after wheel, touch or key input counts as the user's. */
+const INPUT_WINDOW_MS = 250
+const SCROLL_KEYS = new Set([
+  'ArrowUp',
+  'ArrowDown',
+  'PageUp',
+  'PageDown',
+  'Home',
+  'End',
+  ' ',
+])
 
 export function Timeline({
   resumedWithRecap = false,
@@ -51,12 +79,23 @@ export function Timeline({
     () => sessions.filter((session) => session.parentSessionId === sessionId),
     [sessions, sessionId],
   )
+  const working = running || pending.length > 0
   const items = useMemo(() => {
     const base = toRenderModel(messages, resumedWithRecap, children, pending)
-    return running
+    return working
       ? [...base, { kind: 'working' as const, id: 'working-indicator' }]
       : base
-  }, [messages, messagesVersion, resumedWithRecap, children, pending, running])
+  }, [messages, messagesVersion, resumedWithRecap, children, pending, working])
+  const meta = useMemo(() => rowMeta(items, running), [items, running])
+  const prompts = useMemo(() => railPrompts(items), [items])
+  const turnStartedAt = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1)
+      if (messages[index].content.type === 'turn_start')
+        return messages[index].createdAt
+    return undefined
+  }, [messages, messagesVersion])
+  const sending =
+    !running || sendingBridge(pending.at(-1)?.createdAt, turnStartedAt)
   // zeron opens a tool group by default only while it is the live tail of
   // the streaming turn; pending user bubbles trail the turn, so skip them.
   const liveGroupId = useMemo(() => {
@@ -69,83 +108,191 @@ export function Timeline({
       .at(-1)
     return tail?.kind === 'tool-group' ? tail.id : undefined
   }, [items, running])
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [atBottom, setAtBottom] = useState(true)
-  // The bottom spacer grows with the composer, so re-pin before paint whenever
-  // the inset changes; otherwise the last row hides under the composer.
-  // virtua sizes its box from row measurements that land after the commit, and
-  // its rows overflow that box, so `scrollHeight` still leaves the spacer out
-  // while the box is short. Aim past the end by the inset: the browser clamps
-  // the overshoot, and the timeline no longer parks one composer above bottom.
-  useLayoutEffect(() => {
-    if (atBottom)
-      scrollRef.current?.scrollTo({
-        top: scrollRef.current.scrollHeight + bottomInset,
-      })
-  }, [items, atBottom, bottomInset])
-  // The clamp above uses the height virtua has applied so far, so pin again
-  // once the measured rows land and the spacer joins the scrollable area.
+
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
+  const list = useRef<VirtualizerHandle>(null)
+  const follow = useRef(
+    targetSeq === undefined ? initialFollow : releaseFollow(initialFollow),
+  )
+  const [jump, setJump] = useState(false)
+  const lastInput = useRef(0)
+  const holding = useRef(false)
+  const spacer = bottomInset + BOTTOM_CLEARANCE
+  const spacerRef = useRef(spacer)
+  spacerRef.current = spacer
+
+  const setFollow = useCallback((next: typeof initialFollow) => {
+    follow.current = next
+    setJump(next.jump)
+  }, [])
+  // virtua sizes its box from row measurements that land after the commit,
+  // and its rows overflow that box, so `scrollHeight` can still leave the
+  // spacer out. Aim past the end by the spacer; the browser clamps it.
+  const pin = useCallback(() => {
+    if (!scroller || !follow.current.pinned) return
+    scroller.scrollTo({ top: scroller.scrollHeight + spacerRef.current })
+  }, [scroller])
+
+  useLayoutEffect(pin, [pin, items, spacer])
+  // Pin again once measured rows land and resize the scrolled content.
   useEffect(() => {
-    const node = scrollRef.current
-    if (!node || !atBottom || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => {
-      node.scrollTo({ top: node.scrollHeight + bottomInset })
-    })
-    for (const child of node.children) observer.observe(child)
+    if (!scroller || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(pin)
+    for (const child of scroller.children) observer.observe(child)
     return () => observer.disconnect()
-  }, [atBottom, bottomInset])
+  }, [scroller, pin])
+  // Sending a prompt follows the bottom again.
+  const pendingCount = pending.length
+  const previousPending = useRef(pendingCount)
+  useLayoutEffect(() => {
+    if (pendingCount > previousPending.current) {
+      holding.current = false
+      setFollow(restoreFollow(follow.current))
+      pin()
+    }
+    previousPending.current = pendingCount
+  }, [pendingCount, pin, setFollow])
+  // A folding bubble or a rail jump asks the view to stop following.
+  useEffect(() => {
+    if (!scroller) return
+    const release = () => setFollow(releaseFollow(follow.current))
+    scroller.addEventListener(RELEASE_FOLLOW_EVENT, release)
+    return () => scroller.removeEventListener(RELEASE_FOLLOW_EVENT, release)
+  }, [scroller, setFollow])
+
+  // `?m=<seq>` centres that message and marks it until the reader scrolls.
+  const [deepLinkId, setDeepLinkId] = useState<string>()
   useEffect(() => {
     if (targetSeq === undefined) return
-    const target = scrollRef.current?.querySelector(`[data-seq="${targetSeq}"]`)
-    if (target instanceof HTMLElement) {
-      target.scrollIntoView({ block: 'center' })
-      target.classList.add('chat-deep-link-target')
+    const index = items.findIndex(
+      (item) => item.kind === 'message' && item.seq === targetSeq,
+    )
+    if (index < 0) return
+    if (deepLinkId === undefined) {
+      holding.current = true
+      setDeepLinkId(items[index].id)
+      setFollow(releaseFollow(follow.current))
     }
-  }, [items, targetSeq])
+    if (holding.current) list.current?.scrollToIndex(index, { align: 'center' })
+  }, [items, targetSeq, deepLinkId, setFollow])
+
+  const markInput = () => {
+    lastInput.current = performance.now()
+    holding.current = false
+  }
+  const dragging = useRef(false)
+  useEffect(() => {
+    const stop = () => {
+      dragging.current = false
+    }
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+    return () => {
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+    }
+  }, [])
+
+  const toBottom = () => {
+    if (!scroller) return
+    holding.current = false
+    setFollow(restoreFollow(follow.current))
+    const max = scroller.scrollHeight - scroller.clientHeight
+    const start = jumpStart(
+      distanceFromBottom(scroller),
+      scroller.clientHeight,
+      max,
+    )
+    if (start !== undefined) scroller.scrollTop = start
+    const reduce = window.matchMedia?.(
+      '(prefers-reduced-motion: reduce)',
+    ).matches
+    scroller.scrollTo({
+      top: scroller.scrollHeight + spacer,
+      behavior: reduce ? 'auto' : 'smooth',
+    })
+  }
+
   return (
-    <section className="chat-timeline-shell relative min-h-0 w-full flex-1">
+    <section
+      className="chat-timeline-shell relative min-h-0 w-full flex-1"
+      style={{ '--fade-bottom': `${bottomInset}px` } as CSSProperties}
+    >
       <div
-        ref={scrollRef}
-        className="chat-timeline h-full overflow-auto overscroll-contain px-3 py-5 [-webkit-overflow-scrolling:touch] sm:px-5"
+        ref={setScroller}
+        className="chat-timeline h-full overflow-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
+        onWheel={markInput}
+        onTouchStart={markInput}
+        onTouchMove={markInput}
+        onKeyDown={(event) => {
+          if (SCROLL_KEYS.has(event.key)) markInput()
+        }}
+        onPointerDown={(event) => {
+          // A press on the scroller itself is a press on its scrollbar.
+          if (event.target === event.currentTarget) {
+            dragging.current = true
+            markInput()
+          }
+        }}
         onScroll={(event) => {
-          const node = event.currentTarget
-          setAtBottom(
-            node.scrollHeight - node.scrollTop - node.clientHeight < 48,
+          const userInput =
+            dragging.current ||
+            performance.now() - lastInput.current < INPUT_WINDOW_MS
+          const next = followAfterScroll(
+            follow.current,
+            distanceFromBottom(event.currentTarget),
+            userInput,
           )
+          if (next.pinned !== follow.current.pinned || next.jump !== jump)
+            setFollow(next)
+          else follow.current = next
         }}
       >
         {/* No `shift`: rows are only appended or folded in place, and `shift`
             makes virtua re-index its size cache on every append, which offsets
             every measured row by one and opens blank bands between rows. */}
-        <Virtualizer<ChatRenderItem> data={items}>
-          {(item: ChatRenderItem) => (
+        <Virtualizer<ChatRenderItem> ref={list} data={items}>
+          {(item: ChatRenderItem, index: number) => (
             <RenderItem
               key={item.id}
               item={item}
+              meta={meta[index]}
               sessionId={sessionId}
               skills={skills}
               live={item.id === liveGroupId}
+              deepLink={item.id === deepLinkId}
+              sending={sending}
+              turnStartedAt={turnStartedAt}
             />
           )}
         </Virtualizer>
-        <div aria-hidden style={{ height: bottomInset }} />
+        <div aria-hidden style={{ height: spacer }} />
       </div>
-      {!atBottom && (
-        <Button
-          className="chat-jump absolute left-1/2 z-30 -translate-x-1/2 rounded-full border border-border/60 bg-card shadow-sm"
-          style={{ bottom: bottomInset + 4 }}
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            scrollRef.current?.scrollTo({
-              top: scrollRef.current.scrollHeight + bottomInset,
-              behavior: 'smooth',
-            })
-            setAtBottom(true)
-          }}
+      <PromptRail
+        scroller={scroller}
+        handle={list}
+        prompts={prompts}
+        onNavigate={() => {
+          holding.current = false
+          setFollow(releaseFollow(follow.current))
+        }}
+      />
+      {jump && (
+        <div
+          className="pointer-events-none absolute inset-x-0 z-30 flex justify-center pe-2.5"
+          style={{ bottom: bottomInset + 6 }}
         >
-          <ChevronDown className="size-4" /> Jump to latest
-        </Button>
+          <button
+            type="button"
+            className="chat-jump pointer-events-auto flex h-[30px] cursor-pointer items-center gap-1.5 rounded-full border border-border bg-surface-raised ps-[11px] pe-[13px] text-[13px] text-foreground shadow-md transition-colors duration-150 hover:bg-[color-mix(in_oklab,var(--surface-raised),var(--foreground)_8%)] focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none"
+            onClick={toBottom}
+          >
+            <span className="text-muted-foreground" aria-hidden>
+              ↓
+            </span>
+            Scroll to bottom
+          </button>
+        </div>
       )}
     </section>
   )
@@ -153,49 +300,77 @@ export function Timeline({
 
 function RenderItem({
   item,
+  meta,
   sessionId,
   skills,
   live,
+  deepLink,
+  sending,
+  turnStartedAt,
 }: {
-  item: ReturnType<typeof toRenderModel>[number]
+  item: ChatRenderItem
+  meta: RowMeta
   sessionId: string
   skills: string[]
   live: boolean
+  deepLink: boolean
+  sending: boolean
+  turnStartedAt?: string
 }) {
   return (
     <div
-      className={cn(
-        'mx-auto w-full min-w-0 max-w-3xl overflow-x-clip',
-        item.kind === 'tool' ||
-          item.kind === 'subagent' ||
-          item.kind === 'tool-group'
-          ? 'pb-2'
-          : 'pb-4',
-      )}
+      className="flex w-full justify-center px-5 sm:px-12"
+      style={{ paddingTop: meta.gap }}
     >
-      <RenderItemContent
-        item={item}
-        sessionId={sessionId}
-        skills={skills}
-        live={live}
-      />
+      <div
+        className={cn(
+          'w-full max-w-(--transcript-width) min-w-0 overflow-x-clip',
+          deepLink && 'chat-deep-link-target',
+        )}
+      >
+        {item.kind === 'working' ? (
+          <WorkingLine
+            seed={sessionId}
+            sending={sending}
+            startedAt={turnStartedAt}
+          />
+        ) : (
+          <RenderItemContent
+            item={item}
+            meta={meta}
+            sessionId={sessionId}
+            skills={skills}
+            live={live}
+          />
+        )}
+      </div>
     </div>
   )
 }
 
 function RenderItemContent({
   item,
+  meta,
   sessionId,
   skills,
   live,
 }: {
-  item: ReturnType<typeof toRenderModel>[number]
+  item: ChatRenderItem
+  meta: RowMeta
   sessionId: string
   skills: string[]
   live: boolean
 }) {
   if (item.kind === 'message')
-    return <MessageRow item={item} sessionId={sessionId} skills={skills} />
+    return (
+      <MessageRow
+        item={item}
+        sessionId={sessionId}
+        skills={skills}
+        lane={meta.lane ?? false}
+        streaming={meta.streaming}
+      />
+    )
   if (item.kind === 'tool')
     return <AgentToolCard tool={item} sessionId={sessionId} />
   if (item.kind === 'answered-question')
@@ -210,149 +385,5 @@ function RenderItemContent({
   if (item.kind === 'system') return <SystemItem item={item} />
   if (item.kind === 'native')
     return <NativeContentRow item={item} sessionId={sessionId} />
-  if (item.kind === 'working') return <WorkingRow />
   return null
-}
-
-function PlanCard({
-  item,
-}: {
-  item: Extract<ChatRenderItem, { kind: 'plan' }>
-}) {
-  return (
-    <article
-      className="mx-auto mb-3 max-w-3xl rounded-xl border border-border/60 bg-muted/20 p-4"
-      aria-label="Plan progress"
-    >
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Plan</h2>
-        <span className="text-xs text-muted-foreground">
-          {item.steps.filter((step) => step.status === 'completed').length}/
-          {item.steps.length} complete
-        </span>
-      </div>
-      {item.explanation && (
-        <p className="mt-1 text-sm text-muted-foreground">{item.explanation}</p>
-      )}
-      <ol className="mt-3 space-y-2">
-        {item.steps.map((step) => (
-          <li key={step.id} className="flex items-start gap-2 text-sm">
-            <span className="mt-0.5 shrink-0">
-              {step.status === 'completed' ? (
-                <Check className="size-4 text-emerald-500" />
-              ) : step.status === 'running' ? (
-                <LoaderCircle className="size-4 animate-spin text-primary" />
-              ) : step.status === 'failed' ? (
-                <X className="size-4 text-destructive" />
-              ) : (
-                <Circle className="size-4 text-muted-foreground" />
-              )}
-            </span>
-            <span
-              className={
-                step.status === 'completed'
-                  ? 'text-muted-foreground line-through'
-                  : ''
-              }
-            >
-              {step.title}
-            </span>
-          </li>
-        ))}
-      </ol>
-    </article>
-  )
-}
-
-function WorkingRow() {
-  return (
-    <div
-      className="chat-working flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground"
-      role="status"
-      aria-live="polite"
-    >
-      <RunningDots />
-      Working
-    </div>
-  )
-}
-
-function SystemItem({
-  item,
-}: {
-  item: Extract<ChatRenderItem, { kind: 'system' }>
-}) {
-  return (
-    <div
-      className={cn(
-        'chat-system px-2 py-2 text-center text-xs',
-        item.alert ? 'text-destructive' : 'text-muted-foreground',
-      )}
-      role={item.alert ? 'alert' : undefined}
-    >
-      <span>{item.text}</span>
-      {item.code && (
-        <details className="chat-system-details mt-1 text-left">
-          <summary className="cursor-pointer text-muted-foreground">
-            Show process details
-          </summary>
-          <pre className="mt-1 overflow-auto rounded-lg border border-border bg-card p-2 whitespace-pre-wrap">
-            {item.code}
-          </pre>
-        </details>
-      )}
-    </div>
-  )
-}
-
-function AttachmentItem({
-  item,
-}: {
-  item: Extract<ChatRenderItem, { kind: 'attachment' }>
-}) {
-  const [removed, setRemoved] = useState(false)
-  useEffect(() => {
-    const controller = new AbortController()
-    void fetch(`/api/attachments/${encodeURIComponent(item.id)}`, {
-      headers: { Range: 'bytes=0-0' },
-      signal: controller.signal,
-    })
-      .then((response) => {
-        if (response.status === 410) setRemoved(true)
-      })
-      .catch(() => undefined)
-    return () => controller.abort()
-  }, [item.id])
-  if (removed)
-    return (
-      <span className="chat-attachment flex w-fit items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground">
-        {item.filename} · file removed
-      </span>
-    )
-  return (
-    <a
-      className="chat-attachment flex w-fit items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm text-foreground no-underline hover:bg-accent"
-      href={`/api/attachments/${encodeURIComponent(item.id)}`}
-      target={item.mime?.startsWith('image/') ? '_blank' : undefined}
-      rel="noreferrer"
-    >
-      {item.mime?.startsWith('image/') ? (
-        <FileImage className="size-3.5 text-muted-foreground" />
-      ) : (
-        <File className="size-3.5 text-muted-foreground" />
-      )}
-      {item.filename}
-      {item.sizeBytes !== undefined && (
-        <small className="text-muted-foreground">
-          {formatBytes(item.sizeBytes)}
-        </small>
-      )}
-    </a>
-  )
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`
-  return `${(bytes / 1024 ** 2).toFixed(1)} MiB`
 }

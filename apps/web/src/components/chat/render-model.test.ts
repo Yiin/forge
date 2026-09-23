@@ -271,6 +271,7 @@ describe('chat render model', () => {
         seq: 1,
         role: 'agent',
         text: 'hello',
+        createdAt: 'now',
       },
     ])
   })

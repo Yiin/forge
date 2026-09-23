@@ -1,0 +1,109 @@
+/* Transcript chrome after zeron (crates/ui/src/transcript.rs, loaders.rs,
+   edge_fade.rs, rail.rs). */
+
+/* zeron's default text column. The composer is 32px wider. */
+:root {
+  --transcript-width: 736px;
+}
+
+/* The scroller fades its content, not an overlay, so it works over the
+   frosted composer: a 24px ramp at the top, and a ramp under the composer
+   down to the bottom edge. */
+.chat-timeline {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 24px,
+    #000 calc(100% - var(--fade-bottom, 0px)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 24px,
+    #000 calc(100% - var(--fade-bottom, 0px)),
+    transparent 100%
+  );
+}
+
+/* 3x3 working matrix. The row tints are zeron's fixed spinner palette and
+   do not follow the theme. Each dot drops to 0.1 over 45% of a 750ms cycle,
+   holds, then comes back. */
+.gradient-spinner {
+  --spinner-top: #b6d3ef;
+  --spinner-middle: #edb185;
+  --spinner-bottom: #f888a0;
+  display: inline-grid;
+  flex: none;
+  grid-template-columns: repeat(3, 2.5px);
+  gap: 1.25px;
+}
+
+.gradient-spinner > span {
+  width: 2.5px;
+  height: 2.5px;
+  border-radius: 999px;
+  background: var(--spinner-top);
+  animation: gradient-spin 750ms linear infinite;
+  animation-delay: calc(-750ms * var(--offset));
+}
+
+.gradient-spinner > span[data-row='1'] {
+  background: var(--spinner-middle);
+}
+
+.gradient-spinner > span[data-row='2'] {
+  background: var(--spinner-bottom);
+}
+
+@keyframes gradient-spin {
+  0% {
+    opacity: 1;
+  }
+  45% {
+    opacity: 0.1;
+  }
+  92% {
+    opacity: 0.1;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* The jump pill rises 2px as it fades in; it leaves at once. */
+.chat-jump {
+  animation: chat-jump-in 180ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
+}
+
+.chat-jump:active:not(:disabled) {
+  transform: none;
+}
+
+@keyframes chat-jump-in {
+  from {
+    opacity: 0;
+    translate: 0 2px;
+  }
+}
+
+/* A deep-linked message glows softly, then settles to a faint wash. */
+.chat-deep-link-target {
+  border-radius: 12px;
+  animation: chat-deep-link 2.4s cubic-bezier(0.25, 0.1, 0.25, 1) both;
+  background: color-mix(in oklab, var(--primary) 5%, transparent);
+  box-shadow: 0 0 0 6px color-mix(in oklab, var(--primary) 5%, transparent);
+}
+
+@keyframes chat-deep-link {
+  from {
+    background: color-mix(in oklab, var(--primary) 14%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--primary) 14%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gradient-spinner > span {
+    animation: none;
+  }
+}

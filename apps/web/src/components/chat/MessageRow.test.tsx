@@ -78,7 +78,7 @@ describe('MessageRow', () => {
     )
   })
 
-  it('allows long user messages to collapse without changing the row', () => {
+  it('clamps a long prompt behind Show more without changing the row', () => {
     const view = render(
       <MessageRow
         item={{
@@ -86,18 +86,74 @@ describe('MessageRow', () => {
           id: 'u4',
           seq: 4,
           role: 'user',
-          text: 'long prompt '.repeat(25),
+          text: 'long prompt '.repeat(40),
         }}
       />,
     )
-    const toggle = screen.getByRole('button', { name: 'Hide message' })
-    fireEvent.click(toggle)
+    const more = screen.getByRole('button', { name: /Show more/ })
+    expect(more.getAttribute('aria-expanded')).toBe('false')
+    expect(view.container.textContent).toContain('...')
+    fireEvent.click(more)
     expect(
       screen
-        .getByRole('button', { name: 'Show message' })
+        .getByRole('button', { name: /Show less/ })
         .getAttribute('aria-expanded'),
-    ).toBe('false')
+    ).toBe('true')
     expect(view.container.querySelector('.chat-user')).toBeTruthy()
+  })
+
+  it('leaves a short prompt unclamped', () => {
+    render(
+      <MessageRow
+        item={{
+          kind: 'message',
+          id: 'u5',
+          seq: 5,
+          role: 'user',
+          text: 'short prompt',
+        }}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /Show more/ })).toBeNull()
+  })
+
+  it('hides the reply lane while its entry is unsettled', () => {
+    render(
+      <MessageRow
+        item={{
+          kind: 'message',
+          id: 'a1',
+          seq: 6,
+          role: 'agent',
+          text: 'still streaming',
+        }}
+        sessionId="session-1"
+        lane={false}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Copy message' })).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'Branch from here' }),
+    ).toBeNull()
+  })
+
+  it('keeps Edit and the timestamp in the prompt lane', () => {
+    render(
+      <MessageRow
+        item={{
+          kind: 'message',
+          id: 'u6',
+          seq: 7,
+          role: 'user',
+          text: 'hello',
+          createdAt: '2026-07-01T15:45:00',
+        }}
+        sessionId="session-1"
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Copy message' })).toBeTruthy()
+    expect(screen.getByText('Jul 1, 3:45 PM')).toBeTruthy()
   })
 
   it('chips only skills listed by the workspace', () => {

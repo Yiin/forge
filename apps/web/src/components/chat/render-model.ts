@@ -16,6 +16,8 @@ export type ChatRenderItem =
       text: string
       thought?: boolean
       pending?: boolean
+      /** When the text arrived: a prompt's send time, a reply's last chunk. */
+      createdAt?: string
     }
   | {
       kind: 'tool'
@@ -219,6 +221,7 @@ export function toRenderModel(
             ? content.text
             : previous.text + content.text
         previous.seq = message.seq
+        if (previous.role === 'agent') previous.createdAt = message.createdAt
       } else {
         const item: Extract<ChatRenderItem, { kind: 'message' }> = {
           kind: 'message',
@@ -226,6 +229,7 @@ export function toRenderModel(
           seq: message.seq,
           role: message.role === 'user' ? 'user' : 'agent',
           text: content.text,
+          createdAt: message.createdAt,
           ...(channel === 'thought' ? { thought: true } : {}),
         }
         result.push(item)
@@ -352,6 +356,7 @@ export function toRenderModel(
         role: 'user' as const,
         text: item.text,
         pending: true,
+        createdAt: item.createdAt,
       })),
     ],
     turnIds,

@@ -17,7 +17,7 @@ export function SkillChipText({
     nodes.push(
       text.slice(cursor, start),
       <span
-        className="inline-block rounded-md border border-primary/35 bg-primary/10 px-1.5 py-px text-[0.9em] text-primary"
+        className="rounded-[5px] bg-code-wash px-0.5 py-px font-mono text-primary [box-decoration-break:clone]"
         key={`${start}-${name}`}
       >
         ${name}

@@ -14,14 +14,6 @@ import {
   AlertDialogTitle,
 } from '../ui/alert-dialog'
 import { Button } from '../ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '../ui/card'
 
 export function EpicTriageCard({
   card,
@@ -42,54 +34,55 @@ export function EpicTriageCard({
     }
   }
   return (
-    <Card
-      className="mx-auto mb-3 max-w-[760px] gap-4 border-destructive/30 bg-destructive/5 py-4"
+    <section
+      className="flex flex-col gap-2 rounded-[10px] border border-destructive/16 bg-destructive/5 px-2.5 py-2 text-xs leading-4"
       aria-label="Epic run needs attention"
     >
-      <CardHeader className="px-4">
-        <div className="flex items-start gap-3">
+      <div className="flex items-center gap-2">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-destructive/12">
           <AlertTriangle
-            className="mt-0.5 size-[18px] shrink-0 text-destructive"
+            className="size-3 text-destructive-foreground/80"
             aria-hidden="true"
           />
-          <div className="space-y-1">
-            <CardTitle>Run paused after a failure</CardTitle>
-            <CardDescription>
-              {labelFor(card.classification)} failure in child {card.beadId}.{' '}
-              {card.attempts} {card.attempts === 1 ? 'attempt' : 'attempts'}{' '}
-              recorded.
-            </CardDescription>
-          </div>
+        </span>
+        <h2 className="font-medium text-destructive-foreground/80">
+          Run paused after a failure
+        </h2>
+      </div>
+      <p className="text-foreground/80">
+        {labelFor(card.classification)} failure in child {card.beadId}.{' '}
+        {card.attempts} {card.attempts === 1 ? 'attempt' : 'attempts'} recorded.
+      </p>
+      {card.failureChain.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {card.failureChain.map((failure) => (
+            <details
+              key={`${failure.attempt}-${failure.signature}`}
+              className="rounded-md bg-ink/4"
+            >
+              <summary className="cursor-pointer px-2 py-1 text-muted-foreground hover:text-foreground">
+                Attempt {failure.attempt} · {failure.signature.slice(0, 12)}
+              </summary>
+              <pre className="max-h-64 overflow-auto px-2 pb-2 font-mono text-[11px] leading-4 whitespace-pre-wrap text-foreground/80">
+                {failure.excerpt}
+              </pre>
+            </details>
+          ))}
         </div>
-      </CardHeader>
-      <CardContent className="space-y-1.5 px-4">
-        {card.failureChain.map((failure) => (
-          <details
-            key={`${failure.attempt}-${failure.signature}`}
-            className="rounded-md border border-border bg-card"
-          >
-            <summary className="cursor-pointer px-3 py-1.5 text-xs text-muted-foreground">
-              Attempt {failure.attempt} · {failure.signature.slice(0, 12)}
-            </summary>
-            <pre className="overflow-auto border-t border-border p-3 text-xs whitespace-pre-wrap text-muted-foreground">
-              {failure.excerpt}
-            </pre>
-          </details>
-        ))}
-      </CardContent>
-      <CardFooter className="gap-2 px-4">
-        <Button size="sm" disabled={busy} onClick={() => void act()}>
-          <Play className="size-3.5" aria-hidden="true" /> Resume
+      )}
+      <div className="flex gap-1.5">
+        <Button size="xs" disabled={busy} onClick={() => void act()}>
+          <Play aria-hidden="true" /> Resume
         </Button>
         <Button
-          size="sm"
-          variant="outline"
+          size="xs"
+          variant="ghost"
           disabled={busy}
           onClick={() => setConfirmSkip(true)}
         >
-          <SkipForward className="size-3.5" aria-hidden="true" /> Skip child
+          <SkipForward aria-hidden="true" /> Skip child
         </Button>
-      </CardFooter>
+      </div>
       <AlertDialog open={confirmSkip} onOpenChange={setConfirmSkip}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -112,7 +105,7 @@ export function EpicTriageCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </section>
   )
 }
 
