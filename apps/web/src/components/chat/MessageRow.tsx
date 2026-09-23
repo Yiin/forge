@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { ChatMarkdown } from './ChatMarkdown'
 import type { ChatRenderItem } from './render-model'
 import { SkillChipText } from './SkillChipText'
+import { foldCurveCss, foldDuration } from './scroll-motion'
 import { formatTimestamp } from './transcript-layout'
 import { useCopied } from './useCopied'
 import { api } from '../../lib/api'
@@ -27,8 +28,17 @@ export const USER_COLLAPSED_LINES = 5
 const LINE_PX = 22
 const COLLAPSED_PX = USER_COLLAPSED_LINES * LINE_PX
 
-/** Asks the transcript to stop following the bottom, such as on a fold. */
-export const RELEASE_FOLLOW_EVENT = 'chat:release-follow'
+/**
+ * A prompt bubble folds or unfolds. The transcript stops following and
+ * keeps the row in view while its height eases.
+ */
+export const USER_FOLD_EVENT = 'chat:user-fold'
+export type UserFoldDetail = {
+  /** How much the row's height changes, in px; negative when folding. */
+  heightChange: number
+  /** How far the clip eases, in px; it sets the fold's duration and curve. */
+  heightDelta: number
+}
 
 export function MessageRow({
   item,
@@ -145,10 +155,15 @@ function UserBubble({ item, skills }: { item: MessageItem; skills: string[] }) {
   const folded = long && collapsed
   const delta = Math.abs((full ?? COLLAPSED_PX) - COLLAPSED_PX)
   const toggle = (event: { currentTarget: HTMLElement }) => {
-    setDuration(Math.min(220 + 0.32 * delta, 850))
+    setDuration(foldDuration(delta))
     setCollapsed((value) => !value)
+    // Folding swaps the clipped text for the clip plus the ellipsis line.
+    const opened = (full ?? COLLAPSED_PX) - COLLAPSED_PX - LINE_PX
     event.currentTarget.dispatchEvent(
-      new CustomEvent(RELEASE_FOLLOW_EVENT, { bubbles: true }),
+      new CustomEvent<UserFoldDetail>(USER_FOLD_EVENT, {
+        bubbles: true,
+        detail: { heightChange: folded ? opened : -opened, heightDelta: delta },
+      }),
     )
   }
   return (
@@ -165,11 +180,7 @@ function UserBubble({ item, skills }: { item: MessageItem; skills: string[] }) {
           long
             ? {
                 maxHeight: folded ? COLLAPSED_PX : full,
-                transition: `max-height ${duration}ms ${
-                  delta > 500
-                    ? 'cubic-bezier(0.42, 0, 0.58, 1)'
-                    : 'cubic-bezier(0, 0, 0.58, 1)'
-                }`,
+                transition: `max-height ${duration}ms ${foldCurveCss(delta)}`,
               }
             : undefined
         }

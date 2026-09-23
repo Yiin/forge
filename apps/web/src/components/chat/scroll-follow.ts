@@ -45,12 +45,18 @@ export function followAfterScroll(
       pinned = false
   } else if (
     distance <= AT_BOTTOM_PX ||
-    // Re-stick inside the band only while moving down, so a small wheel-up
-    // near the bottom does not snap back.
-    (distance <= STICK_THRESHOLD_PX && distance < state.distance)
+    // Re-stick inside the band only on the user's own move down, so a small
+    // wheel-up near the bottom does not snap back, and a glide the view runs
+    // itself, such as a fold correction, does not take the pin back.
+    (userInput && shouldRestick(distance, state.distance))
   )
     pinned = true
   return { pinned, jump: jumpVisible(state.jump, pinned, distance), distance }
+}
+
+/** Inside the 70px band and moving toward the bottom. */
+export function shouldRestick(distance: number, previous: number) {
+  return distance <= STICK_THRESHOLD_PX && distance < previous
 }
 
 /** Release the pin on purpose, such as for a rail jump or a deep link. */
@@ -71,13 +77,4 @@ export function jumpVisible(shown: boolean, pinned: boolean, distance: number) {
   if (pinned) return false
   if (!shown) return distance > JUMP_SHOW_PX
   return distance > AT_BOTTOM_PX
-}
-
-/**
- * The pill click teleports to 2.5 viewports from the end before gliding, so
- * a long way back does not take seconds.
- */
-export function jumpStart(distance: number, viewport: number, max: number) {
-  const limit = viewport * 2.5
-  return distance > limit ? max - limit : undefined
 }

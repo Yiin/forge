@@ -18,19 +18,33 @@ vi.mock('./ToolGroup', () => ({
   ToolGroup: () => null,
 }))
 const virtualizerProps: Record<string, unknown>[] = []
-vi.mock('virtua', () => ({
-  Virtualizer: ({
-    data,
-    children,
-    ...rest
-  }: {
-    data: unknown[]
-    children: (item: unknown) => unknown
-  }) => {
-    virtualizerProps.push(rest)
-    return data.map(children)
-  },
-}))
+/** Row geometry the mocked virtua reports: offsets from `rowHeights`. */
+const layout = { rowHeights: [] as number[] }
+const handle = {
+  getItemOffset: (index: number) =>
+    layout.rowHeights.slice(0, index).reduce((sum, height) => sum + height, 0),
+  getItemSize: (index: number) => layout.rowHeights[index] ?? 0,
+  scrollToIndex: () => {},
+}
+vi.mock('virtua', async () => {
+  const React = await import('react')
+  return {
+    Virtualizer: ({
+      data,
+      children,
+      ref,
+      ...rest
+    }: {
+      data: unknown[]
+      children: (item: unknown) => unknown
+      ref?: React.Ref<unknown>
+    }) => {
+      React.useImperativeHandle(ref, () => handle)
+      virtualizerProps.push(rest)
+      return data.map(children)
+    },
+  }
+})
 vi.mock('../../stores/messages', () => ({
   useMessagesStore: (
     selector: (value: {
@@ -45,13 +59,17 @@ vi.mock('../../stores/messages', () => ({
 }))
 vi.mock('./MessageRow', () => ({
   MessageRow: () => null,
-  RELEASE_FOLLOW_EVENT: 'chat:release-follow',
+  USER_FOLD_EVENT: 'chat:user-fold',
 }))
 
 import { useSessionsStore } from '../../stores/sessions'
 import { Timeline } from './Timeline'
 
-const message = (text: string, seq: number): Message => ({
+const message = (
+  text: string,
+  seq: number,
+  fields: Partial<Message> = {},
+): Message => ({
   seq,
   sessionId: 'session-1',
   turnId: 'turn-1',
@@ -60,110 +78,103 @@ const message = (text: string, seq: number): Message => ({
   type: 'text_delta',
   content: { type: 'text_delta', text },
   createdAt: new Date(0).toISOString(),
+  ...fields,
 })
+
+const FRAME = 1000 / 60
+let clock = 0
+let frameQueue = new Map<number, FrameRequestCallback>()
+let frameId = 0
+/** Runs one animation frame, 1/60s later. */
+function frame() {
+  clock += FRAME
+  const callbacks = [...frameQueue.values()]
+  frameQueue = new Map()
+  for (const callback of callbacks) callback(clock)
+}
+
+/**
+ * The timeline with browser-like geometry: content height comes from the
+ * mocked row heights plus the bottom spacer or the runway's minimum, and
+ * `scrollTop` clamps to it.
+ */
+function mount(props: Parameters<typeof Timeline>[0] = {}) {
+  const view = render(<Timeline {...props} />)
+  const timeline = view.container.querySelector(
+    '.chat-timeline',
+  ) as HTMLDivElement
+  const content = timeline.firstElementChild as HTMLDivElement
+  const box = { clientHeight: 500 }
+  const scrollHeight = () => {
+    const spacer = parseFloat(
+      (content.lastElementChild as HTMLElement).style.height || '0',
+    )
+    const rows = layout.rowHeights.reduce((sum, height) => sum + height, 0)
+    return Math.max(rows + spacer, parseFloat(content.style.minHeight || '0'))
+  }
+  let top = 0
+  Object.defineProperties(timeline, {
+    scrollHeight: { get: scrollHeight, configurable: true },
+    clientHeight: { get: () => box.clientHeight, configurable: true },
+    scrollTop: {
+      get: () => top,
+      set: (value: number) => {
+        top = Math.min(Math.max(0, value), scrollHeight() - box.clientHeight)
+      },
+      configurable: true,
+    },
+    getBoundingClientRect: {
+      value: () => ({ top: 0, height: box.clientHeight }) as DOMRect,
+      configurable: true,
+    },
+  })
+  const max = () => scrollHeight() - box.clientHeight
+  const rerender = (next: Parameters<typeof Timeline>[0] = props) =>
+    view.rerender(<Timeline {...next} />)
+  /** Runs frames and returns `scrollTop` after each. */
+  const run = (count: number) =>
+    Array.from({ length: count }, () => {
+      frame()
+      return timeline.scrollTop
+    })
+  const userScroll = (value: number) => {
+    fireEvent.wheel(timeline)
+    timeline.scrollTop = value
+    fireEvent.scroll(timeline)
+  }
+  /** Past the window in which the first rows land at once. */
+  const land = () => {
+    run(1)
+    clock += 600
+    run(1)
+  }
+  return { view, timeline, content, box, max, rerender, run, userScroll, land }
+}
+
+const increasing = (trace: number[]) =>
+  trace.every((value, index) => index === 0 || value >= trace[index - 1])
 
 describe('Timeline', () => {
   beforeEach(() => {
     state.messages = []
     state.pending = []
+    layout.rowHeights = []
     useSessionsStore.setState({ sessions: [] })
+    clock = 1000
+    frameQueue = new Map()
+    vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frameId += 1
+      frameQueue.set(frameId, callback)
+      return frameId
+    })
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frameQueue.delete(id))
   })
 
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
-  })
-
-  it('keeps a pinned timeline at the latest streamed text', () => {
-    state.messages = [message('hello', 1)]
-    const scrollTo = vi.fn()
-    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
-      value: scrollTo,
-      configurable: true,
-    })
-    const view = render(<Timeline />)
-    const timeline = view.container.querySelector(
-      '.chat-timeline',
-    ) as HTMLDivElement
-    Object.defineProperty(timeline, 'scrollHeight', {
-      value: 1000,
-      configurable: true,
-    })
-    Object.defineProperty(timeline, 'clientHeight', {
-      value: 500,
-      configurable: true,
-    })
-
-    state.messages = [message('hello world', 2)]
-    view.rerender(<Timeline />)
-
-    // The pin aims past the end by the bottom spacer: the composer inset
-    // plus zeron's 32px clearance.
-    expect(scrollTo).toHaveBeenCalledWith({ top: 1032 })
-  })
-
-  it('pins past the inset the bottom spacer reserves', () => {
-    // virtua applies its measured height after the commit, and its rows
-    // overflow that box, so `scrollHeight` can still leave the spacer out. A
-    // pin that stops at `scrollHeight` parks one composer above the bottom.
-    state.messages = [message('hello', 1)]
-    const scrollTo = vi.fn()
-    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
-      value: scrollTo,
-      configurable: true,
-    })
-    const view = render(<Timeline bottomInset={120} />)
-    const timeline = view.container.querySelector(
-      '.chat-timeline',
-    ) as HTMLDivElement
-    Object.defineProperty(timeline, 'scrollHeight', {
-      value: 1000,
-      configurable: true,
-    })
-    Object.defineProperty(timeline, 'clientHeight', {
-      value: 500,
-      configurable: true,
-    })
-    scrollTo.mockClear()
-
-    state.messages = [message('hello world', 2)]
-    view.rerender(<Timeline bottomInset={120} />)
-
-    expect(scrollTo).toHaveBeenCalledWith({ top: 1152 })
-  })
-
-  it('re-pins once the measured rows resize the scrolled content', () => {
-    const callbacks: ResizeObserverCallback[] = []
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        constructor(callback: ResizeObserverCallback) {
-          callbacks.push(callback)
-        }
-        observe() {}
-        disconnect() {}
-      },
-    )
-    state.messages = [message('hello', 1)]
-    const scrollTo = vi.fn()
-    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
-      value: scrollTo,
-      configurable: true,
-    })
-    const view = render(<Timeline bottomInset={120} />)
-    const timeline = view.container.querySelector(
-      '.chat-timeline',
-    ) as HTMLDivElement
-    Object.defineProperty(timeline, 'scrollHeight', {
-      value: 4826,
-      configurable: true,
-    })
-    scrollTo.mockClear()
-
-    // The timeline and the prompt rail each observe the scroller.
-    for (const callback of callbacks) callback([], {} as ResizeObserver)
-
-    expect(scrollTo).toHaveBeenCalledWith({ top: 4978 })
+    vi.restoreAllMocks()
   })
 
   it('never asks virtua to shift its size cache', () => {
@@ -181,10 +192,7 @@ describe('Timeline', () => {
     const view = render(<Timeline running />)
     const working = view.container.querySelector('.chat-working')
     expect(working).not.toBeNull()
-    const timeline = view.container.querySelector('.chat-timeline')!
-    // The last child is the bottom spacer; the row before it is the tail.
-    const rows = [...timeline.children].slice(0, -1)
-    expect(rows.at(-1)?.contains(working!)).toBe(true)
+    expect(lastRow(view.container)?.contains(working!)).toBe(true)
 
     view.rerender(<Timeline />)
     expect(view.container.querySelector('.chat-working')).toBeNull()
@@ -217,8 +225,9 @@ describe('Timeline', () => {
       },
     ]
   }
+  /** The rows sit in the content box, before the bottom spacer. */
   const lastRow = (container: HTMLElement) =>
-    [...container.querySelector('.chat-timeline')!.children].at(-2)
+    [...container.querySelector('.chat-timeline > div')!.children].at(-2)
 
   it('says a prompt is queued while the connection is down', () => {
     waiting('unsent')
@@ -275,65 +284,145 @@ describe('Timeline', () => {
   })
 
   describe('follow', () => {
-    const setup = () => {
+    it('lands at the end at once when the transcript opens', () => {
       state.messages = [message('hello', 1)]
-      const scrollTo = vi.fn()
-      Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
-        value: scrollTo,
-        configurable: true,
-      })
-      const view = render(<Timeline />)
-      const timeline = view.container.querySelector(
-        '.chat-timeline',
-      ) as HTMLDivElement
-      const size = { scrollHeight: 2000, clientHeight: 500 }
-      Object.defineProperty(timeline, 'scrollHeight', {
-        get: () => size.scrollHeight,
-        configurable: true,
-      })
-      Object.defineProperty(timeline, 'clientHeight', {
-        get: () => size.clientHeight,
-        configurable: true,
-      })
-      const scrollAt = (top: number, input?: 'wheel') => {
-        if (input) fireEvent.wheel(timeline)
-        timeline.scrollTop = top
-        fireEvent.scroll(timeline)
-      }
-      const grow = (text: string, seq: number) => {
-        state.messages = [message(text, seq)]
-        scrollTo.mockClear()
-        view.rerender(<Timeline />)
-      }
-      return { view, timeline, size, scrollAt, grow, scrollTo }
-    }
+      layout.rowHeights = [2000]
+      const { timeline, run, max } = mount()
+      run(1)
+      expect(timeline.scrollTop).toBe(max())
+      expect(max()).toBe(2000 + 32 - 500)
+    })
+
+    it('glides new content in on the spring, without overshoot', () => {
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [2000]
+      const { timeline, run, max, rerender, land } = mount()
+      land()
+      const start = timeline.scrollTop
+      layout.rowHeights = [2600]
+      state.messages = [message('hello world', 2)]
+      rerender()
+      const trace = run(120)
+      // The first frame moves only a little of the 600px; it then eases in
+      // and lands exactly on the end.
+      expect(trace[0] - start).toBeGreaterThan(0)
+      expect(trace[0] - start).toBeLessThan(60)
+      expect(increasing(trace)).toBe(true)
+      expect(Math.max(...trace)).toBe(max())
+      expect(trace.at(-1)).toBe(max())
+    })
+
+    it('snaps instead of gliding under reduced motion', () => {
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query.includes('reduce'),
+      }))
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [2000]
+      const { timeline, run, max, rerender, land } = mount()
+      land()
+      layout.rowHeights = [2600]
+      state.messages = [message('hello world', 2)]
+      rerender()
+      run(1)
+      expect(timeline.scrollTop).toBe(max())
+    })
 
     it('lets a wheel scroll release the pin and shows the jump pill', () => {
-      const { scrollAt, grow, scrollTo } = setup()
-      scrollAt(1500)
-      scrollAt(1000, 'wheel')
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [2000]
+      const { timeline, run, rerender, land, userScroll } = mount()
+      land()
+      userScroll(1000)
       expect(screen.getByRole('button', { name: 'Scroll to bottom' }))
-      grow('hello again', 2)
-      expect(scrollTo).not.toHaveBeenCalled()
+      layout.rowHeights = [2600]
+      state.messages = [message('hello again', 2)]
+      rerender()
+      run(30)
+      expect(timeline.scrollTop).toBe(1000)
+    })
+
+    it('does not fight a wheel that lands mid-glide', () => {
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [2000]
+      const { timeline, run, rerender, land } = mount()
+      land()
+      layout.rowHeights = [2600]
+      state.messages = [message('hello world', 2)]
+      rerender()
+      run(3)
+      fireEvent.wheel(timeline)
+      const held = timeline.scrollTop
+      run(3)
+      expect(timeline.scrollTop).toBe(held)
     })
 
     it('keeps following when content grows without user input', () => {
-      const { scrollAt, grow, scrollTo, size } = setup()
-      scrollAt(1500)
-      size.scrollHeight = 2600
-      scrollAt(1500)
-      grow('hello again', 2)
-      expect(scrollTo).toHaveBeenCalled()
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [2000]
+      const { timeline, run, max, rerender, land } = mount()
+      land()
+      // A scroll event with no input, such as a clamp, keeps the pin.
+      fireEvent.scroll(timeline)
+      layout.rowHeights = [2300]
+      state.messages = [message('hello again', 2)]
+      rerender()
+      run(120)
+      expect(timeline.scrollTop).toBe(max())
       expect(
         screen.queryByRole('button', { name: 'Scroll to bottom' }),
       ).toBeNull()
     })
 
-    it('follows again after a send', () => {
-      const { view, scrollAt, scrollTo } = setup()
-      scrollAt(1500)
-      scrollAt(600, 'wheel')
-      scrollTo.mockClear()
+    it('moves with the composer at once', () => {
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [2000]
+      const { timeline, max, rerender, land } = mount({ bottomInset: 40 })
+      land()
+      rerender({ bottomInset: 160 })
+      // No frame needed: the last row stays attached to the composer.
+      expect(timeline.scrollTop).toBe(max())
+      expect(max()).toBe(2000 + 160 + 32 - 500)
+    })
+
+    it('glides back from far with the pill, teleporting first', () => {
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [10_000]
+      const { timeline, run, max, land, userScroll } = mount()
+      land()
+      userScroll(0)
+      fireEvent.click(screen.getByRole('button', { name: 'Scroll to bottom' }))
+      clock += 200
+      run(1)
+      // Within 2.5 viewports of the end after one frame, not at it.
+      expect(timeline.scrollTop).toBeGreaterThanOrEqual(max() - 1250)
+      expect(timeline.scrollTop).toBeLessThan(max())
+      run(120)
+      expect(timeline.scrollTop).toBe(max())
+    })
+
+    it('releases the pin when a selection drag starts', () => {
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [2000]
+      const { timeline, run, rerender, land } = mount()
+      land()
+      const row = timeline.querySelector('[data-transcript-row]')!
+      fireEvent.pointerDown(row, { button: 0 })
+      vi.spyOn(document, 'getSelection').mockReturnValue({
+        isCollapsed: false,
+        anchorNode: row,
+      } as unknown as Selection)
+      document.dispatchEvent(new Event('selectionchange'))
+      const before = timeline.scrollTop
+      layout.rowHeights = [2600]
+      state.messages = [message('hello again', 2)]
+      rerender()
+      run(30)
+      expect(timeline.scrollTop).toBe(before)
+    })
+  })
+
+  describe('own-send runway', () => {
+    const send = () => {
       state.pending = [
         {
           sessionId: 'session-1',
@@ -342,11 +431,122 @@ describe('Timeline', () => {
           createdAt: new Date().toISOString(),
         },
       ]
-      view.rerender(<Timeline />)
-      expect(scrollTo).toHaveBeenCalled()
+    }
+
+    it('glides a sent prompt to the top and holds it while the reply fills in', () => {
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [1000]
+      const { timeline, content, run, max, rerender, land } = mount({
+        running: true,
+      })
+      land()
+      const start = timeline.scrollTop
+      expect(start).toBe(1000 + 32 - 500)
+
+      // The prompt and the working line come in; the prompt row is at 1000.
+      send()
+      layout.rowHeights = [1000, 60, 40]
+      rerender()
+      // The reservation lets the prompt rest 10px under the viewport top.
+      const hold = 1000 - 10
+      expect(content.style.minHeight).toBe('')
+      const glide = run(40)
+      expect(content.style.minHeight).toBe(`${hold + 500 + 2}px`)
+      expect(glide[0]).toBeGreaterThan(start)
+      expect(glide[0] - start).toBeLessThan((hold - start) * 0.2)
+      expect(increasing(glide)).toBe(true)
+      expect(glide.at(-1)).toBe(hold)
       expect(
         screen.queryByRole('button', { name: 'Scroll to bottom' }),
       ).toBeNull()
+
+      // The echo replaces the pending bubble and the reply streams in under
+      // it. Nothing on screen moves.
+      state.pending = []
+      state.messages = [
+        message('hello', 1),
+        message('next', 2, { role: 'user', itemId: 'client_1' }),
+        message('reply', 3, { itemId: 'item-3' }),
+      ]
+      layout.rowHeights = [1000, 60, 200, 40]
+      rerender()
+      expect(run(20).every((value) => value === hold)).toBe(true)
+
+      // The reply outgrows the reservation: tail-follow takes over and
+      // glides on from the hold.
+      layout.rowHeights = [1000, 60, 560, 40]
+      state.messages = [
+        ...state.messages.slice(0, 2),
+        message('reply grows', 4, { itemId: 'item-3' }),
+      ]
+      rerender()
+      const follow = run(120)
+      expect(content.style.minHeight).toBe('')
+      expect(increasing(follow)).toBe(true)
+      expect(follow[0]).toBeLessThan(max())
+      expect(follow.at(-1)).toBe(max())
+    })
+
+    it('gives the view back to the wheel and re-arms at the bottom', () => {
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [1000]
+      const { timeline, run, rerender, land, userScroll } = mount({
+        running: true,
+      })
+      land()
+      send()
+      layout.rowHeights = [1000, 60, 40]
+      rerender()
+      run(40)
+      expect(timeline.scrollTop).toBe(990)
+      userScroll(600)
+      run(20)
+      expect(timeline.scrollTop).toBe(600)
+      // Back at the bottom, the hold takes over again.
+      userScroll(992)
+      clock += 200
+      run(40)
+      expect(timeline.scrollTop).toBe(990)
+    })
+  })
+
+  describe('prompt fold', () => {
+    it('stops the follow and glides the row under the top fade', () => {
+      state.messages = [
+        message('hello', 1),
+        message('prompt', 2, { role: 'user', itemId: 'u' }),
+        message('reply', 3, { itemId: 'r' }),
+      ]
+      layout.rowHeights = [2000, 400, 800]
+      const { timeline, run, rerender, land } = mount()
+      land()
+      const rows = timeline.querySelectorAll('[data-transcript-row]')
+      const row = rows[1] as HTMLElement
+      // The prompt row starts 2000px down the content.
+      row.getBoundingClientRect = () =>
+        ({ top: 2000 - timeline.scrollTop, height: 400 }) as DOMRect
+      timeline.scrollTop = 2200
+      row.dispatchEvent(
+        new CustomEvent('chat:user-fold', {
+          bubbles: true,
+          detail: { heightChange: -268, heightDelta: 290 },
+        }),
+      )
+      const trace = run(40).map((top) => 2000 - top)
+      // The row top eases from -200px into the band 52px down.
+      expect(trace[0]).toBeGreaterThan(-200)
+      expect(trace.at(-1)).toBe(52)
+      expect(increasing(trace)).toBe(true)
+      // Folding broke the follow: growth no longer moves the view.
+      const before = timeline.scrollTop
+      layout.rowHeights = [2000, 400, 1400]
+      state.messages = [
+        ...state.messages.slice(0, 2),
+        message('reply grows', 4, { itemId: 'r' }),
+      ]
+      rerender()
+      run(30)
+      expect(timeline.scrollTop).toBe(before)
     })
   })
 })

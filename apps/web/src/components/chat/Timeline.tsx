@@ -10,7 +10,7 @@ import {
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { useParams } from '@tanstack/react-router'
 import { useMessagesStore } from '../../stores/messages'
-import { MessageRow, RELEASE_FOLLOW_EVENT } from './MessageRow'
+import { MessageRow, USER_FOLD_EVENT, type UserFoldDetail } from './MessageRow'
 import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
 import { AnsweredQuestionRow } from './AnsweredQuestionRow'
@@ -26,19 +26,15 @@ import { PromptRail } from './PromptRail'
 import { railPrompts } from './prompt-rail'
 import {
   BOTTOM_CLEARANCE,
+  promptIndex,
   rowMeta,
   workingPhase,
   type RowMeta,
   type WorkingPhase,
 } from './transcript-layout'
-import {
-  distanceFromBottom,
-  followAfterScroll,
-  initialFollow,
-  jumpStart,
-  releaseFollow,
-  restoreFollow,
-} from './scroll-follow'
+import { ATTACH_MS, TranscriptScroll } from './transcript-scroll'
+import { prefersReducedMotion } from './motion'
+import { noteArrivals, type Arrivals } from './tool-reveal'
 import './transcript.css'
 
 const EMPTY_MESSAGES: never[] = []
@@ -124,54 +120,121 @@ export function Timeline({
   }, [items, running])
 
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const content = useRef<HTMLDivElement>(null)
   const list = useRef<VirtualizerHandle>(null)
-  // The view starts pinned; a deep link releases it once its row exists.
-  const follow = useRef(initialFollow)
+  const driver = useRef<TranscriptScroll>(undefined)
   const [jump, setJump] = useState(false)
   const lastInput = useRef(0)
   const holding = useRef(false)
   const spacer = bottomInset + BOTTOM_CLEARANCE
-  const spacerRef = useRef(spacer)
-  spacerRef.current = spacer
+  const latest = useRef({ items, spacer, bottomInset })
+  latest.current = { items, spacer, bottomInset }
 
-  const setFollow = useCallback((next: typeof initialFollow) => {
-    follow.current = next
-    setJump(next.jump)
-  }, [])
-  // virtua sizes its box from row measurements that land after the commit,
-  // and its rows overflow that box, so `scrollHeight` can still leave the
-  // spacer out. Aim past the end by the spacer; the browser clamps it.
-  const pin = useCallback(() => {
-    if (!scroller || !follow.current.pinned) return
-    scroller.scrollTo({ top: scroller.scrollHeight + spacerRef.current })
-  }, [scroller])
+  // One driver per scroller and session. React attaches the content ref
+  // before this one, so both boxes exist when the driver starts.
+  const attachScroller = useCallback(
+    (node: HTMLDivElement | null) => {
+      driver.current?.dispose()
+      driver.current = undefined
+      scrollerRef.current = node
+      setScroller(node)
+      if (!node || !content.current) return
+      driver.current = new TranscriptScroll(node, content.current, {
+        prompt: (itemId) => {
+          const index = promptIndex(latest.current.items, itemId)
+          if (index < 0 || !list.current) return undefined
+          return { index, offset: list.current.getItemOffset(index) }
+        },
+        contentHeight: () => {
+          const last = latest.current.items.length - 1
+          const rows =
+            last < 0 || !list.current
+              ? 0
+              : list.current.getItemOffset(last) +
+                list.current.getItemSize(last)
+          return rows + latest.current.spacer
+        },
+        bottomInset: () => latest.current.bottomInset,
+        reducedMotion: prefersReducedMotion,
+        onFollow: (state) => setJump(state.jump),
+      })
+    },
+    // A new session starts a fresh driver.
+    [sessionId],
+  )
 
-  useLayoutEffect(pin, [pin, items, spacer])
-  // Pin again once measured rows land and resize the scrolled content.
+  useLayoutEffect(() => {
+    if (items.length) driver.current?.contentArrived()
+    driver.current?.kick()
+  }, [items])
+  useLayoutEffect(() => {
+    driver.current?.insetChanged()
+  }, [spacer])
+  // Measured rows and a resized viewport move the target; look again.
   useEffect(() => {
-    if (!scroller || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(pin)
-    for (const child of scroller.children) observer.observe(child)
+    const box = content.current
+    if (!scroller || !box || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => driver.current?.kick())
+    observer.observe(scroller)
+    observer.observe(box)
+    if (box.firstElementChild) observer.observe(box.firstElementChild)
     return () => observer.disconnect()
-  }, [scroller, pin])
-  // Sending a prompt follows the bottom again.
+  }, [scroller])
+  // Sending a prompt glides it to the top of the view.
   const pendingCount = pending.length
+  const newestPending = pending.at(-1)?.itemId
   const previousPending = useRef(pendingCount)
   useLayoutEffect(() => {
-    if (pendingCount > previousPending.current) {
+    if (pendingCount > previousPending.current && newestPending) {
       holding.current = false
-      setFollow(restoreFollow(follow.current))
-      pin()
+      driver.current?.ownSend(newestPending)
     }
     previousPending.current = pendingCount
-  }, [pendingCount, pin, setFollow])
-  // A folding bubble or a rail jump asks the view to stop following.
+  }, [pendingCount, newestPending])
+  // A folding prompt stops the follow and keeps its row in view.
   useEffect(() => {
     if (!scroller) return
-    const release = () => setFollow(releaseFollow(follow.current))
-    scroller.addEventListener(RELEASE_FOLLOW_EVENT, release)
-    return () => scroller.removeEventListener(RELEASE_FOLLOW_EVENT, release)
-  }, [scroller, setFollow])
+    const fold = (event: Event) => {
+      const row = (event.target as Element).closest('[data-transcript-row]')
+      const detail = (event as CustomEvent<UserFoldDetail | null>).detail
+      if (row instanceof HTMLElement && detail)
+        driver.current?.foldStart(row, detail.heightChange, detail.heightDelta)
+      else driver.current?.release()
+    }
+    scroller.addEventListener(USER_FOLD_EVENT, fold)
+    return () => scroller.removeEventListener(USER_FOLD_EVENT, fold)
+  }, [scroller])
+  // Selecting text by dragging stops the follow, so the stream cannot
+  // carry the selection away.
+  useEffect(() => {
+    if (!scroller) return
+    let pressed = false
+    const press = (event: PointerEvent) => {
+      pressed = event.button === 0 && event.target !== scroller
+    }
+    const lift = () => {
+      pressed = false
+    }
+    const select = () => {
+      if (!pressed) return
+      const selection = document.getSelection()
+      if (!selection || selection.isCollapsed) return
+      if (!scroller.contains(selection.anchorNode)) return
+      pressed = false
+      driver.current?.release()
+    }
+    scroller.addEventListener('pointerdown', press)
+    window.addEventListener('pointerup', lift)
+    window.addEventListener('pointercancel', lift)
+    document.addEventListener('selectionchange', select)
+    return () => {
+      scroller.removeEventListener('pointerdown', press)
+      window.removeEventListener('pointerup', lift)
+      window.removeEventListener('pointercancel', lift)
+      document.removeEventListener('selectionchange', select)
+    }
+  }, [scroller])
 
   // `?m=<seq>` centres that message and marks it until the reader scrolls.
   const [deepLinkId, setDeepLinkId] = useState<string>()
@@ -184,14 +247,31 @@ export function Timeline({
     if (deepLinkId === undefined) {
       holding.current = true
       setDeepLinkId(items[index].id)
-      setFollow(releaseFollow(follow.current))
+      driver.current?.release()
     }
     if (holding.current) list.current?.scrollToIndex(index, { align: 'center' })
-  }, [items, targetSeq, deepLinkId, setFollow])
+  }, [items, targetSeq, deepLinkId])
+
+  // Tool rows that arrive once the transcript has landed grow in; the rows
+  // it opened with are history. Arrival times are noted as the items come,
+  // so a row that mounts late, or remounts, plays only what is left.
+  const [landed, setLanded] = useState(false)
+  const hasItems = items.length > 0
+  useEffect(() => {
+    if (!hasItems || landed) return
+    const timer = setTimeout(() => setLanded(true), ATTACH_MS)
+    return () => clearTimeout(timer)
+  }, [hasItems, landed])
+  const [arrivals] = useState<Arrivals>(() => new Map())
+  useMemo(
+    () => noteArrivals(arrivals, items, performance.now(), landed),
+    [arrivals, items, landed],
+  )
 
   const markInput = () => {
     lastInput.current = performance.now()
     holding.current = false
+    driver.current?.userInput()
   }
   const dragging = useRef(false)
   useEffect(() => {
@@ -206,33 +286,13 @@ export function Timeline({
     }
   }, [])
 
-  const toBottom = () => {
-    if (!scroller) return
-    holding.current = false
-    setFollow(restoreFollow(follow.current))
-    const max = scroller.scrollHeight - scroller.clientHeight
-    const start = jumpStart(
-      distanceFromBottom(scroller),
-      scroller.clientHeight,
-      max,
-    )
-    if (start !== undefined) scroller.scrollTop = start
-    const reduce = window.matchMedia?.(
-      '(prefers-reduced-motion: reduce)',
-    ).matches
-    scroller.scrollTo({
-      top: scroller.scrollHeight + spacer,
-      behavior: reduce ? 'auto' : 'smooth',
-    })
-  }
-
   return (
     <section
       className="chat-timeline-shell relative min-h-0 w-full flex-1"
       style={{ '--fade-bottom': `${bottomInset}px` } as CSSProperties}
     >
       <div
-        ref={setScroller}
+        ref={attachScroller}
         className="chat-timeline h-full overflow-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
         onWheel={markInput}
         onTouchStart={markInput}
@@ -247,40 +307,43 @@ export function Timeline({
             markInput()
           }
         }}
-        onScroll={(event) => {
-          const userInput =
+        onScroll={() => {
+          driver.current?.scrolled(
             dragging.current ||
-            performance.now() - lastInput.current < INPUT_WINDOW_MS
-          const next = followAfterScroll(
-            follow.current,
-            distanceFromBottom(event.currentTarget),
-            userInput,
+              performance.now() - lastInput.current < INPUT_WINDOW_MS,
           )
-          if (next.pinned !== follow.current.pinned || next.jump !== jump)
-            setFollow(next)
-          else follow.current = next
         }}
       >
-        {/* No `shift`: rows are only appended or folded in place, and `shift`
-            makes virtua re-index its size cache on every append, which offsets
-            every measured row by one and opens blank bands between rows. */}
-        <Virtualizer<ChatRenderItem> ref={list} data={items}>
-          {(item: ChatRenderItem, index: number) => (
-            <RenderItem
-              key={item.id}
-              item={item}
-              meta={meta[index]}
-              sessionId={sessionId}
-              skills={skills}
-              live={item.id === liveGroupId}
-              deepLink={item.id === deepLinkId}
-              phase={phase}
-              turnStartedAt={turnStartedAt}
-              onRetry={onRetry}
-            />
-          )}
-        </Virtualizer>
-        <div aria-hidden style={{ height: spacer }} />
+        {/* The runway's reserved space lands on this box as a minimum
+            height, so the rows and the spacer need no layout of their own. */}
+        <div ref={content}>
+          {/* No `shift`: rows are only appended or folded in place, and
+              `shift` makes virtua re-index its size cache on every append,
+              which offsets every measured row by one and opens blank bands
+              between rows. */}
+          <Virtualizer<ChatRenderItem>
+            ref={list}
+            data={items}
+            scrollRef={scrollerRef}
+          >
+            {(item: ChatRenderItem, index: number) => (
+              <RenderItem
+                key={item.id}
+                item={item}
+                meta={meta[index]}
+                sessionId={sessionId}
+                skills={skills}
+                live={item.id === liveGroupId}
+                arrivals={arrivals}
+                deepLink={item.id === deepLinkId}
+                phase={phase}
+                turnStartedAt={turnStartedAt}
+                onRetry={onRetry}
+              />
+            )}
+          </Virtualizer>
+          <div aria-hidden style={{ height: spacer }} />
+        </div>
       </div>
       <PromptRail
         scroller={scroller}
@@ -288,7 +351,7 @@ export function Timeline({
         prompts={prompts}
         onNavigate={() => {
           holding.current = false
-          setFollow(releaseFollow(follow.current))
+          driver.current?.release()
         }}
       />
       {jump && (
@@ -299,7 +362,10 @@ export function Timeline({
           <button
             type="button"
             className="chat-jump pointer-events-auto flex h-[30px] cursor-pointer items-center gap-1.5 rounded-full border border-border bg-surface-raised ps-[11px] pe-[13px] text-[13px] text-foreground shadow-md transition-colors duration-150 hover:bg-[color-mix(in_oklab,var(--surface-raised),var(--foreground)_8%)] focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none"
-            onClick={toBottom}
+            onClick={() => {
+              holding.current = false
+              driver.current?.toBottom()
+            }}
           >
             <span className="text-muted-foreground" aria-hidden>
               ↓
@@ -318,6 +384,7 @@ function RenderItem({
   sessionId,
   skills,
   live,
+  arrivals,
   deepLink,
   phase,
   turnStartedAt,
@@ -328,6 +395,8 @@ function RenderItem({
   sessionId: string
   skills: string[]
   live: boolean
+  /** When tool rows arrived; see `noteArrivals`. */
+  arrivals: Arrivals
   deepLink: boolean
   phase: WorkingPhase
   turnStartedAt?: string
@@ -335,6 +404,7 @@ function RenderItem({
 }) {
   return (
     <div
+      data-transcript-row
       className="flex w-full justify-center px-5 sm:px-12"
       style={{ paddingTop: meta.gap }}
     >
@@ -358,6 +428,7 @@ function RenderItem({
             sessionId={sessionId}
             skills={skills}
             live={live}
+            arrivals={arrivals}
           />
         )}
       </div>
@@ -371,12 +442,14 @@ function RenderItemContent({
   sessionId,
   skills,
   live,
+  arrivals,
 }: {
   item: ChatRenderItem
   meta: RowMeta
   sessionId: string
   skills: string[]
   live: boolean
+  arrivals: Arrivals
 }) {
   if (item.kind === 'message')
     return (
@@ -395,7 +468,14 @@ function RenderItemContent({
   if (item.kind === 'subagent')
     return <SubagentCard child={item.child} skills={skills} />
   if (item.kind === 'tool-group')
-    return <ToolGroup item={item} sessionId={sessionId} live={live} />
+    return (
+      <ToolGroup
+        item={item}
+        sessionId={sessionId}
+        live={live}
+        arrivals={arrivals}
+      />
+    )
   if (item.kind === 'epic-triage') return <EpicTriageCard card={item.card} />
   if (item.kind === 'plan') return <PlanCard item={item} />
   if (item.kind === 'attachment') return <AttachmentItem item={item} />

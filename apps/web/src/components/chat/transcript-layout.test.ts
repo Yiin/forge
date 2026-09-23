@@ -6,6 +6,7 @@ import {
   fnv1a,
   formatElapsed,
   formatTimestamp,
+  promptIndex,
   rowGap,
   rowMeta,
   sendingBridge,
@@ -179,5 +180,20 @@ describe('transcript layout', () => {
         phase([pending('unsent'), pending('accepted')], { running: true }),
       ).toBe('undelivered')
     })
+  })
+})
+
+describe('promptIndex', () => {
+  it('finds a prompt by its item id, pending or echoed', () => {
+    const items: ChatRenderItem[] = [
+      user('u1'),
+      reply('r1'),
+      attachment('a1'),
+      { ...user('u2'), itemId: 'client_2' } as ChatRenderItem,
+      reply('r2'),
+    ]
+    // The entry starts at the attachment above the bubble.
+    expect(promptIndex(items, 'client_2')).toBe(2)
+    expect(promptIndex(items, 'client_9')).toBe(-1)
   })
 })

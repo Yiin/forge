@@ -16,6 +16,8 @@ export type ChatRenderItem =
       text: string
       thought?: boolean
       pending?: boolean
+      /** A prompt's item id, shared by its pending bubble and its echo. */
+      itemId?: string
       /** How far a pending prompt got; see `DeliveryStatus`. */
       delivery?: DeliveryStatus
       /** When the text arrived: a prompt's send time, a reply's last chunk. */
@@ -233,6 +235,7 @@ export function toRenderModel(
           text: content.text,
           createdAt: message.createdAt,
           ...(channel === 'thought' ? { thought: true } : {}),
+          ...(message.role === 'user' ? { itemId: message.itemId } : {}),
         }
         result.push(item)
         textItems.set(key, item)
@@ -358,6 +361,7 @@ export function toRenderModel(
         seq: Number.MAX_SAFE_INTEGER,
         role: 'user' as const,
         text: item.text,
+        itemId: item.itemId,
         pending: true,
         delivery: item.status ?? 'sending',
         createdAt: item.createdAt,

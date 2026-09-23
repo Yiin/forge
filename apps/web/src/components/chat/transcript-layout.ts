@@ -93,6 +93,22 @@ export function rowMeta(items: ChatRenderItem[], running: boolean): RowMeta[] {
   return meta
 }
 
+/**
+ * The row where a sent prompt's entry starts: its bubble, or the attachments
+ * above it. The pending bubble and the server's echo share the item id.
+ */
+export function promptIndex(items: ChatRenderItem[], itemId: string) {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]
+    if (item.kind !== 'message' || item.role !== 'user') continue
+    if (item.itemId !== itemId) continue
+    let start = index
+    while (start > 0 && items[start - 1].kind === 'attachment') start -= 1
+    return start
+  }
+  return -1
+}
+
 function lastIndexWhere<T>(list: T[], test: (item: T) => boolean) {
   for (let index = list.length - 1; index >= 0; index -= 1)
     if (test(list[index])) return index

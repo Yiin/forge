@@ -3,7 +3,6 @@ import {
   distanceFromBottom,
   followAfterScroll,
   initialFollow,
-  jumpStart,
   jumpVisible,
   releaseFollow,
   restoreFollow,
@@ -39,6 +38,10 @@ describe('scroll follow', () => {
     expect(
       followAfterScroll({ ...released, distance: 90 }, 70, true).pinned,
     ).toBe(true)
+    // Only the user's own move re-sticks inside the band.
+    expect(
+      followAfterScroll({ ...released, distance: 90 }, 70, false).pinned,
+    ).toBe(false)
     // Moving up inside the band does not snap back.
     expect(
       followAfterScroll({ ...released, distance: 20 }, 50, true).pinned,
@@ -61,10 +64,5 @@ describe('scroll follow', () => {
     expect(releaseFollow(pinned).pinned).toBe(false)
     const restored = restoreFollow({ pinned: false, jump: true, distance: 900 })
     expect(restored).toMatchObject({ pinned: true, jump: false })
-  })
-
-  it('teleports to 2.5 viewports from the end before a long glide', () => {
-    expect(jumpStart(5000, 400, 6000)).toBe(5000)
-    expect(jumpStart(900, 400, 6000)).toBeUndefined()
   })
 })
