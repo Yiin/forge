@@ -41,8 +41,11 @@ export const INPUT_YIELD_MS = 120
 export type ScrollHost = {
   /** The prompt's row index and offset in the content, if it is there. */
   prompt: (itemId: string) => { index: number; offset: number } | undefined
-  /** Height of the rows plus the bottom spacer, without the runway. */
-  contentHeight: () => number
+  /**
+   * Height from the top of row `index` to the end of the content, without
+   * the runway: the rows as laid out, plus the bottom spacer.
+   */
+  tailHeight: (index: number) => number
   /** Overlaid chrome at the bottom of the scroller, such as the composer. */
   bottomInset: () => number
   reducedMotion: () => boolean
@@ -83,16 +86,53 @@ export class TranscriptScroll {
   private attachedAt?: number
   private frame = 0
 
+  private writing = false
+  private guarded = false
+
   constructor(
     private scroller: HTMLElement,
     /** The content box that carries the runway's minimum height. */
     private content: HTMLElement,
     private host: ScrollHost,
-  ) {}
+  ) {
+    this.guardScrollTop()
+  }
 
   dispose() {
     cancelAnimationFrame(this.frame)
     this.frame = 0
+    if (this.guarded) Reflect.deleteProperty(this.scroller, 'scrollTop')
+  }
+
+  /**
+   * virtua keeps the rows in view still when a row above the viewport top
+   * changes size, by moving `scrollTop`. While the view scrolls down it
+   * also counts a row that straddles the top, and the streaming reply is
+   * such a row while the spring follows it. virtua would then snap every new
+   * line into place and the spring would never glide. So while the view
+   * follows the bottom or holds a runway, only the driver writes
+   * `scrollTop`; other scripts' writes are dropped. The user's own scrolling
+   * does not go through this setter.
+   */
+  private guardScrollTop() {
+    const native = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      'scrollTop',
+    )
+    const { get, set } = native ?? {}
+    if (!get || !set) return
+    const owns = () =>
+      !this.writing && (this.follow.pinned || this.runway?.held === true)
+    Object.defineProperty(this.scroller, 'scrollTop', {
+      configurable: true,
+      get() {
+        return get.call(this)
+      },
+      set(value: number) {
+        if (!owns()) set.call(this, value)
+      },
+    })
+    this.guarded = true
   }
 
   /** Content or layout changed: look again on the next frame. */
@@ -222,7 +262,7 @@ export class TranscriptScroll {
     })
     if (Math.abs(to - from) <= 0.5) return
     if (this.host.reducedMotion()) {
-      this.scroller.scrollTop += from - to
+      this.write(this.read() + from - to)
       return
     }
     this.fold = {
@@ -265,9 +305,7 @@ export class TranscriptScroll {
     runway.seen = true
     const inset = runwayInset(prompt.index)
     const viewport = this.scroller.clientHeight
-    if (
-      runwayFilled(this.host.contentHeight(), prompt.offset, viewport, inset)
-    ) {
+    if (runwayFilled(this.host.tailHeight(prompt.index), viewport, inset)) {
       const held = runway.held
       this.endRunway()
       if (held || distanceFromBottom(this.scroller) <= AT_BOTTOM_PX) {
@@ -393,7 +431,9 @@ export class TranscriptScroll {
    * kicks another frame.
    */
   private snapToEnd() {
+    this.writing = true
     this.scroller.scrollTop = this.scroller.scrollHeight
+    this.writing = false
     this.position = this.scroller.scrollTop
   }
 
@@ -406,8 +446,10 @@ export class TranscriptScroll {
 
   private write(position: number) {
     this.position = position
-    if (Math.abs(this.scroller.scrollTop - position) >= 0.25)
-      this.scroller.scrollTop = position
+    if (Math.abs(this.scroller.scrollTop - position) < 0.25) return
+    this.writing = true
+    this.scroller.scrollTop = position
+    this.writing = false
   }
 
   private setFollow(next: FollowState) {

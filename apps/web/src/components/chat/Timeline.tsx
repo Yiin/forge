@@ -146,14 +146,22 @@ export function Timeline({
           if (index < 0 || !list.current) return undefined
           return { index, offset: list.current.getItemOffset(index) }
         },
-        contentHeight: () => {
-          const last = latest.current.items.length - 1
-          const rows =
-            last < 0 || !list.current
-              ? 0
-              : list.current.getItemOffset(last) +
-                list.current.getItemSize(last)
-          return rows + latest.current.spacer
+        // The runway ends only once both the laid-out rows and virtua's own
+        // sizes pass it. virtua sizes a row it has yet to measure from its
+        // average, which can be far off for a fresh prompt, and it learns a
+        // row's growth a frame after layout; ending on either alone would
+        // end the runway early or let the content box shrink under the view.
+        tailHeight: (index) => {
+          const { items, spacer } = latest.current
+          let height = spacer
+          for (let row = index; row < items.length; row += 1) {
+            const node = content.current?.querySelector<HTMLElement>(
+              `[data-row-index="${row}"]`,
+            )
+            const known = list.current?.getItemSize(row) ?? 0
+            height += node ? Math.min(node.offsetHeight, known) : known
+          }
+          return height
         },
         bottomInset: () => latest.current.bottomInset,
         reducedMotion: prefersReducedMotion,
@@ -168,9 +176,6 @@ export function Timeline({
     if (items.length) driver.current?.contentArrived()
     driver.current?.kick()
   }, [items])
-  useLayoutEffect(() => {
-    driver.current?.insetChanged()
-  }, [spacer])
   // Measured rows and a resized viewport move the target; look again.
   useEffect(() => {
     const box = content.current
@@ -192,6 +197,11 @@ export function Timeline({
     }
     previousPending.current = pendingCount
   }, [pendingCount, newestPending])
+  // After a send, so a composer that shrinks as it clears the text moves a
+  // pinned view only when no runway has taken it.
+  useLayoutEffect(() => {
+    driver.current?.insetChanged()
+  }, [spacer])
   // A folding prompt stops the follow and keeps its row in view.
   useEffect(() => {
     if (!scroller) return
@@ -329,6 +339,7 @@ export function Timeline({
             {(item: ChatRenderItem, index: number) => (
               <RenderItem
                 key={item.id}
+                index={index}
                 item={item}
                 meta={meta[index]}
                 sessionId={sessionId}
@@ -379,6 +390,7 @@ export function Timeline({
 }
 
 function RenderItem({
+  index,
   item,
   meta,
   sessionId,
@@ -390,6 +402,7 @@ function RenderItem({
   turnStartedAt,
   onRetry,
 }: {
+  index: number
   item: ChatRenderItem
   meta: RowMeta
   sessionId: string
@@ -405,6 +418,7 @@ function RenderItem({
   return (
     <div
       data-transcript-row
+      data-row-index={index}
       className="flex w-full justify-center px-5 sm:px-12"
       style={{ paddingTop: meta.gap }}
     >

@@ -123,8 +123,9 @@ describe('own-send runway', () => {
   it('reserves space down to the viewport bottom plus the slack', () => {
     // A prompt at 1200px in a 600px view needs content to 1792px.
     expect(runwayMinHeight(1200, 600, 10)).toBe(1190 + 600 + RUNWAY_SLACK)
-    expect(runwayFilled(1792, 1200, 600, 10)).toBe(false)
-    expect(runwayFilled(1793, 1200, 600, 10)).toBe(true)
+    // Filled once the rows from the prompt down pass that same line.
+    expect(runwayFilled(592, 600, 10)).toBe(false)
+    expect(runwayFilled(593, 600, 10)).toBe(true)
   })
 
   it('glides 85% per frame, about 90% in 230ms, then snaps', () => {

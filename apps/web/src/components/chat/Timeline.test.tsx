@@ -169,6 +169,14 @@ describe('Timeline', () => {
       return frameId
     })
     vi.stubGlobal('cancelAnimationFrame', (id: number) => frameQueue.delete(id))
+    // Laid-out rows report the mocked heights.
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        const row = this.dataset.rowIndex
+        return row === undefined ? 0 : (layout.rowHeights[Number(row)] ?? 0)
+      },
+    })
   })
 
   afterEach(() => {

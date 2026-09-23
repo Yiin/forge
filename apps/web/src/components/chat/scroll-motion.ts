@@ -131,14 +131,16 @@ export function runwayMinHeight(
   return runwayHold(promptOffset, inset) + viewport + RUNWAY_SLACK
 }
 
-/** The reply has outgrown the reservation; tail-follow takes over. */
+/**
+ * The reply has outgrown the reservation, and tail-follow takes over.
+ * `tailHeight` runs from the prompt's top to the end of the content.
+ */
 export function runwayFilled(
-  contentHeight: number,
-  promptOffset: number,
+  tailHeight: number,
   viewport: number,
   inset: number,
 ) {
-  return contentHeight > runwayMinHeight(promptOffset, viewport, inset)
+  return tailHeight > viewport - inset + RUNWAY_SLACK
 }
 
 /** One frame of the runway's ease-out glide toward the hold. */

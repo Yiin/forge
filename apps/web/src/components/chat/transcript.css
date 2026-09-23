@@ -6,6 +6,14 @@
   --transcript-width: 736px;
 }
 
+/* The transcript places its own scroll: the follow spring, the runway and
+   virtua's size corrections. Browser scroll anchoring would pick the bottom
+   spacer as its anchor and throw the view to the end whenever rows above it
+   grow. */
+.chat-timeline {
+  overflow-anchor: none;
+}
+
 /* The scroller fades its content, not an overlay, so it works over the
    frosted composer: a 24px ramp at the top, and a ramp under the composer
    down to the bottom edge. */
