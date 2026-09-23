@@ -18,12 +18,31 @@ vi.mock('./ToolGroup', () => ({
   ToolGroup: () => null,
 }))
 const virtualizerProps: Record<string, unknown>[] = []
-/** Row geometry the mocked virtua reports: offsets from `rowHeights`. */
-const layout = { rowHeights: [] as number[] }
+/**
+ * Row geometry the mocked virtua reports: offsets from `rowHeights`. Rows in
+ * `estimated` are sized from virtua's average, `estimate`, until measured,
+ * and rows in `hidden` are not rendered at all.
+ */
+const layout = {
+  rowHeights: [] as number[],
+  estimated: new Set<number>(),
+  hidden: new Set<number>(),
+  estimate: 0,
+}
+/** virtua's size for a row: its estimate until it is measured. */
+const virtuaSize = (index: number) =>
+  layout.estimated.has(index)
+    ? layout.estimate
+    : (layout.rowHeights[index] ?? 0)
+const rowOffset = (index: number) =>
+  layout.rowHeights.slice(0, index).reduce((sum, height) => sum + height, 0)
 const handle = {
   getItemOffset: (index: number) =>
-    layout.rowHeights.slice(0, index).reduce((sum, height) => sum + height, 0),
-  getItemSize: (index: number) => layout.rowHeights[index] ?? 0,
+    Array.from({ length: index }, (_, row) => virtuaSize(row)).reduce(
+      (sum, height) => sum + height,
+      0,
+    ),
+  getItemSize: virtuaSize,
   scrollToIndex: () => {},
 }
 vi.mock('virtua', async () => {
@@ -36,12 +55,14 @@ vi.mock('virtua', async () => {
       ...rest
     }: {
       data: unknown[]
-      children: (item: unknown) => unknown
+      children: (item: unknown, index: number) => unknown
       ref?: React.Ref<unknown>
     }) => {
       React.useImperativeHandle(ref, () => handle)
       virtualizerProps.push(rest)
-      return data.map(children)
+      return data.map((item, index) =>
+        layout.hidden.has(index) ? null : children(item, index),
+      )
     },
   }
 })
@@ -105,11 +126,15 @@ function mount(props: Parameters<typeof Timeline>[0] = {}) {
   ) as HTMLDivElement
   const content = timeline.firstElementChild as HTMLDivElement
   const box = { clientHeight: 500 }
+  // virtua sizes its box from its own sizes, estimates included.
   const scrollHeight = () => {
     const spacer = parseFloat(
       (content.lastElementChild as HTMLElement).style.height || '0',
     )
-    const rows = layout.rowHeights.reduce((sum, height) => sum + height, 0)
+    const rows = layout.rowHeights.reduce(
+      (sum, _, index) => sum + virtuaSize(index),
+      0,
+    )
     return Math.max(rows + spacer, parseFloat(content.style.minHeight || '0'))
   }
   let top = 0
@@ -131,15 +156,6 @@ function mount(props: Parameters<typeof Timeline>[0] = {}) {
       configurable: true,
     },
   })
-  // The rows and the spacer as laid out, without the content's minimum.
-  const spacer = content.lastElementChild as HTMLElement
-  content.getBoundingClientRect = () => ({ top: 0 }) as DOMRect
-  spacer.getBoundingClientRect = () =>
-    ({
-      bottom:
-        layout.rowHeights.reduce((sum, height) => sum + height, 0) +
-        parseFloat(spacer.style.height || '0'),
-    }) as DOMRect
   const max = () => scrollHeight() - box.clientHeight
   const rerender = (next: Parameters<typeof Timeline>[0] = props) =>
     view.rerender(<Timeline {...next} />)
@@ -181,12 +197,25 @@ describe('Timeline', () => {
       return frameId
     })
     vi.stubGlobal('cancelAnimationFrame', (id: number) => frameQueue.delete(id))
-    // Laid-out rows report the mocked heights.
+    layout.estimated = new Set()
+    layout.hidden = new Set()
+    // Laid-out rows report the mocked heights, in content coordinates.
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
       configurable: true,
       get(this: HTMLElement) {
         const row = this.dataset.rowIndex
         return row === undefined ? 0 : (layout.rowHeights[Number(row)] ?? 0)
+      },
+    })
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      writable: true,
+      value(this: HTMLElement) {
+        const row = this.dataset.rowIndex
+        if (row === undefined) return { top: 0, bottom: 0, height: 0 }
+        const top = rowOffset(Number(row))
+        const height = layout.rowHeights[Number(row)] ?? 0
+        return { top, bottom: top + height, height }
       },
     })
   })
@@ -420,6 +449,31 @@ describe('Timeline', () => {
       expect(timeline.scrollTop).toBe(max())
     })
 
+    it("follows the rows as laid out, not virtua's estimate", () => {
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [2000]
+      const { timeline, run, max, rerender, land } = mount()
+      land()
+      // A 100px row lands; virtua sizes it from its 1200px average first.
+      layout.rowHeights = [2000, 100]
+      layout.estimated = new Set([1])
+      layout.estimate = 1200
+      state.messages = [
+        message('hello', 1),
+        message('next', 2, { itemId: 'item-2' }),
+      ]
+      rerender()
+      const end = 2000 + 100 + 32 - 500
+      const trace = run(60)
+      expect(Math.max(...trace)).toBe(end)
+      expect(trace.at(-1)).toBe(end)
+      // virtua measures it: nothing moves.
+      layout.estimated = new Set()
+      rerender()
+      expect(run(10).every((top) => top === end)).toBe(true)
+      expect(max()).toBe(end)
+    })
+
     it('releases the pin when a selection drag starts', () => {
       state.messages = [message('hello', 1)]
       layout.rowHeights = [2000]
@@ -545,6 +599,25 @@ describe('Timeline', () => {
       expect(increasing(follow)).toBe(true)
       expect(follow[0]).toBeLessThan(max())
       expect(follow.at(-1)).toBe(max())
+    })
+
+    it("holds the runway while a fresh row is only virtua's estimate", () => {
+      state.messages = [message('hello', 1)]
+      layout.rowHeights = [1000]
+      const { timeline, content, run, rerender, land } = mount({
+        running: true,
+      })
+      land()
+      send()
+      // The working line is not rendered yet; virtua guesses 900px for it.
+      layout.rowHeights = [1000, 60, 40]
+      layout.estimated = new Set([2])
+      layout.hidden = new Set([2])
+      layout.estimate = 900
+      rerender()
+      run(40)
+      expect(content.style.minHeight).not.toBe('')
+      expect(timeline.scrollTop).toBe(990)
     })
 
     it('gives the view back to the wheel and re-arms at the bottom', () => {

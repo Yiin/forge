@@ -131,6 +131,9 @@ export function Timeline({
   const latest = useRef({ items, spacer, bottomInset })
   latest.current = { items, spacer, bottomInset }
 
+  const rowNode = (index: number) =>
+    content.current?.querySelector<HTMLElement>(`[data-row-index="${index}"]`)
+
   // One driver per scroller and session. React attaches the content ref
   // before this one, so both boxes exist when the driver starts.
   const attachScroller = useCallback(
@@ -147,30 +150,30 @@ export function Timeline({
           return { index, offset: list.current.getItemOffset(index) }
         },
         // The runway ends only once both the laid-out rows and virtua's own
-        // sizes pass it. virtua sizes a row it has yet to measure from its
-        // average, which can be far off for a fresh prompt, and it learns a
-        // row's growth a frame after layout; ending on either alone would
-        // end the runway early or let the content box shrink under the view.
+        // sizes pass it. virtua learns a row's growth a frame after layout,
+        // so ending on the layout alone would let the content box shrink
+        // under the view. A row virtua has not rendered yet counts as
+        // nothing: its size is only virtua's average, which can be far off
+        // for a fresh row and would end the runway early.
         tailHeight: (index) => {
           const { items, spacer } = latest.current
           let height = spacer
           for (let row = index; row < items.length; row += 1) {
-            const node = content.current?.querySelector<HTMLElement>(
-              `[data-row-index="${row}"]`,
-            )
-            const known = list.current?.getItemSize(row) ?? 0
-            height += node ? Math.min(node.offsetHeight, known) : known
+            const node = rowNode(row)
+            if (!node) continue
+            const known = list.current?.getItemSize(row) ?? node.offsetHeight
+            height += Math.min(node.offsetHeight, known)
           }
           return height
         },
-        // The bottom spacer's lower edge, so a minimum height on the box
-        // does not count.
         contentHeight: () => {
           const box = content.current
-          const end = box?.lastElementChild
-          if (!box || !end) return 0
+          const last = rowNode(latest.current.items.length - 1)
+          if (!box || !last) return undefined
           return (
-            end.getBoundingClientRect().bottom - box.getBoundingClientRect().top
+            last.getBoundingClientRect().bottom -
+            box.getBoundingClientRect().top +
+            latest.current.spacer
           )
         },
         bottomInset: () => latest.current.bottomInset,

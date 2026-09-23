@@ -49,10 +49,11 @@ export type ScrollHost = {
    */
   tailHeight: (index: number) => number
   /**
-   * Height of the rows plus the bottom spacer as laid out this frame,
-   * without the runway or the tail floor.
+   * Where the content ends as laid out this frame: the last row's bottom
+   * plus the bottom spacer, without the runway or the tail floor. Unset
+   * while the last row is not rendered.
    */
-  contentHeight: () => number
+  contentHeight: () => number | undefined
   /** Overlaid chrome at the bottom of the scroller, such as the composer. */
   bottomInset: () => number
   reducedMotion: () => boolean
@@ -89,7 +90,7 @@ export class TranscriptScroll {
   private runway?: Runway
   private reserved = 0
   /** The content height at the last frame, and the floor held under it. */
-  private tail = 0
+  private tail?: number
   private floor?: TailFloor
   private floorTick?: number
   private minHeight = 0
@@ -299,10 +300,7 @@ export class TranscriptScroll {
     let again = false
     if (this.fold) again = this.stepFold(now)
     else if (this.runway?.held) again = yielding || this.stepRunway(now)
-    // A held tail keeps the view still; the spring would only chase into
-    // space that is about to go.
-    else if (this.follow.pinned && !floored)
-      again = yielding || this.stepFollow(now)
+    else if (this.follow.pinned) again = yielding || this.stepFollow(now)
     if (again || floored) this.kick()
   }
 
@@ -317,7 +315,12 @@ export class TranscriptScroll {
     this.tail = height
     const started = !this.floor
     this.floor =
-      this.follow.pinned && !this.runway && !this.fold && !this.attaching(now)
+      height !== undefined &&
+      previous !== undefined &&
+      this.follow.pinned &&
+      !this.runway &&
+      !this.fold &&
+      !this.attaching(now)
         ? stepTailFloor({
             floor: this.floor,
             previous,
@@ -415,9 +418,23 @@ export class TranscriptScroll {
     return false
   }
 
+  /**
+   * The offset that rests the view on the end of the content as laid out.
+   * virtua sizes a row it has yet to measure from its average, which can be
+   * far taller than the row; the view must not chase that blank space.
+   */
+  private endTarget() {
+    const end = this.host.contentHeight()
+    const height =
+      end === undefined
+        ? this.scroller.scrollHeight
+        : Math.min(end, this.scroller.scrollHeight)
+    return height - this.scroller.clientHeight
+  }
+
   /** One spring frame toward the bottom. */
   private stepFollow(now: number) {
-    const target = this.scroller.scrollHeight - this.scroller.clientHeight
+    const target = this.endTarget()
     if (target <= 0) return false
     if (
       this.settledAt !== undefined &&
@@ -431,7 +448,13 @@ export class TranscriptScroll {
       this.settledAt ??= now
       return false
     }
-    const position = glideStart(this.read(), target, this.scroller.clientHeight)
+    const current = this.read()
+    // At or past the end, such as over a held tail: nothing to glide to.
+    if (current >= target - 0.5) {
+      this.settledAt ??= now
+      return false
+    }
+    const position = glideStart(current, target, this.scroller.clientHeight)
     const step = stepSpring(
       this.spring,
       position,
@@ -486,14 +509,18 @@ export class TranscriptScroll {
   }
 
   /**
-   * Land on the end. The rows virtua has yet to measure can overflow its
-   * box and hide the spacer from `scrollHeight`, so aim past the end by the
-   * whole scroll height and let the browser clamp; the next measurement
-   * kicks another frame.
+   * Land on the end as laid out. A row virtua has yet to measure can
+   * overflow its box and hide the spacer from `scrollHeight`, so aim at the
+   * end and let the browser clamp; the next measurement kicks another frame.
+   * With no last row rendered, aim past everything.
    */
   private snapToEnd() {
+    const end = this.host.contentHeight()
     this.writing = true
-    this.scroller.scrollTop = this.scroller.scrollHeight
+    this.scroller.scrollTop =
+      end === undefined
+        ? this.scroller.scrollHeight
+        : end - this.scroller.clientHeight
     this.writing = false
     this.position = this.scroller.scrollTop
   }
