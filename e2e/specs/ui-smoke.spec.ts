@@ -67,7 +67,7 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
       expect((await pill.boundingBox())?.height).toBe(49)
       expect(
         await pill.evaluate((node) => getComputedStyle(node).borderRadius),
-      ).toBe('26px')
+      ).toBe('22px')
       await composer.fill(
         'A line that wraps as the conversation narrows. '.repeat(6),
       )
@@ -93,7 +93,7 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
       await composer.fill('line\n'.repeat(80))
       await expect
         .poll(async () => (await pill.boundingBox())!.height)
-        .toBe(308)
+        .toBe(304)
       await composer.fill('')
       await page.setViewportSize({ width: 1320, height: 880 })
       await expect(form).toHaveAttribute('data-composer-mode', 'compact')

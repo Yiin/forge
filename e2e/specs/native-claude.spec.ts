@@ -101,7 +101,7 @@ test('native Claude promotes a draft and resumes the original binding after serv
     await expect(
       page.getByText('Native first response', { exact: true }),
     ).toBeVisible({ timeout: 15000 })
-    await page.getByRole('combobox', { name: 'Model', exact: true }).click()
+    await page.getByRole('button', { name: 'Model', exact: true }).click()
     await expect(
       page.getByRole('option', { name: /Opus \(1M context\)/ }),
     ).toBeVisible()
@@ -314,7 +314,7 @@ test('native Claude streams tools, answers original requests, and receives a dra
       buffer: image,
     })
     await expect(
-      page.getByText('native-pixel.png', { exact: true }).first(),
+      page.getByRole('img', { name: 'native-pixel.png', exact: true }),
     ).toBeVisible()
     await page
       .getByLabel('Message composer')
