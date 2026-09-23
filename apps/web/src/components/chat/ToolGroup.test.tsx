@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ChatRenderItem, ToolGroupEntry, ToolItem } from './render-model'
 import { AgentToolCard, ToolGroup } from './ToolGroup'
 import { useShellStore } from '../../stores/shell'
@@ -150,6 +150,94 @@ describe('ToolGroup', () => {
       name: 'Thought process',
     }))
       expect(button.getAttribute('aria-expanded')).toBe('false')
+  })
+})
+
+describe('ToolGroup arrivals', () => {
+  const played: { node: Element; keyframes: Keyframe[]; delay?: number }[] = []
+  const setup = (reduce = false) => {
+    played.length = 0
+    vi.spyOn(performance, 'now').mockReturnValue(1000)
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: reduce && query.includes('reduce'),
+    }))
+    Element.prototype.animate = function (
+      this: Element,
+      keyframes: Keyframe[],
+      options?: KeyframeAnimationOptions,
+    ) {
+      played.push({ node: this, keyframes, delay: Number(options?.delay) })
+      return {} as Animation
+    } as Element['animate']
+  }
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+    delete (Element.prototype as Partial<Element>).animate
+  })
+  const property = (name: string) =>
+    played.filter((entry) => name in (entry.keyframes[0] ?? {}))
+
+  it('grows a new row in, draws its connector, then fades its content in', () => {
+    setup()
+    const old = tool('Bash', { command: 'pwd' })
+    const fresh = tool('Read', { file_path: 'a.ts' })
+    const arrivals = new Map<string, number | null>([
+      [`tool-group:${old.id}`, null],
+      [old.id, null],
+      [fresh.id, 1000],
+    ])
+    render(<ToolGroup live arrivals={arrivals} item={group([old, fresh])} />)
+    // Height: the new row's grid track grows from 0fr, 360ms expo-out.
+    const grow = property('gridTemplateRows')
+    expect(grow).toHaveLength(1)
+    expect(grow[0].delay).toBe(0)
+    expect(grow[0].node.textContent).toContain('Read')
+    // The trunk of the row above extends, then this row's trunk and branch
+    // draw, and the icon and content follow the branch.
+    const trunks = property('transform').filter((entry) =>
+      String(entry.keyframes[0].transform).startsWith('scaleY'),
+    )
+    expect(trunks).toHaveLength(2)
+    expect(property('strokeDashoffset')).toHaveLength(1)
+    const lifted = played.find((entry) =>
+      String(entry.keyframes[0].transform).startsWith('translateY'),
+    )
+    expect(lifted?.keyframes[0]).toMatchObject({
+      opacity: 0,
+      transform: 'translateY(4px)',
+    })
+    expect(lifted?.keyframes.at(-1)).toMatchObject({
+      opacity: 1,
+      transform: 'translateY(0px)',
+    })
+  })
+
+  it('keeps history and landed rows still', () => {
+    setup()
+    const first = tool('Bash', { command: 'pwd' })
+    const second = tool('Bash', { command: 'ls' })
+    const arrivals = new Map<string, number | null>([
+      [first.id, null],
+      // Arrived a second ago: long landed when this row mounts.
+      [second.id, 0],
+    ])
+    render(<ToolGroup live arrivals={arrivals} item={group([first, second])} />)
+    expect(played).toHaveLength(0)
+  })
+
+  it('fades a new row in place under reduced motion', () => {
+    setup(true)
+    const fresh = tool('Bash', { command: 'pwd' })
+    const arrivals = new Map<string, number | null>([
+      [`tool-group:${fresh.id}`, 1000],
+      [fresh.id, 1090],
+    ])
+    render(<ToolGroup live arrivals={arrivals} item={group([fresh])} />)
+    expect(played.length).toBeGreaterThan(0)
+    for (const entry of played)
+      expect(Object.keys(entry.keyframes[0])).toEqual(['opacity'])
   })
 })
 

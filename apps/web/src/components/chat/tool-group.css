@@ -47,19 +47,6 @@
   overflow: hidden;
 }
 
-/* Rows that arrive while the group is live fade in and lift 4px. */
-.tool-row-enter {
-  animation: tool-row-in 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  animation-delay: var(--tool-row-delay, 0ms);
-}
-
-@keyframes tool-row-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
-
 /* 2x3 chase spinner for running agents. */
 .glyph-spinner > span {
   animation: glyph-spin 750ms linear infinite;
