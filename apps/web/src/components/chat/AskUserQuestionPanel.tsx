@@ -299,7 +299,12 @@ function QuestionCard({
             </p>
           </div>
         )}
-        <h2 className="mt-1.5 text-[15px] leading-5 font-medium text-foreground">
+        <h2
+          className={cn(
+            'text-[15px] leading-5 font-medium text-foreground',
+            isPermission ? 'mt-3' : 'mt-1.5',
+          )}
+        >
           {question.question}
         </h2>
         {question.multiSelect && (

@@ -77,7 +77,7 @@ export function CommandMenu({
       data-composer-menu=""
       className={cn(
         CARD_CLASS,
-        'flex max-h-80 flex-col duration-150 animate-in fade-in-0 slide-in-from-bottom-0.5 motion-reduce:animate-none',
+        'flex max-h-80 min-h-0 flex-col duration-150 animate-in fade-in-0 slide-in-from-bottom-0.5 motion-reduce:animate-none',
       )}
       // Keep focus (and the caret) in the composer while clicking a row.
       onMouseDown={(event) => event.preventDefault()}
@@ -87,7 +87,7 @@ export function CommandMenu({
         role="listbox"
         aria-label="Completions"
         className={cn(
-          'flex max-h-[310px] flex-col gap-0.5 overflow-y-auto',
+          'flex max-h-[310px] min-h-0 flex-col gap-0.5 overflow-y-auto',
           EDGE_FADE_CLASS,
         )}
       >

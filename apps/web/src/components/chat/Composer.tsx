@@ -6,11 +6,12 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type {
   ClipboardEvent,
   DragEvent as ReactDragEvent,
   ReactNode,
+  RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../../lib/api'
@@ -94,6 +95,54 @@ const hasFiles = (transfer: DataTransfer | null) =>
 
 /** The interactive controls a pill mouse-down must not steal focus from. */
 const INTERACTIVE = 'button, a, input, textarea, label, [role="option"]'
+
+/**
+ * Floats its children above the pill at the pill's width. It renders in a
+ * portal because the session's composer overlay scrolls, which would clip
+ * anything that sticks out above it.
+ */
+function AbovePill({
+  pill,
+  children,
+}: {
+  pill: RefObject<HTMLDivElement | null>
+  children: ReactNode
+}) {
+  const [rect, setRect] = useState<DOMRect | null>(null)
+  useLayoutEffect(() => {
+    const node = pill.current
+    if (!node) return
+    const update = () => setRect(node.getBoundingClientRect())
+    update()
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(update)
+    observer?.observe(node)
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [pill])
+  if (!rect) return null
+  return createPortal(
+    <div
+      className="fixed z-50 flex flex-col justify-end pb-1.5"
+      style={{
+        left: rect.left,
+        width: rect.width,
+        bottom: window.innerHeight - rect.top,
+        maxHeight: Math.max(120, rect.top - 8),
+      }}
+    >
+      {children}
+    </div>,
+    document.body,
+  )
+}
 
 export function Composer({
   sessionId,
@@ -716,7 +765,7 @@ export function Composer({
             </div>
           )}
           {trigger && (
-            <div className="absolute inset-x-0 bottom-full z-30 pb-1.5">
+            <AbovePill pill={pill}>
               <CommandMenu
                 ref={menu}
                 commands={commands}
@@ -724,7 +773,7 @@ export function Composer({
                 query={trigger.query}
                 onSelect={select}
               />
-            </div>
+            </AbovePill>
           )}
           <div
             ref={pill}
