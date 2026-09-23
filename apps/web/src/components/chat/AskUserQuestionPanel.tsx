@@ -1,10 +1,4 @@
-import {
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Send,
-  ShieldAlert,
-} from 'lucide-react'
+import { ShieldAlert } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import {
@@ -15,10 +9,16 @@ import {
 } from './question-logic'
 import { useMessagesStore } from '../../stores/messages'
 import { cn } from '../../lib/utils'
-import { Button } from '../ui/button'
-import { Input } from '../ui/input'
 
 const EMPTY_MESSAGES: never[] = []
+
+/** zeron's question wizard surface: radius 26, glass fill, 150ms fade in. */
+const PANEL_CLASS =
+  'ask-question-panel mx-auto mb-2 w-full min-w-0 max-w-3xl rounded-[26px] border border-border bg-background shadow-lg backdrop-blur-[16px] duration-150 animate-in fade-in-0 motion-reduce:animate-none dark:bg-surface-raised/72 dark:shadow-none'
+const COUNTER_CLASS =
+  'inline-flex h-5 shrink-0 items-center rounded-[6px] bg-ink/6 px-1.5 text-[10px] font-medium text-muted-foreground/60 tabular-nums'
+const GHOST_BUTTON_CLASS =
+  'cursor-pointer rounded-[8px] px-3 py-1.5 text-[13px] text-muted-foreground outline-none transition-colors duration-150 hover:bg-ink/6 hover:text-foreground focus-visible:bg-ink/6 disabled:cursor-default disabled:opacity-40 pointer-coarse:min-h-11'
 type SelectedWithText = {
   type: 'selected_with_text'
   optionIds: string[]
@@ -237,154 +237,163 @@ function QuestionCard({
     }
     return (
       <section
-        className="ask-question-panel mx-auto mb-2 w-full max-w-3xl rounded-[20px] border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground"
+        className={cn(
+          PANEL_CLASS,
+          'px-4 py-4 text-[13px] text-muted-foreground',
+        )}
         aria-live="polite"
       >
         {statusText[request.requestStatus!]}
       </section>
     )
   }
+  const lastPage = page === request.questions.length - 1
+  const advanceDisabled = sending || !canAdvance || (lastPage && !complete)
+  const picked =
+    selectedIds.length > 0 ||
+    (typeof selected === 'string' &&
+      selected !== '' &&
+      question.options.some((option) => option.id === selected))
   return (
     <section
-      className="ask-question-panel mx-auto mb-2 w-full min-w-0 max-w-3xl space-y-3 rounded-[20px] border border-border/65 bg-muted/20 p-4"
+      className={PANEL_CLASS}
       aria-label={
         isPermission ? 'Tool permission request' : 'Question from Forge'
       }
     >
-      <div className="flex items-center justify-between text-xs text-muted-foreground/75">
-        <span className="flex items-center gap-2 font-medium">
-          {isPermission && <ShieldAlert className="size-4 text-amber-500" />}
-          {isPermission
-            ? 'Permission request'
-            : (question.header ?? 'Forge asks')}
-        </span>
-        {request.questions.length > 1 ? (
-          <span aria-live="polite">
-            Question {page + 1} of {request.questions.length}
+      <div className="px-4 pt-4">
+        <div className="flex items-center gap-2.5">
+          <span className="flex min-w-0 items-center gap-1.5 text-[10.5px] font-medium tracking-[0.1em] text-muted-foreground/60 uppercase">
+            {isPermission && (
+              <ShieldAlert aria-hidden className="size-3.5 text-warning" />
+            )}
+            <span className="truncate">
+              {isPermission
+                ? 'Permission request'
+                : (question.header ?? 'Forge asks')}
+            </span>
           </span>
-        ) : queued > 1 ? (
-          <span aria-live="polite">{queued} questions</span>
-        ) : null}
-      </div>
-      {isPermission && (
-        <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-sm">
-          <p className="font-medium">
-            {request.toolName ?? 'A tool'} needs your approval
-          </p>
-          {request.toolContext && (
-            <p className="mt-1 whitespace-pre-wrap text-muted-foreground">
-              {request.toolContext}
-            </p>
-          )}
-          <p className="mt-2 text-xs text-muted-foreground">
-            Allow scope: {request.permissionScope ?? 'once'}
-          </p>
+          {request.questions.length > 1 ? (
+            <span aria-live="polite" className={COUNTER_CLASS}>
+              <span className="sr-only">Question </span>
+              {page + 1}/{request.questions.length}
+            </span>
+          ) : queued > 1 ? (
+            <span aria-live="polite" className={COUNTER_CLASS}>
+              {queued} questions
+            </span>
+          ) : null}
         </div>
-      )}
-      <div>
-        <h2 className="text-sm font-medium text-foreground/90">
+        {isPermission && (
+          <div className="mt-3 rounded-[12px] border border-warning/25 bg-warning/8 px-3.5 py-2.5 text-[13px]">
+            <p className="font-medium text-foreground">
+              {request.toolName ?? 'A tool'} needs your approval
+            </p>
+            {request.toolContext && (
+              <p className="mt-1 whitespace-pre-wrap text-muted-foreground">
+                {request.toolContext}
+              </p>
+            )}
+            <p className="mt-1.5 text-[12px] text-muted-foreground">
+              Allow scope: {request.permissionScope ?? 'once'}
+            </p>
+          </div>
+        )}
+        <h2 className="mt-1.5 text-[15px] leading-5 font-medium text-foreground">
           {question.question}
         </h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Choose an answer, then continue.
-        </p>
-      </div>
-      {error && (
-        <p className="text-xs text-destructive" role="alert">
-          {error}
-        </p>
-      )}
-      <QuestionChoices
-        question={question}
-        value={selected}
-        disabled={sending}
-        onChange={(value) => {
-          const next = setAnswer(value)
-          // A permission still needs a deliberate submit, the same way the
-          // numbered-key path above refuses to advance on a single choice.
-          if (!question.multiSelect && !isPermission) advanceAfterSelect(next)
-        }}
-      />
-      {(question.allowFreeInput || question.options.length === 0) && (
-        <Input
-          aria-label="Additional answer"
-          type={question.isSecret ? 'password' : 'text'}
-          value={typeof selected === 'string' ? selected : freeText}
-          onChange={(event) =>
-            setAnswer(
-              question.multiSelect && question.allowFreeInput
-                ? {
-                    type: 'selected_with_text',
-                    optionIds: selectedIds,
-                    text: event.target.value,
-                  }
-                : event.target.value,
-            )
-          }
-          placeholder="Add your own answer"
-          onKeyDown={(event) => {
-            if (
-              event.key !== 'Enter' ||
-              event.nativeEvent.isComposing ||
-              sending ||
-              !canAdvance ||
-              (page === request.questions.length - 1 && !complete)
-            )
-              return
-            event.preventDefault()
-            if (page < request.questions.length - 1) setPage(page + 1)
-            else void submit()
+        {question.multiSelect && (
+          <p className="mt-1 text-[12px] text-muted-foreground/65">
+            Select one or more options.
+          </p>
+        )}
+        {error && (
+          <p className="mt-2 text-[12px] text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+        <QuestionChoices
+          question={question}
+          value={selected}
+          disabled={sending}
+          onChange={(value) => {
+            const next = setAnswer(value)
+            // A permission still needs a deliberate submit, the same way the
+            // numbered-key path above refuses to advance on a single choice.
+            if (!question.multiSelect && !isPermission) advanceAfterSelect(next)
           }}
         />
-      )}
-      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={cancel}
-          disabled={sending}
-        >
-          Cancel
-        </Button>
-        <div className="flex gap-2">
-          <Button
+        {(question.allowFreeInput || question.options.length === 0) && (
+          <div className="mt-3 border-t border-ink/6 px-1 pt-3 pb-1">
+            <input
+              aria-label="Additional answer"
+              type={question.isSecret ? 'password' : 'text'}
+              value={
+                typeof selected === 'string' && !picked ? selected : freeText
+              }
+              onChange={(event) =>
+                setAnswer(
+                  question.multiSelect && question.allowFreeInput
+                    ? {
+                        type: 'selected_with_text',
+                        optionIds: selectedIds,
+                        text: event.target.value,
+                      }
+                    : event.target.value,
+                )
+              }
+              placeholder={
+                question.options.length === 0
+                  ? 'Type your answer'
+                  : picked
+                    ? 'Type your own answer, or leave this blank to use the selected option'
+                    : 'Type your own answer, or pick an option above'
+              }
+              onKeyDown={(event) => {
+                if (
+                  event.key !== 'Enter' ||
+                  event.nativeEvent.isComposing ||
+                  advanceDisabled
+                )
+                  return
+                event.preventDefault()
+                if (!lastPage) setPage(page + 1)
+                else void submit()
+              }}
+              className="w-full border-0 bg-transparent text-[16px] leading-[22.75px] text-foreground caret-primary outline-none placeholder:text-faint-foreground sm:text-[14px]"
+            />
+          </div>
+        )}
+      </div>
+      <div className="flex items-center justify-between gap-2 px-4 pt-1 pb-4">
+        <div className="flex items-center gap-1">
+          <button
             type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setPage(page - 1)}
-            disabled={sending || page === 0}
+            onClick={cancel}
+            disabled={sending}
+            className={GHOST_BUTTON_CLASS}
           >
-            <ChevronLeft className="size-4" />
-            Back
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() =>
-              page < request.questions.length - 1
-                ? setPage(page + 1)
-                : void submit()
-            }
-            disabled={
-              sending ||
-              !canAdvance ||
-              (page === request.questions.length - 1 && !complete)
-            }
-          >
-            {page === request.questions.length - 1 ? (
-              <>
-                <Send className="size-4" />
-                Submit
-              </>
-            ) : (
-              <>
-                Next
-                <ChevronRight className="size-4" />
-              </>
-            )}
-          </Button>
+            Cancel
+          </button>
+          {page > 0 && (
+            <button
+              type="button"
+              onClick={() => setPage(page - 1)}
+              disabled={sending}
+              className={GHOST_BUTTON_CLASS}
+            >
+              Back
+            </button>
+          )}
         </div>
+        <button
+          type="button"
+          onClick={() => (lastPage ? void submit() : setPage(page + 1))}
+          disabled={advanceDisabled}
+          className="cursor-pointer rounded-[8px] bg-foreground px-4 py-1.5 text-[13px] font-medium text-background outline-none transition-opacity duration-150 hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-40 pointer-coarse:min-h-11"
+        >
+          {lastPage ? 'Submit' : 'Next'}
+        </button>
       </div>
     </section>
   )
@@ -407,7 +416,7 @@ function QuestionChoices({
       ? value.optionIds
       : [value]
   return (
-    <div className="space-y-1.5">
+    <div className="mt-3 flex flex-col gap-1">
       {question.options.map((option, index) => {
         const active = selected.includes(option.id!)
         return (
@@ -415,10 +424,10 @@ function QuestionChoices({
             key={option.id}
             type="button"
             className={cn(
-              'group flex min-h-11 w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/40',
+              'flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-[12px] border px-3.5 py-2.5 text-left outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default',
               active
-                ? 'border-primary/35 bg-primary/10'
-                : 'border-transparent bg-muted/25 hover:border-border/55 hover:bg-muted/40',
+                ? 'border-ink/16 bg-ink/9'
+                : 'border-transparent bg-ink/2.5 hover:bg-ink/6',
             )}
             disabled={disabled}
             aria-pressed={question.multiSelect ? active : undefined}
@@ -437,21 +446,34 @@ function QuestionChoices({
               else onChange(option.id!)
             }}
           >
+            {index < 9 && (
+              <span
+                aria-hidden
+                className={cn(
+                  'grid size-[22px] shrink-0 place-items-center rounded-[6px] text-[11px] tabular-nums transition-colors duration-150',
+                  active
+                    ? 'bg-ink/16 text-foreground'
+                    : 'bg-ink/5 text-muted-foreground/60',
+                )}
+              >
+                {index + 1}
+              </span>
+            )}
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-sm font-medium">{option.label}</span>
+              <span
+                className={cn(
+                  'text-[13.5px] font-medium',
+                  active ? 'text-foreground' : 'text-foreground/90',
+                )}
+              >
+                {option.label}
+              </span>
               {option.description && (
-                <span className="text-xs text-muted-foreground">
+                <span className="text-[12px] text-muted-foreground">
                   {option.description}
                 </span>
               )}
             </span>
-            {active ? (
-              <Check className="size-4 shrink-0 text-primary" />
-            ) : index < 9 ? (
-              <kbd className="flex size-5 shrink-0 items-center justify-center rounded border text-[11px] tabular-nums">
-                {index + 1}
-              </kbd>
-            ) : null}
           </button>
         )
       })}
