@@ -113,6 +113,33 @@ describe('tool kinds', () => {
     expect(toolKind(tool('mystery', {}))).toBe('other')
   })
 
+  it('reads claude-code-acp title names by their first word', () => {
+    expect(toolKind(tool('Read /repo/a.ts', { file_path: '/repo/a.ts' }))).toBe(
+      'read',
+    )
+    expect(toolKind(tool('grep "paste" apps/web', { pattern: 'paste' }))).toBe(
+      'search',
+    )
+    expect(toolKind(tool('Find `**/*.ts`', { pattern: '**/*.ts' }))).toBe(
+      'glob',
+    )
+    expect(
+      toolKind(
+        tool('Explore paste handling', {
+          description: 'Explore paste handling',
+          subagent_type: 'Explore',
+        }),
+      ),
+    ).toBe('agent')
+    expect(
+      summarizeToolGroup([
+        tool('Read /repo/a.ts', { file_path: '/repo/a.ts' }),
+        tool('grep "x" src', { pattern: 'x' }),
+        tool('Find `*.ts`', { pattern: '*.ts' }),
+      ]),
+    ).toBe('Read 1 file · searched 2 times')
+  })
+
   it('builds the row label, detail, and file badge', () => {
     expect(
       describeTool(tool('Bash', { command: 'git\n status' })),

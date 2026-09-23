@@ -92,9 +92,11 @@ const AGENT_NAMES = new Set(['agent', 'task', 'child', 'spawnagent'])
 /** Subagent spawns render as standalone cards, never inside a tool group. */
 export function isAgentTool(tool: {
   name: string
+  input?: unknown
   nativeChildId?: string
 }): boolean {
   if (tool.nativeChildId) return true
+  if (text(fields(tool.input), ['subagent_type'])) return true
   const name = cleanName(tool.name)
   return AGENT_NAMES.has(name.toLowerCase()) || name.startsWith('Agent: ')
 }
@@ -148,6 +150,10 @@ export function toolKind(
   if (/^mcp(__|$)/i.test(name)) return 'mcp'
   const lower = name.toLowerCase()
   for (const [pattern, kind] of NAME_KINDS) if (pattern.test(lower)) return kind
+  // claude-code-acp names tools by title: "Read /path", "grep foo src",
+  // "Find `*.ts`". The first word is the tool.
+  const verb = lower.split(/[\s`]/)[0] ?? ''
+  for (const [pattern, kind] of NAME_KINDS) if (pattern.test(verb)) return kind
   const hint = text(fields(tool.output), ['kind'])
   if (hint && HINT_KINDS[hint]) return HINT_KINDS[hint]
   if (text(input, ['command', 'cmd'])) return 'exec'
