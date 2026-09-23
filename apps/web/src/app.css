@@ -54,6 +54,11 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-ink: var(--ink);
+  --color-wash: var(--wash);
+  --color-code-wash: var(--code-wash);
+  --color-frost: var(--frost);
+  --color-frost-border: var(--frost-border);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -137,6 +142,16 @@
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
+  /* Zeron paint helpers. Use them with an opacity modifier, like bg-ink/3,
+     border-ink/12, or bg-wash/6. ink is pure black or white, wash is a
+     near-neutral hover plate, code-wash tints inline code and mention chips,
+     and frost is the translucent fill for the composer, queue tray and
+     popovers (pair it with a 16px backdrop blur). */
+  --ink: #000000;
+  --wash: hsl(0 0% 10%);
+  --code-wash: color-mix(in oklab, var(--primary) 12%, transparent);
+  --frost: rgb(255 255 255 / 15%);
+  --frost-border: hsl(210 18% 32% / 10%);
 
   @variant dark {
     color-scheme: dark;
@@ -162,6 +177,11 @@
     --info-foreground: var(--color-blue-400);
     --border: rgb(255 255 255 / 8%);
     --input: rgb(255 255 255 / 14%);
+    --ink: #ffffff;
+    --wash: hsl(0 0% 92%);
+    --code-wash: color-mix(in oklab, var(--primary) 22%, transparent);
+    --frost: rgb(1 1 1 / 15%);
+    --frost-border: hsl(210 18% 78% / 9%);
   }
 }
 
