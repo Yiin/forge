@@ -26,6 +26,33 @@ export const KIND_LABELS: Record<string, string> = {
   pi: 'Pi',
 }
 
+/** An account's cooldown is live until its reset time passes. */
+export function isAccountCooling(
+  cooldownUntil: number | null,
+  nowMs: number,
+): boolean {
+  return cooldownUntil !== null && cooldownUntil > nowMs
+}
+
+/** New sessions can use an account that is enabled and not cooling down. */
+export function isAccountUsable(account: {
+  disabled: boolean
+  cooling: boolean
+}): boolean {
+  return !account.disabled && !account.cooling
+}
+
+/**
+ * The account new sessions of a harness use: the first usable account in
+ * rotation order. The composer's default pick and the Accounts page's Active
+ * pill both come from this rule.
+ */
+export function activeAccount<
+  T extends { disabled: boolean; cooling: boolean },
+>(accounts: ReadonlyArray<T>): T | undefined {
+  return accounts.find(isAccountUsable)
+}
+
 export function formatAccountDisplayName(input: {
   kindLabel: string
   ordinal: number

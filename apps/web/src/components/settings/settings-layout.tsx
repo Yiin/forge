@@ -482,9 +482,7 @@ export function UsageMeter({
       <span className="w-16 shrink-0 text-right tabular-nums">
         {used}% used
       </span>
-      {reset && (
-        <span className="truncate text-muted-foreground/60">{reset}</span>
-      )}
+      {reset && <span className="truncate">{reset}</span>}
     </div>
   )
 }

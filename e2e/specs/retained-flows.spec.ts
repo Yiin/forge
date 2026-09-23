@@ -275,11 +275,13 @@ test('saves one isolated account without changing its sibling', async ({
     expect(second.homePath.startsWith(forge.dataDir + '/')).toBe(true)
     await page.goto('/settings/accounts')
     await page
-      .getByRole('button', { name: 'Toggle Account alpha details' })
+      .getByRole('button', { name: 'More actions for Account alpha' })
       .click()
-    const firstLabel = page.locator('input[value="Account alpha"]')
-    await firstLabel.fill('Account alpha renamed')
-    await page.getByRole('heading', { name: 'Harnesses', level: 1 }).click()
+    await page.getByRole('menuitem', { name: 'Rename…' }).click()
+    const rename = page.getByRole('dialog', { name: 'Rename account' })
+    await rename.getByLabel('Name').fill('Account alpha renamed')
+    await rename.getByRole('button', { name: 'Save' }).click()
+    await expect(rename).toBeHidden()
     await expect
       .poll(
         async () =>
@@ -289,16 +291,10 @@ test('saves one isolated account without changing its sibling', async ({
       )
       .toBe('Account alpha renamed')
     await page.reload()
-    await page
-      .getByRole('button', { name: 'Toggle Account alpha renamed details' })
-      .click()
-    await expect(
-      page.locator('input[value="Account alpha renamed"]'),
-    ).toBeVisible()
-    await page
-      .getByRole('button', { name: 'Toggle Account beta details' })
-      .click()
-    await expect(page.locator('input[value="Account beta"]')).toBeVisible()
+    const row = (id: string) => page.locator(`[data-account-id="${id}"]`)
+    await expect(row(first.id)).toContainText('Account alpha renamed')
+    await expect(row(second.id)).toContainText('Account beta')
+    await expect(row(second.id)).not.toContainText('renamed')
     const accounts = await api(forge, '/api/harness-accounts')
     expect(
       accounts.find((account: { id: string }) => account.id === second.id),

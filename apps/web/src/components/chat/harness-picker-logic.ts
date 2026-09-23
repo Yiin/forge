@@ -1,8 +1,11 @@
 import type { Account } from '@/lib/accounts-api'
 import {
   KIND_LABELS,
+  activeAccount,
   formatAccountDisplayName,
   formatCooldown,
+  isAccountCooling,
+  isAccountUsable,
 } from '@/lib/harness-accounts-logic'
 
 export type HarnessOptionAccount = {
@@ -47,8 +50,7 @@ export function buildHarnessOptions(
     const optionAccounts = accounts
       .filter((account) => account.harness === harness)
       .map((account, index) => {
-        const cooling =
-          account.cooldownUntil !== null && account.cooldownUntil > nowMs
+        const cooling = isAccountCooling(account.cooldownUntil, nowMs)
         return {
           id: account.id,
           label: formatAccountDisplayName({
@@ -96,23 +98,12 @@ export function defaultSelection(
   const currentAccount = currentOption?.accounts.find(
     (account) => account.id === current.accountId,
   )
-  if (
-    currentOption &&
-    currentAccount &&
-    !currentAccount.cooling &&
-    !currentAccount.disabled
-  )
+  if (currentOption && currentAccount && isAccountUsable(currentAccount))
     return current
-  const usable = options.find((option) => {
-    const account = option.accounts[0]
-    return (
-      option.accountOptional ||
-      (account && !account.cooling && !account.disabled)
-    )
-  })
-  if (usable)
-    return usable.accountOptional
-      ? { harness: usable.harness }
-      : { harness: usable.harness, accountId: usable.accounts[0]!.id }
+  for (const option of options) {
+    if (option.accountOptional) return { harness: option.harness }
+    const account = activeAccount(option.accounts)
+    if (account) return { harness: option.harness, accountId: account.id }
+  }
   return { harness: '' }
 }

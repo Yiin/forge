@@ -1,10 +1,8 @@
-import { Check, Copy, ExternalLink, LoaderCircle, Send } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import { toast } from 'sonner'
+import { Check, Copy, ExternalLink, LoaderCircle } from 'lucide-react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { LoginRunState } from '@/lib/accounts-api'
 import { loginCancel, loginRespond, loginStatus } from '@/lib/accounts-api'
 import { reduceLoginRunState } from './account-login-logic'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -20,81 +18,91 @@ import { Input } from '@/components/ui/input'
 export type AccountLoginStart = { terminalId: string; state: LoginRunState }
 
 type Props = {
-  accountName: string
+  title: string
+  description: string
   start: AccountLoginStart
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onOpenChangeComplete?: (open: boolean) => void
+  /** Called once when the dialog is done, with how the sign-in ended. */
+  onClose: (status: LoginRunState['status']) => void
 }
 
-const statusPresentation = {
-  idle: ['Starting', 'secondary'],
-  running: ['Waiting', 'info'],
-  succeeded: ['Signed in', 'success'],
-  failed: ['Failed', 'error'],
-  cancelled: ['Cancelled', 'secondary'],
-} as const
+const pending = (status: LoginRunState['status']) =>
+  status === 'idle' || status === 'running'
 
-const terminal = (status: LoginRunState['status']) =>
-  status === 'succeeded' || status === 'failed' || status === 'cancelled'
+const errorText = (cause: unknown) =>
+  cause instanceof Error ? cause.message : String(cause)
 
+/**
+ * Runs one provider sign-in: shows the sign-in page link, the device code,
+ * and a box for pasted codes, and closes by itself when the sign-in succeeds.
+ */
 export function AccountLoginDialog({
-  accountName,
+  title,
+  description,
   start,
-  open,
-  onOpenChange,
-  onOpenChangeComplete,
+  onClose,
 }: Props) {
+  const inputId = useId()
+  const formId = useId()
   const [state, setState] = useState(start.state)
   const stateRef = useRef(state)
-  const mounted = useRef(false)
+  const closed = useRef(false)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [cancelling, setCancelling] = useState(false)
-  const [cancelError, setCancelError] = useState<string | null>(null)
-  const [streamError, setStreamError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   stateRef.current = state
 
-  useEffect(() => {
-    const stop = loginStatus(start.terminalId, (incoming) => {
-      const next = reduceLoginRunState(stateRef.current, incoming)
-      stateRef.current = next
-      setState(next)
-      if (!terminal(incoming.status)) setStreamError(null)
-    })
-    return stop
-  }, [start.terminalId])
+  const finish = (status: LoginRunState['status']) => {
+    if (closed.current) return
+    closed.current = true
+    onClose(status)
+  }
 
+  const merge = (incoming: LoginRunState) => {
+    const next = reduceLoginRunState(stateRef.current, incoming)
+    stateRef.current = next
+    setState(next)
+    return next
+  }
+
+  const finishRef = useRef(finish)
+  finishRef.current = finish
+  useEffect(
+    () =>
+      loginStatus(start.terminalId, (incoming) => {
+        const next = reduceLoginRunState(stateRef.current, incoming)
+        stateRef.current = next
+        setState(next)
+        if (next.status === 'succeeded') finishRef.current('succeeded')
+      }),
+    [start.terminalId],
+  )
+
+  // Leaving the page mid-flow must not strand the provider CLI. The
+  // microtask skips StrictMode's immediate remount.
+  const mounted = useRef(false)
   useEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
       queueMicrotask(() => {
         if (!mounted.current && stateRef.current.status === 'running')
-          void loginCancel({ terminalId: start.terminalId })
+          void loginCancel({ terminalId: start.terminalId }).catch(() => {})
       })
     }
   }, [start.terminalId])
 
   const requestClose = async () => {
-    if (state.status !== 'running') {
-      onOpenChange(false)
-      return
-    }
+    if (!pending(state.status)) return finish(state.status)
     if (cancelling) return
     setCancelling(true)
-    setCancelError(null)
+    setError(null)
     try {
-      const next = await loginCancel({ terminalId: start.terminalId })
-      const merged = reduceLoginRunState(stateRef.current, next)
-      stateRef.current = merged
-      setState(merged)
-      onOpenChange(false)
+      merge(await loginCancel({ terminalId: start.terminalId }))
+      finish('cancelled')
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause)
-      setCancelError(message)
-      toast.error('Could not cancel sign-in', { description: message })
+      setError(`Could not cancel sign-in: ${errorText(cause)}`)
     } finally {
       setCancelling(false)
     }
@@ -104,14 +112,16 @@ export function AccountLoginDialog({
     const data = input.trim()
     if (!data || sending || state.status !== 'running') return
     setSending(true)
+    setError(null)
     try {
-      const next = await loginRespond({ terminalId: start.terminalId, data })
-      const merged = reduceLoginRunState(stateRef.current, next)
-      stateRef.current = merged
-      setState(merged)
+      if (
+        merge(await loginRespond({ terminalId: start.terminalId, data }))
+          .status === 'succeeded'
+      )
+        finish('succeeded')
       setInput('')
-    } catch {
-      toast.error('Could not send the code')
+    } catch (cause) {
+      setError(`Could not send the code: ${errorText(cause)}`)
     } finally {
       setSending(false)
     }
@@ -122,69 +132,71 @@ export function AccountLoginDialog({
     try {
       await navigator.clipboard.writeText(state.userCode)
       setCopied(true)
-      toast.success('Authentication code copied')
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
-      toast.error('Could not copy authentication code')
+      setError('Could not copy the code. Select it and copy it by hand.')
     }
   }
 
-  const [label, variant] = statusPresentation[state.status]
+  const failed = state.status === 'failed' || state.status === 'cancelled'
+  const failure = failed
+    ? (state.message ??
+      (state.status === 'failed' ? 'Sign-in failed.' : 'Sign-in cancelled.'))
+    : null
+  const shownError = error ?? failure
+
   return (
     <Dialog
-      open={open}
+      open
       disablePointerDismissal
-      onOpenChange={(next) => {
-        if (next) return onOpenChange(true)
-        if (state.status === 'running') return void requestClose()
-        onOpenChange(false)
+      onOpenChange={(open) => {
+        if (!open) void requestClose()
       }}
-      onOpenChangeComplete={() => onOpenChangeComplete?.(open)}
     >
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <div className="flex min-w-0 items-center gap-2 pr-8">
-            <DialogTitle className="truncate">
-              Sign in to {accountName}
-            </DialogTitle>
-            <Badge variant={variant}>{label}</Badge>
-          </div>
-          <DialogDescription>
-            Finish the provider&apos;s browser or device flow. This window
-            updates as the command runs.
+      <DialogContent className="max-w-md" showCloseButton={false}>
+        <DialogHeader className="gap-1.5">
+          <DialogTitle className="text-[15px] font-semibold tracking-tight">
+            {title}
+          </DialogTitle>
+          <DialogDescription className="text-[13px] leading-relaxed">
+            {description}
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="min-w-0 space-y-4">
+        <DialogPanel className="flex min-w-0 flex-col gap-4">
           {state.verificationUrl && (
-            <div className="grid gap-1.5">
-              <span className="text-xs font-medium">Verification page</span>
-              <a
-                className="flex min-w-0 items-center gap-1.5 text-sm text-primary underline break-all"
-                href={state.verificationUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {state.verificationUrl}
-                <ExternalLink className="size-3.5 shrink-0" aria-hidden />
-              </a>
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="self-start"
+              render={
+                <a
+                  href={state.verificationUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={state.verificationUrl}
+                />
+              }
+            >
+              <ExternalLink aria-hidden />
+              Open sign-in page
+            </Button>
           )}
           {state.userCode && (
             <div className="grid gap-1.5">
-              <span className="text-xs font-medium">
-                Device code — enter it on the verification page
+              <span className="text-xs text-muted-foreground">
+                Enter this code on the sign-in page
               </span>
-              <div className="flex items-center gap-2 rounded-lg border bg-muted/35 p-2">
-                <code className="min-w-0 flex-1 break-all px-1 font-mono text-sm font-semibold tracking-wide select-all">
+              <div className="flex items-center gap-2 rounded-lg border bg-muted/40 py-1.5 pr-1.5 pl-3">
+                <code className="min-w-0 flex-1 font-mono text-sm font-semibold tracking-wide break-all select-all">
                   {state.userCode}
                 </code>
                 <Button
                   type="button"
-                  size="sm"
-                  variant="outline"
+                  size="xs"
+                  variant="ghost"
                   onClick={() => void copyCode()}
                 >
-                  {copied ? <Check /> : <Copy />}
+                  {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
                   {copied ? 'Copied' : 'Copy'}
                 </Button>
               </div>
@@ -192,6 +204,7 @@ export function AccountLoginDialog({
           )}
           {state.status === 'running' && (
             <form
+              id={formId}
               className="grid gap-1.5"
               onSubmit={(event) => {
                 event.preventDefault()
@@ -199,61 +212,73 @@ export function AccountLoginDialog({
               }}
             >
               <label
-                htmlFor="account-login-input"
-                className="text-xs font-medium"
+                htmlFor={inputId}
+                className="text-xs text-muted-foreground"
               >
-                Send input to the command
+                If the provider shows a code or asks for a key, paste it here
               </label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="account-login-input"
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  placeholder="Paste the code from your browser and press Enter"
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  variant="outline"
-                  disabled={!input.trim() || sending}
-                >
-                  {sending && <LoaderCircle className="animate-spin" />}
-                  <Send />
-                  Send
-                </Button>
-              </div>
+              <Input
+                id={inputId}
+                className="font-mono"
+                value={input}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="Paste the code"
+              />
             </form>
           )}
-          <div className="grid gap-1.5">
-            <span className="text-xs font-medium">Command output</span>
-            <pre className="min-h-24 overflow-auto rounded-lg border bg-muted/35 p-3 font-mono text-[11px] whitespace-pre-wrap">
-              {state.output || 'Waiting for the provider command…'}
-            </pre>
-          </div>
-          <div
-            className="min-h-5 text-xs text-muted-foreground"
-            aria-live="polite"
-          >
-            {cancelError ??
-              streamError ??
-              state.message ??
-              'Waiting for an update.'}
-          </div>
-        </DialogPanel>
-        <DialogFooter>
-          {state.status === 'running' ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void requestClose()}
-              disabled={cancelling}
+          {pending(state.status) && !shownError && (
+            <div
+              className="flex items-center gap-2 text-[12.5px] text-muted-foreground"
+              role="status"
+              aria-live="polite"
             >
-              {cancelling && <LoaderCircle className="animate-spin" />}
-              {cancelling ? 'Cancelling' : 'Cancel'}
-            </Button>
-          ) : (
-            <Button type="button" onClick={() => void requestClose()}>
-              Done
+              <LoaderCircle
+                aria-hidden
+                className="size-3.5 shrink-0 motion-safe:animate-spin"
+              />
+              <span className="min-w-0 truncate">
+                {state.message ?? 'Waiting for the browser…'}
+              </span>
+            </div>
+          )}
+          {shownError && (
+            <p role="alert" className="text-xs break-words text-destructive">
+              {shownError}
+            </p>
+          )}
+          {state.output && (
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer rounded-sm outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                Command output
+              </summary>
+              <pre className="mt-2 max-h-40 overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-[11px] whitespace-pre-wrap">
+                {state.output}
+              </pre>
+            </details>
+          )}
+        </DialogPanel>
+        <DialogFooter variant="bare">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => void requestClose()}
+            disabled={cancelling}
+          >
+            {cancelling && (
+              <LoaderCircle className="motion-safe:animate-spin" />
+            )}
+            {failed ? 'Close' : cancelling ? 'Cancelling…' : 'Cancel'}
+          </Button>
+          {state.status === 'running' && (
+            <Button
+              type="submit"
+              form={formId}
+              disabled={!input.trim() || sending}
+            >
+              {sending && <LoaderCircle className="motion-safe:animate-spin" />}
+              {sending ? 'Sending…' : 'Submit code'}
             </Button>
           )}
         </DialogFooter>

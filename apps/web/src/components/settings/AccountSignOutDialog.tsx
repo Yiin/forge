@@ -58,7 +58,7 @@ export function AccountSignOutDialog({
       toast.success(`Signed out of ${displayName}`, {
         description: checked
           ? 'The managed credential home was also deleted.'
-          : 'The account remains in your harness list.',
+          : 'The account stays in Forge.',
       })
       onFinished?.()
       onOpenChange(false)
@@ -80,25 +80,27 @@ export function AccountSignOutDialog({
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Sign out of {displayName}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This removes the account credentials. The account stays in your
-            harness list.
+          <AlertDialogTitle className="text-[15px] font-semibold tracking-tight">
+            Sign out of {displayName}?
+          </AlertDialogTitle>
+          <AlertDialogDescription className="text-[13px] leading-relaxed">
+            This removes the saved sign-in. The account stays in Forge, so you
+            can sign in again later.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {canDelete && (
           <AlertDialogPanel>
-            <label className="flex items-start gap-3 rounded-md border p-3">
+            <label className="flex items-start gap-3 rounded-lg border p-3">
               <Checkbox
                 checked={checked}
                 onCheckedChange={(value) => setChecked(value === true)}
                 aria-labelledby={deleteHomeLabelId}
               />
-              <span className="grid gap-1 text-sm">
-                <strong id={deleteHomeLabelId}>
+              <span className="grid gap-0.5 text-[13px]">
+                <span id={deleteHomeLabelId} className="font-medium">
                   Delete managed credential home
-                </strong>
-                <span className="text-muted-foreground">
+                </span>
+                <span className="text-xs text-muted-foreground">
                   Remove this account&apos;s credential directory from the
                   server.
                 </span>
@@ -106,8 +108,10 @@ export function AccountSignOutDialog({
             </label>
           </AlertDialogPanel>
         )}
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+        <AlertDialogFooter variant="bare">
+          <AlertDialogCancel variant="ghost" disabled={pending}>
+            Cancel
+          </AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
             disabled={pending}
@@ -116,8 +120,8 @@ export function AccountSignOutDialog({
               void signOut()
             }}
           >
-            {pending && <LoaderCircle className="animate-spin" />}
-            {pending ? 'Signing out' : 'Sign out'}
+            {pending && <LoaderCircle className="motion-safe:animate-spin" />}
+            {pending ? 'Signing out…' : 'Sign out'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

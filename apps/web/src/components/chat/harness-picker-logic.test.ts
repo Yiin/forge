@@ -92,6 +92,22 @@ describe('harness picker logic', () => {
     })
   })
 
+  it('picks the next usable account of a harness when the first cannot run', () => {
+    const options = buildHarnessOptions(
+      ['claude'],
+      [
+        account({ cooldownUntil: 60_001 }),
+        account({ id: 'off', enabled: false }),
+        account({ id: 'next' }),
+      ],
+      0,
+    )
+    expect(defaultSelection(options, { harness: '' })).toEqual({
+      harness: 'claude',
+      accountId: 'next',
+    })
+  })
+
   it('skips a cooling first account and falls back from stale selection', () => {
     const options: HarnessOption[] = buildHarnessOptions(
       ['claude', 'codex'],
