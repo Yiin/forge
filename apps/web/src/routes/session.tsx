@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
@@ -20,6 +21,7 @@ import { registerShortcuts } from '../lib/shortcuts'
 import { ChatLifecycle } from '../components/chat/ChatLifecycle'
 import type { ConnectionState } from '../lib/socket'
 import type { HarnessSelection } from '../components/chat/harness-picker-logic'
+import type { Prompt } from '@forge/protocol/commands'
 import type { QueuedPrompt } from '@forge/protocol/session'
 import { SessionSnapshot } from '@forge/protocol/ws'
 import { WorkspaceDock } from '../components/workspace/WorkspaceDock'
@@ -30,6 +32,26 @@ import {
 } from '@forge/protocol/review'
 import { useReviewNotes, emptyReviewNotes } from '../stores/review-notes'
 import { revisionKey, type ReviewRevisionListener } from '../lib/review-notes'
+import {
+  carriedNoteIds,
+  connectionNotice,
+  isOffline,
+  sendFailure,
+} from '../lib/delivery'
+import { toast } from 'sonner'
+
+const newClientItemId = () =>
+  `client_${crypto.randomUUID().replaceAll('-', '')}`
+
+const subscribeOnline = (listener: () => void) => {
+  window.addEventListener('online', listener)
+  window.addEventListener('offline', listener)
+  return () => {
+    window.removeEventListener('online', listener)
+    window.removeEventListener('offline', listener)
+  }
+}
+const readOnline = () => navigator.onLine
 
 export function SessionRoute() {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
@@ -52,6 +74,7 @@ export function SessionRoute() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string>()
   const [connection, setConnection] = useState<ConnectionState>('connecting')
+  const online = useSyncExternalStore(subscribeOnline, readOnline)
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [skills, setSkills] = useState<string[]>([])
   const reviewComments = useReviewNotes(
@@ -321,6 +344,56 @@ export function SessionRoute() {
       socket?.stop()
     }
   }, [sessionId, navigate, retryAttempt])
+  // Review notes that a prompt still on its way carries stay in the tray
+  // until the server takes it, but a new send leaves them out.
+  const freshNotes = () => {
+    const carried = carriedNoteIds(
+      useMessagesStore.getState().pendingBySession[sessionId] ?? [],
+    )
+    return reviewComments.filter((note) => !carried.has(note.id))
+  }
+  const redelivering = useRef(false)
+  // A prompt whose request never got an answer stays in the transcript as
+  // unsent. It goes again when the connection returns or the user retries,
+  // under the same idempotency key, so the server drops the copy if the
+  // first try landed. Resends go to the turn boundary: the server runs them
+  // at once when the session is idle and queues them behind a running turn,
+  // never refusing one as busy. A queued one then lives in the queue tray.
+  const redeliver = async () => {
+    if (redelivering.current) return
+    redelivering.current = true
+    try {
+      const store = useMessagesStore.getState
+      const unsent = (store().pendingBySession[sessionId] ?? []).filter(
+        (item) => item.status === 'unsent' && item.prompt,
+      )
+      for (const item of unsent) {
+        store().setPendingStatus(sessionId, item.itemId, 'sending')
+        try {
+          await api.prompt(
+            { ...item.prompt!, delivery: 'turn-boundary' },
+            item.itemId,
+          )
+        } catch (error) {
+          store().setPendingStatus(sessionId, item.itemId, 'unsent')
+          if (sendFailure(error) === 'refused')
+            toast.error(
+              error instanceof Error ? error.message : 'Message not delivered',
+            )
+          return
+        }
+        store().removePending(sessionId, item.itemId)
+        acknowledgeReviewNotes(item.prompt!.reviewReferences ?? [])
+      }
+    } finally {
+      redelivering.current = false
+    }
+  }
+  const redeliverRef = useRef(redeliver)
+  redeliverRef.current = redeliver
+  useEffect(() => {
+    if (connection === 'connected') void redeliverRef.current()
+  }, [connection])
   const send = async (
     text: string,
     attachmentIds: string[],
@@ -330,7 +403,7 @@ export function SessionRoute() {
     setSending(true)
     try {
       const value = text.trim()
-      const submittedNotes = reviewComments
+      const submittedNotes = freshNotes()
       const reviewText = serializeReviewNotes(submittedNotes)
       if (value === '/btw' || value.startsWith('/btw ')) {
         if (submittedNotes.length)
@@ -364,29 +437,39 @@ export function SessionRoute() {
           params: { sessionId: result.sessionId },
         })
       } else {
-        const clientItemId = `client_${crypto.randomUUID().replaceAll('-', '')}`
-        useMessagesStore.getState().addPending({
+        const clientItemId = newClientItemId()
+        const prompt: Prompt = {
+          sessionId,
+          text: value,
+          reviewReferences: submittedNotes,
+          attachmentIds,
+          harness: selection.harness || harness,
+          accountId: selection.accountId,
+          model: selection.model,
+          configOptions: selection.configOptions,
+          clientItemId,
+        }
+        const messages = useMessagesStore.getState()
+        messages.addPending({
           sessionId,
           itemId: clientItemId,
           text: value + reviewText,
           createdAt: new Date().toISOString(),
+          status: 'sending',
+          prompt,
         })
         try {
-          await api.prompt({
-            sessionId,
-            text: value,
-            reviewReferences: submittedNotes,
-            attachmentIds,
-            harness: selection.harness || harness,
-            accountId: selection.accountId,
-            model: selection.model,
-            configOptions: selection.configOptions,
-            clientItemId,
-          })
+          await api.prompt(prompt, clientItemId)
         } catch (error) {
-          useMessagesStore.getState().removePending(sessionId, clientItemId)
+          if (sendFailure(error) === 'unsent') {
+            messages.setPendingStatus(sessionId, clientItemId, 'unsent')
+            return
+          }
+          // The server refused it, so the composer gets the text back.
+          messages.removePending(sessionId, clientItemId)
           throw error
         }
+        messages.setPendingStatus(sessionId, clientItemId, 'accepted')
         acknowledgeReviewNotes(submittedNotes)
         setHarness(selection.harness || harness)
         setAccountId(selection.accountId)
@@ -401,8 +484,9 @@ export function SessionRoute() {
     attachmentIds: string[],
     selection: HarnessSelection,
   ) => {
-    const submittedNotes = reviewComments
-    await api.prompt({
+    const submittedNotes = freshNotes()
+    const clientItemId = newClientItemId()
+    const prompt: Prompt = {
       sessionId,
       text,
       reviewReferences: submittedNotes,
@@ -412,7 +496,22 @@ export function SessionRoute() {
       model: selection.model,
       configOptions: selection.configOptions,
       delivery: 'turn-boundary',
-    })
+      clientItemId,
+    }
+    try {
+      await api.prompt(prompt, clientItemId)
+    } catch (error) {
+      if (sendFailure(error) === 'refused') throw error
+      useMessagesStore.getState().addPending({
+        sessionId,
+        itemId: clientItemId,
+        text: text + serializeReviewNotes(submittedNotes),
+        createdAt: new Date().toISOString(),
+        status: 'unsent',
+        prompt,
+      })
+      return
+    }
     acknowledgeReviewNotes(submittedNotes)
   }
   return (
@@ -451,6 +550,8 @@ export function SessionRoute() {
             bottomInset={composerHeight}
             skills={skills}
             running={(sessionStatus ?? loadedStatus) === 'running'}
+            offline={isOffline(connection)}
+            onRetry={() => void redeliver()}
           />
         )}
         {!loading && !loadError && (
@@ -564,6 +665,7 @@ export function SessionRoute() {
                 onSend={send}
                 onQueue={queue}
                 sending={sending}
+                connectionNotice={connectionNotice(connection, online)}
                 footer={
                   <WorkspaceBar
                     projectId={

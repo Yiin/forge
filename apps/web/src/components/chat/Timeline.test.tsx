@@ -205,6 +205,58 @@ describe('Timeline', () => {
     expect(working?.textContent).not.toMatch(/\d+s/)
   })
 
+  const waiting = (status: PendingUserMessage['status']) => {
+    state.messages = [message('hello', 1)]
+    state.pending = [
+      {
+        sessionId: 'session-1',
+        itemId: 'client_1',
+        text: 'hi',
+        createdAt: new Date().toISOString(),
+        status,
+      },
+    ]
+  }
+  const lastRow = (container: HTMLElement) =>
+    [...container.querySelector('.chat-timeline')!.children].at(-2)
+
+  it('says a prompt is queued while the connection is down', () => {
+    waiting('unsent')
+    const view = render(<Timeline offline />)
+    const working = view.container.querySelector('.chat-working')!
+    expect(lastRow(view.container)?.contains(working)).toBe(true)
+    expect(screen.getByRole('status').textContent).toContain(
+      'Queued, will send automatically',
+    )
+    // zeron adds no ellipsis and no timer to the queued line.
+    expect(working.textContent).not.toMatch(/…|\d+s/)
+    expect(working.querySelector('.text-warning')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /retry/ })).toBeNull()
+  })
+
+  it('turns an unsent prompt into a retry once the connection is up', () => {
+    waiting('unsent')
+    const onRetry = vi.fn()
+    const view = render(<Timeline onRetry={onRetry} />)
+    const working = view.container.querySelector('.chat-working')!
+    expect(lastRow(view.container)?.contains(working)).toBe(true)
+    const retry = screen.getByRole('button', {
+      name: 'Not delivered, click to retry',
+    })
+    expect(working.contains(retry)).toBe(true)
+    expect(retry.className).toContain('text-destructive')
+    fireEvent.click(retry)
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('keeps Sending for a prompt the server took while offline', () => {
+    waiting('accepted')
+    const view = render(<Timeline offline />)
+    expect(
+      view.container.querySelector('.chat-working')?.textContent,
+    ).toContain('Sending…')
+  })
+
   it('renders a subagent card without an update loop', () => {
     state.messages = [message('hello', 1)]
     useSessionsStore.setState({

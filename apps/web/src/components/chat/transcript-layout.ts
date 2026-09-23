@@ -1,4 +1,5 @@
 import type { ChatRenderItem } from './render-model'
+import type { PendingUserMessage } from '../../stores/messages'
 
 /**
  * Transcript rhythm after zeron (crates/ui/src/transcript.rs `top_gap_for`).
@@ -174,4 +175,37 @@ export function sendingBridge(
   if (!sendStarted) return false
   if (!turnStarted) return true
   return Date.parse(turnStarted) <= Date.parse(sendStarted)
+}
+
+/**
+ * What the working line says, after zeron's trailer (transcript.rs
+ * `render_working_trailer`):
+ * - `queued`: a prompt is waiting and the connection is down. It goes out
+ *   by itself when the connection returns.
+ * - `undelivered`: a prompt never reached the server and the connection is
+ *   up, so only the user's retry sends it again.
+ * - `sending`: a prompt is on its way and its turn has not started.
+ * - `working`: the turn runs.
+ */
+export type WorkingPhase = 'working' | 'sending' | 'queued' | 'undelivered'
+
+export function workingPhase({
+  pending,
+  offline,
+  running,
+  turnStartedAt,
+}: {
+  pending: PendingUserMessage[]
+  offline: boolean
+  running: boolean
+  turnStartedAt?: string
+}): WorkingPhase {
+  const waiting = pending.filter(
+    (item) => (item.status ?? 'sending') !== 'accepted',
+  )
+  if (offline && waiting.length) return 'queued'
+  if (pending.some((item) => item.status === 'unsent')) return 'undelivered'
+  if (!running || sendingBridge(pending.at(-1)?.createdAt, turnStartedAt))
+    return 'sending'
+  return 'working'
 }

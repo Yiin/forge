@@ -42,6 +42,34 @@ describe('MessageRow', () => {
     ).toBeTruthy()
   })
 
+  it('keeps a pending prompt faded and busy until it is unsent', () => {
+    const prompt = (delivery: 'sending' | 'accepted' | 'unsent') => ({
+      kind: 'message' as const,
+      id: 'client_1',
+      seq: Number.MAX_SAFE_INTEGER,
+      role: 'user' as const,
+      text: 'hi',
+      pending: true,
+      delivery,
+    })
+    const view = render(
+      <MessageRow item={prompt('sending')} sessionId="session-1" />,
+    )
+    const row = () => view.container.querySelector('.chat-user')!
+    expect(row().getAttribute('aria-busy')).toBe('true')
+    expect(row().getAttribute('data-delivery')).toBe('sending')
+    expect(row().querySelector('.opacity-65')).not.toBeNull()
+    // A pending prompt has no lane actions yet.
+    expect(screen.queryByRole('button', { name: 'Copy message' })).toBeNull()
+
+    view.rerender(<MessageRow item={prompt('unsent')} sessionId="session-1" />)
+    // Nothing is in flight, but the prompt keeps its place and its fade.
+    expect(row().hasAttribute('aria-busy')).toBe(false)
+    expect(row().getAttribute('data-delivery')).toBe('unsent')
+    expect(row().querySelector('.opacity-65')).not.toBeNull()
+    expect(screen.getByText('hi')).toBeTruthy()
+  })
+
   it('keeps user message line breaks in the bubble', () => {
     const view = render(
       <MessageRow

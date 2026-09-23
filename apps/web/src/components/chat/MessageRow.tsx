@@ -68,7 +68,10 @@ export function MessageRow({
         className="chat-row chat-user group flex min-w-0 flex-col items-end"
         data-seq={item.pending ? undefined : item.seq}
         data-pending={item.pending ? 'true' : undefined}
-        aria-busy={item.pending ? true : undefined}
+        data-delivery={item.pending ? item.delivery : undefined}
+        aria-busy={
+          item.pending && item.delivery !== 'unsent' ? true : undefined
+        }
       >
         <UserBubble item={item} skills={skills} />
         <HoverLane align="end">

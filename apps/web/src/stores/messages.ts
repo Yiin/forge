@@ -1,16 +1,28 @@
 import { create } from 'zustand'
 import type { Ephemeral, ServerEvent } from '@forge/protocol/events'
 import type { Message, MessageContent } from '@forge/protocol/message'
+import type { Prompt } from '@forge/protocol/commands'
 import type { QueuedPrompt } from '@forge/protocol/session'
 import type { NativeInteraction, SessionSnapshot } from '@forge/protocol/ws'
 
 export type TimelineItem = Message
 export type VolatileEvent = Ephemeral
+/**
+ * Where a sent prompt stands before its echo lands:
+ * - `sending`: the request is in flight.
+ * - `accepted`: the server took it; the echo is on its way.
+ * - `unsent`: the request never reached the server. It goes again
+ *   when the connection returns or the user retries.
+ */
+export type DeliveryStatus = 'sending' | 'accepted' | 'unsent'
 export type PendingUserMessage = {
   sessionId: string
   itemId: string
   text: string
   createdAt: string
+  status?: DeliveryStatus
+  /** The prompt as sent, kept so a resend repeats it exactly. */
+  prompt?: Prompt
 }
 type FoldedMessagesState = Pick<MessagesState, 'bySession' | 'lastSeq'> &
   Partial<Pick<MessagesState, 'pendingBySession' | 'seenSeqs'>>
@@ -32,6 +44,11 @@ type MessagesState = {
   loadSnapshot: (snapshot: SessionSnapshot) => void
   addPending: (pending: PendingUserMessage) => void
   removePending: (sessionId: string, itemId: string) => void
+  setPendingStatus: (
+    sessionId: string,
+    itemId: string,
+    status: DeliveryStatus,
+  ) => void
   clearPending: (sessionId: string) => void
   setQueued: (sessionId: string, prompts: QueuedPrompt[]) => void
   removeQueued: (sessionId: string, promptId: string) => void
@@ -387,6 +404,15 @@ export const useMessagesStore = create<MessagesState>((set) => ({
         ...state.pendingBySession,
         [sessionId]: (state.pendingBySession[sessionId] ?? []).filter(
           (item) => item.itemId !== itemId,
+        ),
+      },
+    })),
+  setPendingStatus: (sessionId, itemId, status) =>
+    set((state) => ({
+      pendingBySession: {
+        ...state.pendingBySession,
+        [sessionId]: (state.pendingBySession[sessionId] ?? []).map((item) =>
+          item.itemId === itemId ? { ...item, status } : item,
         ),
       },
     })),

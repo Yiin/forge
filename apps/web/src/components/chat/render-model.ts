@@ -1,6 +1,6 @@
 import type { Message } from '@forge/protocol/message'
 import type { SubagentSession } from './subagent'
-import type { PendingUserMessage } from '../../stores/messages'
+import type { DeliveryStatus, PendingUserMessage } from '../../stores/messages'
 import { interruptReasonText } from './interrupt-copy'
 import { answerWithLabels, requestQuestions } from './question-logic'
 import { isAgentTool } from './tool-view'
@@ -16,6 +16,8 @@ export type ChatRenderItem =
       text: string
       thought?: boolean
       pending?: boolean
+      /** How far a pending prompt got; see `DeliveryStatus`. */
+      delivery?: DeliveryStatus
       /** When the text arrived: a prompt's send time, a reply's last chunk. */
       createdAt?: string
     }
@@ -357,6 +359,7 @@ export function toRenderModel(
         role: 'user' as const,
         text: item.text,
         pending: true,
+        delivery: item.status ?? 'sending',
         createdAt: item.createdAt,
       })),
     ],

@@ -27,8 +27,9 @@ import { railPrompts } from './prompt-rail'
 import {
   BOTTOM_CLEARANCE,
   rowMeta,
-  sendingBridge,
+  workingPhase,
   type RowMeta,
+  type WorkingPhase,
 } from './transcript-layout'
 import {
   distanceFromBottom,
@@ -59,6 +60,8 @@ export function Timeline({
   bottomInset = 0,
   skills = [],
   running = false,
+  offline = false,
+  onRetry,
 }: {
   resumedWithRecap?: boolean
   targetSeq?: number
@@ -66,6 +69,10 @@ export function Timeline({
   bottomInset?: number
   skills?: string[]
   running?: boolean
+  /** The live connection is down; waiting prompts read as queued. */
+  offline?: boolean
+  /** Sends the prompts that never reached the server again. */
+  onRetry?: () => void
 }) {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
   const messagesBySession = useMessagesStore((state) => state.bySession)
@@ -102,8 +109,7 @@ export function Timeline({
     return undefined
     // The store appends to the same array, so its length marks new rows.
   }, [messages, messages.length])
-  const sending =
-    !running || sendingBridge(pending.at(-1)?.createdAt, turnStartedAt)
+  const phase = workingPhase({ pending, offline, running, turnStartedAt })
   // zeron opens a tool group by default only while it is the live tail of
   // the streaming turn; pending user bubbles trail the turn, so skip them.
   const liveGroupId = useMemo(() => {
@@ -268,8 +274,9 @@ export function Timeline({
               skills={skills}
               live={item.id === liveGroupId}
               deepLink={item.id === deepLinkId}
-              sending={sending}
+              phase={phase}
               turnStartedAt={turnStartedAt}
+              onRetry={onRetry}
             />
           )}
         </Virtualizer>
@@ -312,8 +319,9 @@ function RenderItem({
   skills,
   live,
   deepLink,
-  sending,
+  phase,
   turnStartedAt,
+  onRetry,
 }: {
   item: ChatRenderItem
   meta: RowMeta
@@ -321,8 +329,9 @@ function RenderItem({
   skills: string[]
   live: boolean
   deepLink: boolean
-  sending: boolean
+  phase: WorkingPhase
   turnStartedAt?: string
+  onRetry?: () => void
 }) {
   return (
     <div
@@ -338,8 +347,9 @@ function RenderItem({
         {item.kind === 'working' ? (
           <WorkingLine
             seed={sessionId}
-            sending={sending}
+            phase={phase}
             startedAt={turnStartedAt}
+            onRetry={onRetry}
           />
         ) : (
           <RenderItemContent

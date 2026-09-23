@@ -9,7 +9,9 @@ import {
   rowGap,
   rowMeta,
   sendingBridge,
+  workingPhase,
 } from './transcript-layout'
+import type { PendingUserMessage } from '../../stores/messages'
 
 const user = (id: string, value = 'prompt'): ChatRenderItem => ({
   kind: 'message',
@@ -123,5 +125,59 @@ describe('transcript layout', () => {
     expect(sendingBridge(send, undefined)).toBe(true)
     expect(sendingBridge(send, '2026-07-01T10:00:00Z')).toBe(true)
     expect(sendingBridge(send, '2026-07-01T10:00:06Z')).toBe(false)
+  })
+
+  describe('workingPhase', () => {
+    const sent = '2026-07-01T10:00:05Z'
+    const pending = (
+      status?: PendingUserMessage['status'],
+    ): PendingUserMessage => ({
+      sessionId: 's',
+      itemId: 'client_1',
+      text: 'hi',
+      createdAt: sent,
+      status,
+    })
+    const phase = (
+      items: PendingUserMessage[],
+      {
+        offline = false,
+        running = false,
+        turnStartedAt,
+      }: { offline?: boolean; running?: boolean; turnStartedAt?: string } = {},
+    ) => workingPhase({ pending: items, offline, running, turnStartedAt })
+
+    it('reads Sending until the turn starts, then Working', () => {
+      expect(phase([pending('sending')])).toBe('sending')
+      expect(phase([pending('accepted')], { running: true })).toBe('sending')
+      expect(
+        phase([pending('accepted')], {
+          running: true,
+          turnStartedAt: '2026-07-01T10:00:06Z',
+        }),
+      ).toBe('working')
+      expect(phase([], { running: true, turnStartedAt: sent })).toBe('working')
+    })
+
+    it('reads Queued while the connection is down and a prompt waits', () => {
+      expect(phase([pending('sending')], { offline: true })).toBe('queued')
+      expect(phase([pending('unsent')], { offline: true })).toBe('queued')
+      // A pending item from before delivery states counts as sending.
+      expect(phase([pending()], { offline: true })).toBe('queued')
+    })
+
+    it('does not queue a prompt the server already took', () => {
+      expect(
+        phase([pending('accepted')], { offline: true, running: true }),
+      ).toBe('sending')
+      expect(phase([], { offline: true, running: true })).toBe('working')
+    })
+
+    it('offers the retry once the connection is up', () => {
+      expect(phase([pending('unsent')])).toBe('undelivered')
+      expect(
+        phase([pending('unsent'), pending('accepted')], { running: true }),
+      ).toBe('undelivered')
+    })
   })
 })
