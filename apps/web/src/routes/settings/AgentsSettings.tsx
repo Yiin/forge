@@ -236,16 +236,22 @@ function AgentRowView({
           )}
         </SettingsMeta>
       </div>
-      <Button
-        variant="ghost"
-        size="xs"
-        className="shrink-0 text-xs text-muted-foreground"
-        aria-label={`Configure ${harness.name}`}
-        onClick={onConfigure}
-      >
-        <SlidersHorizontal />
-        <span className="max-sm:hidden">Configure</span>
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+              aria-label={`Configure ${harness.name}`}
+              onClick={onConfigure}
+            />
+          }
+        >
+          <SlidersHorizontal />
+        </TooltipTrigger>
+        <TooltipContent>Configure</TooltipContent>
+      </Tooltip>
       {lockedReason ? (
         <Tooltip>
           <TooltipTrigger render={toggle} />
