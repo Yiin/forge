@@ -5,6 +5,7 @@ import {
   defaultBaseRef,
   effectiveWorkspaceMode,
   isModeLocked,
+  sessionCheckoutLabel,
   workspaceModeLabel,
 } from './workspace-picker-logic'
 
@@ -22,6 +23,8 @@ describe('workspace picker logic', () => {
     expect(workspaceModeLabel('local')).toBe('Current checkout')
     expect(workspaceModeLabel('worktree')).toBe('New worktree')
     expect(currentWorkspaceLabel(null)).toBe('Current checkout')
+    expect(sessionCheckoutLabel(null)).toBe('Local checkout')
+    expect(sessionCheckoutLabel('/tmp/wt')).toBe('Worktree')
     expect(currentWorkspaceLabel('/tmp/worktree')).toBe('Current worktree')
   })
 
@@ -69,7 +72,7 @@ describe('workspace picker logic', () => {
     ).toBe('main')
     expect(
       branchTriggerLabel({ mode: 'local', worktreePath: null, branch: null }),
-    ).toBe('Select branch')
+    ).toBe('Select ref')
   })
 
   it('prefers the default ref over the current branch', () => {

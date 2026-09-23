@@ -79,3 +79,47 @@ export function modelResponse(value: unknown): ModelOption[] {
     ),
   )
 }
+
+/**
+ * Model search as zeron ranks it: label prefix, then label substring, then a
+ * match in the description or traits. Default models win ties, and the order
+ * is otherwise stable. An empty query lists everything.
+ */
+export function filterModels(models: ModelOption[], query: string) {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return models
+  const rank = (model: ModelOption) => {
+    const label = model.label.toLowerCase()
+    if (label.startsWith(needle)) return 0
+    if (label.includes(needle)) return 1
+    const extra = [model.description ?? '', ...(model.traits ?? []), label]
+      .join(' ')
+      .toLowerCase()
+    return extra.includes(needle) ? 2 : -1
+  }
+  return models
+    .map((model, index) => ({ model, index, rank: rank(model) }))
+    .filter((entry) => entry.rank >= 0)
+    .sort(
+      (a, b) =>
+        a.rank - b.rank ||
+        Number(Boolean(b.model.favorite)) - Number(Boolean(a.model.favorite)) ||
+        a.index - b.index,
+    )
+    .map((entry) => entry.model)
+}
+
+/**
+ * The model chip's name: the picked model, else the harness default model,
+ * else the harness label. `set` is false when the user has not picked one.
+ */
+export function modelChipName(
+  selectedId: string | undefined,
+  options: ModelOption[],
+  fallback: string,
+): { label: string; set: boolean } {
+  const picked = resolveModelTriggerLabel(selectedId, options)
+  if (picked) return { label: picked.label, set: true }
+  const preferred = options.find((option) => option.favorite)
+  return { label: preferred?.label ?? fallback, set: false }
+}

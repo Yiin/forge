@@ -77,6 +77,9 @@ export type HarnessPickerEntry = {
   enabled: boolean
   protocol: 'acp' | 'pty'
   adapterKind?: 'native' | 'acp' | 'pty' | 'custom'
+  /** The launch command and args, used to pick a brand mark. */
+  command?: string
+  args?: string[]
 }
 
 /** One harness as the health endpoint reports it, without account details. */
@@ -198,12 +201,14 @@ export class AccountsApi {
       await this.get<unknown>('/api/harnesses'),
     )
     return Object.entries(config).map(
-      ([key, { name, enabled, protocol, adapterKind }]) => ({
+      ([key, { name, enabled, protocol, adapterKind, command, args }]) => ({
         key,
         name,
         enabled,
         protocol,
         adapterKind,
+        command,
+        args,
       }),
     )
   }

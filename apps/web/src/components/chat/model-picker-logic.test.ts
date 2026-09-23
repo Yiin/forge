@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildModelOptions,
+  filterModels,
+  modelChipName,
   modelResponse,
   resolveModelTriggerLabel,
 } from './model-picker-logic'
@@ -58,5 +60,36 @@ describe('model picker logic', () => {
 
   it('returns null when no model is selected', () => {
     expect(resolveModelTriggerLabel(undefined, [])).toBeNull()
+  })
+})
+
+describe('model search and chip name', () => {
+  const models = [
+    { id: 'haiku', label: 'Haiku', description: 'Fast and light' },
+    { id: 'opus', label: 'Opus', favorite: true },
+    { id: 'sonnet-fast', label: 'Sonnet fast' },
+    { id: 'fastlane', label: 'Fastlane' },
+  ]
+  it('ranks label prefix, then label substring, then description', () => {
+    expect(filterModels(models, 'fast').map((model) => model.id)).toEqual([
+      'fastlane',
+      'sonnet-fast',
+      'haiku',
+    ])
+    expect(filterModels(models, '  ')).toBe(models)
+  })
+  it('names the chip from the pick, then the default model, then the harness', () => {
+    expect(modelChipName('haiku', models, 'Claude')).toEqual({
+      label: 'Haiku',
+      set: true,
+    })
+    expect(modelChipName(undefined, models, 'Claude')).toEqual({
+      label: 'Opus',
+      set: false,
+    })
+    expect(modelChipName(undefined, [], 'Claude')).toEqual({
+      label: 'Claude',
+      set: false,
+    })
   })
 })
