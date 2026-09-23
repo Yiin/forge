@@ -23,6 +23,10 @@ vi.mock('lucide-react', () => ({
   FileText: () => null,
   LoaderCircle: () => null,
 }))
+vi.mock('./ToolGroup', () => ({
+  AgentToolCard: () => null,
+  ToolGroup: () => null,
+}))
 const virtualizerProps: Record<string, unknown>[] = []
 vi.mock('virtua', () => ({
   Virtualizer: ({
@@ -52,7 +56,6 @@ vi.mock('../../stores/messages', () => ({
 vi.mock('./MessageRow', () => ({
   MessageRow: () => null,
   RunningDots: () => null,
-  ToolCallRow: () => null,
 }))
 
 import { useSessionsStore } from '../../stores/sessions'

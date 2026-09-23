@@ -1,4 +1,3 @@
-import { Bot, ChevronDown } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Message } from '@forge/protocol/message'
 import { connectForgeSocket } from '../../lib/socket'
@@ -12,7 +11,7 @@ import {
   type SubagentSession,
 } from './subagent'
 import { SubagentTranscript } from './SubagentTranscript'
-import { RunningDots } from './MessageRow'
+import { AgentCard } from './AgentCard'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
 
@@ -33,7 +32,6 @@ export function SubagentCard({
   const messagesVersion = useMessagesStore((state) => state.lastSeq)
   const messages = messagesBySession[child.id] ?? EMPTY_MESSAGES
   const status = deriveSubagentStatus(messages, child.status)
-  const preview = resultPreview(messages)
   const tools = toolCount(messages)
   useEffect(() => {
     if (status !== 'running') return
@@ -78,71 +76,32 @@ export function SubagentCard({
   }, [child.id, expanded])
 
   const failed = status === 'errored' || status === 'interrupted'
-  const statusText = status === 'unknown' ? 'status unknown' : status
+  const running = status === 'running'
+  const bodyId = `subagent-body-${child.id}`
+  const note = 'px-3 py-2 text-xs text-muted-foreground'
   return (
-    <article
-      className="subagent-card rounded-2xl border border-input bg-background p-3 shadow-xs/5 not-dark:bg-clip-padding dark:bg-input/32"
+    <AgentCard
+      className="subagent-card"
       data-subagent-status={status}
+      detail={child.title || 'Subagent'}
+      model={child.model}
+      meta={
+        running
+          ? `${elapsedSeconds(messages, now)}s`
+          : tools
+            ? `${tools} ${tools === 1 ? 'tool' : 'tools'}`
+            : undefined
+      }
+      hint={resultPreview(messages)}
+      running={running}
+      failed={failed}
+      expanded={expanded}
+      bodyId={bodyId}
+      onToggle={() => setExpanded((value) => !value)}
     >
-      <div
-        className="-m-1 flex cursor-pointer items-center gap-1.5 rounded-md p-1 transition-colors select-none hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset focus-visible:outline-none"
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-        onKeyDown={(event) => {
-          if (event.key !== 'Enter' && event.key !== ' ') return
-          event.preventDefault()
-          setExpanded((value) => !value)
-        }}
-      >
-        <span
-          className={cn(
-            'flex size-5 shrink-0 items-center justify-center',
-            failed ? 'text-destructive' : 'text-muted-foreground/65',
-          )}
-        >
-          <Bot
-            className="block size-3.5 shrink-0 stroke-[1.8] opacity-80"
-            aria-hidden
-          />
-        </span>
-        <p className="flex min-w-0 flex-1 items-baseline gap-1.5 text-[12px] leading-5">
-          <span
-            className={cn(
-              'min-w-0 shrink truncate font-medium',
-              failed ? 'text-destructive' : 'text-foreground/82',
-            )}
-          >
-            {child.title || 'Subagent'}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-muted-foreground/55">
-            {tools ? `${tools} tools` : 'No tool calls'}
-            {preview ? ` · ${preview}` : ''}
-          </span>
-        </p>
-        <div className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground/70 tabular-nums">
-          {status === 'running' ? (
-            <>
-              <span className="sr-only">Running</span>
-              <RunningDots />
-              <span>{elapsedSeconds(messages, now)}s</span>
-            </>
-          ) : (
-            <span className="capitalize">{statusText}</span>
-          )}
-          <ChevronDown
-            className={cn(
-              'size-3 shrink-0 opacity-70 transition-transform duration-200',
-              expanded && 'rotate-180',
-            )}
-            aria-hidden
-          />
-        </div>
-      </div>
-      {expanded && loadError ? (
+      {loadError ? (
         <div
-          className="mt-2 flex items-center justify-between gap-3 border-t border-border/45 pt-2 text-xs text-muted-foreground"
+          className={cn(note, 'flex items-center justify-between gap-3')}
           role="alert"
         >
           <span>Could not load transcript.</span>
@@ -158,25 +117,17 @@ export function SubagentCard({
             Retry
           </Button>
         </div>
-      ) : expanded && !loaded && messages.length === 0 ? (
-        <div className="mt-2 border-t border-border/45 pt-2 text-xs text-muted-foreground">
-          Loading transcript…
-        </div>
-      ) : expanded ? (
-        messages.length ? (
-          <div className="mt-2 border-t border-border/45 pt-2">
-            <SubagentTranscript
-              messages={messages}
-              messagesVersion={messagesVersion}
-              skills={skills}
-            />
-          </div>
-        ) : (
-          <div className="mt-2 border-t border-border/45 pt-2 text-xs text-muted-foreground">
-            No transcript items.
-          </div>
-        )
-      ) : null}
-    </article>
+      ) : !loaded && messages.length === 0 ? (
+        <div className={note}>Loading transcript…</div>
+      ) : messages.length ? (
+        <SubagentTranscript
+          messages={messages}
+          messagesVersion={messagesVersion}
+          skills={skills}
+        />
+      ) : (
+        <div className={note}>No transcript items.</div>
+      )}
+    </AgentCard>
   )
 }

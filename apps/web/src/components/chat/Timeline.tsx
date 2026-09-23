@@ -11,12 +11,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Virtualizer } from 'virtua'
 import { useParams } from '@tanstack/react-router'
 import { useMessagesStore } from '../../stores/messages'
-import { MessageRow, RunningDots, ToolCallRow } from './MessageRow'
+import { MessageRow, RunningDots } from './MessageRow'
 import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
 import { AnsweredQuestionRow } from './AnsweredQuestionRow'
 import { SubagentCard } from './SubagentCard'
-import { ActivityStack } from './ActivityStack'
+import { AgentToolCard, ToolGroup } from './ToolGroup'
 import { EpicTriageCard } from './EpicTriageCard'
 import { useSessionsStore } from '../../stores/sessions'
 import { cn } from '../../lib/utils'
@@ -57,6 +57,18 @@ export function Timeline({
       ? [...base, { kind: 'working' as const, id: 'working-indicator' }]
       : base
   }, [messages, messagesVersion, resumedWithRecap, children, pending, running])
+  // zeron opens a tool group by default only while it is the live tail of
+  // the streaming turn; pending user bubbles trail the turn, so skip them.
+  const liveGroupId = useMemo(() => {
+    if (!running) return undefined
+    const tail = items
+      .filter(
+        (item) =>
+          item.kind !== 'working' && !(item.kind === 'message' && item.pending),
+      )
+      .at(-1)
+    return tail?.kind === 'tool-group' ? tail.id : undefined
+  }, [items, running])
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
   // The bottom spacer grows with the composer, so re-pin before paint whenever
@@ -112,6 +124,7 @@ export function Timeline({
               item={item}
               sessionId={sessionId}
               skills={skills}
+              live={item.id === liveGroupId}
             />
           )}
         </Virtualizer>
@@ -142,10 +155,12 @@ function RenderItem({
   item,
   sessionId,
   skills,
+  live,
 }: {
   item: ReturnType<typeof toRenderModel>[number]
   sessionId: string
   skills: string[]
+  live: boolean
 }) {
   return (
     <div
@@ -153,12 +168,17 @@ function RenderItem({
         'mx-auto w-full min-w-0 max-w-3xl overflow-x-clip',
         item.kind === 'tool' ||
           item.kind === 'subagent' ||
-          item.kind === 'activity'
+          item.kind === 'tool-group'
           ? 'pb-2'
           : 'pb-4',
       )}
     >
-      <RenderItemContent item={item} sessionId={sessionId} skills={skills} />
+      <RenderItemContent
+        item={item}
+        sessionId={sessionId}
+        skills={skills}
+        live={live}
+      />
     </div>
   )
 }
@@ -167,21 +187,23 @@ function RenderItemContent({
   item,
   sessionId,
   skills,
+  live,
 }: {
   item: ReturnType<typeof toRenderModel>[number]
   sessionId: string
   skills: string[]
+  live: boolean
 }) {
   if (item.kind === 'message')
     return <MessageRow item={item} sessionId={sessionId} skills={skills} />
   if (item.kind === 'tool')
-    return <ToolCallRow item={item} sessionId={sessionId} />
+    return <AgentToolCard tool={item} sessionId={sessionId} />
   if (item.kind === 'answered-question')
     return <AnsweredQuestionRow question={item.question} answer={item.answer} />
   if (item.kind === 'subagent')
     return <SubagentCard child={item.child} skills={skills} />
-  if (item.kind === 'activity')
-    return <ActivityStack item={item} sessionId={sessionId} />
+  if (item.kind === 'tool-group')
+    return <ToolGroup item={item} sessionId={sessionId} live={live} />
   if (item.kind === 'epic-triage') return <EpicTriageCard card={item.card} />
   if (item.kind === 'plan') return <PlanCard item={item} />
   if (item.kind === 'attachment') return <AttachmentItem item={item} />

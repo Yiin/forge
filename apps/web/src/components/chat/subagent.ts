@@ -8,6 +8,7 @@ export type SubagentSession = {
   title: string
   status?: string
   spawnedBySeq?: number | null
+  model?: string | null
 }
 
 export function deriveSubagentStatus(

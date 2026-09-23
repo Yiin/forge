@@ -1,0 +1,94 @@
+/* Tool groups, tool rows, and agent cards, after zeron's transcript
+   (crates/ui/src/transcript.rs). Colours come from app.css tokens. */
+
+/* Wide disclosure rows do not take the global press scale; it reads as the
+   whole transcript twitching. */
+.tool-press:active:not(:disabled) {
+  transform: none;
+}
+
+/* The live tail group's summary: a slow light sweep, 3.4s per pass. */
+.tool-shimmer {
+  background: linear-gradient(
+      90deg,
+      var(--muted-foreground) 38%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 62%
+    )
+    0 0 / 300% 100% repeat-x;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: tool-shimmer 3.4s linear infinite;
+}
+
+@keyframes tool-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* Height fold: 140ms ease-out on the grid track, so no measuring is needed. */
+.tool-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 140ms cubic-bezier(0, 0, 0.58, 1);
+}
+
+.tool-fold[data-open='true'] {
+  grid-template-rows: 1fr;
+}
+
+.tool-fold > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Rows that arrive while the group is live fade in and lift 4px. */
+.tool-row-enter {
+  animation: tool-row-in 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--tool-row-delay, 0ms);
+}
+
+@keyframes tool-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* 2x3 chase spinner for running agents. */
+.glyph-spinner > span {
+  animation: glyph-spin 750ms linear infinite;
+  animation-delay: calc(-750ms * var(--offset));
+}
+
+@keyframes glyph-spin {
+  0% {
+    opacity: 1;
+  }
+  45% {
+    opacity: 0.1;
+  }
+  92% {
+    opacity: 0.1;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-shimmer {
+    animation: none;
+    background: none;
+    color: inherit;
+  }
+
+  .glyph-spinner > span {
+    animation: none;
+  }
+}

@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
 import { Virtualizer } from 'virtua'
 import type { Message } from '@forge/protocol/message'
-import { MessageRow, ToolCallRow } from './MessageRow'
+import { MessageRow } from './MessageRow'
 import { toRenderModel } from './render-model'
 import type { ChatRenderItem } from './render-model'
-import { ActivityStack } from './ActivityStack'
+import { AgentToolCard, ToolGroup } from './ToolGroup'
 import { AttachmentItem } from './TranscriptItems'
 import { NativeContentRow } from './NativeContentRow'
 
@@ -27,7 +27,7 @@ export function SubagentTranscript({
   )
   return (
     <div
-      className="subagent-transcript h-[min(60vh,460px)] overflow-auto border-t border-border p-3 [&_.chat-row]:max-w-none [&_.chat-tool]:max-w-none [&_.subagent-card]:max-w-none [&_.activity-stack]:max-w-none"
+      className="subagent-transcript h-[min(60vh,460px)] overflow-auto border-t border-border p-3 [&_.chat-row]:max-w-none [&_.chat-tool]:max-w-none [&_.subagent-card]:max-w-none [&_.tool-group]:max-w-none"
       aria-label="Subagent transcript"
     >
       <Virtualizer<ChatRenderItem> data={items}>
@@ -53,12 +53,10 @@ export function SubagentTranscript({
             )
           if (item.kind === 'tool')
             return (
-              <ToolCallRow key={item.id} item={item} sessionId={sessionId} />
+              <AgentToolCard key={item.id} tool={item} sessionId={sessionId} />
             )
-          if (item.kind === 'activity')
-            return (
-              <ActivityStack key={item.id} item={item} sessionId={sessionId} />
-            )
+          if (item.kind === 'tool-group')
+            return <ToolGroup key={item.id} item={item} sessionId={sessionId} />
           if (item.kind === 'attachment')
             return <AttachmentItem key={item.id} item={item} />
           if (item.kind === 'answered-question')

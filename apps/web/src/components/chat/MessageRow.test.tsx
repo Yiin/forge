@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { MessageRow, ToolCallRow } from './MessageRow'
-import { useShellStore } from '../../stores/shell'
+import { MessageRow } from './MessageRow'
 
 describe('MessageRow', () => {
   afterEach(cleanup)
@@ -21,25 +20,6 @@ describe('MessageRow', () => {
     view.rerender(<MessageRow item={item} />)
     expect(await screen.findByText('world')).toBeTruthy()
     expect(view.container.querySelectorAll('.chat-agent')).toHaveLength(1)
-  })
-
-  it('exposes thought disclosures to assistive technology', () => {
-    render(
-      <MessageRow
-        item={{
-          kind: 'message',
-          id: 'thought-1',
-          seq: 2,
-          role: 'agent',
-          thought: true,
-          text: 'working',
-        }}
-      />,
-    )
-
-    const disclosure = screen.getByRole('button', { name: /thought/i })
-    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
-    expect(disclosure.getAttribute('aria-controls')).toBe('thought-thought-1')
   })
 
   it('keeps message actions keyboard discoverable', () => {
@@ -137,73 +117,5 @@ describe('MessageRow', () => {
     expect(view.container.textContent).toBe('$beads $unknown')
     expect(view.container.querySelectorAll('span')).toHaveLength(1)
     expect(view.container.querySelector('span')?.textContent).toBe('$beads')
-  })
-
-  it('exposes tool detail disclosures', () => {
-    render(
-      <ToolCallRow
-        item={{
-          kind: 'tool',
-          id: 'tool-1',
-          name: 'Search',
-          state: 'done',
-          input: { query: 'Forge' },
-        }}
-      />,
-    )
-
-    const disclosure = screen.getByRole('button', {
-      name: /search.*completed/i,
-    })
-    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
-    expect(disclosure.getAttribute('aria-controls')).toBe('tool-detail-tool-1')
-    expect(screen.queryByText('{"query":"Forge"}')).toBeNull()
-  })
-
-  it('renders a compact command header and keeps raw input in the detail', () => {
-    const view = render(
-      <ToolCallRow
-        item={{
-          kind: 'tool',
-          id: 'tool-2',
-          name: '`Terminal`',
-          state: 'done',
-          input: { command: 'hostname', description: 'Check hostname' },
-        }}
-      />,
-    )
-
-    expect(
-      screen.getByRole('button', {
-        name: /\$ hostname.*check hostname.*completed/i,
-      }),
-    ).toBeTruthy()
-    expect(screen.queryByText(/\{"command":"hostname"/)).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: /\$ hostname/i }))
-    expect(view.container.querySelector('pre')?.textContent).toContain(
-      '"command": "hostname"',
-    )
-  })
-
-  it('opens a file tool path in the workspace dock', () => {
-    useShellStore.setState({ docks: {}, dockWidth: 480 })
-    render(
-      <ToolCallRow
-        sessionId="session-1"
-        item={{
-          kind: 'tool',
-          id: 'tool-file',
-          name: 'read_file',
-          state: 'done',
-          input: { path: 'src/main.ts' },
-        }}
-      />,
-    )
-    fireEvent.click(screen.getByRole('button', { name: /read_file/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Open src/main.ts' }))
-    expect(useShellStore.getState().dock('session-1').tabs).toContainEqual(
-      expect.objectContaining({ kind: 'file', path: 'src/main.ts' }),
-    )
   })
 })

@@ -1,14 +1,7 @@
 import {
-  Bot,
   Check,
   ChevronDown,
-  Eye,
-  Globe,
-  Hammer,
   Minus,
-  SquarePen,
-  Terminal,
-  Wrench,
   X,
   Copy,
   GitBranch,
@@ -20,10 +13,8 @@ import { toast } from 'sonner'
 import { ChatMarkdown } from './ChatMarkdown'
 import type { ChatRenderItem } from './render-model'
 import { SkillChipText } from './SkillChipText'
-import { summarizeToolCall } from './tool-summary'
 import { api } from '../../lib/api'
 import { cn } from '../../lib/utils'
-import { useShellStore } from '../../stores/shell'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
 
@@ -39,7 +30,6 @@ export function MessageRow({
   sessionId?: string
   skills?: string[]
 }) {
-  const [open, setOpen] = useState(!item.thought)
   const [collapsed, setCollapsed] = useState(false)
   const copy = async () => {
     await navigator.clipboard.writeText(item.text)
@@ -63,20 +53,6 @@ export function MessageRow({
       toast.error(error instanceof Error ? error.message : 'Fork failed')
     }
   }
-  if (item.thought)
-    return (
-      <article className="chat-row chat-thought" data-seq={item.seq}>
-        <WorkEntryRow
-          icon={Bot}
-          heading="Thought"
-          expanded={open}
-          detailId={`thought-${item.id}`}
-          onToggle={() => setOpen(!open)}
-        >
-          <ChatMarkdown text={item.text} />
-        </WorkEntryRow>
-      </article>
-    )
   if (item.role === 'user')
     return (
       <article
@@ -154,80 +130,6 @@ export function MessageRow({
       </div>
     </article>
   )
-}
-
-export function ToolCallRow({
-  item,
-  sessionId,
-}: {
-  item: Extract<ChatRenderItem, { kind: 'tool' }>
-  sessionId?: string
-}) {
-  const [open, setOpen] = useState(false)
-  const summary = summarizeToolCall(item.name, item.input)
-  const filePath = toolPath(item.input)
-  const openFile = () => {
-    if (!sessionId || !filePath) return
-    useShellStore.getState().openDockTab(sessionId, {
-      id: `file-${sessionId}-${filePath}`,
-      kind: 'file',
-      title: filePath.split('/').at(-1) || 'File',
-      path: filePath,
-    })
-  }
-  return (
-    <article className="chat-tool">
-      <WorkEntryRow
-        icon={toolIcon(item.name, item.input)}
-        heading={summary.title}
-        preview={summary.detail}
-        state={item.state}
-        expanded={open}
-        detailId={`tool-detail-${item.id}`}
-        onToggle={() => setOpen(!open)}
-      >
-        <pre className="max-h-64 overflow-auto break-words whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
-          {JSON.stringify(item.input, null, 2)}
-        </pre>
-        {item.output !== undefined && (
-          <pre className="mt-2 max-h-64 overflow-auto break-words whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
-            {JSON.stringify(item.output, null, 2)}
-          </pre>
-        )}
-        {item.nativeChildId && sessionId && (
-          <Button
-            variant="outline"
-            size="xs"
-            onClick={() =>
-              useShellStore.getState().openDockTab(sessionId, {
-                id: `native-child-${sessionId}-${item.nativeChildId}`,
-                kind: 'subagent',
-                title: 'Child transcript',
-                nativeChildId: item.nativeChildId,
-              })
-            }
-          >
-            Open child transcript
-          </Button>
-        )}
-        {filePath && sessionId && (
-          <Button variant="outline" size="xs" onClick={openFile}>
-            Open {filePath}
-          </Button>
-        )}
-      </WorkEntryRow>
-    </article>
-  )
-}
-
-function toolPath(input: unknown): string | undefined {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return
-  const value = input as Record<string, unknown>
-  for (const key of ['path', 'file_path', 'filePath']) {
-    if (typeof value[key] === 'string' && value[key].trim())
-      return value[key].trim()
-  }
-  return
 }
 
 /**
@@ -371,30 +273,4 @@ export function RunningDots() {
       <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30 [animation-delay:400ms] motion-reduce:animate-none" />
     </span>
   )
-}
-
-const READ_TOOL = /read|view|grep|glob|search|list|ls/i
-const WRITE_TOOL = /write|edit|patch|update|create|notebook/i
-const WEB_TOOL = /web|fetch|http|url|browser|search/i
-const AGENT_TOOL = /task|agent|spawn/i
-const BUILD_TOOL = /build|compile|make|install|deploy/i
-
-function toolIcon(
-  name: string,
-  input: unknown,
-): ComponentType<SVGProps<SVGSVGElement>> {
-  const clean = name.replace(/`/g, '').trim()
-  if (
-    input &&
-    typeof input === 'object' &&
-    !Array.isArray(input) &&
-    ('command' in input || 'cmd' in input)
-  )
-    return Terminal
-  if (AGENT_TOOL.test(clean)) return Bot
-  if (WEB_TOOL.test(clean)) return Globe
-  if (WRITE_TOOL.test(clean)) return SquarePen
-  if (READ_TOOL.test(clean)) return Eye
-  if (BUILD_TOOL.test(clean)) return Hammer
-  return Wrench
 }

@@ -3,9 +3,9 @@ import type { SubagentSession } from './subagent'
 import type { PendingUserMessage } from '../../stores/messages'
 import { interruptReasonText } from './interrupt-copy'
 import { answerWithLabels, requestQuestions } from './question-logic'
+import { isAgentTool } from './tool-view'
 
 export type ToolState = 'running' | 'done' | 'error'
-export type ActivityState = ToolState | 'unknown'
 export type ChatRenderItem =
   | { kind: 'working'; id: string }
   | {
@@ -68,86 +68,51 @@ export type ChatRenderItem =
       >
     }
   | { kind: 'subagent'; id: string; child: SubagentSession }
-  | {
-      kind: 'activity'
-      id: string
-      turnId: string
-      tools: Extract<ChatRenderItem, { kind: 'tool' }>[]
-      agents: SubagentSession[]
-      state: ActivityState
-    }
+  | { kind: 'tool-group'; id: string; entries: ToolGroupEntry[] }
 
-type ActivitySource =
-  | Extract<ChatRenderItem, { kind: 'tool' }>
-  | Extract<ChatRenderItem, { kind: 'subagent' }>
+export type ToolItem = Extract<ChatRenderItem, { kind: 'tool' }>
+export type MessageItem = Extract<ChatRenderItem, { kind: 'message' }>
+/** A group holds ordinary tools and the thoughts between them. */
+export type ToolGroupEntry = ToolItem | MessageItem
 
-export function groupActivity(
+/**
+ * zeron's grouping: consecutive tools of one turn share a group, a thought
+ * joins the group it lands in, and anything else closes it. Subagent spawns
+ * never share a group with ordinary tools; they stay standalone cards. A lone
+ * tool still gets a group, so every tool run reads the same way.
+ */
+export function groupTools(
   items: ChatRenderItem[],
   turnIds: Map<string, string>,
-  childTurnIds: Map<string, string>,
 ): ChatRenderItem[] {
   const result: ChatRenderItem[] = []
-  let group: ActivitySource[] = []
+  let group: ToolGroupEntry[] = []
   let groupTurnId: string | undefined
   const flush = () => {
-    if (!group.length) return
-    if (group.length === 1) result.push(group[0])
-    else {
-      const tools = group.flatMap((entry) =>
-        entry.kind === 'tool' ? [entry] : [],
-      )
-      const agents = group.flatMap((entry) =>
-        entry.kind === 'subagent' ? [entry.child] : [],
-      )
-      const states: ActivityState[] = [
-        ...tools.map((tool) => tool.state),
-        ...agents.map((agent) =>
-          agent.status === 'running'
-            ? 'running'
-            : agent.status === 'failed' || agent.status === 'errored'
-              ? 'error'
-              : agent.status === 'completed' || agent.status === 'done'
-                ? 'done'
-                : 'unknown',
-        ),
-      ]
-      const state = states.includes('error')
-        ? 'error'
-        : states.includes('running')
-          ? 'running'
-          : states.includes('unknown')
-            ? 'unknown'
-            : 'done'
+    if (group.length)
       result.push({
-        kind: 'activity',
-        id: `activity-${group[0].id}`,
-        turnId: groupTurnId ?? 'unknown-turn',
-        tools,
-        agents,
-        state,
+        kind: 'tool-group',
+        id: `tool-group:${group[0].id}`,
+        entries: group,
       })
-    }
     group = []
     groupTurnId = undefined
   }
   for (const item of items) {
-    if (item.kind !== 'tool' && item.kind !== 'subagent') {
+    const joins =
+      (item.kind === 'tool' && !isAgentTool(item)) ||
+      (item.kind === 'message' && item.thought)
+    if (!joins) {
       flush()
       result.push(item)
       continue
     }
-    const turnId =
-      item.kind === 'tool'
-        ? turnIds.get(item.id)
-        : childTurnIds.get(item.child.id)
-    if (!group.length || turnId === groupTurnId) {
-      group.push(item)
-      groupTurnId ??= turnId
-    } else {
-      flush()
-      group.push(item)
-      groupTurnId = turnId
-    }
+    // Empty thinking neither shows nor splits the run around it.
+    if (item.kind === 'message' && !item.text.trim()) continue
+    const turnId = turnIds.get(item.id)
+    if (group.length && turnId !== groupTurnId) flush()
+    if (!group.length) groupTurnId = turnId
+    group.push(item)
   }
   flush()
   return result
@@ -167,7 +132,6 @@ export function toRenderModel(
   const questionOptions = new Map<string, ReturnType<typeof requestQuestions>>()
   const anchors = new Map<string, number>()
   const turnIds = new Map<string, string>()
-  const childTurnIds = new Map<string, string>()
   const toolIds = new Map<string, Extract<ChatRenderItem, { kind: 'tool' }>>()
   const planItems = new Map<string, Extract<ChatRenderItem, { kind: 'plan' }>>()
   const textItems = new Map<
@@ -376,13 +340,7 @@ export function toRenderModel(
     }
   }
   const placed = placeSubagents(result, children, anchors) as ChatRenderItem[]
-  for (const child of children) {
-    const anchor = child.spawnedBySeq
-    if (anchor == null) continue
-    const anchorItem = messages.find((message) => message.seq === anchor)
-    if (anchorItem) childTurnIds.set(child.id, anchorItem.turnId)
-  }
-  return groupActivity(
+  return groupTools(
     [
       ...placed,
       ...pending.map((item) => ({
@@ -395,14 +353,15 @@ export function toRenderModel(
       })),
     ],
     turnIds,
-    childTurnIds,
   )
 }
 
 import { placeSubagents } from './subagent'
 
 function stateForStatus(status: string): ToolState {
-  if (/error|fail/i.test(status)) return 'error'
+  // Codex reports refused and stopped calls as `declined` and `interrupted`;
+  // neither will ever finish, so they count as failures, not as running.
+  if (/error|fail|declin|interrupt|cancel|reject/i.test(status)) return 'error'
   if (/done|complete|success/i.test(status)) return 'done'
   return 'running'
 }

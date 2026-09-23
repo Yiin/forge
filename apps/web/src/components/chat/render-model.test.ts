@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Message } from '@forge/protocol/message'
-import { groupActivity, toRenderModel } from './render-model'
+import type { ChatRenderItem } from './render-model'
+import { groupTools, toRenderModel } from './render-model'
 
 const message = (
   content: Message['content'],
@@ -143,37 +144,120 @@ describe('chat render model', () => {
     })
   })
 
-  it('groups adjacent tools and agents within one turn', () => {
-    const tool = {
-      kind: 'tool' as const,
-      id: 'tool-1',
-      name: 'shell',
-      state: 'done' as const,
-      input: 'pwd',
-      output: '/tmp',
-    }
-    const agent = {
-      kind: 'subagent' as const,
-      id: 'subagent-child',
-      child: { id: 'child', title: 'Research', status: 'completed' },
-    }
-    expect(
-      groupActivity(
-        [tool, agent],
-        new Map([['tool-1', 'turn-1']]),
-        new Map([['child', 'turn-1']]),
-      ),
-    ).toEqual([
-      {
-        kind: 'activity',
-        id: 'activity-tool-1',
-        turnId: 'turn-1',
-        tools: [tool],
-        agents: [agent.child],
-        state: 'done',
+  describe('tool groups', () => {
+    const tool = (id: string, name = 'Bash', turn = 'turn-1') => ({
+      item: {
+        kind: 'tool' as const,
+        id,
+        name,
+        state: 'done' as const,
+        input: { command: 'pwd' },
       },
-    ])
+      turn,
+    })
+    const text = (id: string, value: string, thought = false) => ({
+      item: {
+        kind: 'message' as const,
+        id,
+        seq: 1,
+        role: 'agent' as const,
+        text: value,
+        ...(thought ? { thought: true } : {}),
+      },
+      turn: 'turn-1',
+    })
+    const group = (rows: Array<{ item: ChatRenderItem; turn: string }>) =>
+      groupTools(
+        rows.map((row) => row.item),
+        new Map(rows.map((row) => [row.item.id, row.turn])),
+      )
+    const shape = (items: ChatRenderItem[]) =>
+      items.map((item) =>
+        item.kind === 'tool-group'
+          ? `group(${item.entries.map((entry) => entry.id).join(',')})`
+          : item.id,
+      )
+
+    it('gives a lone tool the same group as a run of tools', () => {
+      expect(shape(group([tool('a')]))).toEqual(['group(a)'])
+      expect(shape(group([tool('a'), tool('b'), tool('c')]))).toEqual([
+        'group(a,b,c)',
+      ])
+      expect(group([tool('a')])[0]).toMatchObject({ id: 'tool-group:a' })
+    })
+
+    it('lets thinking join the group and text close it', () => {
+      expect(
+        shape(
+          group([
+            text('think', 'hmm', true),
+            tool('a'),
+            text('think-2', 'more', true),
+            tool('b'),
+            text('reply', 'Done.'),
+            tool('c'),
+          ]),
+        ),
+      ).toEqual(['group(think,a,think-2,b)', 'reply', 'group(c)'])
+    })
+
+    it('closes the group on whitespace text but skips empty thinking', () => {
+      expect(
+        shape(
+          group([
+            tool('a'),
+            text('blank', '  \n'),
+            tool('b'),
+            text('empty-thought', ' ', true),
+            tool('c'),
+          ]),
+        ),
+      ).toEqual(['group(a)', 'blank', 'group(b,c)'])
+    })
+
+    it('keeps subagent spawns out of tool groups', () => {
+      expect(
+        shape(
+          group([
+            tool('a'),
+            tool('spawn', 'Agent'),
+            tool('child', 'child'),
+            tool('b'),
+            {
+              item: {
+                kind: 'subagent',
+                id: 'subagent-x',
+                child: { id: 'x', title: 'Research' },
+              },
+              turn: 'turn-1',
+            },
+            tool('c'),
+          ]),
+        ),
+      ).toEqual([
+        'group(a)',
+        'spawn',
+        'child',
+        'group(b)',
+        'subagent-x',
+        'group(c)',
+      ])
+    })
+
+    it('starts a new group when the turn changes', () => {
+      expect(shape(group([tool('a'), tool('b', 'Bash', 'turn-2')]))).toEqual([
+        'group(a)',
+        'group(b)',
+      ])
+    })
+
+    it('keeps the group id while the run grows', () => {
+      const before = group([tool('a')])
+      const after = group([tool('a'), tool('b')])
+      expect(after[0].id).toBe(before[0].id)
+    })
   })
+
   it('keeps progressive text under one stable item key', () => {
     expect(
       toRenderModel([
@@ -227,14 +311,21 @@ describe('chat render model', () => {
         isError: false,
       }),
     ])
+    const id = JSON.stringify(['s', 't', null, 'tool', 'i'])
     expect(items).toEqual([
       {
-        kind: 'tool',
-        id: JSON.stringify(['s', 't', null, 'tool', 'i']),
-        name: 'shell',
-        state: 'done',
-        input: 'ls',
-        output: 'ok',
+        kind: 'tool-group',
+        id: `tool-group:${id}`,
+        entries: [
+          {
+            kind: 'tool',
+            id,
+            name: 'shell',
+            state: 'done',
+            input: 'ls',
+            output: 'ok',
+          },
+        ],
       },
     ])
   })
@@ -262,7 +353,10 @@ describe('chat render model', () => {
       ],
     ]) {
       expect(toRenderModel([...prefix, update, settled])).toMatchObject([
-        { kind: 'tool', state: 'done', output: 'native output' },
+        {
+          kind: 'tool-group',
+          entries: [{ kind: 'tool', state: 'done', output: 'native output' }],
+        },
       ])
       expect(
         toRenderModel([
@@ -275,7 +369,7 @@ describe('chat render model', () => {
             output: '',
           }),
         ]),
-      ).toMatchObject([{ output: '' }])
+      ).toMatchObject([{ entries: [{ output: '' }] }])
     }
   })
 
@@ -304,14 +398,19 @@ describe('chat render model', () => {
         { itemId: 'result-item', seq: 3 },
       ),
     ])
-    expect(items).toEqual([
+    expect(items).toMatchObject([
       {
-        kind: 'tool',
-        id: JSON.stringify(['s', 't', null, 'tool', 'call-item']),
-        name: 'shell',
-        state: 'done',
-        input: 'pwd',
-        output: 'done',
+        kind: 'tool-group',
+        entries: [
+          {
+            kind: 'tool',
+            id: JSON.stringify(['s', 't', null, 'tool', 'call-item']),
+            name: 'shell',
+            state: 'done',
+            input: 'pwd',
+            output: 'done',
+          },
+        ],
       },
     ])
   })
@@ -429,8 +528,10 @@ it('replaces exact snapshot text while preserving thought and child ownership', 
       { seq: 6, turnId: 'other' },
     ),
   ]
+  // Thinking rides in a tool group; flatten groups to read it back.
   expect(
     toRenderModel(rows)
+      .flatMap((i) => (i.kind === 'tool-group' ? i.entries : [i]))
       .filter((i) => i.kind === 'message')
       .map((i) => [i.text, i.thought ?? false]),
   ).toEqual([
@@ -490,6 +591,7 @@ it('replaces child snapshots and preserves native child actions and plan text', 
       { seq: 5, itemId: 'tool' },
     ),
   ]
+  // A native child is a subagent spawn, so it stays a standalone row.
   expect(toRenderModel(rows).find((i) => i.kind === 'tool')).toMatchObject({
     nativeChildId: 'c',
   })
@@ -533,7 +635,11 @@ it('uses distinct stable render keys and tool owners across channels and turns',
   const items = toRenderModel(rows)
   expect(new Set(items.map((i) => i.id)).size).toBe(items.length)
   const tools = items.flatMap((i) =>
-    i.kind === 'tool' ? [i] : i.kind === 'activity' ? i.tools : [],
+    i.kind === 'tool'
+      ? [i]
+      : i.kind === 'tool-group'
+        ? i.entries.flatMap((entry) => (entry.kind === 'tool' ? [entry] : []))
+        : [],
   )
   expect(tools.map((i) => [i.name, i.state, i.output])).toEqual([
     ['first', 'done', 'first done'],
