@@ -74,6 +74,8 @@ export function SessionRoute() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string>()
   const [connection, setConnection] = useState<ConnectionState>('connecting')
+  // The socket effect below calls the latest `redeliver` on reconnect.
+  const redeliverRef = useRef<() => Promise<void>>(async () => {})
   const online = useSyncExternalStore(subscribeOnline, readOnline)
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [skills, setSkills] = useState<string[]>([])
@@ -241,7 +243,7 @@ export function SessionRoute() {
           onConnectionChange: (state) => active && setConnection(state),
           onReconnect: () => {
             if (!active) return
-            void fetch(
+            const snapshot = fetch(
               `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
             )
               .then((response) => (response.ok ? response.json() : null))
@@ -250,28 +252,25 @@ export function SessionRoute() {
                 if (value.success)
                   useMessagesStore.getState().loadSnapshot(value.data)
               })
-              .catch(() => undefined)
-            void api
-              .getSession(sessionId)
-              .then((value) => {
-                if (!active) return
-                useSessionsStore
+            const summary = api.getSession(sessionId).then((value) => {
+              if (!active) return
+              useSessionsStore.getState().upsertSession(value as SessionSummary)
+            })
+            const queued = api.listQueued(sessionId).then((value) => {
+              const prompts = Array.isArray(value)
+                ? value
+                : ((value as { prompts?: unknown[] }).prompts ?? [])
+              if (active)
+                useMessagesStore
                   .getState()
-                  .upsertSession(value as SessionSummary)
-              })
-              .catch(() => undefined)
-            void api
-              .listQueued(sessionId)
-              .then((value) => {
-                const prompts = Array.isArray(value)
-                  ? value
-                  : ((value as { prompts?: unknown[] }).prompts ?? [])
-                if (active)
-                  useMessagesStore
-                    .getState()
-                    .setQueued(sessionId, prompts as QueuedPrompt[])
-              })
-              .catch(() => undefined)
+                  .setQueued(sessionId, prompts as QueuedPrompt[])
+            })
+            // Held prompts go out once the refresh lands. Sent sooner, the
+            // refreshed summary can arrive after the turn they start and
+            // mark a running session idle.
+            void Promise.allSettled([snapshot, summary, queued]).then(() => {
+              if (active) void redeliverRef.current()
+            })
           },
         })
         void fetch('/api/status')
@@ -389,11 +388,7 @@ export function SessionRoute() {
       redelivering.current = false
     }
   }
-  const redeliverRef = useRef(redeliver)
   redeliverRef.current = redeliver
-  useEffect(() => {
-    if (connection === 'connected') void redeliverRef.current()
-  }, [connection])
   const send = async (
     text: string,
     attachmentIds: string[],
