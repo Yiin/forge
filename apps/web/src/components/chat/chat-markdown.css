@@ -1,0 +1,305 @@
+/* Assistant markdown after zeron (crates/ui/src/markdown/render.rs).
+   Streamdown ships Tailwind utilities in a layer; these rules are unlayered,
+   so they win without !important. */
+
+.chat-markdown {
+  --md-rule: color-mix(in srgb, var(--ink) 13.5%, transparent);
+  min-width: 0;
+  color: var(--foreground);
+  font-size: 0.875rem;
+  line-height: 1.375rem;
+  overflow-wrap: anywhere;
+}
+
+[data-theme='dark'] .chat-markdown {
+  --md-rule: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+/* Blocks stack with one 12px gap and no margins of their own. */
+.chat-markdown > div {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-markdown > div > *,
+.chat-markdown :is(p, ul, ol, li, blockquote, pre, h1, h2, h3, h4, h5, h6, hr) {
+  margin: 0;
+}
+
+.chat-markdown :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.chat-markdown h1 {
+  font-size: 1.1875rem;
+  line-height: 1.6875rem;
+}
+
+.chat-markdown h2 {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+.chat-markdown h3 {
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
+}
+
+.chat-markdown :is(h4, h5, h6) {
+  font-size: 0.875rem;
+  line-height: 1.375rem;
+}
+
+.chat-markdown :is(strong, b, [data-streamdown='strong']) {
+  font-weight: 600;
+}
+
+.chat-markdown :is(del, s) {
+  text-decoration-color: var(--muted-foreground);
+  text-decoration-thickness: 1px;
+}
+
+/* Lists: 18px marker column plus an 8px gap, accent markers at every depth. */
+.chat-markdown :is(ul, ol) {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 26px;
+  list-style-position: outside;
+}
+
+.chat-markdown ul,
+.chat-markdown ul ul {
+  list-style-type: disc;
+}
+
+.chat-markdown ol {
+  list-style-type: decimal;
+}
+
+.chat-markdown li::marker {
+  color: var(--primary);
+}
+
+.chat-markdown li > :is(ul, ol) {
+  margin-top: 4px;
+}
+
+/* Links stay in text colour with a muted 1px underline. */
+.chat-markdown a,
+.chat-markdown [data-streamdown='link'] {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--muted-foreground);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.chat-markdown [data-streamdown='link']:focus-visible,
+.chat-markdown a:focus-visible {
+  outline: 1px solid var(--primary);
+  outline-offset: 1px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--primary) 24%, transparent);
+}
+
+/* Inline code: accent text on the code wash, painted 2px past the glyphs. */
+.chat-markdown :not(pre) > code,
+.chat-markdown [data-streamdown='inline-code'] {
+  margin: 0 -2px;
+  border: none;
+  border-radius: 4.5px;
+  background: var(--code-wash);
+  padding: 1px 2px;
+  color: var(--primary);
+  font-family: var(--font-mono);
+  font-size: inherit;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.chat-markdown blockquote,
+.chat-markdown [data-streamdown='blockquote'] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-left: 2px solid color-mix(in oklab, var(--primary) 60%, transparent);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in oklab, var(--primary) 5%, transparent);
+  padding: 6px 10px 6px 12px;
+  color: var(--foreground);
+  font-style: normal;
+}
+
+.chat-markdown hr {
+  height: 1px;
+  border: none;
+  background: var(--border);
+}
+
+/* Tables: frameless, a hairline between rows, 12px cells. */
+.chat-markdown [data-streamdown='table-wrapper'] {
+  display: block;
+  overflow-x: auto;
+  border: none;
+  border-radius: 0;
+  background: none;
+  padding: 0;
+}
+
+.chat-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  border: none;
+}
+
+.chat-markdown :is(thead, tbody, tr) {
+  border: none;
+  background: none;
+}
+
+.chat-markdown tr:not(:last-child),
+.chat-markdown thead tr {
+  border-bottom: 1px solid var(--md-rule);
+}
+
+.chat-markdown :is(th, td) {
+  min-width: 96px;
+  border: none;
+  padding: 12px;
+  font-size: 0.875rem;
+  line-height: 1.375rem;
+  text-align: left;
+  white-space: normal;
+}
+
+.chat-markdown th {
+  background: none;
+  font-weight: 700;
+}
+
+/* Fenced code: a 10px frame, a 28px header with the language, wrap and
+   copy, and a 12.5px body that scrolls sideways unless wrapped. */
+.md-code {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 3.5%, transparent);
+}
+
+.md-code-header {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--ink) 2%, transparent);
+  padding: 0 5px 0 12px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.md-code-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.md-code-button {
+  display: inline-flex;
+  height: 22px;
+  min-width: 22px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.md-code-button[data-copy] {
+  border-radius: 5px;
+  padding: 0 6px;
+  font-size: 10.5px;
+}
+
+.md-code-button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+}
+
+@media (hover: hover) {
+  .md-code-button:hover {
+    background: color-mix(in srgb, var(--ink) 8%, transparent);
+  }
+
+  .md-code-button[aria-pressed='true']:hover {
+    background: color-mix(in srgb, var(--ink) 13%, transparent);
+  }
+}
+
+.md-code-button:active:not(:disabled) {
+  transform: none;
+}
+
+.md-code-button:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--ring) 70%, transparent);
+  outline-offset: -2px;
+}
+
+.md-code-body {
+  overflow-x: auto;
+  padding: 10px 12px;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 18px;
+  white-space: pre;
+  overflow-wrap: normal;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--faint-foreground) 50%, transparent)
+    transparent;
+}
+
+.md-code-body[data-wrap='true'] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.md-code-body code {
+  font: inherit;
+}
+
+/* Streamed words fade in by opacity only. */
+@keyframes sd-fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sd-markerIn {
+  from {
+    color: transparent;
+  }
+}
+
+.chat-markdown [data-sd-animate] {
+  animation: var(--sd-animation, sd-fadeIn) var(--sd-duration, 150ms)
+    var(--sd-easing, ease) var(--sd-delay, 0ms) both;
+}
+
+.chat-markdown [data-sd-animate-marker]::marker {
+  animation: sd-markerIn var(--sd-marker-duration, 150ms)
+    var(--sd-marker-easing, ease) var(--sd-marker-delay, 0ms) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-markdown [data-sd-animate],
+  .chat-markdown [data-sd-animate-marker]::marker {
+    animation: none;
+  }
+}
