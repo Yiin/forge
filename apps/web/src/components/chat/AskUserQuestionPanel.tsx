@@ -16,7 +16,7 @@ const EMPTY_MESSAGES: never[] = []
 const PANEL_CLASS =
   'ask-question-panel mx-auto mb-2 w-full min-w-0 max-w-3xl rounded-[26px] border border-border bg-background shadow-lg backdrop-blur-[16px] duration-150 animate-in fade-in-0 motion-reduce:animate-none dark:bg-surface-raised/72 dark:shadow-none'
 const COUNTER_CLASS =
-  'inline-flex h-5 shrink-0 items-center rounded-[6px] bg-ink/6 px-1.5 text-[10px] font-medium text-muted-foreground/60 tabular-nums'
+  'inline-flex h-5 shrink-0 items-center rounded-[6px] bg-ink/6 px-1.5 text-[10px] font-medium text-muted-foreground tabular-nums'
 const GHOST_BUTTON_CLASS =
   'cursor-pointer rounded-[8px] px-3 py-1.5 text-[13px] text-muted-foreground outline-none transition-colors duration-150 hover:bg-ink/6 hover:text-foreground focus-visible:bg-ink/6 disabled:cursor-default disabled:opacity-40 pointer-coarse:min-h-11'
 type SelectedWithText = {
@@ -263,7 +263,7 @@ function QuestionCard({
     >
       <div className="px-4 pt-4">
         <div className="flex items-center gap-2.5">
-          <span className="flex min-w-0 items-center gap-1.5 text-[10.5px] font-medium tracking-[0.1em] text-muted-foreground/60 uppercase">
+          <span className="flex min-w-0 items-center gap-1.5 text-[10.5px] font-medium tracking-[0.1em] text-muted-foreground uppercase">
             {isPermission && (
               <ShieldAlert aria-hidden className="size-3.5 text-warning" />
             )}
@@ -308,7 +308,7 @@ function QuestionCard({
           {question.question}
         </h2>
         {question.multiSelect && (
-          <p className="mt-1 text-[12px] text-muted-foreground/65">
+          <p className="mt-1 text-[12px] text-muted-foreground">
             Select one or more options.
           </p>
         )}

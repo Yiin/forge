@@ -58,7 +58,7 @@ export function DraftRoute() {
         <h1 className="text-[16px] font-medium text-foreground">
           Draft not found
         </h1>
-        <p className="text-[13px] text-muted-foreground/70">
+        <p className="text-[13px] text-muted-foreground">
           This local draft is no longer available.
         </p>
       </section>

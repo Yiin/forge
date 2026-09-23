@@ -173,7 +173,7 @@ export function ModelChip({
                   'min-w-0 shrink-[1000] truncate transition-colors duration-150',
                   traitsChanged
                     ? 'text-foreground/85'
-                    : 'text-muted-foreground/70',
+                    : 'text-muted-foreground',
                 )}
               >
                 {traits}

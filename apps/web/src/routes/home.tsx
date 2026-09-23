@@ -63,7 +63,7 @@ export function HomeRoute() {
         <h1 className="mt-6 text-[16px] font-medium text-foreground">
           Welcome to Forge
         </h1>
-        <p className="mt-1.5 text-[13px] text-muted-foreground/70">
+        <p className="mt-1.5 text-[13px] text-muted-foreground">
           Add a project to start a session.
         </p>
         <button

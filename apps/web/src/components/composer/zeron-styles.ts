@@ -27,11 +27,11 @@ export const CARD_SEPARATOR_CLASS = '-mx-1 my-0.5 h-px bg-ink/7'
 
 /** footer_chip: 20px tall interactive chip under or above the pill. */
 export const FOOTER_CHIP_CLASS =
-  'inline-flex h-5 max-w-[280px] min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-[6px] px-2 text-[12px] font-medium text-muted-foreground/70 outline-none transition-colors duration-150 hover:bg-accent hover:text-foreground/80 focus-visible:bg-accent focus-visible:text-foreground/80 data-popup-open:bg-accent disabled:cursor-default disabled:opacity-55 pointer-coarse:h-8'
+  'inline-flex h-5 max-w-[280px] min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-[6px] px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors duration-150 hover:bg-accent hover:text-foreground/80 focus-visible:bg-accent focus-visible:text-foreground/80 data-popup-open:bg-accent disabled:cursor-default disabled:opacity-55 pointer-coarse:h-8'
 
 /** footer_label: the read-only twin of FOOTER_CHIP_CLASS. */
 export const FOOTER_LABEL_CLASS =
-  'inline-flex h-5 max-w-40 min-w-0 shrink-0 items-center gap-1.5 px-2 text-[12px] font-medium text-muted-foreground/60'
+  'inline-flex h-5 max-w-40 min-w-0 shrink-0 items-center gap-1.5 px-2 text-[12px] font-medium text-muted-foreground'
 
 /** Round 28px icon control inside the pill (attach button). */
 export const PILL_ICON_BUTTON_CLASS =
