@@ -76,10 +76,13 @@ function receive(
   })
 }
 
+// Every named subscription opens with a sessionStatus frame. Most tests count
+// only the frames that follow it, so they leave `withStatus` off.
 function receiveWithTimeout(
   socket: WebSocket,
   count: number,
   timeoutMs = 5_000,
+  withStatus = false,
 ): Promise<Array<Record<string, unknown>>> {
   return new Promise((resolve, reject) => {
     const events: Array<Record<string, unknown>> = []
@@ -88,7 +91,9 @@ function receiveWithTimeout(
       timeoutMs,
     )
     socket.addEventListener('message', (event) => {
-      events.push(JSON.parse(String(event.data)) as Record<string, unknown>)
+      const frame = JSON.parse(String(event.data)) as Record<string, unknown>
+      if (!withStatus && frame.type === 'sessionStatus') return
+      events.push(frame)
       if (events.length === count) {
         clearTimeout(timeout)
         resolve(events.slice())
@@ -184,6 +189,39 @@ describe('event websocket', () => {
     expect(await notReceived).toBe(false)
     subscribed.close()
     unsubscribed.close()
+  })
+
+  it('sends the current status of each named session on subscribe', async () => {
+    const { db, bus, session, port } = fixture()
+    // The status changed before this client subscribed, so its ephemeral
+    // frame went to nobody. A client that read `running` over HTTP must still
+    // learn that the turn ended.
+    db.prepare("UPDATE sessions SET status = 'running' WHERE id = ?").run(
+      session.id,
+    )
+    db.prepare("UPDATE sessions SET status = 'idle' WHERE id = ?").run(
+      session.id,
+    )
+    append(db, bus, session.id, 1)
+    const socket = await openSocket(port)
+    const events = receiveWithTimeout(socket, 2, 5_000, true)
+    socket.send(
+      JSON.stringify({
+        type: 'subscribe',
+        sessions: [session.id, 'ses_missing'],
+        cursor: 0,
+      }),
+    )
+    expect(await events).toEqual([
+      {
+        type: 'sessionStatus',
+        seq: null,
+        sessionId: session.id,
+        status: 'idle',
+      },
+      expect.objectContaining({ seq: 1, sessionId: session.id }),
+    ])
+    socket.close()
   })
 
   it('replays a stale cursor in bounded batches without gaps or duplicates', async () => {

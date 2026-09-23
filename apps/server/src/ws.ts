@@ -1,5 +1,5 @@
 import { SubscribeFrame } from '@forge/protocol/ws'
-import { ServerEvent, type Ephemeral } from '@forge/protocol/events'
+import { Ephemeral, ServerEvent } from '@forge/protocol/events'
 import type { NodeWebSocket } from '@hono/node-ws'
 import { replaySince } from './db/queries.js'
 import type { EventBus } from './events/bus.js'
@@ -51,6 +51,27 @@ function eventFromRow(row: MessageRow) {
 function matchesSession(event: Ephemeral, sessions: string[] | 'all') {
   if (sessions === 'all' || !('sessionId' in event)) return true
   return sessions.includes(event.sessionId)
+}
+
+// Session status travels as an ephemeral frame, which replay never repeats.
+// A client reads the status over HTTP and then subscribes, so a turn that
+// ends in between would leave it showing `running` for good. Sending the
+// stored status on subscribe closes that gap.
+function statusFrames(db: Database, sessions: string[]) {
+  if (!sessions.length) return []
+  const marks = sessions.map(() => '?').join(',')
+  const rows = db
+    .prepare(`SELECT id, status FROM sessions WHERE id IN (${marks})`)
+    .all(...sessions) as Array<{ id: string; status: string }>
+  return rows.flatMap((row) => {
+    const frame = Ephemeral.safeParse({
+      type: 'sessionStatus',
+      seq: null,
+      sessionId: row.id,
+      status: row.status,
+    })
+    return frame.success ? [frame.data] : []
+  })
 }
 
 export function websocketRoute(
@@ -118,6 +139,11 @@ export function websocketRoute(
         )
           void eventWriter.write(JSON.stringify(event))
       })
+      // Queue these in the same tick as the ephemeral subscription so no
+      // later status change can be overtaken by this older snapshot.
+      if (parsed.data.sessions !== 'all')
+        for (const frame of statusFrames(db, parsed.data.sessions))
+          void eventWriter.write(JSON.stringify(frame))
 
       while (current === generation) {
         const rows = replaySince(
