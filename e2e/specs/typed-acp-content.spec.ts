@@ -155,10 +155,6 @@ for (const scenario of [
               ).status,
           )
           .toBe('idle')
-        const childTool = parent
-          .getByRole('button', { name: /^child\b/i })
-          .first()
-        await childTool.click()
         const [childPage] = await Promise.all([
           page.waitForResponse(
             (response) =>

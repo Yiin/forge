@@ -342,8 +342,12 @@ test('native Claude streams tools, answers original requests, and receives a dra
       )
       .toBe(true)
     await writeFile(join(peer, 'continue'), '')
+    // The running tool is the live tail of the turn, so its group is open.
     await expect(
-      page.getByRole('button', { name: '$ pwd Running', exact: true }),
+      page.getByRole('button', { name: 'Ran 1 command', exact: true }),
+    ).toHaveAttribute('aria-expanded', 'true')
+    await expect(
+      page.getByRole('button', { name: 'Run pwd', exact: true }),
     ).toBeVisible()
     const permission = page.getByRole('region', {
       name: 'Tool permission request',
