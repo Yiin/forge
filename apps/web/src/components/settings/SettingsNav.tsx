@@ -32,7 +32,7 @@ export function SettingsNav() {
   const setDrawerOpen = useShellStore((state) => state.setDrawerOpen)
   return (
     <nav aria-label="Settings" className="flex min-h-full flex-col">
-      <p className="px-2 pt-3 pb-1 text-[11px] font-medium text-muted-foreground/60">
+      <p className="px-2 pt-3 pb-1 text-[11px] font-medium text-muted-foreground">
         Settings
       </p>
       <ul className="flex flex-col gap-0.5">

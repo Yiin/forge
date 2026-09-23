@@ -256,7 +256,7 @@ export function SettingsPage({
             {title}
           </h1>
           {count !== undefined && (
-            <span className="text-[13px] text-muted-foreground/70 tabular-nums">
+            <span className="text-[13px] text-muted-foreground tabular-nums">
               {count}
             </span>
           )}
@@ -338,7 +338,7 @@ export function SettingsMeta({
   return (
     <div
       className={cn(
-        'mt-px text-xs leading-[18px] text-muted-foreground/80',
+        'mt-px text-xs leading-[18px] text-muted-foreground',
         className,
       )}
     >
@@ -456,7 +456,7 @@ export function UsageMeter({
   const used = Math.round(clampPercent(percent))
   const reset = resetsAt ? formatResetText(resetsAt, nowMs) : null
   return (
-    <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground/80">
+    <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
       <span className="w-12 shrink-0 truncate" title={label}>
         {label}
       </span>

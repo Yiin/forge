@@ -144,7 +144,7 @@ export function AgentsSettings() {
               />
             ))}
             {rows.length === 0 && (
-              <p className="px-5 py-8 text-center text-[13px] text-muted-foreground/70">
+              <p className="px-5 py-8 text-center text-[13px] text-muted-foreground">
                 No agents configured yet.
               </p>
             )}
