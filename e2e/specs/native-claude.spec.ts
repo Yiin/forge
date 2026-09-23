@@ -101,6 +101,12 @@ test('native Claude promotes a draft and resumes the original binding after serv
     await expect(
       page.getByText('Native first response', { exact: true }),
     ).toBeVisible({ timeout: 15000 })
+    // The turn ends before this page subscribes, so only the status sent on
+    // subscribe tells it the session is idle again.
+    await expect(page.locator('.chat-working')).toHaveCount(0)
+    await expect(
+      page.getByRole('button', { name: 'Send', exact: true }),
+    ).toBeVisible()
     await page.getByRole('button', { name: 'Model', exact: true }).click()
     await expect(
       page.getByRole('option', { name: /Opus \(1M context\)/ }),
