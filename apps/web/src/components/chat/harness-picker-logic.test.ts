@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  type HarnessOption,
+  accountChoices,
   buildHarnessOptions,
   defaultSelection,
-  type HarnessOption,
+  selectHarness,
 } from './harness-picker-logic'
 import type { Account } from '@/lib/accounts-api'
 
@@ -169,4 +171,46 @@ it('retains an explicitly selected account for ACP and requires native account i
   expect(
     defaultSelection(options, { harness: 'claude', accountId: 'main' }),
   ).toEqual({ harness: 'claude', accountId: 'main' })
+})
+
+describe('harness tabs and account rows', () => {
+  const options: HarnessOption[] = [
+    {
+      harness: 'claude',
+      label: 'Claude',
+      accounts: [
+        {
+          id: 'main',
+          label: 'Main',
+          cooling: false,
+          coolingLabel: null,
+          disabled: false,
+        },
+      ],
+    },
+    {
+      harness: 'grok',
+      label: 'Grok',
+      accounts: [],
+      accountOptional: true,
+    },
+  ]
+  it('keeps the selection on the same harness and repairs it on another', () => {
+    const current = { harness: 'claude', accountId: 'main', model: 'opus' }
+    expect(selectHarness(options, 'claude', current)).toBe(current)
+    expect(selectHarness(options, 'grok', current)).toEqual({ harness: 'grok' })
+    expect(
+      selectHarness([...options].reverse(), 'claude', { harness: 'grok' }),
+    ).toEqual({
+      harness: 'claude',
+      accountId: 'main',
+    })
+  })
+  it('lists an optional default before the accounts', () => {
+    expect(
+      accountChoices({ ...options[0]!, accountOptional: true }).map(
+        (row) => row.label,
+      ),
+    ).toEqual(['Claude default', 'Main'])
+  })
 })

@@ -8,6 +8,10 @@ export function workspaceModeLabel(mode: WorkspaceMode) {
 export function currentWorkspaceLabel(worktreePath: string | null) {
   return worktreePath ? 'Current worktree' : 'Current checkout'
 }
+/** The read-only checkout label under a session's composer. */
+export function sessionCheckoutLabel(worktreePath: string | null) {
+  return worktreePath ? 'Worktree' : 'Local checkout'
+}
 export function effectiveWorkspaceMode(input: {
   worktreePath: string | null
   hasSession: boolean
@@ -30,7 +34,7 @@ export function branchTriggerLabel(input: {
   worktreePath: string | null
   branch: string | null
 }) {
-  if (!input.branch) return 'Select branch'
+  if (!input.branch) return 'Select ref'
   if (input.mode === 'worktree' && !input.worktreePath)
     return `From ${input.branch}`
   return input.branch

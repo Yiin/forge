@@ -417,7 +417,7 @@ export function SessionRoute() {
   }
   return (
     <div className="session-view flex h-full min-h-0 min-w-0">
-      <div className="relative flex min-w-0 flex-1 flex-col">
+      <div data-chat-pane className="relative flex min-w-0 flex-1 flex-col">
         {!loading && !loadError && <PathSwitcher sessionId={sessionId} />}
         {workspaceError && (
           <div
@@ -466,17 +466,7 @@ export function SessionRoute() {
                 <div className="chat-composer-shared-blur absolute -inset-8" />
               </div>
             </div>
-            <div className="chat-composer-lower-chrome pointer-events-auto relative z-10 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:px-5 sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]">
-              <WorkspaceBar
-                projectId={
-                  useSessionsStore
-                    .getState()
-                    .sessions.find((item) => item.id === sessionId)
-                    ?.projectId ?? ''
-                }
-                sessionId={sessionId}
-                disabled={(sessionStatus ?? loadedStatus) === 'running'}
-              />
+            <div className="chat-composer-lower-chrome pointer-events-auto relative z-10 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-5">
               {reviewComments.length > 0 && (
                 <section
                   aria-label="Review notes"
@@ -574,6 +564,18 @@ export function SessionRoute() {
                 onSend={send}
                 onQueue={queue}
                 sending={sending}
+                footer={
+                  <WorkspaceBar
+                    projectId={
+                      useSessionsStore
+                        .getState()
+                        .sessions.find((item) => item.id === sessionId)
+                        ?.projectId ?? ''
+                    }
+                    sessionId={sessionId}
+                    disabled={(sessionStatus ?? loadedStatus) === 'running'}
+                  />
+                }
               />
             </div>
           </div>

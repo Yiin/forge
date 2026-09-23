@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { groupComposerCommands } from './command-menu-logic'
+import {
+  emptyCommandText,
+  filterComposerCommands,
+  groupComposerCommands,
+} from './command-menu-logic'
 import type { ComposerCommand } from './CommandMenu'
 
 const commands: ComposerCommand[] = [
@@ -21,5 +25,29 @@ describe('command menu groups', () => {
     expect(
       groupComposerCommands(commands, 'path').map((item) => item.group),
     ).toEqual(['Files'])
+  })
+})
+
+describe('command menu filter', () => {
+  const rows: ComposerCommand[] = [
+    { id: 'a', label: '/review', group: 'Harness' },
+    { id: 'b', label: '/preview', group: 'Harness' },
+    { id: 'c', label: '/help', group: 'Built-in' },
+  ]
+  it('ranks prefix matches before substring matches, ignoring the sigil', () => {
+    expect(
+      filterComposerCommands(rows, 'slash-command', 'rev').map(
+        (row) => row.label,
+      ),
+    ).toEqual(['/review', '/preview'])
+    expect(
+      filterComposerCommands(rows, 'slash-command', '').map((row) => row.id),
+    ).toEqual(['c', 'a', 'b'])
+  })
+  it('names the empty state per trigger', () => {
+    expect(emptyCommandText(rows, 'skill')).toBe(
+      'No skills available for this project',
+    )
+    expect(emptyCommandText(rows, 'slash-command')).toBe('No matching commands')
   })
 })

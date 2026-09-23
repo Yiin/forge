@@ -2,20 +2,13 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { Composer } from '../components/chat/Composer'
 import { WorkspaceBar } from '../components/chat/WorkspaceBar'
+import { DestinationChips } from '../components/composer/DestinationChips'
+import { openProjectCreation } from '../components/ProjectCreationDialog'
 import { api } from '../lib/api'
 import { promoteDraftWithKey } from '../lib/draft-promotion'
 import { useDraftsStore } from '../stores/drafts'
 import { useMessagesStore } from '../stores/messages'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
 import type { ProjectSummary } from '../stores/sessions'
-import { FolderPicker } from '../components/FolderPicker'
 
 export function DraftRoute() {
   const { draftId } = useParams({ from: '/draft/$draftId' })
@@ -49,7 +42,7 @@ export function DraftRoute() {
   if (loading)
     return (
       <section
-        className="grid h-full place-content-center text-center text-sm text-muted-foreground"
+        className="grid h-full place-content-center text-center text-[13px] text-muted-foreground"
         role="status"
       >
         <p>Loading draft…</p>
@@ -61,82 +54,31 @@ export function DraftRoute() {
       !projects.some((project) => project.id === draft.projectId))
   )
     return (
-      <section className="grid h-full place-content-center gap-2 text-center">
-        <h1 className="text-xl font-semibold tracking-tight">
+      <section className="grid h-full place-content-center gap-1.5 text-center">
+        <h1 className="text-[16px] font-medium text-foreground">
           Draft not found
         </h1>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[13px] text-muted-foreground">
           This local draft is no longer available.
         </p>
       </section>
     )
+  const openDraft = (next: { id: string }) =>
+    navigate({
+      to: '/draft/$draftId',
+      params: { draftId: next.id },
+      replace: true,
+    })
+  const promoting = draft.promotionState === 'promoting'
+  // zeron's new thread: an empty canvas with the composer centred 8px low,
+  // the destination chips above the pill, and the Git chips below it.
   return (
     <section
-      className="relative flex h-full min-h-0 flex-col"
-      aria-label="Local draft"
+      data-chat-pane
+      aria-label="New session"
+      className="relative flex h-full min-h-0 flex-col overflow-y-auto"
     >
-      <div className="m-auto flex w-full max-w-2xl flex-col items-center gap-6 px-4 py-10">
-        <header className="flex flex-col items-center gap-3 text-center">
-          <Badge variant="outline" className="uppercase tracking-wide">
-            Local draft
-          </Badge>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            What do you want to build?
-          </h1>
-          {draft.promotionState === 'promoting' && (
-            <p role="status" className="text-sm text-muted-foreground">
-              Starting session…
-            </p>
-          )}
-          <div className="flex flex-col items-center gap-1.5">
-            <label className="sr-only" htmlFor="draft-project">
-              Project
-            </label>
-            {draft.projectId ? (
-              <Select
-                value={draft.projectId}
-                items={projects.map((project) => ({
-                  value: project.id,
-                  label: project.name,
-                }))}
-                onValueChange={(value) => {
-                  if (value === null || value === draft.projectId) return
-                  const next = useDraftsStore.getState().getOrCreate(value)
-                  void navigate({
-                    to: '/draft/$draftId',
-                    params: { draftId: next.id },
-                    replace: true,
-                  })
-                }}
-              >
-                <SelectTrigger
-                  id="draft-project"
-                  aria-label="Draft project"
-                  className="min-w-[220px]"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.map((project) => (
-                    <SelectItem key={project.id} value={project.id}>
-                      {project.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <FolderPicker
-                initialPath={draft.targetPath}
-                onSelect={(targetPath) =>
-                  useDraftsStore.getState().update(draft.id, { targetPath })
-                }
-              />
-            )}
-          </div>
-        </header>
-        {draft.projectId && (
-          <WorkspaceBar projectId={draft.projectId} draftId={draft.id} />
-        )}
+      <div className="m-auto w-full max-w-3xl px-4 pt-12 pb-8">
         <Composer
           sessionId={draft.id}
           draftProjectId={draft.projectId}
@@ -144,8 +86,52 @@ export function DraftRoute() {
           accountId={draft.accountId}
           model={draft.model}
           draftMode
-          sending={draft.promotionState === 'promoting'}
+          sending={promoting}
           initialText={draft.prompt}
+          destination={
+            <>
+              {promoting && (
+                <span
+                  role="status"
+                  className="mr-auto truncate text-[12px] text-muted-foreground"
+                >
+                  Starting session…
+                </span>
+              )}
+              <DestinationChips
+                projects={projects}
+                projectId={draft.projectId}
+                targetPath={draft.targetPath}
+                disabled={promoting}
+                onProject={(id) =>
+                  void openDraft(useDraftsStore.getState().getOrCreate(id))
+                }
+                onNewProject={openProjectCreation}
+                onNoProject={() =>
+                  void api
+                    .listDirectories()
+                    .catch(() => null)
+                    .then((listing) => {
+                      const path = (listing as { path?: string } | null)?.path
+                      if (!path) return
+                      return openDraft(
+                        useDraftsStore
+                          .getState()
+                          .getOrCreate(undefined, undefined, undefined, path),
+                      )
+                    })
+                }
+                onFolder={(targetPath) =>
+                  useDraftsStore.getState().update(draft.id, { targetPath })
+                }
+              />
+            </>
+          }
+          footer={
+            draft.projectId ? (
+              <WorkspaceBar projectId={draft.projectId} draftId={draft.id} />
+            ) : undefined
+          }
           onTextChange={(prompt) =>
             useDraftsStore.getState().update(draft.id, { prompt })
           }

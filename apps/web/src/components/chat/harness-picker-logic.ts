@@ -107,3 +107,48 @@ export function defaultSelection(
   }
   return { harness: '' }
 }
+
+export type AccountChoice = {
+  accountId?: string
+  label: string
+  coolingLabel: string | null
+  disabled: boolean
+}
+
+/** The account rows one harness offers: an optional default, then accounts. */
+export function accountChoices(option: HarnessOption): AccountChoice[] {
+  return [
+    ...(option.accountOptional
+      ? [
+          {
+            label: option.accounts.length
+              ? `${option.label} default`
+              : option.label,
+            coolingLabel: null,
+            disabled: false,
+          },
+        ]
+      : []),
+    ...option.accounts.map((account) => ({
+      accountId: account.id,
+      label: account.label,
+      coolingLabel: account.cooling ? account.coolingLabel : null,
+      disabled: account.disabled,
+    })),
+  ]
+}
+
+/**
+ * Switching to another harness picks its first usable account through
+ * defaultSelection. Staying on the same harness keeps the whole selection.
+ */
+export function selectHarness(
+  options: ReadonlyArray<HarnessOption>,
+  harness: string,
+  current: HarnessSelection,
+): HarnessSelection {
+  if (harness === current.harness) return current
+  const option = options.find((item) => item.harness === harness)
+  if (!option) return current
+  return defaultSelection([option], { harness })
+}

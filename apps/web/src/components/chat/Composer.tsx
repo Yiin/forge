@@ -1,29 +1,26 @@
-import { Paperclip, Star } from 'lucide-react'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { buttonVariants } from '@/components/ui/button'
+import { Copy, Paperclip, TriangleAlert } from 'lucide-react'
 import {
   Tooltip,
   TooltipPopup,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { Spinner } from '@/components/ui/spinner'
-import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
-import { useEffect, useRef, useState } from 'react'
-import type { ClipboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type {
+  ClipboardEvent,
+  DragEvent as ReactDragEvent,
+  ReactNode,
+  RefObject,
+} from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../../lib/api'
 import { useMessagesStore } from '../../stores/messages'
 import { AttachmentChips } from '../composer/AttachmentChips'
 import { QueuedPrompts } from '../composer/QueuedPrompts'
+import { ModelChip } from '../composer/ModelChip'
+import { PILL_ICON_BUTTON_CLASS } from '../composer/zeron-styles'
+import { EDGE_FADE_CLASS } from '../composer/useEdgeFade'
 import type { QueuedPrompt } from '@forge/protocol/session'
 import {
   attachmentUploadsReducer,
@@ -31,7 +28,11 @@ import {
   completedAttachmentIds,
   initialAttachmentUploads,
 } from '../composer/attachmentUploads'
-import { CommandMenu, type ComposerCommand } from './CommandMenu'
+import {
+  CommandMenu,
+  type CommandMenuHandle,
+  type ComposerCommand,
+} from './CommandMenu'
 import {
   detectComposerTrigger,
   replaceComposerTrigger,
@@ -43,6 +44,7 @@ import {
   accountsApi,
   type Account,
   type HarnessAccountSnapshot,
+  type HarnessPickerEntry,
 } from '../../lib/accounts-api'
 import { ContextWindowMeter } from './ContextWindowMeter'
 import { useSessionsStore } from '../../stores/sessions'
@@ -51,8 +53,7 @@ import {
   defaultSelection,
   type HarnessSelection,
 } from './harness-picker-logic'
-import { modelResponse, resolveModelTriggerLabel } from './model-picker-logic'
-import { ConfigOptionsPicker } from './ConfigOptionsPicker'
+import { modelResponse } from './model-picker-logic'
 import {
   parseConfigOptionsResponse,
   pendingChanges,
@@ -61,12 +62,14 @@ import {
   type ConfigSelections,
 } from './config-options-logic'
 
-/** Ghost pill trigger: the composer footer's shared look for its selects. */
-const PILL_TRIGGER_CLASS =
-  'h-9 w-auto min-w-0 max-w-40 shrink-0 gap-1 border-transparent bg-transparent px-2 text-xs text-muted-foreground shadow-none before:hidden hover:bg-accent/50 hover:text-foreground/80 sm:h-8 sm:max-w-48'
-
 const commandDefaults: ComposerCommand[] = [
-  { id: 'btw', label: '/btw', group: 'Built-in', value: '/btw ' },
+  {
+    id: 'btw',
+    label: '/btw',
+    group: 'Built-in',
+    value: '/btw ',
+    detail: 'Ask a side question in a new chat',
+  },
   { id: 'help', label: '/help', group: 'Built-in', value: '/help' },
   { id: 'clear', label: '/clear', group: 'Built-in', value: '/clear' },
 ]
@@ -87,12 +90,65 @@ function clipboardExtension(type: string) {
   }
 }
 
+const hasFiles = (transfer: DataTransfer | null) =>
+  [...(transfer?.types ?? [])].includes('Files')
+
+/** The interactive controls a pill mouse-down must not steal focus from. */
+const INTERACTIVE = 'button, a, input, textarea, label, [role="option"]'
+
+/**
+ * Floats its children above the pill at the pill's width. It renders in a
+ * portal because the session's composer overlay scrolls, which would clip
+ * anything that sticks out above it.
+ */
+function AbovePill({
+  pill,
+  children,
+}: {
+  pill: RefObject<HTMLDivElement | null>
+  children: ReactNode
+}) {
+  const [rect, setRect] = useState<DOMRect | null>(null)
+  useLayoutEffect(() => {
+    const node = pill.current
+    if (!node) return
+    const update = () => setRect(node.getBoundingClientRect())
+    update()
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(update)
+    observer?.observe(node)
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [pill])
+  if (!rect) return null
+  return createPortal(
+    <div
+      className="fixed z-50 flex flex-col justify-end pb-1.5"
+      style={{
+        left: rect.left,
+        width: rect.width,
+        bottom: window.innerHeight - rect.top,
+        maxHeight: Math.max(120, rect.top - 8),
+      }}
+    >
+      {children}
+    </div>,
+    document.body,
+  )
+}
+
 export function Composer({
   sessionId,
   harness,
   accountId,
   model,
-  protocol,
   running = false,
   onInterrupt,
   onSend,
@@ -103,6 +159,8 @@ export function Composer({
   initialText = '',
   onTextChange,
   onSelectionChange,
+  footer,
+  destination,
 }: {
   sessionId: string
   harness?: string
@@ -127,6 +185,10 @@ export function Composer({
   initialText?: string
   onTextChange?: (text: string) => void
   onSelectionChange?: (selection: HarnessSelection) => void
+  /** Left side of the row under the pill: checkout and branch. */
+  footer?: ReactNode
+  /** New-thread only: the chips that float above the pill, right-aligned. */
+  destination?: ReactNode
 }) {
   const [text, setText] = useState(initialText)
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null)
@@ -139,12 +201,17 @@ export function Composer({
     model,
   })
   const [models, setModels] = useState<ReturnType<typeof modelResponse>>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [configOptions, setConfigOptions] = useState<ConfigOption[]>([])
   const [configSelections, setConfigSelections] = useState<ConfigSelections>({})
   const [interrupting, setInterrupting] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const modelRequestAccount = useRef<string | undefined>(undefined)
   const submitting = useRef(false)
+  const form = useRef<HTMLFormElement>(null)
+  const menu = useRef<CommandMenuHandle>(null)
+  const [pane, setPane] = useState<Element | null>(null)
   const volatile = useMessagesStore((state) => state.volatile)
   const queued = useMessagesStore(
     (state) => state.queuedBySession[sessionId] ?? EMPTY_QUEUED_PROMPTS,
@@ -152,6 +219,9 @@ export function Composer({
   const contextWindow = useSessionsStore(
     (state) => state.contextWindow[sessionId],
   )
+  useEffect(() => {
+    setPane(form.current?.closest('[data-chat-pane]') ?? null)
+  }, [])
   useEffect(() => {
     const events = volatile.filter(
       (event): event is Extract<typeof event, { type: 'availableCommands' }> =>
@@ -161,30 +231,31 @@ export function Composer({
     if (latest)
       setCommands((items) => [
         ...items.filter((item) => item.group !== 'Harness'),
-        ...latest.commands.flatMap((value, index) =>
-          typeof value === 'string'
-            ? [
-                {
-                  id: `h-${index}`,
-                  label: value,
-                  group: 'Harness' as const,
-                  value,
-                },
-              ]
-            : typeof value === 'object' &&
-                value !== null &&
-                typeof (value as { name?: unknown }).name === 'string' &&
-                (value as { name: string }).name.trim()
-              ? [
-                  {
-                    id: `h-${index}`,
-                    label: `/${(value as { name: string }).name}`,
-                    group: 'Harness' as const,
-                    value: `/${(value as { name: string }).name}`,
-                  },
-                ]
-              : [],
-        ),
+        ...latest.commands.flatMap((value, index) => {
+          if (typeof value === 'string')
+            return [
+              {
+                id: `h-${index}`,
+                label: value,
+                group: 'Harness' as const,
+                value,
+              },
+            ]
+          if (typeof value !== 'object' || value === null) return []
+          const entry = value as { name?: unknown; description?: unknown }
+          if (typeof entry.name !== 'string' || !entry.name.trim()) return []
+          return [
+            {
+              id: `h-${index}`,
+              label: `/${entry.name}`,
+              group: 'Harness' as const,
+              value: `/${entry.name}`,
+              ...(typeof entry.description === 'string' && entry.description
+                ? { detail: entry.description }
+                : {}),
+            },
+          ]
+        }),
       ])
   }, [volatile, sessionId])
   useEffect(() => {
@@ -209,6 +280,7 @@ export function Composer({
               label: `$${skill.name}`,
               group: 'Skills' as const,
               value: `$${skill.name} `,
+              ...(skill.description ? { detail: skill.description } : {}),
             })),
           ]),
       )
@@ -265,15 +337,7 @@ export function Composer({
         setConfigSelections({})
       })
   }, [draftMode, sessionId, sending])
-  const [harnesses, setHarnesses] = useState<
-    Array<{
-      key: string
-      name?: string
-      enabled?: boolean
-      protocol?: 'acp' | 'pty'
-      adapterKind?: 'native' | 'acp' | 'pty' | 'custom'
-    }>
-  >(harness ? [{ key: harness }] : [])
+  const [harnesses, setHarnesses] = useState<HarnessPickerEntry[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [accountSnapshots, setAccountSnapshots] = useState<
     HarnessAccountSnapshot[]
@@ -284,6 +348,7 @@ export function Composer({
     const requestedAccountId = selection.accountId
     modelRequestAccount.current = requestedAccountId
     setModels([])
+    setModelsLoading(true)
     const liveModels: Promise<ReturnType<typeof modelResponse>> = draftMode
       ? Promise.resolve([] as ReturnType<typeof modelResponse>)
       : fetch(`/api/sessions/${encodeURIComponent(sessionId)}/models`)
@@ -301,6 +366,7 @@ export function Composer({
       if (modelRequestAccount.current !== requestedAccountId) return
       const byId = new Map(account.concat(live).map((item) => [item.id, item]))
       setModels([...byId.values()])
+      setModelsLoading(false)
     })
   }, [draftMode, selection.accountId, sessionId])
   useEffect(() => {
@@ -330,13 +396,28 @@ export function Composer({
       .then(setAccountSnapshots)
       .catch(() => undefined)
   }, [])
-  const harnessOptions = buildHarnessOptions(harnesses, accounts, Date.now())
-  const showHarnessPicker =
-    harnessOptions.length > 0 || (!accountsLoaded && Boolean(selection.harness))
-  const selected =
-    accountsLoaded && harnessesLoaded
-      ? defaultSelection(harnessOptions, selection)
-      : selection
+  // Mod+/ opens the model picker, as in zeron.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === '/') {
+        event.preventDefault()
+        setPickerOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+  const harnessEntries =
+    harnesses.length > 0 ? harnesses : harness ? [{ key: harness }] : []
+  const harnessOptions = buildHarnessOptions(
+    harnessEntries,
+    accounts,
+    Date.now(),
+  )
+  const catalogLoaded = accountsLoaded && harnessesLoaded
+  const selected = catalogLoaded
+    ? defaultSelection(harnessOptions, selection)
+    : selection
   useEffect(() => {
     if (
       selected.harness !== selection.harness ||
@@ -363,6 +444,7 @@ export function Composer({
       command.value ?? command.label,
     )
     update(result.text, result.cursor)
+    setTrigger(null)
     requestAnimationFrame(() => {
       textarea.current?.focus()
       textarea.current?.setSelectionRange(result.cursor, result.cursor)
@@ -419,22 +501,38 @@ export function Composer({
       )
     }
   }
+  const addFiles = (files: FileList | File[]) => {
+    for (const file of files) {
+      const normalized = file.name
+        ? file
+        : new File(
+            [file],
+            `pasted-${Date.now()}.${clipboardExtension(file.type)}`,
+            {
+              type: file.type,
+              lastModified: file.lastModified,
+            },
+          )
+      void upload(normalized)
+    }
+  }
+  // The drop zone is the whole chat pane, not just the pill.
   useEffect(() => {
-    const hasFiles = (event: DragEvent) =>
-      [...(event.dataTransfer?.types ?? [])].includes('Files')
     const over = (event: DragEvent) => {
       if (
-        hasFiles(event) &&
+        hasFiles(event.dataTransfer) &&
         !(event.target as Element | null)?.closest('.composer-root')
       ) {
         event.preventDefault()
         setDragging(true)
       }
     }
-    const leave = () => setDragging(false)
+    const leave = (event: DragEvent) => {
+      if (!event.relatedTarget) setDragging(false)
+    }
     const drop = (event: DragEvent) => {
       if (
-        !hasFiles(event) ||
+        !hasFiles(event.dataTransfer) ||
         (event.target as Element | null)?.closest('.composer-root')
       )
         return
@@ -502,20 +600,15 @@ export function Composer({
       setInterrupting(false)
     }
   }
-  const addFiles = (files: FileList | File[]) => {
-    for (const file of files) {
-      const normalized = file.name
-        ? file
-        : new File(
-            [file],
-            `pasted-${Date.now()}.${clipboardExtension(file.type)}`,
-            {
-              type: file.type,
-              lastModified: file.lastModified,
-            },
-          )
-      void upload(normalized)
-    }
+  const sendQueuedNow = (id: string) => {
+    void api
+      .sendQueuedNow(sessionId, id)
+      .then(() => {
+        useMessagesStore.getState().removeQueued(sessionId, id)
+      })
+      // The server republishes the queue, so a refused send needs no local
+      // rollback.
+      .catch(() => undefined)
   }
   const paste = (event: ClipboardEvent) => {
     const files = [...event.clipboardData.files]
@@ -525,28 +618,56 @@ export function Composer({
     }
   }
   const hasContent = Boolean(text.trim()) || uploads.items.length > 0
-  const canSubmit =
-    !sending &&
-    hasContent &&
-    canSendUploads(uploads) &&
-    Boolean(selected.accountId || canSelectWithoutAccount || !accountsLoaded)
-  const stopping = running && onInterrupt && !hasContent
+  const noAgents = catalogLoaded && harnessOptions.length === 0
+  const blocked =
+    sending ||
+    noAgents ||
+    !canSendUploads(uploads) ||
+    Boolean(accountsLoaded && !selected.accountId && !canSelectWithoutAccount)
+  const stopping = Boolean(running && onInterrupt && !hasContent)
   const accountSnapshot = accountSnapshots.find(
     (snapshot) => snapshot.accountId === selected.accountId,
   )
-  const modelTrigger = resolveModelTriggerLabel(selection.model, models)
-  const {
-    form,
-    controls,
-    send: sendControls,
-    textarea,
-    expanded,
-  } = useComposerLayout(
+  const { pill, chip, textarea, mirror, expanded } = useComposerLayout(
     text,
-    draftMode ||
-      uploads.items.length > 0 ||
-      queued.length > 0 ||
-      Boolean(sendError),
+    draftMode,
+  )
+  const pickable = draftMode ? [] : pickableOptions(configOptions)
+  const onFormDrag = (event: ReactDragEvent) => {
+    if (!hasFiles(event.dataTransfer)) return
+    event.preventDefault()
+    setDragging(true)
+  }
+
+  const attach = (
+    <TooltipProvider delay={300}>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <label
+              className={cn(
+                PILL_ICON_BUTTON_CLASS,
+                '[grid-area:attach] self-center has-focus-visible:bg-ink/10',
+                expanded ? 'mb-[10px] ml-3 self-end' : 'ml-2',
+              )}
+            />
+          }
+        >
+          <Paperclip aria-hidden className="size-[18px]" />
+          <input
+            aria-label="Attach files"
+            type="file"
+            multiple
+            className="sr-only"
+            onChange={(event) => {
+              addFiles(event.target.files ?? [])
+              event.target.value = ''
+            }}
+          />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Attach files</TooltipPopup>
+      </Tooltip>
+    </TooltipProvider>
   )
 
   return (
@@ -555,93 +676,123 @@ export function Composer({
       <form
         ref={form}
         data-composer-mode={expanded ? 'expanded' : 'compact'}
-        className="composer-root mx-auto w-full min-w-0 max-w-3xl"
+        className="composer-root mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-2"
         onSubmit={(event) => {
           event.preventDefault()
           void submit()
         }}
-        onDragEnter={(event) => {
-          event.preventDefault()
-          setDragging(true)
+        onDragEnter={onFormDrag}
+        onDragOver={(event) => {
+          if (hasFiles(event.dataTransfer)) event.preventDefault()
         }}
-        onDragOver={(event) => event.preventDefault()}
         onDragLeave={(event) => {
-          if (event.currentTarget === event.target) setDragging(false)
+          if (!event.currentTarget.contains(event.relatedTarget as Node))
+            setDragging(false)
         }}
         onDrop={(event) => {
+          if (!hasFiles(event.dataTransfer)) return
           event.preventDefault()
           setDragging(false)
           addFiles(event.dataTransfer.files)
         }}
       >
-        <div className="group relative rounded-[26px] transition-colors duration-200">
-          {dragging && (
-            <div className="pointer-events-none absolute -inset-2 z-5 grid place-items-center rounded-[24px] border-2 border-dashed border-primary bg-primary/10 text-sm font-medium text-primary">
-              Drop files to upload
+        {sendError && (
+          <div
+            role="alert"
+            onClick={() => setSendError(null)}
+            className="mx-1 mt-1.5 flex cursor-pointer flex-col gap-1 rounded-[12px] border border-destructive/16 bg-destructive/5 px-3 py-2 text-[12px] leading-4 text-destructive-foreground/90 duration-500 animate-in fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none"
+          >
+            <span className="flex items-center gap-1.5">
+              <TriangleAlert
+                aria-hidden
+                className="size-3.5 text-destructive"
+              />
+              <span className="font-semibold">Error</span>
+              <span className="flex-1" />
+              <button
+                type="button"
+                aria-label="Copy error"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  void navigator.clipboard?.writeText(sendError)
+                }}
+                className="grid size-5 cursor-pointer place-items-center rounded-[6px] hover:bg-destructive/12"
+              >
+                <Copy aria-hidden className="size-3" />
+              </button>
+            </span>
+            <span className="break-words">{sendError}</span>
+          </div>
+        )}
+        {queued.length > 0 && (
+          <QueuedPrompts
+            items={queued}
+            onRemove={(id) => {
+              void api.deleteQueued(sessionId, id).then(() => {
+                useMessagesStore.getState().removeQueued(sessionId, id)
+              })
+            }}
+            onEdit={(item: QueuedPrompt) => {
+              void api.deleteQueued(sessionId, item.id).then(() => {
+                useMessagesStore.getState().removeQueued(sessionId, item.id)
+                update(item.text)
+                textarea.current?.focus()
+              })
+            }}
+            onMove={(id, target) => {
+              const index = queued.findIndex((item) => item.id === id)
+              if (index < 0 || target < 0 || target >= queued.length) return
+              const next = [...queued]
+              const [moved] = next.splice(index, 1)
+              next.splice(target, 0, moved!)
+              useMessagesStore.getState().setQueued(sessionId, next)
+              void api
+                .reorderQueued(
+                  sessionId,
+                  next.map((item) => item.id),
+                )
+                .catch(() => {
+                  useMessagesStore.getState().setQueued(sessionId, queued)
+                })
+            }}
+            onSendNow={sendQueuedNow}
+          />
+        )}
+        <div className="relative z-10">
+          {destination && (
+            <div className="absolute inset-x-[26px] -top-7 flex h-5 items-center justify-end gap-1">
+              {destination}
             </div>
           )}
+          {trigger && (
+            <AbovePill pill={pill}>
+              <CommandMenu
+                ref={menu}
+                commands={commands}
+                kind={trigger.kind}
+                query={trigger.query}
+                onSelect={select}
+              />
+            </AbovePill>
+          )}
           <div
+            ref={pill}
+            onMouseDown={(event) => {
+              if (pickerOpen || (event.target as Element).closest(INTERACTIVE))
+                return
+              event.preventDefault()
+              textarea.current?.focus()
+            }}
             className={cn(
-              'chat-composer-glass rounded-[26px] border transition-[background-color] duration-200 has-focus-visible:border-foreground/40',
-              !expanded && 'grid grid-cols-[minmax(0,1fr)_auto] items-center',
-              dragging
-                ? 'border-primary/70 bg-accent/45'
-                : 'border-black/12 dark:border-transparent dark:inset-ring-1 dark:inset-ring-white/5',
+              'chat-composer-glass @container relative grid overflow-hidden border',
+              draftMode ? 'rounded-[26px]' : 'rounded-[22px]',
+              expanded
+                ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_42px] [grid-template-areas:'strip_strip_strip'_'input_input_input'_'attach_chip_send'] pointer-coarse:grid-rows-[auto_auto_52px]"
+                : "grid-cols-[auto_minmax(0,1fr)_auto_auto] [grid-template-areas:'strip_strip_strip_strip'_'attach_input_chip_send']",
             )}
           >
-            {queued.length > 0 && (
-              <>
-                <QueuedPrompts
-                  items={queued}
-                  onRemove={(id) => {
-                    void api.deleteQueued(sessionId, id).then(() => {
-                      useMessagesStore.getState().removeQueued(sessionId, id)
-                    })
-                  }}
-                  onEdit={(item: QueuedPrompt) => {
-                    void api.deleteQueued(sessionId, item.id).then(() => {
-                      useMessagesStore
-                        .getState()
-                        .removeQueued(sessionId, item.id)
-                      update(item.text)
-                      textarea.current?.focus()
-                    })
-                  }}
-                  onMove={(id, direction) => {
-                    const index = queued.findIndex((item) => item.id === id)
-                    const target = index + direction
-                    if (index < 0 || target < 0 || target >= queued.length)
-                      return
-                    const next = [...queued]
-                    ;[next[index], next[target]] = [next[target], next[index]]
-                    useMessagesStore.getState().setQueued(sessionId, next)
-                    void api
-                      .reorderQueued(
-                        sessionId,
-                        next.map((item) => item.id),
-                      )
-                      .catch(() => {
-                        useMessagesStore.getState().setQueued(sessionId, queued)
-                      })
-                  }}
-                  onSendNow={(id) => {
-                    void api
-                      .sendQueuedNow(sessionId, id)
-                      .then(() => {
-                        useMessagesStore.getState().removeQueued(sessionId, id)
-                      })
-                      // The server republishes the queue, so a refused send
-                      // needs no local rollback.
-                      .catch(() => undefined)
-                  }}
-                />
-                <p className="px-2 pt-1 text-xs text-muted-foreground">
-                  Sends when the current turn ends.
-                </p>
-              </>
-            )}
             {uploads.items.length > 0 && (
-              <div className="px-3 pt-3 sm:px-4">
+              <div className="[grid-area:strip] px-4 pt-3">
                 <AttachmentChips
                   items={uploads.items}
                   onRetry={(id) => {
@@ -656,362 +807,179 @@ export function Composer({
                 />
               </div>
             )}
-            <div className="relative min-w-0 px-4">
-              {trigger && (
-                <div className="absolute inset-x-0 bottom-full z-20 mb-2">
-                  <CommandMenu
-                    commands={commands}
-                    kind={trigger.kind}
-                    query={trigger.query}
-                    onSelect={select}
-                    onDismiss={() => setTrigger(null)}
-                  />
-                </div>
+            {attach}
+            <textarea
+              ref={textarea}
+              id="message-composer"
+              aria-label="Message composer"
+              placeholder="Do anything…"
+              value={text}
+              rows={1}
+              className={cn(
+                'block w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-[22.75px] text-foreground caret-primary outline-none [grid-area:input] placeholder:text-faint-foreground sm:text-[14px]',
+                'transition-[height] duration-180 ease-[cubic-bezier(0,0,0.58,1)] motion-reduce:transition-none',
+                EDGE_FADE_CLASS,
+                expanded ? 'px-4 pt-4 pb-1' : 'px-2 py-3',
               )}
-              <textarea
-                ref={textarea}
-                id="message-composer"
-                aria-label="Message composer"
-                placeholder={
-                  harness ? `Message ${harness}…` : 'Send a message…'
-                }
-                value={text}
-                rows={1}
-                className={cn(
-                  'block w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-[22.75px] text-foreground placeholder:text-muted-foreground focus:outline-none sm:text-[14px]',
-                  expanded
-                    ? 'min-h-[76px] max-h-[260px] pt-4 pb-1'
-                    : 'h-[47px] py-3',
-                )}
-                onPaste={paste}
-                onChange={(event) => update(event.target.value)}
-                onKeyDown={(event) => {
-                  if (trigger && event.key === 'Escape') {
+              onPaste={paste}
+              onBlur={() => setTrigger(null)}
+              onChange={(event) => update(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return
+                if (trigger) {
+                  if (event.key === 'Escape') {
                     event.preventDefault()
                     setTrigger(null)
                     return
                   }
-                  if (
-                    trigger &&
-                    (event.key === 'ArrowDown' || event.key === 'ArrowUp')
-                  ) {
+                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                     event.preventDefault()
-                    const item = document.querySelector<HTMLElement>(
-                      '[data-composer-menu] [cmdk-item]',
-                    )
-                    item?.focus()
+                    menu.current?.move(event.key === 'ArrowDown' ? 1 : -1)
                     return
                   }
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    if (event.nativeEvent.isComposing) return
-                    if (trigger) {
+                  if (
+                    (event.key === 'Enter' && !event.shiftKey) ||
+                    event.key === 'Tab'
+                  ) {
+                    if (menu.current?.accept()) {
                       event.preventDefault()
-                      const item = document.querySelector<HTMLElement>(
-                        '[data-composer-menu] [cmdk-item]',
-                      )
-                      item?.click()
                       return
                     }
-                    event.preventDefault()
-                    void submit()
                   }
+                }
+                if (event.key !== 'Enter' || event.shiftKey) return
+                event.preventDefault()
+                // Mod+Enter on an empty composer sends the newest queued row.
+                if (
+                  (event.metaKey || event.ctrlKey) &&
+                  !hasContent &&
+                  queued.length > 0
+                ) {
+                  sendQueuedNow(queued.at(-1)!.id)
+                  return
+                }
+                void submit()
+              }}
+            />
+            <textarea
+              ref={mirror}
+              aria-hidden
+              tabIndex={-1}
+              readOnly
+              rows={1}
+              className="pointer-events-none invisible absolute inset-x-0 top-0 h-0 resize-none overflow-hidden border-0 px-4 pt-4 pb-1 text-[16px] leading-[22.75px] sm:text-[14px]"
+            />
+            <div
+              ref={chip}
+              className={cn(
+                'flex min-w-0 [grid-area:chip]',
+                expanded
+                  ? 'mb-2 ml-0.5 max-w-[248px] self-end justify-self-start'
+                  : 'max-w-[45cqw] self-center',
+              )}
+            >
+              <ModelChip
+                harnessOptions={harnessOptions}
+                harnessEntries={harnessEntries}
+                accounts={accounts}
+                loaded={catalogLoaded}
+                selection={selection}
+                models={models}
+                modelsLoading={modelsLoading}
+                configOptions={pickable}
+                configSelections={configSelections}
+                configDisabled={running || sending}
+                hero={draftMode}
+                open={pickerOpen}
+                onOpenChange={setPickerOpen}
+                returnFocus={textarea}
+                onSelectionChange={(next) => {
+                  setSelection(next)
+                  onSelectionChange?.(next)
+                }}
+                onConfigChange={(id, value) => {
+                  const nextSelections = { ...configSelections, [id]: value }
+                  setConfigSelections(nextSelections)
+                  onSelectionChange?.({
+                    ...selected,
+                    configOptions: pendingChanges(
+                      configOptions,
+                      nextSelections,
+                    ),
+                  })
                 }}
               />
             </div>
-            {sendError && (
-              <p
-                className="px-3 pb-1 text-xs text-destructive sm:px-4"
-                role="alert"
-              >
-                {sendError}
-              </p>
-            )}
-            <div
+            <button
+              type={stopping ? 'button' : 'submit'}
               className={cn(
-                'flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2.5',
-                expanded
-                  ? 'h-[46px] pt-1 pb-2.5 pointer-coarse:h-[58px]'
-                  : 'h-11 py-1.5',
+                'relative grid size-7 shrink-0 place-items-center rounded-full bg-foreground text-background outline-none [grid-area:send] enabled:cursor-pointer enabled:hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-35',
+                'pointer-coarse:after:absolute pointer-coarse:after:-inset-2 pointer-coarse:after:content-[""]',
+                expanded ? 'mr-3 mb-[10px] ml-2 self-end' : 'mx-2 self-center',
               )}
+              disabled={stopping ? interrupting : blocked}
+              title={
+                stopping
+                  ? 'Stop the current turn'
+                  : !canSendUploads(uploads)
+                    ? 'Wait for uploads to finish or remove failed files'
+                    : undefined
+              }
+              aria-label={
+                stopping ? 'End turn' : running ? 'Queue message' : 'Send'
+              }
+              onClick={stopping ? () => void endTurn() : undefined}
             >
-              <div
-                ref={controls}
-                className="-m-1 flex min-w-0 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              >
-                <TooltipProvider delay={300}>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <label
-                          className={cn(
-                            buttonVariants({
-                              variant: 'ghost',
-                              size: 'icon-sm',
-                            }),
-                            'shrink-0 cursor-pointer text-muted-foreground hover:text-foreground/80',
-                          )}
-                        />
-                      }
-                    >
-                      <Paperclip className="size-4" />
-                      <input
-                        aria-label="Attach files"
-                        type="file"
-                        multiple
-                        className="sr-only"
-                        onChange={(event) => {
-                          addFiles(event.target.files ?? [])
-                          event.target.value = ''
-                        }}
-                      />
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">Attach files</TooltipPopup>
-                  </Tooltip>
-                </TooltipProvider>
-                {showHarnessPicker && (
-                  <Separator
-                    orientation="vertical"
-                    className="mx-0.5 hidden h-4 sm:block"
-                  />
-                )}
-                {showHarnessPicker ? (
-                  <Select
-                    value={
-                      selection.accountId
-                        ? `${selection.harness}:${selection.accountId}`
-                        : selection.harness
-                    }
-                    items={harnessOptions.flatMap((option) => [
-                      ...(option.accountOptional
-                        ? [
-                            {
-                              value: option.harness,
-                              label: option.accounts.length
-                                ? `${option.label} default`
-                                : option.label,
-                            },
-                          ]
-                        : []),
-                      ...option.accounts.map((account) => ({
-                        value: `${option.harness}:${account.id}`,
-                        label: account.label,
-                      })),
-                    ])}
-                    onValueChange={(value) => {
-                      if (value === null) return
-                      const separator = value.indexOf(':')
-                      const picked =
-                        separator < 0
-                          ? { harness: value, accountId: undefined }
-                          : {
-                              harness: value.slice(0, separator),
-                              accountId: value.slice(separator + 1),
-                            }
-                      // A model id only carries over within the same harness.
-                      const nextSelection =
-                        picked.harness === selection.harness
-                          ? { ...selection, ...picked }
-                          : picked
-                      setSelection(nextSelection)
-                      onSelectionChange?.(nextSelection)
-                    }}
-                  >
-                    <SelectTrigger
-                      size="sm"
-                      aria-label="Harness"
-                      className={PILL_TRIGGER_CLASS}
-                    >
-                      <SelectValue placeholder="Harness" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {harnessOptions.map((option) => (
-                        <SelectGroup key={option.harness}>
-                          <SelectLabel>{option.label}</SelectLabel>
-                          {option.accountOptional && (
-                            <SelectItem value={option.harness}>
-                              {option.accounts.length
-                                ? `${option.label} default`
-                                : option.label}
-                            </SelectItem>
-                          )}
-                          {option.accounts.map((account) => (
-                            <SelectItem
-                              key={`${option.harness}:${account.id}`}
-                              value={`${option.harness}:${account.id}`}
-                              disabled={account.disabled}
-                            >
-                              {account.label}
-                              {account.cooling && account.coolingLabel
-                                ? ` Cooling - ${account.coolingLabel}`
-                                : ''}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <a
-                    href="/settings/accounts"
-                    className={cn(
-                      buttonVariants({ variant: 'ghost', size: 'sm' }),
-                      'px-2 text-xs',
-                    )}
-                  >
-                    Add an account
-                  </a>
-                )}
-                <Separator
-                  orientation="vertical"
-                  className="mx-0.5 hidden h-4 sm:block"
+              {stopping ? (
+                <span
+                  aria-hidden
+                  className="size-[11px] rounded-[3px] bg-current"
                 />
-                {
-                  <TooltipProvider delay={300}>
-                    <Tooltip>
-                      <TooltipTrigger render={<span />}>
-                        <Select
-                          value={selection.model ?? ''}
-                          items={models.map((model) => ({
-                            value: model.id,
-                            label: model.label,
-                          }))}
-                          onValueChange={(value) => {
-                            if (value === null) return
-                            const nextSelection = { ...selection, model: value }
-                            setSelection(nextSelection)
-                            onSelectionChange?.(nextSelection)
-                          }}
-                          disabled={models.length === 0}
-                        >
-                          <SelectTrigger
-                            size="sm"
-                            aria-label="Model"
-                            className={PILL_TRIGGER_CLASS}
-                          >
-                            <span className="flex-1 truncate text-left data-placeholder:text-muted-foreground">
-                              {modelTrigger?.label ?? 'Model'}
-                            </span>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {models.map((model) => (
-                              <SelectItem key={model.id} value={model.id}>
-                                <span className="flex min-w-0 items-center gap-2">
-                                  {model.favorite && (
-                                    <Star className="size-3.5 shrink-0 fill-current" />
-                                  )}
-                                  <span className="flex min-w-0 flex-col">
-                                    <span className="truncate">
-                                      {model.label}
-                                    </span>
-                                    {(model.description ||
-                                      model.traits?.length) && (
-                                      <span className="truncate text-xs text-muted-foreground">
-                                        {model.description ??
-                                          model.traits?.join(' · ')}
-                                      </span>
-                                    )}
-                                  </span>
-                                </span>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TooltipTrigger>
-                      {models.length === 0 && (
-                        <TooltipPopup side="top">
-                          This session does not expose model choices
-                        </TooltipPopup>
-                      )}
-                    </Tooltip>
-                  </TooltipProvider>
-                }
-                {!draftMode && pickableOptions(configOptions).length > 0 && (
-                  <ConfigOptionsPicker
-                    options={pickableOptions(configOptions)}
-                    selections={configSelections}
-                    disabled={running || sending}
-                    onChange={(id, value) => {
-                      const nextSelections = {
-                        ...configSelections,
-                        [id]: value,
-                      }
-                      setConfigSelections(nextSelections)
-                      onSelectionChange?.({
-                        ...selected,
-                        configOptions: pendingChanges(
-                          configOptions,
-                          nextSelections,
-                        ),
-                      })
-                    }}
-                  />
-                )}
-              </div>
-              <div
-                ref={sendControls}
-                className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
-              >
-                {contextWindow && (
-                  <ContextWindowMeter
-                    usage={contextWindow}
-                    account={accountSnapshot}
-                  />
-                )}
-                <button
-                  type={stopping ? 'button' : 'submit'}
-                  className="flex h-7 w-7 pointer-coarse:h-11 pointer-coarse:w-11 items-center justify-center rounded-full bg-solid text-solid-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer hover:scale-105 hover:bg-solid/90 disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none"
-                  disabled={stopping ? interrupting : !canSubmit}
-                  title={
-                    stopping
-                      ? 'Stop the current turn'
-                      : !canSendUploads(uploads)
-                        ? 'Wait for uploads to finish or remove failed files'
-                        : undefined
-                  }
-                  aria-label={
-                    stopping ? 'End turn' : running ? 'Queue message' : 'Send'
-                  }
-                  onClick={stopping ? () => void endTurn() : undefined}
+              ) : (
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  aria-hidden="true"
                 >
-                  {stopping ? (
-                    interrupting ? (
-                      <Spinner className="size-3.5" />
-                    ) : (
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 12 12"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
-                        <rect x="0.5" y="0.5" width="11" height="11" rx="3" />
-                      </svg>
-                    )
-                  ) : sending ? (
-                    <Spinner className="size-3.5" />
-                  ) : (
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 14 14"
-                      fill="none"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            </div>
+                  <path
+                    d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+            </button>
           </div>
         </div>
+        <div className="relative -mb-2 flex h-6 min-w-0 items-center gap-1 pl-2.5 pointer-coarse:h-9">
+          {footer}
+          <span className="min-w-0 flex-1" />
+          {contextWindow && (
+            <span className="flex shrink-0 items-center pr-2.5">
+              <ContextWindowMeter
+                usage={contextWindow}
+                account={accountSnapshot}
+              />
+            </span>
+          )}
+        </div>
       </form>
+      {dragging &&
+        createPortal(
+          <div
+            className={cn(
+              'pointer-events-none inset-0 z-50 grid place-items-center bg-black/20 text-[13px] text-foreground dark:bg-black/40',
+              pane ? 'absolute' : 'fixed',
+            )}
+          >
+            Drop to attach
+          </div>,
+          pane ?? document.body,
+        )}
     </>
   )
 }

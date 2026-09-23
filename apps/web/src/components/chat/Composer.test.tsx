@@ -14,6 +14,9 @@ import { api } from '../../lib/api'
 import { useMessagesStore } from '../../stores/messages'
 import type { HarnessSelection } from './harness-picker-logic'
 
+const openModelPicker = () =>
+  fireEvent.click(screen.getByRole('button', { name: 'Model' }))
+
 describe('Composer', () => {
   beforeEach(() => {
     vi.stubGlobal('matchMedia', () => ({
@@ -344,15 +347,11 @@ describe('Composer', () => {
       />,
     )
 
-    await waitFor(() =>
-      expect(
-        screen.getByRole('combobox', { name: 'Harness' }).textContent,
-      ).toContain('Main'),
-    )
-    fireEvent.click(screen.getByRole('combobox', { name: 'Harness' }))
-    const workOption = await screen.findByRole('option', { name: 'Work' })
-    fireEvent.keyDown(workOption, { key: 'ArrowDown' })
-    fireEvent.keyDown(workOption, { key: 'Enter' })
+    openModelPicker()
+    const account = await screen.findByRole('button', { name: /Account/ })
+    await waitFor(() => expect(account.textContent).toContain('Main'))
+    fireEvent.click(account)
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Work' }))
     await waitFor(() =>
       expect(onSelectionChange).toHaveBeenCalledWith({
         harness: 'claude',
@@ -424,15 +423,11 @@ describe('Composer', () => {
       />,
     )
 
-    await waitFor(() =>
-      expect(
-        screen.getByRole('combobox', { name: 'Harness' }).textContent,
-      ).toContain('Main'),
-    )
-    fireEvent.click(screen.getByRole('combobox', { name: 'Harness' }))
-    const workOption = await screen.findByRole('option', { name: 'Work' })
-    fireEvent.keyDown(workOption, { key: 'ArrowDown' })
-    fireEvent.keyDown(workOption, { key: 'Enter' })
+    openModelPicker()
+    const account = await screen.findByRole('button', { name: /Account/ })
+    await waitFor(() => expect(account.textContent).toContain('Main'))
+    fireEvent.click(account)
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Work' }))
     await waitFor(() =>
       expect(onSelectionChange).toHaveBeenCalledWith({
         harness: 'claude',
@@ -471,14 +466,17 @@ describe('Composer', () => {
       />,
     )
 
-    await waitFor(() => {
-      expect(screen.queryByRole('combobox', { name: 'Harness' })).toBeNull()
+    await waitFor(() =>
       expect(
-        screen
-          .getByRole('link', { name: 'Add an account' })
-          .getAttribute('href'),
-      ).toBe('/settings/accounts')
-    })
+        screen.getByRole('button', { name: 'Model' }).textContent,
+      ).toContain('No agents available'),
+    )
+    openModelPicker()
+    expect(
+      (
+        await screen.findByRole('link', { name: 'Add an account' })
+      ).getAttribute('href'),
+    ).toBe('/settings/accounts')
   })
 
   it('keeps the initial harness usable when account lookup is unavailable', async () => {
@@ -488,7 +486,7 @@ describe('Composer', () => {
     const onSend = vi.fn().mockResolvedValue(undefined)
     render(<Composer sessionId="session-1" harness="codex" onSend={onSend} />)
     await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Harness' })).toBeTruthy(),
+      expect(screen.getByRole('button', { name: 'Model' })).toBeTruthy(),
     )
     const composer = screen.getByLabelText('Message composer')
     fireEvent.change(composer, { target: { value: 'hello' } })
@@ -512,15 +510,8 @@ describe('Composer', () => {
     )
     const onSend = vi.fn().mockResolvedValue(undefined)
     renderComposer(onSend)
-    await waitFor(() =>
-      expect(
-        screen
-          .getByRole('combobox', { name: 'Model' })
-          .hasAttribute('disabled'),
-      ).toBe(false),
-    )
-    fireEvent.click(screen.getByRole('combobox', { name: 'Model' }))
-    fireEvent.click(screen.getByRole('option', { name: 'Fast' }))
+    openModelPicker()
+    fireEvent.click(await screen.findByRole('option', { name: /^Fast/ }))
     const composer = screen.getByLabelText('Message composer')
     fireEvent.change(composer, { target: { value: 'hello' } })
     fireEvent.keyDown(composer, { key: 'Enter' })
@@ -563,11 +554,11 @@ describe('Composer', () => {
     )
     await waitFor(() =>
       expect(
-        screen.getByRole('combobox', { name: 'Model' }).textContent,
+        screen.getByRole('button', { name: 'Model' }).textContent,
       ).toContain('Fast'),
     )
     expect(
-      screen.getByRole('combobox', { name: 'Model' }).textContent,
+      screen.getByRole('button', { name: 'Model' }).textContent,
     ).not.toContain('Model')
   })
 
@@ -589,15 +580,8 @@ describe('Composer', () => {
         onSend={onSend}
       />,
     )
-    await waitFor(() =>
-      expect(
-        screen
-          .getByRole('combobox', { name: 'Model' })
-          .hasAttribute('disabled'),
-      ).toBe(false),
-    )
-    fireEvent.click(screen.getByRole('combobox', { name: 'Model' }))
-    fireEvent.click(screen.getByRole('option', { name: 'Fast' }))
+    openModelPicker()
+    fireEvent.click(await screen.findByRole('option', { name: /^Fast/ }))
     const composer = screen.getByLabelText('Message composer')
     fireEvent.change(composer, { target: { value: 'hello' } })
     fireEvent.keyDown(composer, { key: 'Enter' })
@@ -610,19 +594,16 @@ describe('Composer', () => {
     )
   })
 
-  it('disables the model picker when no models are available', async () => {
+  it('explains an empty model list inside the picker', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(new Response('{}', { status: 200 })),
     )
     renderComposer()
-    await waitFor(() =>
-      expect(
-        screen
-          .getByRole('combobox', { name: 'Model' })
-          .hasAttribute('disabled'),
-      ).toBe(true),
-    )
+    openModelPicker()
+    expect(
+      await screen.findByText('This session does not expose model choices'),
+    ).toBeTruthy()
   })
 
   it('shows config options and sends only changed values', async () => {
@@ -657,12 +638,12 @@ describe('Composer', () => {
     const onSend = vi.fn().mockResolvedValue(undefined)
     renderComposer(onSend)
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Reasoning' })).toBeTruthy(),
+      expect(
+        screen.getByRole('button', { name: 'Model' }).textContent,
+      ).toContain('High'),
     )
-    expect(
-      screen.getByRole('button', { name: 'Reasoning' }).textContent,
-    ).toContain('High')
-    fireEvent.click(screen.getByRole('button', { name: 'Reasoning' }))
+    openModelPicker()
+    fireEvent.click(await screen.findByRole('button', { name: /Reasoning/ }))
     fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Low' }))
     const composer = screen.getByLabelText('Message composer')
     fireEvent.change(composer, { target: { value: 'hello' } })
@@ -687,9 +668,9 @@ describe('Composer', () => {
       ),
     )
     renderComposer()
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Reasoning' })).toBeNull(),
-    )
+    openModelPicker()
+    await screen.findByRole('listbox', { name: 'Models' })
+    expect(screen.queryByRole('button', { name: /Reasoning/ })).toBeNull()
     cleanup()
     render(
       <Composer
