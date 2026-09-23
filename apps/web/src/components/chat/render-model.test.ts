@@ -19,7 +19,7 @@ const message = (
 })
 
 describe('chat render model', () => {
-  it('projects every native passthrough event into a visible transcript row', () => {
+  it('projects native passthrough events into transcript rows, except usage', () => {
     const types = [
       'content_block',
       'source_reference',
@@ -36,8 +36,14 @@ describe('chat render model', () => {
         }),
       ),
     )
-    expect(items.filter((item) => item.kind === 'native')).toHaveLength(6)
-    expect(items.map((item) => item.kind)).toEqual(types.map(() => 'native'))
+    expect(
+      items.map((item) => item.kind === 'native' && item.content.type),
+    ).toEqual([
+      'content_block',
+      'source_reference',
+      'file_change',
+      'child_updated',
+    ])
   })
 
   it('renders an answered question with the labels the user clicked', () => {

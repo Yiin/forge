@@ -335,10 +335,11 @@ export function toRenderModel(
         ...(content.code ? { code: content.code } : {}),
       })
     } else if (
+      // Usage and usage_snapshot stay out of the transcript, as in zeron: the
+      // composer's context ring already reports usage, and a row after every
+      // reply is noise.
       content.type === 'content_block' ||
       content.type === 'source_reference' ||
-      content.type === 'usage' ||
-      content.type === 'usage_snapshot' ||
       content.type === 'file_change' ||
       content.type === 'child_updated'
     ) {
