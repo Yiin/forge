@@ -3,7 +3,8 @@ import type { KeyboardEvent, RefObject } from 'react'
 import { ChevronDown, Folder, FolderGit2, GitBranch } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useDraftsStore } from '../../stores/drafts'
-import { useSessionsStore } from '../../stores/sessions'
+import { toast } from 'sonner'
+import { useSessionsStore, type SessionSummary } from '../../stores/sessions'
 import type { GitRef, GitRefsPage, GitStatus } from '@forge/protocol/git'
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
@@ -21,6 +22,7 @@ import {
   branchTriggerLabel,
   defaultBaseRef,
   effectiveWorkspaceMode,
+  isModeLocked,
   sessionCheckoutLabel,
   workspaceModeLabel,
   type WorkspaceMode,
@@ -29,17 +31,21 @@ import {
 const ICON_CLASS = 'size-3 shrink-0'
 
 /**
- * Checkout and branch under the composer pill. A session shows read-only
- * labels; a draft shows chips that pick the checkout mode and the ref.
+ * Checkout and branch under the composer pill, as chips that pick the
+ * checkout mode and the ref. A session that cannot switch (running, or
+ * already in its own worktree) shows read-only labels instead.
  */
 export function WorkspaceBar({
   projectId,
   sessionId,
   draftId,
+  disabled,
 }: {
   projectId: string
   sessionId?: string
   draftId?: string
+  /** A running session shows read-only labels instead of chips. */
+  disabled?: boolean
 }) {
   const session = useSessionsStore((state) =>
     state.sessions.find((item) => item.id === sessionId),
@@ -55,8 +61,18 @@ export function WorkspaceBar({
         .catch(() => setStatus(null))
   }, [projectId, cwd])
   if (!status || !status.isRepo) return null
-  if (!draftId) {
-    const branch = session?.branch ?? status.branch
+  if (draftId)
+    return (
+      <DraftWorkspace
+        projectId={projectId}
+        draftId={draftId}
+        currentBranch={status.branch}
+      />
+    )
+  if (!sessionId) return null
+  const branch = session?.branch ?? status.branch
+  // A running session, or one that already owns a worktree, cannot switch.
+  if (disabled || isModeLocked({ hasSession: true, worktreePath })) {
     const Icon = worktreePath ? FolderGit2 : Folder
     return (
       <>
@@ -72,24 +88,17 @@ export function WorkspaceBar({
     )
   }
   return (
-    <DraftWorkspace
+    <SessionWorkspace
       projectId={projectId}
-      draftId={draftId}
+      sessionId={sessionId}
+      branch={branch}
       currentBranch={status.branch}
     />
   )
 }
 
-function DraftWorkspace({
-  projectId,
-  draftId,
-  currentBranch,
-}: {
-  projectId: string
-  draftId: string
-  currentBranch: string | null
-}) {
-  const draft = useDraftsStore((state) => state.drafts[draftId])
+/** Branch search shared by the draft and session chips. */
+function useRefs(projectId: string) {
   const [query, setQuery] = useState('')
   const [refs, setRefs] = useState<GitRefsPage | null>(null)
   useEffect(() => {
@@ -103,6 +112,74 @@ function DraftWorkspace({
     return () => clearTimeout(timer)
   }, [projectId, query])
   const visible = useMemo(() => refs?.refs.slice(0, 30) ?? [], [refs])
+  return { query, setQuery, refs, visible }
+}
+
+function SessionWorkspace({
+  projectId,
+  sessionId,
+  branch,
+  currentBranch,
+}: {
+  projectId: string
+  sessionId: string
+  branch: string | null
+  currentBranch: string | null
+}) {
+  const { query, setQuery, refs, visible } = useRefs(projectId)
+  const update = async (next: {
+    mode: WorkspaceMode
+    branch?: string
+    baseRef?: string
+  }) => {
+    try {
+      await api.setSessionWorkspace(sessionId, next)
+      const updated = await api.getSession(sessionId)
+      useSessionsStore.getState().upsertSession(updated as SessionSummary)
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not update workspace',
+      )
+    }
+  }
+  return (
+    <>
+      <CheckoutChip
+        mode="local"
+        side="top"
+        onPick={(next) => {
+          if (next === 'worktree')
+            void update({
+              mode: next,
+              baseRef: defaultBaseRef(visible, currentBranch) ?? undefined,
+            })
+        }}
+      />
+      <BranchChip
+        mode="local"
+        side="top"
+        branch={branch}
+        query={query}
+        onQuery={setQuery}
+        refs={refs}
+        visible={visible}
+        onPick={(ref) => void update({ mode: 'local', branch: ref })}
+      />
+    </>
+  )
+}
+
+function DraftWorkspace({
+  projectId,
+  draftId,
+  currentBranch,
+}: {
+  projectId: string
+  draftId: string
+  currentBranch: string | null
+}) {
+  const draft = useDraftsStore((state) => state.drafts[draftId])
+  const { query, setQuery, refs, visible } = useRefs(projectId)
   const mode = effectiveWorkspaceMode({
     worktreePath: null,
     hasSession: false,
@@ -117,6 +194,7 @@ function DraftWorkspace({
     <>
       <CheckoutChip
         mode={mode}
+        side="bottom"
         onPick={(next) =>
           update(
             next,
@@ -130,6 +208,7 @@ function DraftWorkspace({
       />
       <BranchChip
         mode={mode}
+        side="bottom"
         branch={draft?.baseRef ?? currentBranch}
         query={query}
         onQuery={setQuery}
@@ -143,9 +222,11 @@ function DraftWorkspace({
 
 function CheckoutChip({
   mode,
+  side,
   onPick,
 }: {
   mode: WorkspaceMode
+  side: 'top' | 'bottom'
   onPick: (mode: WorkspaceMode) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -173,7 +254,7 @@ function CheckoutChip({
         />
       </PopoverTrigger>
       <PopoverPopup
-        side="bottom"
+        side={side}
         align="start"
         sideOffset={6}
         className={cn(CARD_CLASS, 'w-[224px]')}
@@ -215,6 +296,7 @@ function CheckoutChip({
 
 function BranchChip({
   mode,
+  side,
   branch,
   query,
   onQuery,
@@ -223,6 +305,7 @@ function BranchChip({
   onPick,
 }: {
   mode: WorkspaceMode
+  side: 'top' | 'bottom'
   branch: string | null
   query: string
   onQuery: (query: string) => void
@@ -262,7 +345,7 @@ function BranchChip({
         />
       </PopoverTrigger>
       <PopoverPopup
-        side="bottom"
+        side={side}
         align="start"
         sideOffset={6}
         initialFocus={search}

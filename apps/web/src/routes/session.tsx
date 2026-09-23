@@ -571,6 +571,7 @@ export function SessionRoute() {
                         ?.projectId ?? ''
                     }
                     sessionId={sessionId}
+                    disabled={(sessionStatus ?? loadedStatus) === 'running'}
                   />
                 }
               />
