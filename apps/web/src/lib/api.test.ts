@@ -29,6 +29,25 @@ describe('ForgeApi error reporting', () => {
   })
 })
 
+it('keys a prompt resend to the same request so the server drops a copy', async () => {
+  const keys: string[] = []
+  const client = new ForgeApi({
+    baseUrl: 'http://forge.test',
+    fetch: (async (_url, init) => {
+      keys.push(new Headers(init?.headers).get('Idempotency-Key')!)
+      return jsonResponse(200, { ok: true })
+    }) as typeof fetch,
+  })
+  const prompt = { sessionId: 'session-1', text: 'hi' }
+  const id = 'client_0123456789abcdef0123456789abcdef'
+  await client.prompt(prompt, id)
+  await client.prompt(prompt, id)
+  await client.prompt(prompt)
+  expect(keys[0]).toBe(id)
+  expect(keys[1]).toBe(id)
+  expect(keys[2]).not.toBe(id)
+})
+
 it('uses session Git routes for projectless targets and keeps project routes for project consumers', async () => {
   const urls: string[] = []
   const client = new ForgeApi({

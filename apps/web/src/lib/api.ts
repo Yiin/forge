@@ -231,8 +231,17 @@ export class ForgeApi {
       { sessionId, ...input },
     )
   }
-  prompt(input: Prompt) {
-    return this.post(`/api/sessions/${input.sessionId}/prompt`, prompt, input)
+  /**
+   * `requestId` becomes the Idempotency-Key. Reusing it on a resend lets the
+   * server drop the copy when the first attempt already landed.
+   */
+  prompt(input: Prompt, requestId?: string) {
+    return this.post(
+      `/api/sessions/${input.sessionId}/prompt`,
+      prompt,
+      input,
+      requestId,
+    )
   }
   listQueued(sessionId: string) {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/queued`)
