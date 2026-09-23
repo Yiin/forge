@@ -150,6 +150,9 @@ export function toolKind(
   if (/^mcp(__|$)/i.test(name)) return 'mcp'
   const lower = name.toLowerCase()
   for (const [pattern, kind] of NAME_KINDS) if (pattern.test(lower)) return kind
+  // claude-code-acp titles a shell call with the command itself, so a
+  // command input wins over the title verb below.
+  if (text(input, ['command', 'cmd'])) return 'exec'
   // claude-code-acp names tools by title: "Read /path", "grep foo src",
   // "Find `*.ts`". The first word is the tool.
   const verb = lower.split(/[\s`]/)[0] ?? ''

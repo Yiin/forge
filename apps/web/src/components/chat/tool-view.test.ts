@@ -124,6 +124,9 @@ describe('tool kinds', () => {
       'glob',
     )
     expect(
+      toolKind(tool('`find . -name apps`', { command: 'find . -name apps' })),
+    ).toBe('exec')
+    expect(
       toolKind(
         tool('Explore paste handling', {
           description: 'Explore paste handling',
