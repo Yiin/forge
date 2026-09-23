@@ -9,6 +9,18 @@ and web assets relative to itself, so the tree must stay intact).
 The 15-minute user timer checks GitHub releases and skips active epic runs.
 It verifies checksums and restores the previous tree if health does not recover.
 
+`ops/forge.service` sets no PATH, so Forge uses the PATH of the systemd user
+manager. If that PATH lacks a host's harness CLIs, set PATH in a host drop-in.
+`install.sh` never overwrites it. `yiin-lt` has one. Example:
+
+```ini
+# ~/.config/systemd/user/forge.service.d/path.conf
+[Service]
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+```
+
+Run `systemctl --user daemon-reload` and restart `forge.service` after you edit it.
+
 ## Local no-release rollout
 
 Use this path to build and install the current checkout without creating a release.

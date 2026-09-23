@@ -8,7 +8,9 @@ Restart=on-failure
 RestartSec=3
 Environment=FORGE_PORT=3900
 Environment=FORGE_DATA_DIR=%h/.local/share/forge
-Environment=PATH=%h/.vite-plus/js_runtime/node/24.20.0/bin:%h/.local/bin:%h/.local/share/mise/shims:%h/.vite-plus/bin:%h/.kimi-code/bin:%h/.opencode/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+# PATH comes from the systemd user manager. If a host's harness CLIs are not
+# on that PATH, set it in ~/.config/systemd/user/forge.service.d/path.conf.
+# install.sh never touches that drop-in directory.
 
 [Install]
 WantedBy=default.target
