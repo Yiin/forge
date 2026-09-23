@@ -325,7 +325,7 @@ export function WorkEntryRow({
         <span className="flex h-[18px] w-[22px] flex-none items-center justify-center">
           <Icon className="size-3.5 shrink-0" aria-hidden />
         </span>
-        <p className="flex min-w-0 flex-1 items-baseline gap-1.5">
+        <p className="flex min-w-0 items-baseline gap-1.5">
           <span className="min-w-0 shrink truncate">{heading}</span>
           {preview && (
             <span className="min-w-0 flex-1 truncate text-faint-foreground">

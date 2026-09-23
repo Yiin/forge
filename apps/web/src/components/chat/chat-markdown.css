@@ -79,6 +79,10 @@
   list-style-type: decimal;
 }
 
+.chat-markdown li {
+  padding: 0;
+}
+
 .chat-markdown li::marker {
   color: var(--primary);
 }
@@ -141,8 +145,10 @@
   background: var(--border);
 }
 
-/* Tables: frameless, a hairline between rows, 12px cells. */
-.chat-markdown [data-streamdown='table-wrapper'] {
+/* Tables: frameless, a hairline between rows, 12px cells. Streamdown
+   wraps the table twice; both wrappers lose their frame. */
+.chat-markdown [data-streamdown='table-wrapper'],
+.chat-markdown [data-streamdown='table-wrapper'] > div {
   display: block;
   overflow-x: auto;
   border: none;

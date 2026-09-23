@@ -40,7 +40,9 @@ export function SessionRoute() {
     null,
   )
   const [composerHeight, setComposerHeight] = useState(0)
-  const targetSeq = Number(new URLSearchParams(window.location.search).get('m'))
+  // `?m=<seq>` deep-links a message; without it there is no target.
+  const deepLink = new URLSearchParams(window.location.search).get('m')
+  const targetSeq = deepLink === null ? Number.NaN : Number(deepLink)
   const [sending, setSending] = useState(false)
   const [harness, setHarness] = useState<string>()
   const [accountId, setAccountId] = useState<string>()

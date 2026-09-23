@@ -88,12 +88,20 @@ export function Timeline({
   }, [messages, messagesVersion, resumedWithRecap, children, pending, working])
   const meta = useMemo(() => rowMeta(items, running), [items, running])
   const prompts = useMemo(() => railPrompts(items), [items])
+  // The running turn began at its turn_start, or at the prompt that opened
+  // it when the harness sends no turn_start of its own.
   const turnStartedAt = useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index -= 1)
-      if (messages[index].content.type === 'turn_start')
-        return messages[index].createdAt
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index]
+      if (
+        message.content.type === 'turn_start' ||
+        (message.role === 'user' && message.content.type === 'text_delta')
+      )
+        return message.createdAt
+    }
     return undefined
-  }, [messages, messagesVersion])
+    // The store appends to the same array, so its length marks new rows.
+  }, [messages, messages.length])
   const sending =
     !running || sendingBridge(pending.at(-1)?.createdAt, turnStartedAt)
   // zeron opens a tool group by default only while it is the live tail of
@@ -111,9 +119,8 @@ export function Timeline({
 
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   const list = useRef<VirtualizerHandle>(null)
-  const follow = useRef(
-    targetSeq === undefined ? initialFollow : releaseFollow(initialFollow),
-  )
+  // The view starts pinned; a deep link releases it once its row exists.
+  const follow = useRef(initialFollow)
   const [jump, setJump] = useState(false)
   const lastInput = useRef(0)
   const holding = useRef(false)
