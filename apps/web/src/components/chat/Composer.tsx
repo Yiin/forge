@@ -161,6 +161,7 @@ export function Composer({
   onSelectionChange,
   footer,
   destination,
+  connectionNotice,
 }: {
   sessionId: string
   harness?: string
@@ -189,6 +190,8 @@ export function Composer({
   footer?: ReactNode
   /** New-thread only: the chips that float above the pill, right-aligned. */
   destination?: ReactNode
+  /** A quiet line above the pill while the connection is down. */
+  connectionNotice?: { text: string; offline: boolean }
 }) {
   const [text, setText] = useState(initialText)
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null)
@@ -723,6 +726,21 @@ export function Composer({
             </span>
             <span className="break-words">{sendError}</span>
           </div>
+        )}
+        {connectionNotice && (
+          <p
+            role="status"
+            className="mx-2 mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] leading-[14px] text-faint-foreground duration-500 ease-[cubic-bezier(.16,1,.3,1)] animate-in fade-in-0 slide-in-from-bottom-1 motion-reduce:slide-in-from-bottom-0"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                'size-[5px] shrink-0 rounded-full',
+                connectionNotice.offline ? 'bg-warning' : 'bg-faint-foreground',
+              )}
+            />
+            <span className="min-w-0 truncate">{connectionNotice.text}</span>
+          </p>
         )}
         {queued.length > 0 && (
           <QueuedPrompts

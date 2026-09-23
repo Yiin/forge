@@ -50,6 +50,7 @@ describe('Composer', () => {
         attachmentIds: string[],
         selection: HarnessSelection,
       ) => Promise<void>
+      connectionNotice?: { text: string; offline: boolean }
     } = {},
   ) => {
     vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([
@@ -78,6 +79,7 @@ describe('Composer', () => {
         onQueue={options.onQueue}
         running={options.running}
         onTextChange={onTextChange}
+        connectionNotice={options.connectionNotice}
       />,
     )
     return screen.getByLabelText('Message composer')
@@ -114,6 +116,26 @@ describe('Composer', () => {
       accountId: 'main',
     })
     expect(screen.getByRole('button', { name: 'Queue message' })).toBeTruthy()
+  })
+
+  it('shows a quiet caption above the pill while the connection is down', () => {
+    renderComposer(undefined, undefined, {
+      connectionNotice: {
+        text: "Offline, messages will send when you're back online.",
+        offline: true,
+      },
+    })
+    const caption = screen
+      .getAllByRole('status')
+      .find((node) => node.textContent?.includes('Offline'))!
+    expect(caption.textContent).toBe(
+      "Offline, messages will send when you're back online.",
+    )
+    // One caption line with an amber dot, not a warning box.
+    expect(caption.querySelector('.bg-warning')).not.toBeNull()
+    expect(caption.className).toContain('text-faint-foreground')
+    expect(caption.className).not.toContain('border')
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('lets the trigger menu consume Enter and Escape', async () => {
