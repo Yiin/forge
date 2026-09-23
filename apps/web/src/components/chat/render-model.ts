@@ -272,7 +272,9 @@ export function toRenderModel(
               : content.type === 'tool_update'
                 ? stateForStatus(content.status)
                 : 'running',
-          input: content.type === 'tool_call' ? content.input : undefined,
+          // The store folds updates into the call row, so a settled tool
+          // arrives as a `tool_update` that still carries the call's input.
+          input: 'input' in content ? content.input : undefined,
           output:
             content.type === 'tool_result' || content.type === 'tool_update'
               ? content.output

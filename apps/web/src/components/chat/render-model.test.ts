@@ -330,6 +330,22 @@ describe('chat render model', () => {
     ])
   })
 
+  it('keeps the call input on a row the store folded into an update', () => {
+    const folded = message({
+      type: 'tool_update',
+      toolCallId: 'folded',
+      status: 'completed',
+      output: '/tmp',
+      ...{ name: 'Bash', input: { command: 'pwd' } },
+    } as Message['content'])
+    expect(toRenderModel([folded])).toMatchObject([
+      {
+        kind: 'tool-group',
+        entries: [{ name: 'Bash', input: { command: 'pwd' }, state: 'done' }],
+      },
+    ])
+  })
+
   it('shows native tool update output and retains it through status-only updates', () => {
     const update = message({
       type: 'tool_update',
