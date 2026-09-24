@@ -86,6 +86,7 @@ describe('AttachmentChips', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Preview shot.png' }))
     expect(await screen.findByRole('dialog', { name: 'shot.png' })).toBeTruthy()
+    cleanup()
     vi.unstubAllGlobals()
   })
 })
