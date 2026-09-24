@@ -58,6 +58,7 @@ export function Timeline({
   running = false,
   offline = false,
   onRetry,
+  sentPrompt,
 }: {
   resumedWithRecap?: boolean
   targetSeq?: number
@@ -69,6 +70,11 @@ export function Timeline({
   offline?: boolean
   /** Sends the prompts that never reached the server again. */
   onRetry?: () => void
+  /**
+   * A prompt sent before this transcript mounted, from the new-session
+   * screen. It takes the send runway as if it were sent here.
+   */
+  sentPrompt?: string
 }) {
   const { sessionId } = useParams({ from: '/s/$sessionId' })
   const messagesBySession = useMessagesStore((state) => state.bySession)
@@ -210,6 +216,9 @@ export function Timeline({
     }
     previousPending.current = pendingCount
   }, [pendingCount, newestPending])
+  useLayoutEffect(() => {
+    if (sentPrompt) driver.current?.ownSend(sentPrompt)
+  }, [sentPrompt])
   // After a send, so a composer that shrinks as it clears the text moves a
   // pinned view only when no runway has taken it.
   useLayoutEffect(() => {

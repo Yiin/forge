@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { Composer } from '../components/chat/Composer'
+import { captureComposerGlide } from '../components/chat/composer-glide'
 import { WorkspaceBar } from '../components/chat/WorkspaceBar'
 import { DestinationChips } from '../components/composer/DestinationChips'
 import { openProjectCreation } from '../components/ProjectCreationDialog'
@@ -17,6 +18,7 @@ export function DraftRoute() {
   const hydrate = useDraftsStore((state) => state.hydrate)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const hero = useRef<HTMLDivElement>(null)
   useEffect(() => {
     hydrate()
     void api
@@ -78,7 +80,7 @@ export function DraftRoute() {
       aria-label="New session"
       className="relative flex h-full min-h-0 flex-col overflow-y-auto"
     >
-      <div className="m-auto w-full max-w-3xl px-4 pt-12 pb-8">
+      <div ref={hero} className="m-auto w-full max-w-3xl px-4 pt-12 pb-8">
         <Composer
           sessionId={draft.id}
           draftProjectId={draft.projectId}
@@ -167,6 +169,16 @@ export function DraftRoute() {
               itemId: clientItemId,
               text,
               createdAt: new Date().toISOString(),
+            })
+            // The session's composer glides in from where this one sits.
+            captureComposerGlide(hero.current, {
+              sessionId: result.sessionId,
+              itemId: clientItemId,
+              selection: {
+                harness: selectedHarness.harness,
+                accountId: selectedHarness.accountId,
+                model: selectedHarness.model,
+              },
             })
             await navigate({
               to: '/s/$sessionId',

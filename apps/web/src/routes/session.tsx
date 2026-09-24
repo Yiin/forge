@@ -5,10 +5,12 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from 'react'
+import { peekComposerGlide } from '../components/chat/composer-glide'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
 import { useWorkspaceTarget } from '../lib/useWorkspaceTarget'
@@ -73,6 +75,10 @@ export function SessionRoute() {
   const [loadedStatus, setLoadedStatus] = useState<string>()
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string>()
+  // Arriving from the new-session screen: the composer glides into place and
+  // the transcript shows at once instead of a loading line.
+  const glide = useMemo(() => peekComposerGlide(sessionId), [sessionId])
+  const showChat = !loadError && (!loading || glide !== undefined)
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   // The socket effect below calls the latest `redeliver` on reconnect.
   const redeliverRef = useRef<() => Promise<void>>(async () => {})
@@ -529,7 +535,7 @@ export function SessionRoute() {
           </div>
         )}
         <ChatLifecycle
-          loading={loading}
+          loading={loading && !glide}
           error={loadError}
           onRetry={() => {
             setLoading(true)
@@ -539,7 +545,7 @@ export function SessionRoute() {
           }}
           connection={connection}
         />
-        {!loading && !loadError && (
+        {showChat && (
           <Timeline
             targetSeq={Number.isFinite(targetSeq) ? targetSeq : undefined}
             bottomInset={composerHeight}
@@ -547,15 +553,18 @@ export function SessionRoute() {
             running={(sessionStatus ?? loadedStatus) === 'running'}
             offline={isOffline(connection)}
             onRetry={() => void redeliver()}
+            sentPrompt={glide?.itemId}
           />
         )}
-        {!loading && !loadError && (
+        {showChat && (
           <div
             ref={setComposerOverlay}
+            data-composer-overlay
             className="pointer-events-none absolute inset-x-0 bottom-0 z-40 max-h-full overflow-y-auto overscroll-contain pt-1.5 sm:pt-2"
           >
             <div
               aria-hidden="true"
+              data-glide-fade
               className="pointer-events-none absolute inset-x-0 top-1.5 bottom-0 z-0 px-3 sm:top-2 sm:px-5"
             >
               <div className="relative mx-auto h-full w-full max-w-3xl overflow-clip rounded-t-[20px]">
@@ -649,9 +658,10 @@ export function SessionRoute() {
               {reviewError && <p role="alert">{reviewError}</p>}
               <Composer
                 sessionId={sessionId}
-                harness={harness}
-                accountId={accountId}
-                model={model}
+                harness={harness ?? glide?.selection.harness}
+                accountId={accountId ?? glide?.selection.accountId}
+                model={model ?? glide?.selection.model}
+                glide={glide}
                 protocol={protocol}
                 running={(sessionStatus ?? loadedStatus) === 'running'}
                 onInterrupt={async () => {

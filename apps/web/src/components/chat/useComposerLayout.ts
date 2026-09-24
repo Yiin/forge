@@ -1,4 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { ROUTE_SNAP_MS } from './composer-motion'
+import { PillMotion } from './pill-motion'
 
 /** zeron composer.rs sizes, in CSS px. */
 export const COMPOSER_LAYOUT = {
@@ -16,19 +18,63 @@ export const COMPOSER_LAYOUT = {
   compactInputPadding: 16,
 } as const
 
+const coarsePointer = () =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(pointer: coarse)').matches
+
 /**
  * Compact/expanded layout for the composer pill, with zeron's flip rules:
  * any newline or overflow expands at once; collapsing needs 32px of slack,
  * and waits for the width to settle while the pane is being resized.
- * The hero (new-thread) composer is always expanded.
+ * The hero (new-thread) composer is always expanded. A flip morphs the pill
+ * (see pill-motion.ts) unless it lands right after a route change.
  */
-export function useComposerLayout(text: string, hero: boolean) {
+export function useComposerLayout(
+  text: string,
+  hero: boolean,
+  /** A change of session counts as a navigation: flips snap for a moment. */
+  routeKey: string,
+) {
+  const root = useRef<HTMLFormElement>(null)
   const pill = useRef<HTMLDivElement>(null)
+  const content = useRef<HTMLDivElement>(null)
+  const attach = useRef<HTMLLabelElement>(null)
   const chip = useRef<HTMLDivElement>(null)
+  const send = useRef<HTMLButtonElement>(null)
+  const footer = useRef<HTMLDivElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLTextAreaElement>(null)
-  const [expanded, setExpandedState] = useState(true)
-  const expandedRef = useRef(true)
+  const [initialExpanded] = useState(
+    () => hero || text.includes('\n') || coarsePointer(),
+  )
+  const [expanded, setExpandedState] = useState(initialExpanded)
+  const expandedRef = useRef(initialExpanded)
+  const [motion] = useState(
+    () =>
+      new PillMotion(() => {
+        const parts = {
+          root: root.current,
+          pill: pill.current,
+          content: content.current,
+          attach: attach.current,
+          textarea: textarea.current,
+          chip: chip.current,
+          send: send.current,
+          footer: footer.current,
+        }
+        return Object.values(parts).every(Boolean)
+          ? (parts as {
+              [key in keyof typeof parts]: NonNullable<(typeof parts)[key]>
+            })
+          : undefined
+      }),
+  )
+  const routeChangedAt = useRef(0)
+  useLayoutEffect(() => {
+    routeChangedAt.current = performance.now()
+  }, [routeKey])
+  useLayoutEffect(() => () => motion.dispose(), [motion])
   const textRef = useRef(text)
   const heroRef = useRef(hero)
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -38,10 +84,14 @@ export function useComposerLayout(text: string, hero: boolean) {
   textRef.current = text
   heroRef.current = hero
 
-  const setExpanded = useCallback((next: boolean) => {
-    expandedRef.current = next
-    setExpandedState(next)
-  }, [])
+  const setExpanded = useCallback(
+    (next: boolean) => {
+      motion.beforeFlip()
+      expandedRef.current = next
+      setExpandedState(next)
+    },
+    [motion],
+  )
 
   const updateFade = useCallback(() => {
     const input = textarea.current
@@ -53,10 +103,16 @@ export function useComposerLayout(text: string, hero: boolean) {
     input.style.setProperty('--fade-bottom', bottom ? band : '0px')
   }, [])
 
+  const sizedExpanded = useRef<boolean | undefined>(undefined)
   const sizeInput = useCallback(
     (isExpanded: boolean) => {
       const input = textarea.current
       if (!input) return
+      // A flip sizes the input at once; the pill morph carries the motion.
+      // Only growth within one layout eases the input's own height.
+      const flipped = sizedExpanded.current !== isExpanded
+      sizedExpanded.current = isExpanded
+      if (flipped) input.style.transition = 'none'
       if (!isExpanded) {
         input.style.height = `${COMPOSER_LAYOUT.compactInput}px`
       } else {
@@ -67,6 +123,10 @@ export function useComposerLayout(text: string, hero: boolean) {
           ? COMPOSER_LAYOUT.heroFloor
           : COMPOSER_LAYOUT.threadFloor
         input.style.height = `${Math.min(COMPOSER_LAYOUT.maxInput, Math.max(floor, content))}px`
+      }
+      if (flipped) {
+        void input.offsetHeight
+        input.style.transition = ''
       }
       updateFade()
     },
@@ -79,9 +139,7 @@ export function useComposerLayout(text: string, hero: boolean) {
       const input = textarea.current
       if (!root || !input) return
       const value = textRef.current
-      const coarse =
-        typeof window.matchMedia === 'function' &&
-        window.matchMedia('(pointer: coarse)').matches
+      const coarse = coarsePointer()
       if (canvas.current === undefined)
         canvas.current = document.createElement('canvas').getContext('2d')
       const context = canvas.current
@@ -121,15 +179,34 @@ export function useComposerLayout(text: string, hero: boolean) {
     measure('text')
   }, [text, hero, expanded, measure])
 
+  // After the measure above has sized the input for the new layout.
+  const committed = useRef(initialExpanded)
+  useLayoutEffect(() => {
+    if (committed.current === expanded) return
+    committed.current = expanded
+    motion.afterFlip(
+      expanded,
+      performance.now() - routeChangedAt.current < ROUTE_SNAP_MS,
+    )
+  }, [expanded, motion])
+
   useLayoutEffect(() => {
     const root = pill.current
     const input = textarea.current
     if (!root || !input) return
     const onResize = () => measure('resize')
+    // The pill's height changes every frame of a morph; only its width and
+    // the chip's size move the layout.
+    let width = root.clientWidth
     const observer =
       typeof ResizeObserver === 'undefined'
         ? undefined
-        : new ResizeObserver(onResize)
+        : new ResizeObserver((entries) => {
+            const widened = root.clientWidth !== width
+            width = root.clientWidth
+            if (widened || entries.some((entry) => entry.target !== root))
+              onResize()
+          })
     observer?.observe(root)
     if (chip.current) observer?.observe(chip.current)
     input.addEventListener('scroll', updateFade)
@@ -146,5 +223,17 @@ export function useComposerLayout(text: string, hero: boolean) {
     }
   }, [measure, updateFade])
 
-  return { pill, chip, textarea, mirror, expanded }
+  return {
+    root,
+    pill,
+    content,
+    attach,
+    chip,
+    send,
+    footer,
+    textarea,
+    mirror,
+    expanded,
+    motion,
+  }
 }

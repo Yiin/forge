@@ -39,6 +39,7 @@ import {
   type ComposerTrigger,
 } from './composer-triggers'
 import { useComposerLayout } from './useComposerLayout'
+import { clearComposerGlide, type ComposerGlide } from './composer-glide'
 import { AskUserQuestionPanel } from './AskUserQuestionPanel'
 import {
   accountsApi,
@@ -162,6 +163,7 @@ export function Composer({
   footer,
   destination,
   connectionNotice,
+  glide,
 }: {
   sessionId: string
   harness?: string
@@ -192,6 +194,8 @@ export function Composer({
   destination?: ReactNode
   /** A quiet line above the pill while the connection is down. */
   connectionNotice?: { text: string; offline: boolean }
+  /** The new-session composer this one takes over from; see composer-glide. */
+  glide?: ComposerGlide
 }) {
   const [text, setText] = useState(initialText)
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null)
@@ -212,7 +216,6 @@ export function Composer({
   const [sendError, setSendError] = useState<string | null>(null)
   const modelRequestAccount = useRef<string | undefined>(undefined)
   const submitting = useRef(false)
-  const form = useRef<HTMLFormElement>(null)
   const menu = useRef<CommandMenuHandle>(null)
   const [pane, setPane] = useState<Element | null>(null)
   const volatile = useMessagesStore((state) => state.volatile)
@@ -222,9 +225,6 @@ export function Composer({
   const contextWindow = useSessionsStore(
     (state) => state.contextWindow[sessionId],
   )
-  useEffect(() => {
-    setPane(form.current?.closest('[data-chat-pane]') ?? null)
-  }, [])
   useEffect(() => {
     const events = volatile.filter(
       (event): event is Extract<typeof event, { type: 'availableCommands' }> =>
@@ -631,10 +631,30 @@ export function Composer({
   const accountSnapshot = accountSnapshots.find(
     (snapshot) => snapshot.accountId === selected.accountId,
   )
-  const { pill, chip, textarea, mirror, expanded } = useComposerLayout(
-    text,
-    draftMode,
-  )
+  const {
+    root: form,
+    pill,
+    content,
+    attach: attachRef,
+    chip,
+    send: sendRef,
+    footer: footerRef,
+    textarea,
+    mirror,
+    expanded,
+    motion,
+  } = useComposerLayout(text, draftMode, sessionId)
+  useEffect(() => {
+    setPane(form.current?.closest('[data-chat-pane]') ?? null)
+  }, [form])
+  // The first paint already shows the pill where the hero left it.
+  useLayoutEffect(() => {
+    if (!glide) return
+    motion.startGlide(glide, expanded)
+    clearComposerGlide(glide)
+    // Only the mount glides.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const pickable = draftMode ? [] : pickableOptions(configOptions)
   const onFormDrag = (event: ReactDragEvent) => {
     if (!hasFiles(event.dataTransfer)) return
@@ -648,6 +668,7 @@ export function Composer({
         <TooltipTrigger
           render={
             <label
+              ref={attachRef}
               className={cn(
                 PILL_ICON_BUTTON_CLASS,
                 '[grid-area:attach] self-center has-focus-visible:bg-ink/10',
@@ -778,7 +799,10 @@ export function Composer({
         )}
         <div className="relative z-10">
           {destination && (
-            <div className="absolute inset-x-[26px] -top-7 flex h-5 items-center justify-end gap-1">
+            <div
+              data-glide-ghost
+              className="absolute inset-x-[26px] -top-7 flex h-5 items-center justify-end gap-1"
+            >
               {destination}
             </div>
           )}
@@ -807,179 +831,198 @@ export function Composer({
               textarea.current?.focus()
             }}
             className={cn(
-              'chat-composer-glass @container relative grid overflow-hidden border',
+              'chat-composer-glass @container relative flex flex-col justify-end overflow-hidden border',
               draftMode ? 'rounded-[26px]' : 'rounded-[22px]',
-              expanded
-                ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_42px] [grid-template-areas:'strip_strip_strip'_'input_input_input'_'attach_chip_send'] pointer-coarse:grid-rows-[auto_auto_52px]"
-                : "grid-cols-[auto_minmax(0,1fr)_auto_auto] [grid-template-areas:'strip_strip_strip_strip'_'attach_input_chip_send']",
             )}
           >
-            {uploads.items.length > 0 && (
-              <div className="[grid-area:strip] px-4 pt-3">
-                <AttachmentChips
-                  items={uploads.items}
-                  returnFocus={textarea}
-                  onRetry={(id) => {
-                    const item = uploads.items.find((value) => value.id === id)
-                    if (item) void upload(item.file, id)
-                  }}
-                  onRemove={(id) =>
-                    dispatchUploads((state) =>
-                      attachmentUploadsReducer(state, { type: 'remove', id }),
-                    )
-                  }
-                />
-              </div>
-            )}
-            {attach}
-            <textarea
-              ref={textarea}
-              id="message-composer"
-              aria-label="Message composer"
-              placeholder="Do anything…"
-              value={text}
-              rows={1}
+            {/* The pill clips this box, pinned to its bottom edge, so a
+                morph can ease the pill's height while the controls stay put
+                (see pill-motion.ts). */}
+            <div
+              ref={content}
               className={cn(
-                'block w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-[22.75px] text-foreground caret-primary outline-none [grid-area:input] placeholder:text-faint-foreground sm:text-[14px]',
-                'transition-[height] duration-180 ease-[cubic-bezier(0,0,0.58,1)] motion-reduce:transition-none',
-                EDGE_FADE_CLASS,
-                expanded ? 'px-4 pt-4 pb-1' : 'px-2 py-3',
+                'grid shrink-0',
+                expanded
+                  ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_42px] [grid-template-areas:'strip_strip_strip'_'input_input_input'_'attach_chip_send'] pointer-coarse:grid-rows-[auto_auto_52px]"
+                  : "grid-cols-[auto_minmax(0,1fr)_auto_auto] [grid-template-areas:'strip_strip_strip_strip'_'attach_input_chip_send']",
               )}
-              onPaste={paste}
-              onBlur={() => setTrigger(null)}
-              onChange={(event) => update(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) return
-                if (trigger) {
-                  if (event.key === 'Escape') {
-                    event.preventDefault()
-                    setTrigger(null)
-                    return
-                  }
-                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                    event.preventDefault()
-                    menu.current?.move(event.key === 'ArrowDown' ? 1 : -1)
-                    return
-                  }
-                  if (
-                    (event.key === 'Enter' && !event.shiftKey) ||
-                    event.key === 'Tab'
-                  ) {
-                    if (menu.current?.accept()) {
+            >
+              {uploads.items.length > 0 && (
+                <div className="[grid-area:strip] px-4 pt-3">
+                  <AttachmentChips
+                    items={uploads.items}
+                    returnFocus={textarea}
+                    onRetry={(id) => {
+                      const item = uploads.items.find(
+                        (value) => value.id === id,
+                      )
+                      if (item) void upload(item.file, id)
+                    }}
+                    onRemove={(id) =>
+                      dispatchUploads((state) =>
+                        attachmentUploadsReducer(state, { type: 'remove', id }),
+                      )
+                    }
+                  />
+                </div>
+              )}
+              {attach}
+              <textarea
+                ref={textarea}
+                id="message-composer"
+                aria-label="Message composer"
+                placeholder="Do anything…"
+                value={text}
+                rows={1}
+                className={cn(
+                  'block w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-[22.75px] text-foreground caret-primary outline-none [grid-area:input] placeholder:text-faint-foreground sm:text-[14px]',
+                  'transition-[height] duration-180 ease-[cubic-bezier(0,0,0.58,1)] motion-reduce:transition-none',
+                  EDGE_FADE_CLASS,
+                  expanded ? 'px-4 pt-4 pb-1' : 'px-2 py-3',
+                )}
+                onPaste={paste}
+                onBlur={() => setTrigger(null)}
+                onChange={(event) => update(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing) return
+                  if (trigger) {
+                    if (event.key === 'Escape') {
                       event.preventDefault()
+                      setTrigger(null)
                       return
                     }
+                    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                      event.preventDefault()
+                      menu.current?.move(event.key === 'ArrowDown' ? 1 : -1)
+                      return
+                    }
+                    if (
+                      (event.key === 'Enter' && !event.shiftKey) ||
+                      event.key === 'Tab'
+                    ) {
+                      if (menu.current?.accept()) {
+                        event.preventDefault()
+                        return
+                      }
+                    }
                   }
-                }
-                if (event.key !== 'Enter' || event.shiftKey) return
-                event.preventDefault()
-                // Mod+Enter on an empty composer sends the newest queued row.
-                if (
-                  (event.metaKey || event.ctrlKey) &&
-                  !hasContent &&
-                  queued.length > 0
-                ) {
-                  sendQueuedNow(queued.at(-1)!.id)
-                  return
-                }
-                void submit()
-              }}
-            />
-            <textarea
-              ref={mirror}
-              aria-hidden
-              tabIndex={-1}
-              readOnly
-              rows={1}
-              className="pointer-events-none invisible absolute inset-x-0 top-0 h-0 resize-none overflow-hidden border-0 px-4 pt-4 pb-1 text-[16px] leading-[22.75px] sm:text-[14px]"
-            />
-            <div
-              ref={chip}
-              className={cn(
-                'flex min-w-0 [grid-area:chip]',
-                expanded
-                  ? 'mb-2 ml-0.5 max-w-[248px] self-end justify-self-start'
-                  : 'max-w-[45cqw] self-center',
-              )}
-            >
-              <ModelChip
-                harnessOptions={harnessOptions}
-                harnessEntries={harnessEntries}
-                accounts={accounts}
-                loaded={catalogLoaded}
-                selection={selection}
-                models={models}
-                modelsLoading={modelsLoading}
-                configOptions={pickable}
-                configSelections={configSelections}
-                configDisabled={running || sending}
-                hero={draftMode}
-                open={pickerOpen}
-                onOpenChange={setPickerOpen}
-                returnFocus={textarea}
-                onSelectionChange={(next) => {
-                  setSelection(next)
-                  onSelectionChange?.(next)
-                }}
-                onConfigChange={(id, value) => {
-                  const nextSelections = { ...configSelections, [id]: value }
-                  setConfigSelections(nextSelections)
-                  onSelectionChange?.({
-                    ...selected,
-                    configOptions: pendingChanges(
-                      configOptions,
-                      nextSelections,
-                    ),
-                  })
+                  if (event.key !== 'Enter' || event.shiftKey) return
+                  event.preventDefault()
+                  // Mod+Enter on an empty composer sends the newest queued row.
+                  if (
+                    (event.metaKey || event.ctrlKey) &&
+                    !hasContent &&
+                    queued.length > 0
+                  ) {
+                    sendQueuedNow(queued.at(-1)!.id)
+                    return
+                  }
+                  void submit()
                 }}
               />
-            </div>
-            <button
-              type={stopping ? 'button' : 'submit'}
-              className={cn(
-                'relative grid size-7 shrink-0 place-items-center rounded-full bg-foreground text-background outline-none [grid-area:send] enabled:cursor-pointer enabled:hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-35',
-                'pointer-coarse:after:absolute pointer-coarse:after:-inset-2 pointer-coarse:after:content-[""]',
-                expanded ? 'mr-3 mb-[10px] ml-2 self-end' : 'mx-2 self-center',
-              )}
-              disabled={stopping ? interrupting : blocked}
-              title={
-                stopping
-                  ? 'Stop the current turn'
-                  : !canSendUploads(uploads)
-                    ? 'Wait for uploads to finish or remove failed files'
-                    : undefined
-              }
-              aria-label={
-                stopping ? 'End turn' : running ? 'Queue message' : 'Send'
-              }
-              onClick={stopping ? () => void endTurn() : undefined}
-            >
-              {stopping ? (
-                <span
-                  aria-hidden
-                  className="size-[11px] rounded-[3px] bg-current"
+              <textarea
+                ref={mirror}
+                aria-hidden
+                tabIndex={-1}
+                readOnly
+                rows={1}
+                className="pointer-events-none invisible absolute inset-x-0 top-0 h-0 resize-none overflow-hidden border-0 px-4 pt-4 pb-1 text-[16px] leading-[22.75px] sm:text-[14px]"
+              />
+              <div
+                ref={chip}
+                className={cn(
+                  'flex min-w-0 [grid-area:chip]',
+                  expanded
+                    ? 'mb-2 ml-0.5 max-w-[248px] self-end justify-self-start'
+                    : 'max-w-[45cqw] self-center',
+                )}
+              >
+                <ModelChip
+                  harnessOptions={harnessOptions}
+                  harnessEntries={harnessEntries}
+                  accounts={accounts}
+                  loaded={catalogLoaded}
+                  selection={selection}
+                  models={models}
+                  modelsLoading={modelsLoading}
+                  configOptions={pickable}
+                  configSelections={configSelections}
+                  configDisabled={running || sending}
+                  hero={draftMode}
+                  open={pickerOpen}
+                  onOpenChange={setPickerOpen}
+                  returnFocus={textarea}
+                  onSelectionChange={(next) => {
+                    setSelection(next)
+                    onSelectionChange?.(next)
+                  }}
+                  onConfigChange={(id, value) => {
+                    const nextSelections = { ...configSelections, [id]: value }
+                    setConfigSelections(nextSelections)
+                    onSelectionChange?.({
+                      ...selected,
+                      configOptions: pendingChanges(
+                        configOptions,
+                        nextSelections,
+                      ),
+                    })
+                  }}
                 />
-              ) : (
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 14 14"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+              </div>
+              <button
+                ref={sendRef}
+                type={stopping ? 'button' : 'submit'}
+                className={cn(
+                  'relative grid size-7 shrink-0 place-items-center rounded-full bg-foreground text-background outline-none [grid-area:send] enabled:cursor-pointer enabled:hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-35',
+                  'pointer-coarse:after:absolute pointer-coarse:after:-inset-2 pointer-coarse:after:content-[""]',
+                  expanded
+                    ? 'mr-3 mb-[10px] ml-2 self-end'
+                    : 'mx-2 self-center',
+                )}
+                disabled={stopping ? interrupting : blocked}
+                title={
+                  stopping
+                    ? 'Stop the current turn'
+                    : !canSendUploads(uploads)
+                      ? 'Wait for uploads to finish or remove failed files'
+                      : undefined
+                }
+                aria-label={
+                  stopping ? 'End turn' : running ? 'Queue message' : 'Send'
+                }
+                onClick={stopping ? () => void endTurn() : undefined}
+              >
+                {stopping ? (
+                  <span
+                    aria-hidden
+                    className="size-[11px] rounded-[3px] bg-current"
                   />
-                </svg>
-              )}
-            </button>
+                ) : (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 14 14"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         </div>
-        <div className="relative -mb-2 flex h-6 min-w-0 items-center gap-1 pl-2.5 pointer-coarse:h-9">
+        <div
+          ref={footerRef}
+          data-glide-ghost
+          className="relative -mb-2 flex h-6 min-w-0 items-center gap-1 pl-2.5 pointer-coarse:h-9"
+        >
           {footer}
           <span className="min-w-0 flex-1" />
           {contextWindow && (
