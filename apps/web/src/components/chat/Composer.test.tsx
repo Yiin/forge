@@ -738,6 +738,77 @@ describe('Composer', () => {
     },
   )
 
+  it('paints live Markdown under a transparent textarea and keeps the text plain', () => {
+    const onTextChange = vi.fn()
+    const composer = renderComposer(undefined, onTextChange)
+    fireEvent.change(composer, { target: { value: '**bold** and `code`' } })
+    expect(composer).toHaveProperty('value', '**bold** and `code`')
+    expect(composer.className).toContain('text-transparent')
+    const layer = composer.nextElementSibling as HTMLElement
+    expect(layer.getAttribute('aria-hidden')).toBe('true')
+    expect(layer.querySelector('.composer-md-strong')?.textContent).toBe('bold')
+    expect(layer.textContent).toBe('**bold** and `code`')
+    // IME composition shows the textarea's own text instead.
+    fireEvent.compositionStart(composer)
+    expect(composer.className).toContain('text-foreground')
+    expect(composer.nextElementSibling).toBeNull()
+    fireEvent.compositionEnd(composer)
+    expect(composer.nextElementSibling).not.toBeNull()
+  })
+
+  it('continues a list on Shift+Enter and indents it with Tab', () => {
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    const onTextChange = vi.fn()
+    const composer = renderComposer(onSend, onTextChange) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: '- one' } })
+    composer.setSelectionRange(5, 5)
+    fireEvent.keyDown(composer, { key: 'Enter', shiftKey: true })
+    expect(composer.value).toBe('- one\n- ')
+    expect(onTextChange).toHaveBeenLastCalledWith('- one\n- ')
+    expect(composer.selectionStart).toBe(8)
+
+    const tab = createEvent.keyDown(composer, { key: 'Tab' })
+    fireEvent(composer, tab)
+    expect(tab.defaultPrevented).toBe(true)
+    expect(composer.value).toBe('- one\n  - ')
+    fireEvent.keyDown(composer, { key: 'Tab', shiftKey: true })
+    expect(composer.value).toBe('- one\n- ')
+    expect(onSend).not.toHaveBeenCalled()
+
+    // Outside a list, Tab keeps moving focus.
+    fireEvent.change(composer, { target: { value: 'plain' } })
+    const plainTab = createEvent.keyDown(composer, { key: 'Tab' })
+    fireEvent(composer, plainTab)
+    expect(plainTab.defaultPrevented).toBe(false)
+  })
+
+  it('shows a picked skill as a chip that Backspace removes whole', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) =>
+        Promise.resolve(
+          String(input).endsWith('/skills')
+            ? new Response(
+                JSON.stringify({
+                  skills: [{ name: 'beads', description: '' }],
+                }),
+                { status: 200 },
+              )
+            : new Response('{}', { status: 404 }),
+        ),
+      ),
+    )
+    const composer = renderComposer() as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: '$' } })
+    fireEvent.click(await screen.findByRole('option', { name: /\$beads/ }))
+    fireEvent.change(composer, { target: { value: 'use $beads' } })
+    const layer = composer.nextElementSibling as HTMLElement
+    expect(layer.querySelector('.bg-code-wash')?.textContent).toBe('$beads')
+    composer.setSelectionRange(10, 10)
+    fireEvent.keyDown(composer, { key: 'Backspace' })
+    expect(composer.value).toBe('use ')
+  })
+
   it('prevents the browser from inserting pasted files into the composer', () => {
     vi.spyOn(api, 'upload').mockResolvedValue({
       attachmentId: 'attachment-1',
