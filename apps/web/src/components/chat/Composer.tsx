@@ -796,7 +796,12 @@ export function Composer({
           <div
             ref={pill}
             onMouseDown={(event) => {
-              if (pickerOpen || (event.target as Element).closest(INTERACTIVE))
+              // Portalled popups (the lightbox) bubble here through React.
+              if (
+                pickerOpen ||
+                !event.currentTarget.contains(event.target as Node) ||
+                (event.target as Element).closest(INTERACTIVE)
+              )
                 return
               event.preventDefault()
               textarea.current?.focus()
@@ -813,6 +818,7 @@ export function Composer({
               <div className="[grid-area:strip] px-4 pt-3">
                 <AttachmentChips
                   items={uploads.items}
+                  returnFocus={textarea}
                   onRetry={(id) => {
                     const item = uploads.items.find((value) => value.id === id)
                     if (item) void upload(item.file, id)

@@ -7,8 +7,9 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ChatRenderItem } from './render-model'
+import { ImageLightbox } from './ImageLightbox'
 import { GradientSpinner } from './WorkingLine'
 import { useCopied } from './useCopied'
 import { cn } from '../../lib/utils'
@@ -23,6 +24,8 @@ export function AttachmentItem({
   item: Extract<ChatRenderItem, { kind: 'attachment' }>
 }) {
   const [removed, setRemoved] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
+  const thumb = useRef<HTMLButtonElement>(null)
   const href = `/api/attachments/${encodeURIComponent(item.id)}`
   const image = item.mime?.startsWith('image/')
   useEffect(() => {
@@ -46,20 +49,29 @@ export function AttachmentItem({
           <span className="truncate">{item.filename} · file removed</span>
         </span>
       ) : image ? (
-        <a
-          href={href}
-          target="_blank"
-          rel="noreferrer"
-          title={item.filename}
-          className="block h-20 w-28 overflow-hidden rounded-lg border border-ink/11 bg-ink/[3.5%]"
-        >
-          <img
-            src={href}
-            alt={item.filename}
-            className="size-full rounded-[7px] object-cover"
-            loading="lazy"
+        <>
+          <button
+            ref={thumb}
+            type="button"
+            title={item.filename}
+            aria-label={`Preview ${item.filename}`}
+            onClick={() => setPreviewing(true)}
+            className="block h-20 w-28 cursor-pointer overflow-hidden rounded-lg border border-ink/11 bg-ink/[3.5%] outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <img
+              src={href}
+              alt={item.filename}
+              className="size-full rounded-[7px] object-cover"
+              loading="lazy"
+            />
+          </button>
+          <ImageLightbox
+            src={previewing ? href : null}
+            name={item.filename}
+            onClose={() => setPreviewing(false)}
+            finalFocus={thumb}
           />
-        </a>
+        </>
       ) : (
         <a
           href={href}

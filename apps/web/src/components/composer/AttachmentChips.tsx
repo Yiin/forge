@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import type { RefObject } from 'react'
 import { CircleX, File as FileIcon, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { UploadAttachment } from './attachmentUploads'
+import { ImageLightbox } from '../chat/ImageLightbox'
 
 /** A blob URL for an image file, revoked when the file changes or unmounts. */
 function useImagePreview(file: File, mime: string) {
@@ -38,10 +40,12 @@ function AttachmentTile({
   item,
   onRetry,
   onRemove,
+  onPreview,
 }: {
   item: UploadAttachment
   onRetry: (id: string) => void
   onRemove: (id: string) => void
+  onPreview: (preview: { src: string; name: string }) => void
 }) {
   const preview = useImagePreview(item.file, item.mime)
   const percent = `${Math.round(item.progress * 100)}%`
@@ -67,14 +71,21 @@ function AttachmentTile({
     >
       {preview ? (
         <div className="relative size-full overflow-hidden rounded-[7px]">
-          <img
-            src={preview}
-            alt={item.name}
-            className="size-full object-cover"
-            draggable={false}
-          />
+          <button
+            type="button"
+            aria-label={`Preview ${item.name}`}
+            onClick={() => onPreview({ src: preview, name: item.name })}
+            className="block size-full cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          >
+            <img
+              src={preview}
+              alt={item.name}
+              className="size-full object-cover"
+              draggable={false}
+            />
+          </button>
           {item.state === 'uploading' && (
-            <div className="absolute inset-0 grid place-items-center bg-black/40 text-[11px] font-medium text-white tabular-nums">
+            <div className="pointer-events-none absolute inset-0 grid place-items-center bg-black/40 text-[11px] font-medium text-white tabular-nums">
               {percent}
             </div>
           )}
@@ -136,11 +147,15 @@ export function AttachmentChips({
   items,
   onRetry,
   onRemove,
+  returnFocus,
 }: {
   items: UploadAttachment[]
   onRetry: (id: string) => void
   onRemove: (id: string) => void
+  /** Where focus goes when the lightbox closes: the composer input. */
+  returnFocus?: RefObject<HTMLElement | null>
 }) {
+  const [preview, setPreview] = useState<{ src: string; name: string }>()
   return (
     <div className="flex flex-wrap gap-2" aria-live="polite">
       {items.map((item) => (
@@ -149,8 +164,15 @@ export function AttachmentChips({
           item={item}
           onRetry={onRetry}
           onRemove={onRemove}
+          onPreview={setPreview}
         />
       ))}
+      <ImageLightbox
+        src={preview?.src ?? null}
+        name={preview?.name ?? ''}
+        onClose={() => setPreview(undefined)}
+        finalFocus={returnFocus}
+      />
     </div>
   )
 }
