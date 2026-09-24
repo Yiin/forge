@@ -223,6 +223,12 @@
     backdrop-filter: blur(16px);
   }
 
+  /* Live Markdown bold in the composer: a hairline stroke over the same
+     glyphs, since a heavier weight would widen them past the caret. */
+  .composer-md-strong {
+    text-shadow: 0.45px 0 0 currentColor;
+  }
+
   .chat-composer-shared-blur {
     -webkit-backdrop-filter: blur(16px);
     backdrop-filter: blur(16px);

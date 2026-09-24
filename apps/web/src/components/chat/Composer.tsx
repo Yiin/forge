@@ -6,7 +6,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
   ClipboardEvent,
   DragEvent as ReactDragEvent,
@@ -21,6 +21,8 @@ import { QueuedPrompts } from '../composer/QueuedPrompts'
 import { ModelChip } from '../composer/ModelChip'
 import { PILL_ICON_BUTTON_CLASS } from '../composer/zeron-styles'
 import { EDGE_FADE_CLASS } from '../composer/useEdgeFade'
+import { MarkdownBackdrop } from '../composer/MarkdownBackdrop'
+import { applyTextareaEdit } from '../composer/textarea-edit'
 import type { QueuedPrompt } from '@forge/protocol/session'
 import {
   attachmentUploadsReducer,
@@ -39,6 +41,12 @@ import {
   type ComposerTrigger,
 } from './composer-triggers'
 import { useComposerLayout } from './useComposerLayout'
+import {
+  continueList,
+  indentList,
+  mentionBefore,
+  type Mentions,
+} from './composer-markdown'
 import { clearComposerGlide, type ComposerGlide } from './composer-glide'
 import { AskUserQuestionPanel } from './AskUserQuestionPanel'
 import {
@@ -198,6 +206,10 @@ export function Composer({
   glide?: ComposerGlide
 }) {
   const [text, setText] = useState(initialText)
+  /** The caret's offset, so its line shows the Markdown delimiters. */
+  const [caret, setCaret] = useState(initialText.length)
+  /** IME composition shows the textarea's own text, underline and all. */
+  const [composing, setComposing] = useState(false)
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null)
   const [uploads, dispatchUploads] = useState(initialAttachmentUploads)
   const [dragging, setDragging] = useState(false)
@@ -309,7 +321,7 @@ export function Composer({
                   id: `file-${file.name}`,
                   label: `@${file.name}`,
                   group: 'Files' as const,
-                  value: file.name,
+                  value: `@${file.name} `,
                 })),
             ]),
           )
@@ -436,6 +448,7 @@ export function Composer({
     cursor = textarea.current?.selectionStart ?? value.length,
   ) => {
     setText(value)
+    setCaret(cursor)
     onTextChange?.(value)
     setTrigger(detectComposerTrigger(value, cursor))
   }
@@ -640,10 +653,27 @@ export function Composer({
     send: sendRef,
     footer: footerRef,
     textarea,
+    textBox,
     mirror,
     expanded,
     motion,
   } = useComposerLayout(text, draftMode, sessionId)
+  // Picked files and skills show as chips in the draft (zeron 7.4).
+  const mentions = useMemo<Mentions>(
+    () => ({
+      files: new Set(
+        commands
+          .filter((command) => command.group === 'Files')
+          .map((command) => command.label.slice(1)),
+      ),
+      skills: new Set(
+        commands
+          .filter((command) => command.group === 'Skills')
+          .map((command) => command.label.slice(1)),
+      ),
+    }),
+    [commands],
+  )
   useEffect(() => {
     setPane(form.current?.closest('[data-chat-pane]') ?? null)
   }, [form])
@@ -867,59 +897,131 @@ export function Composer({
                 </div>
               )}
               {attach}
-              <textarea
-                ref={textarea}
-                id="message-composer"
-                aria-label="Message composer"
-                placeholder="Do anything…"
-                value={text}
-                rows={1}
-                className={cn(
-                  'block w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-[22.75px] text-foreground caret-primary outline-none [grid-area:input] placeholder:text-faint-foreground sm:text-[14px]',
-                  'transition-[height] duration-180 ease-[cubic-bezier(0,0,0.58,1)] motion-reduce:transition-none',
-                  EDGE_FADE_CLASS,
-                  expanded ? 'px-4 pt-4 pb-1' : 'px-2 py-3',
-                )}
-                onPaste={paste}
-                onBlur={() => setTrigger(null)}
-                onChange={(event) => update(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.nativeEvent.isComposing) return
-                  if (trigger) {
-                    if (event.key === 'Escape') {
-                      event.preventDefault()
-                      setTrigger(null)
-                      return
-                    }
-                    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                      event.preventDefault()
-                      menu.current?.move(event.key === 'ArrowDown' ? 1 : -1)
-                      return
-                    }
-                    if (
-                      (event.key === 'Enter' && !event.shiftKey) ||
-                      event.key === 'Tab'
-                    ) {
-                      if (menu.current?.accept()) {
+              <div ref={textBox} className="relative min-w-0 [grid-area:input]">
+                <textarea
+                  ref={textarea}
+                  id="message-composer"
+                  aria-label="Message composer"
+                  placeholder="Do anything…"
+                  value={text}
+                  rows={1}
+                  className={cn(
+                    'relative z-[1] block w-full resize-none overflow-y-auto border-0 bg-transparent text-[16px] leading-[22.75px] break-words whitespace-pre-wrap caret-primary outline-none selection:bg-primary/24 placeholder:text-faint-foreground sm:text-[14px] dark:selection:bg-primary/35',
+                    // The painted layer underneath shows the text.
+                    composing ? 'text-foreground' : 'text-transparent',
+                    'transition-[height] duration-180 ease-[cubic-bezier(0,0,0.58,1)] motion-reduce:transition-none',
+                    EDGE_FADE_CLASS,
+                    expanded ? 'px-4 pt-4 pb-1' : 'px-2 py-3',
+                  )}
+                  onPaste={paste}
+                  onBlur={() => setTrigger(null)}
+                  onChange={(event) => update(event.target.value)}
+                  onSelect={(event) =>
+                    setCaret(event.currentTarget.selectionStart)
+                  }
+                  onCompositionStart={() => setComposing(true)}
+                  onCompositionEnd={() => setComposing(false)}
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) return
+                    if (trigger) {
+                      if (event.key === 'Escape') {
                         event.preventDefault()
+                        setTrigger(null)
+                        return
+                      }
+                      if (
+                        event.key === 'ArrowDown' ||
+                        event.key === 'ArrowUp'
+                      ) {
+                        event.preventDefault()
+                        menu.current?.move(event.key === 'ArrowDown' ? 1 : -1)
+                        return
+                      }
+                      if (
+                        (event.key === 'Enter' && !event.shiftKey) ||
+                        event.key === 'Tab'
+                      ) {
+                        if (menu.current?.accept()) {
+                          event.preventDefault()
+                          return
+                        }
+                      }
+                    }
+                    const input = event.currentTarget
+                    const plain =
+                      !event.metaKey && !event.ctrlKey && !event.altKey
+                    // Shift+Enter continues a Markdown list; Tab and
+                    // Shift+Tab indent it. Elsewhere they keep their jobs.
+                    const edit =
+                      plain && event.key === 'Enter' && event.shiftKey
+                        ? continueList(
+                            text,
+                            input.selectionStart,
+                            input.selectionEnd,
+                          )
+                        : plain && event.key === 'Tab'
+                          ? indentList(
+                              text,
+                              input.selectionStart,
+                              input.selectionEnd,
+                              event.shiftKey,
+                            )
+                          : null
+                    if (edit) {
+                      event.preventDefault()
+                      applyTextareaEdit(input, edit)
+                      return
+                    }
+                    // Backspace takes a chip whole.
+                    if (
+                      plain &&
+                      event.key === 'Backspace' &&
+                      input.selectionStart === input.selectionEnd
+                    ) {
+                      const chip = mentionBefore(
+                        text,
+                        input.selectionStart,
+                        mentions,
+                      )
+                      if (chip) {
+                        event.preventDefault()
+                        applyTextareaEdit(input, {
+                          ...chip,
+                          text: '',
+                          caret: chip.start,
+                        })
                         return
                       }
                     }
-                  }
-                  if (event.key !== 'Enter' || event.shiftKey) return
-                  event.preventDefault()
-                  // Mod+Enter on an empty composer sends the newest queued row.
-                  if (
-                    (event.metaKey || event.ctrlKey) &&
-                    !hasContent &&
-                    queued.length > 0
-                  ) {
-                    sendQueuedNow(queued.at(-1)!.id)
-                    return
-                  }
-                  void submit()
-                }}
-              />
+                    if (event.key !== 'Enter' || event.shiftKey) return
+                    event.preventDefault()
+                    // Mod+Enter on an empty composer sends the newest queued row.
+                    if (
+                      (event.metaKey || event.ctrlKey) &&
+                      !hasContent &&
+                      queued.length > 0
+                    ) {
+                      sendQueuedNow(queued.at(-1)!.id)
+                      return
+                    }
+                    void submit()
+                  }}
+                />
+                {/* After the textarea, so its ref is set when this layer
+                    starts following the textarea's scroll. */}
+                {!composing && (
+                  <MarkdownBackdrop
+                    text={text}
+                    caret={caret}
+                    mentions={mentions}
+                    textarea={textarea}
+                    className={cn(
+                      'text-[16px] leading-[22.75px] sm:text-[14px]',
+                      expanded ? 'px-4 pt-4 pb-1' : 'px-2 py-3',
+                    )}
+                  />
+                )}
+              </div>
               <textarea
                 ref={mirror}
                 aria-hidden

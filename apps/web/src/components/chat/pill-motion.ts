@@ -25,6 +25,8 @@ export type PillParts = {
   content: HTMLElement
   attach: HTMLElement
   textarea: HTMLElement
+  /** The box around the textarea and its painted layer; it moves. */
+  textBox: HTMLElement
   chip: HTMLElement
   send: HTMLElement
   footer: HTMLElement
@@ -77,7 +79,7 @@ export class PillMotion {
     for (const node of [parts.attach, parts.textarea, parts.send]) {
       const rect = node.getBoundingClientRect()
       const style = node === parts.textarea ? getComputedStyle(node) : null
-      map.set(node, {
+      map.set(node === parts.textarea ? parts.textBox : node, {
         x: rect.left - box.left + (style ? parseFloat(style.paddingLeft) : 0),
         y: rect.top - box.bottom + (style ? parseFloat(style.paddingTop) : 0),
       })

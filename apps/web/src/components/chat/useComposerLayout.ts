@@ -44,6 +44,8 @@ export function useComposerLayout(
   const send = useRef<HTMLButtonElement>(null)
   const footer = useRef<HTMLDivElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
+  /** The textarea and its painted Markdown layer, moved as one. */
+  const textBox = useRef<HTMLDivElement>(null)
   const mirror = useRef<HTMLTextAreaElement>(null)
   const [initialExpanded] = useState(
     () => hero || text.includes('\n') || coarsePointer(),
@@ -59,6 +61,7 @@ export function useComposerLayout(
           content: content.current,
           attach: attach.current,
           textarea: textarea.current,
+          textBox: textBox.current,
           chip: chip.current,
           send: send.current,
           footer: footer.current,
@@ -99,8 +102,10 @@ export function useComposerLayout(
     const band = `${COMPOSER_LAYOUT.fadeBand}px`
     const top = input.scrollTop > 0
     const bottom = input.scrollTop + input.clientHeight < input.scrollHeight - 1
-    input.style.setProperty('--fade-top', top ? band : '0px')
-    input.style.setProperty('--fade-bottom', bottom ? band : '0px')
+    // On the text box, so the painted Markdown layer fades with the input.
+    const box = input.parentElement ?? input
+    box.style.setProperty('--fade-top', top ? band : '0px')
+    box.style.setProperty('--fade-bottom', bottom ? band : '0px')
   }, [])
 
   const sizedExpanded = useRef<boolean | undefined>(undefined)
@@ -232,6 +237,7 @@ export function useComposerLayout(
     send,
     footer,
     textarea,
+    textBox,
     mirror,
     expanded,
     motion,
