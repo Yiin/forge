@@ -150,6 +150,7 @@ export class PillMotion {
       })
       node.setAttribute('aria-hidden', 'true')
       node.removeAttribute('data-glide-ghost')
+      node.setAttribute('data-glide-copy', '')
       document.body.append(node)
       return node
     })
