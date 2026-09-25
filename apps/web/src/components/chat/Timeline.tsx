@@ -124,6 +124,15 @@ export function Timeline({
       .at(-1)
     return tail?.kind === 'tool-group' ? tail.id : undefined
   }, [items, running])
+  // virtua renders only the rows in view, and only a row it renders gets
+  // measured. The live group grows as its rows reveal, so it stays mounted
+  // even when a tall composer covers the view and pins it above the top:
+  // unmounted mid-reveal, it would keep a half-grown size, and the tool the
+  // agent is running would leave the page.
+  const keepMounted = useMemo(() => {
+    const index = items.findIndex((item) => item.id === liveGroupId)
+    return index < 0 ? undefined : [index]
+  }, [items, liveGroupId])
 
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
@@ -356,6 +365,7 @@ export function Timeline({
           <Virtualizer<ChatRenderItem>
             ref={list}
             data={items}
+            keepMounted={keepMounted}
             scrollRef={scrollerRef}
           >
             {(item: ChatRenderItem, index: number) => (

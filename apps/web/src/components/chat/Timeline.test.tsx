@@ -236,6 +236,30 @@ describe('Timeline', () => {
     expect(virtualizerProps[0].shift).toBeFalsy()
   })
 
+  it('keeps the live tool group mounted while the turn runs', () => {
+    // A tall composer can pin every row above the view; virtua would then
+    // drop the live group mid-reveal and keep its half-grown size.
+    state.messages = [
+      message('hello', 1, { role: 'user' }),
+      message('', 2, {
+        itemId: 'tool',
+        type: 'tool_call',
+        content: {
+          type: 'tool_call',
+          toolCallId: 'tool',
+          name: 'shell',
+          input: 'pwd',
+        },
+      }),
+    ]
+    virtualizerProps.length = 0
+    const view = render(<Timeline running />)
+    // The prompt, the tool group, then the working line.
+    expect(virtualizerProps.at(-1)?.keepMounted).toEqual([1])
+    view.rerender(<Timeline />)
+    expect(virtualizerProps.at(-1)?.keepMounted).toBeUndefined()
+  })
+
   it('renders the working line as the last row only while running', () => {
     state.messages = [message('hello', 1)]
     const view = render(<Timeline running />)
