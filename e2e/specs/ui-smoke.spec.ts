@@ -117,17 +117,52 @@ test('creates a project, sends a prompt, and replays the full streamed reply', a
         .toBeGreaterThan(0)
       const composerBox = page.locator(`${shell} .composer-root`)
       const shortHeight = (await composerBox.boundingBox())?.height ?? 0
+      // How far the last row reaches past the composer's top edge.
+      const overlap = () =>
+        page.evaluate((shell) => {
+          const rows = document.querySelectorAll(`${shell} .chat-row`)
+          const row = rows[rows.length - 1].getBoundingClientRect()
+          const form = document
+            .querySelector(`${shell} .composer-root`)!
+            .getBoundingClientRect()
+          return row.bottom - form.top
+        }, shell)
+      // Record the overlap in every frame the composer grows. This observer
+      // runs after the app's own, so it sees each frame as it paints.
+      await page.evaluate((shell) => {
+        const overlay = document.querySelector(
+          `${shell} [data-composer-overlay]`,
+        )!
+        const probe = window as unknown as { worstOverlap: number }
+        probe.worstOverlap = -Infinity
+        new ResizeObserver(() => {
+          const rows = document.querySelectorAll(`${shell} .chat-row`)
+          const row = rows[rows.length - 1].getBoundingClientRect()
+          const form = document
+            .querySelector(`${shell} .composer-root`)!
+            .getBoundingClientRect()
+          probe.worstOverlap = Math.max(
+            probe.worstOverlap,
+            row.bottom - form.top,
+          )
+        }).observe(overlay)
+      }, shell)
       // A taller composer grows the reserved inset, so the timeline has to
-      // scroll further to keep the last row clear.
+      // scroll further to keep the last row clear. The composer eases its
+      // height, so wait for it to settle; a read between frames can see
+      // the composer ahead of the frame the browser painted.
       await composer.fill('line\n'.repeat(8))
       await expect
         .poll(async () => (await composerBox.boundingBox())?.height ?? 0)
         .toBeGreaterThan(shortHeight)
-      const rowBox = await lastRow.boundingBox()
-      const formBox = await composerBox.boundingBox()
-      expect((rowBox?.y ?? 0) + (rowBox?.height ?? 0)).toBeLessThanOrEqual(
-        formBox?.y ?? 0,
-      )
+      await expect.poll(overlap).toBeLessThanOrEqual(0)
+      // The transcript moves in the same frame as the composer, so no
+      // painted frame puts the row under it while it grows.
+      expect(
+        await page.evaluate(
+          () => (window as unknown as { worstOverlap: number }).worstOverlap,
+        ),
+      ).toBeLessThanOrEqual(0)
     }
   } finally {
     await stopProxiedForge(page, forge)

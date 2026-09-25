@@ -10,6 +10,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
+import { flushSync } from 'react-dom'
 import { peekComposerGlide } from '../components/chat/composer-glide'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../lib/api'
@@ -207,7 +208,11 @@ export function SessionRoute() {
     }
     measure()
     if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(measure)
+    // The observer runs after layout and before paint. Committing the inset
+    // here re-pins the transcript in the frame the composer grew. A plain
+    // update renders a frame later, so a composer that grows over several
+    // frames would slide over the last row while it grows.
+    const observer = new ResizeObserver(() => flushSync(measure))
     observer.observe(composerOverlay)
     return () => observer.disconnect()
   }, [composerOverlay])
