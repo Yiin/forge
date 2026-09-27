@@ -602,6 +602,10 @@ export function startServer(port?: number): ServerType {
       terminalAuthority.bind(address.port)
       // Child harnesses inherit this so agents can call the forge API.
       process.env.FORGE_SERVER_URL = `http://127.0.0.1:${address.port}`
+      // A t3code agent can start forge. Drop its T3_* vars so forge agents
+      // never see them and /cook-epic sends their runs here, not to t3code.
+      for (const key of Object.keys(process.env))
+        if (key.startsWith('T3_')) delete process.env[key]
       // Recovery respawns sessions, so it runs once the URL is known. Its
       // synchronous settling still finishes before any request is served.
       void recoverSessions(db, manager, bus, previousBoot, currentVersion)
