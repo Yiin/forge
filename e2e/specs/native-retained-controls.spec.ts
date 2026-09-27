@@ -71,7 +71,11 @@ async function wire(peer: string) {
     .split('\n')
     .map((line) => JSON.parse(line))
 }
-async function setup(page: Page, actions: unknown[]) {
+async function setup(
+  page: Page,
+  actions: unknown[],
+  configOptions?: Record<string, string>,
+) {
   const directory = await mkdtemp('/tmp/forge-native-retained-')
   const peer = join(directory, 'peer'),
     dataDir = join(directory, 'data')
@@ -113,8 +117,23 @@ async function setup(page: Page, actions: unknown[]) {
     expect(response.ok, await response.clone().text()).toBe(true)
     const session = await response.json()
     await page.goto(`/s/${session.id}`)
-    await page.getByLabel('Message composer').fill('Start retained controls')
-    await page.getByRole('button', { name: 'Send', exact: true }).click()
+    if (configOptions) {
+      const prompt = await fetch(
+        `${forge.baseUrl}/api/sessions/${session.id}/prompt`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            text: 'Start retained controls',
+            configOptions,
+          }),
+        },
+      )
+      expect(prompt.ok, await prompt.clone().text()).toBe(true)
+    } else {
+      await page.getByLabel('Message composer').fill('Start retained controls')
+      await page.getByRole('button', { name: 'Send', exact: true }).click()
+    }
     return {
       forge,
       peer,
@@ -236,18 +255,31 @@ test('answers three native pages with Back keys and reload then denies an approv
     },
     { question: 'Explain choice', header: 'Third', options: [] },
   ]
-  const fixture = await setup(page, [
-    init,
-    ...start,
-    request('three-pages', 'AskUserQuestion', { questions }),
-    answered('three-pages'),
-    request('deny-original', 'Bash', {
-      command: 'forbidden synthetic command',
-    }),
-    answered('deny-original', 'deny'),
-    text('Denied permission retained'),
-    finish,
-  ])
+  // Sessions start in yolo; manual mode makes Claude's request reach the user.
+  const fixture = await setup(
+    page,
+    [
+      init,
+      {
+        expect: {
+          type: 'control_request',
+          request: { subtype: 'set_permission_mode', mode: 'default' },
+        },
+        capture: 'policy',
+        controlSuccess: true,
+      },
+      ...start,
+      request('three-pages', 'AskUserQuestion', { questions }),
+      answered('three-pages'),
+      request('deny-original', 'Bash', {
+        command: 'forbidden synthetic command',
+      }),
+      answered('deny-original', 'deny'),
+      text('Denied permission retained'),
+      finish,
+    ],
+    { permissionMode: 'manual' },
+  )
   try {
     const panel = page.getByRole('region', { name: 'Question from Forge' })
     await expect(panel.getByText('Choose one', { exact: true })).toBeVisible()

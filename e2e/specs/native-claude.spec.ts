@@ -355,14 +355,18 @@ test('native Claude streams tools, answers original requests, and receives a dra
     await expect(
       page.getByRole('button', { name: 'Run pwd', exact: true }),
     ).toBeVisible()
-    const permission = page.getByRole('region', {
-      name: 'Tool permission request',
-    })
-    await expect(permission).toBeVisible()
-    await permission.getByRole('button', { name: /Allow once/ }).click()
-    await permission
-      .getByRole('button', { name: 'Submit', exact: true })
-      .click()
+    // Sessions start in yolo, so Forge approves the tool without asking.
+    await expect
+      .poll(async () =>
+        readFile(join(peer, 'permission-answered'), 'utf8').then(
+          () => true,
+          () => false,
+        ),
+      )
+      .toBe(true)
+    await expect(
+      page.getByRole('region', { name: 'Tool permission request' }),
+    ).toHaveCount(0)
     const question = page.getByRole('region', { name: 'Question from Forge' })
     await expect(question.getByText('Choose native feature')).toBeVisible()
     await page.reload()
