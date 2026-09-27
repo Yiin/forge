@@ -548,9 +548,6 @@ export function startServer(port?: number): ServerType {
     return promise
   }
   const harnessHealth = createHarnessHealthReader({ db, configState, manager })
-  // Settle persisted turns before exposing the port. Respawn work continues
-  // from the settled state without delaying health checks.
-  void recoverSessions(db, manager, bus, previousBoot, currentVersion)
   const app = createApp(
     uploadStore,
     {
@@ -603,6 +600,11 @@ export function startServer(port?: number): ServerType {
     (address) => {
       requestGuard.bind(address.port)
       terminalAuthority.bind(address.port)
+      // Child harnesses inherit this so agents can call the forge API.
+      process.env.FORGE_SERVER_URL = `http://127.0.0.1:${address.port}`
+      // Recovery respawns sessions, so it runs once the URL is known. Its
+      // synchronous settling still finishes before any request is served.
+      void recoverSessions(db, manager, bus, previousBoot, currentVersion)
       console.log(`FORGE_LISTENING ${address.port}`)
     },
   )

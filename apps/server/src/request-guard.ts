@@ -51,11 +51,12 @@ export class RequestGuard {
     if (this.access.mode === 'loopback') {
       this.hosts.clear()
       this.origins.clear()
-      for (const host of ['localhost', '127.0.0.1', '[::1]']) {
-        this.hosts.add(`${host}:${port}`)
-        this.origins.add(`http://${host}:${port}`)
-        if (port === 80) this.hosts.add(host)
-      }
+    }
+    // Explicit mode keeps its lists and also admits local agents on the port.
+    for (const host of ['localhost', '127.0.0.1', '[::1]']) {
+      this.hosts.add(`${host}:${port}`)
+      this.origins.add(`http://${host}:${port}`)
+      if (port === 80) this.hosts.add(host)
     }
     this.bound = true
   }

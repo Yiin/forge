@@ -192,7 +192,7 @@ export function createProductionAcpAdapter(
   }
 }
 
-function approvedToolEnvironment(): Record<string, string | undefined> {
+export function approvedToolEnvironment(): Record<string, string | undefined> {
   const result: Record<string, string | undefined> = {}
   for (const key of [
     'PATH',
@@ -204,6 +204,7 @@ function approvedToolEnvironment(): Record<string, string | undefined> {
     'LC_ALL',
     'TERM',
     'TMPDIR',
+    'FORGE_SERVER_URL',
   ])
     if (process.env[key] !== undefined) result[key] = process.env[key]
   return result

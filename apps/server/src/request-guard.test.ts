@@ -220,6 +220,35 @@ describe('Forge request guard', () => {
     ).toBeUndefined()
   })
 
+  it('admits loopback callers on the bound port in explicit mode', () => {
+    const configured = new RequestGuard({
+      mode: 'explicit',
+      allowedOrigins: ['https://forge.example'],
+      allowedHostAuthorities: ['forge.example'],
+    })
+    const loopback = (host: string, headers: HeadersInit = {}) =>
+      configured.check(
+        request({ host, 'content-type': 'application/json', ...headers }),
+        { mutation: true },
+      )
+    expect(loopback('127.0.0.1:3900')).toBe('Host is not allowed')
+    configured.bind(3900)
+    expect(loopback('127.0.0.1:3900')).toBeUndefined()
+    expect(loopback('localhost:3900')).toBeUndefined()
+    expect(loopback('[::1]:3900')).toBeUndefined()
+    expect(
+      loopback('localhost:3900', { origin: 'http://localhost:3900' }),
+    ).toBeUndefined()
+    expect(loopback('127.0.0.1:3901')).toBe('Host is not allowed')
+    expect(loopback('forge.example')).toBeUndefined()
+    expect(loopback('127.0.0.1:3900', { origin: 'https://evil.example' })).toBe(
+      'Origin is not allowed',
+    )
+    expect(loopback('127.0.0.1:3900', { 'content-type': 'text/plain' })).toBe(
+      'JSON requests require application/json',
+    )
+  })
+
   it('warns once per distinct external host when loopback mode rejects a proxied authority', () => {
     const seen: string[] = []
     const proxied = new RequestGuard({ mode: 'loopback' }, (host) =>

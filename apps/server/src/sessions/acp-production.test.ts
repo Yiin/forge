@@ -3,7 +3,10 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createProductionAcpAdapter } from './acp-factory.js'
+import {
+  approvedToolEnvironment,
+  createProductionAcpAdapter,
+} from './acp-factory.js'
 import { createNativeResources } from './native-factory.js'
 import { createNativeAttachmentLoader } from '../uploads/native.js'
 import { AcpResourceHost } from '../harnesses/acp/limits.js'
@@ -200,6 +203,16 @@ it.each(['grok', 'gemini', 'devin', 'hermes', 'custom-acp'] as const)(
   },
   20000,
 )
+it('passes the forge server URL to ACP terminal commands', () => {
+  vi.stubEnv('FORGE_SERVER_URL', 'http://127.0.0.1:3900')
+  try {
+    expect(approvedToolEnvironment().FORGE_SERVER_URL).toBe(
+      'http://127.0.0.1:3900',
+    )
+  } finally {
+    vi.unstubAllEnvs()
+  }
+})
 
 it('persists the original permission before returning its exact wire answer', async () => {
   const f = await fixture('custom-acp', 'permission')
