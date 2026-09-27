@@ -30,7 +30,7 @@ for (const [flag, value] of Object.entries({
   '--input-format': 'stream-json',
   '--output-format': 'stream-json',
   '--permission-prompt-tool': 'stdio',
-  '--permission-mode': 'manual',
+  '--permission-mode': 'bypassPermissions',
 }))
   assert.equal(options[options.indexOf(flag) + 1], value)
 assert.equal(argv.includes('--dangerously-skip-permissions'), false)

@@ -190,6 +190,8 @@ export async function peer(
           loadAttachment: async () => {
             throw new Error('Fixture has no attachment')
           },
+          // Most specs exercise the approval path; production defaults to yolo.
+          initialOptions: { permissionMode: 'manual' },
           ...settings.options,
         }
       : {
@@ -202,6 +204,8 @@ export async function peer(
           loadAttachment: async () => {
             throw new Error('Fixture has no attachment')
           },
+          // Most specs exercise the approval path; production defaults to yolo.
+          initialOptions: { permissionMode: 'manual' },
           ...settings.options,
         }
   ) as CodexAdapterOptions

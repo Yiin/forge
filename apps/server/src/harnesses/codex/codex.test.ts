@@ -431,11 +431,14 @@ describe('Codex launch and options', () => {
     ])
   })
   it('95, 96, 97, 98: per-call overrides do not replace baseline or persist yolo', () => {
-    const policy = new CodexOptions({
-      model: 'configured',
-      model_reasoning_effort: 'medium',
-      service_tier: 'default',
-    })
+    const policy = new CodexOptions(
+      {
+        model: 'configured',
+        model_reasoning_effort: 'medium',
+        service_tier: 'default',
+      },
+      { permissionMode: 'manual' },
+    )
     const yolo = policy.resolve({
       permissionMode: 'yolo',
       model: 'override',

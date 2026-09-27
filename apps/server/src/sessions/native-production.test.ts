@@ -137,7 +137,13 @@ it('Codex production composition completes a real JSON-RPC turn and exact resume
     result: { turn: turn() },
     after: [turnFrame('started'), turnFrame('completed')],
   }
-  const peer = await codexPeer([completion])
+  // Production starts Codex in yolo: the thread must echo no approvals and full access.
+  const peer = await codexPeer([completion], {
+    threadResponse: {
+      approvalPolicy: 'never',
+      sandbox: { type: 'dangerFullAccess' },
+    },
+  })
   const f = await context(
     'codex',
     peer.root,

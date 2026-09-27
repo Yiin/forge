@@ -356,7 +356,7 @@ export class CodexOptions {
       serviceTier: config.service_tier,
       approvalPolicy: config.approval_policy,
       sandboxPolicy: sandbox,
-      permissionMode: 'manual',
+      permissionMode: 'yolo',
     })
     this.desired = parseOptions(initial)
   }
@@ -368,7 +368,7 @@ export class CodexOptions {
       for (const [key, value] of Object.entries(layer))
         if (value !== undefined && key !== 'approvalsReviewer')
           (merged as Record<string, unknown>)[key] = value
-    const mode = merged.permissionMode ?? 'manual'
+    const mode = merged.permissionMode ?? 'yolo'
     const baselineSandbox = this.configured.sandboxPolicy ?? {
       type: 'workspaceWrite' as const,
     }

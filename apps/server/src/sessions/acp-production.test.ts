@@ -268,7 +268,17 @@ it('routes the browser permission answer through the original production session
     f.directory,
   )
   cleanups.push(() => manager.close())
-  await manager.prompt(f.session.id, 'Permission')
+  await manager.prompt(
+    f.session.id,
+    'Permission',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { permissionMode: 'manual' },
+  )
   await vi.waitFor(() =>
     expect(interactions.listPending(f.session.id)).toHaveLength(1),
   )
@@ -299,6 +309,40 @@ it('routes the browser permission answer through the original production session
   expect(f.db.prepare('SELECT status FROM native_interactions').get()).toEqual({
     status: 'submitted',
   })
+})
+
+it('approves a permission request server-side in the default yolo mode', async () => {
+  const f = await fixture('custom-acp', 'permission')
+  const bus = new EventBus(),
+    interactions = new NativeInteractions(f.db, bus)
+  const manager = new SessionManager(
+    f.db,
+    bus,
+    () => nativeHarness(f.adapter, undefined, interactions),
+    60000,
+    () => false,
+    f.directory,
+  )
+  cleanups.push(() => manager.close())
+  await manager.prompt(f.session.id, 'Permission')
+  await vi.waitFor(() =>
+    expect(
+      f.db
+        .prepare("SELECT count(*) AS n FROM messages WHERE type='turn_end'")
+        .get(),
+    ).toEqual({ n: 1 }),
+  )
+  expect(interactions.listPending(f.session.id)).toHaveLength(0)
+  const rows = (await readFile(f.report, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+  expect(rows.find((row) => row.event === 'permission')?.result).toEqual({
+    outcome: { outcome: 'selected', optionId: 'allow-once' },
+  })
+  expect(manager.configOptions(f.session.id)).toContainEqual(
+    expect.objectContaining({ id: 'permissionMode', currentValue: 'yolo' }),
+  )
 })
 
 it('serves original child-owned messages through the parent scope without creating child sessions', async () => {

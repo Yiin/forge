@@ -60,6 +60,10 @@ const profile = {
 }
 
 describe('native policy and request contracts', () => {
+  it('defaults the permission mode to yolo', () => {
+    expect(native.dispatchOptionsSchema.parse({}).permissionMode).toBe('yolo')
+  })
+
   it.each(['untrusted', 'on-request', 'never', granular])(
     'retains approval policy %j',
     (approvalPolicy) => {

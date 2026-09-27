@@ -3,7 +3,7 @@ import { migrate } from '../db/migrate.js'
 import { createProject, createSession } from '../db/queries.js'
 import { EventBus } from '../events/bus.js'
 import { NativeInteractions } from './native-interactions.js'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   createCompletionHandle,
   type HarnessAdapter,
@@ -262,6 +262,46 @@ describe('native session interaction bridge', () => {
       { type: 'selected', requestId: 'request-1', optionId: 'reject_once' },
     ])
     expect(fake.questionReplies).toEqual([])
+  })
+
+  it('approves a permission request in yolo mode and surfaces it in manual mode', async () => {
+    const fake = interactiveAdapter()
+    const items: unknown[] = []
+    const handle = await nativeHarness(fake.adapter).spawn(
+      { id: 'session-1', cwd: process.cwd(), harness: 'fake' },
+      (item) => items.push(item),
+      () => undefined,
+    )
+    const request = (requestId: string) =>
+      fake.emit({
+        type: 'permission_requested',
+        turnId: 'turn-1',
+        itemId: requestId,
+        request: {
+          requestId,
+          toolCallId: null,
+          title: 'Run the command?',
+          options: [
+            { id: 'no', label: 'Reject', kind: 'reject_once' },
+            { id: 'yes', label: 'Allow once', kind: 'allow_once' },
+          ],
+        },
+      })
+    expect(handle.configOptions!()).toContainEqual(
+      expect.objectContaining({ id: 'permissionMode', currentValue: 'yolo' }),
+    )
+    request('request-1')
+    await vi.waitFor(() =>
+      expect(fake.permissionReplies).toEqual([
+        { type: 'selected', requestId: 'request-1', optionId: 'yes' },
+      ]),
+    )
+    expect(items).toEqual([])
+    await handle.setConfigOption!('permissionMode', 'manual')
+    request('request-2')
+    await Promise.resolve()
+    expect(fake.permissionReplies).toHaveLength(1)
+    expect(items).toHaveLength(1)
   })
 
   it('answers an extension question through the question channel', async () => {

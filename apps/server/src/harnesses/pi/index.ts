@@ -480,16 +480,16 @@ class PiRuntime {
       configOptions: () => this.configOptions(),
       setModel: (model) =>
         this.control(() =>
-          this.applyOptions({ permissionMode: 'manual', model }),
+          this.applyOptions({ permissionMode: 'yolo', model }),
         ),
       setConfigOption: (key, value) =>
         this.control(async () => {
           if (typeof value !== 'string') fail('PI_CONFIG_VALUE_INVALID')
           if (key === 'model')
-            await this.applyOptions({ permissionMode: 'manual', model: value })
+            await this.applyOptions({ permissionMode: 'yolo', model: value })
           else if (key === 'thinking')
             await this.applyOptions({
-              permissionMode: 'manual',
+              permissionMode: 'yolo',
               reasoning: value,
             })
           else if (key === 'steeringMode' || key === 'followUpMode') {
@@ -792,7 +792,7 @@ class PiRuntime {
   }
   private validateOptions(options: DispatchOptions) {
     if (
-      options.permissionMode !== 'manual' ||
+      options.permissionMode !== 'yolo' ||
       options.approvalPolicy != null ||
       options.sandboxPolicy != null ||
       options.serviceTier != null
@@ -894,7 +894,7 @@ class PiRuntime {
       sent: false,
       finished: false,
       prepared: false,
-      options: { permissionMode: 'manual' },
+      options: { permissionMode: 'yolo' },
     }
   }
   private makeEpoch(root: Attempt | null, owner?: PiQuestionOwner): Epoch {
@@ -1004,7 +1004,7 @@ class PiRuntime {
         fail('PI_EMPTY_TEXT_NATIVE_QUEUE_UNSUPPORTED')
       attempt.options = freeze(
         dispatchOptionsSchema.parse(
-          snapshot(options ?? { permissionMode: 'manual' }),
+          snapshot(options ?? { permissionMode: 'yolo' }),
         ),
       )
       this.validateOptions(attempt.options)

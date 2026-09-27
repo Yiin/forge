@@ -26,9 +26,10 @@ describe('Codex policy layers and native configuration choices', () => {
   ])(
     '95, 96, 98: %s resolves configured, initial, setter, call, undefined and null layers',
     (field, nativeField, configured, initial, desired, call) => {
-      const baseline = new CodexOptions({
-        [nativeField as string]: configured,
-      }).resolve()
+      const baseline = new CodexOptions(
+        { [nativeField as string]: configured },
+        { permissionMode: 'manual' },
+      ).resolve()
       const policy = new CodexOptions(
         { [nativeField as string]: configured },
         { permissionMode: 'manual', [field as string]: initial },
@@ -46,6 +47,23 @@ describe('Codex policy layers and native configuration choices', () => {
     },
   )
 
+  it('defaults to yolo: no approvals and full access over configured policy', () => {
+    const policy = new CodexOptions({
+      approval_policy: 'on-request',
+      sandbox_mode: 'workspace-write',
+    })
+    expect(policy.resolve()).toMatchObject({
+      permissionMode: 'yolo',
+      approvalsReviewer: 'user',
+      approvalPolicy: 'never',
+      sandboxPolicy: { type: 'dangerFullAccess' },
+    })
+    expect(policy.resolve({ permissionMode: 'manual' })).toMatchObject({
+      approvalPolicy: 'on-request',
+      sandboxPolicy: { type: 'workspaceWrite' },
+    })
+  })
+
   it('35, 95, 97, 99: manual restores configured granular rules and workspace details after yolo', () => {
     const granular = {
       sandbox_approval: false,
@@ -54,15 +72,18 @@ describe('Codex policy layers and native configuration choices', () => {
       request_permissions: false,
       mcp_elicitations: true,
     }
-    const policy = new CodexOptions({
-      approval_policy: { granular },
-      sandbox_workspace_write: {
-        writable_roots: ['/b', '/a'],
-        network_access: false,
-        exclude_slash_tmp: true,
-        exclude_tmpdir_env_var: false,
+    const policy = new CodexOptions(
+      {
+        approval_policy: { granular },
+        sandbox_workspace_write: {
+          writable_roots: ['/b', '/a'],
+          network_access: false,
+          exclude_slash_tmp: true,
+          exclude_tmpdir_env_var: false,
+        },
       },
-    })
+      { permissionMode: 'manual' },
+    )
     const manual = policy.resolve()
     expect(manual).toMatchObject({
       approvalPolicy: { granular },

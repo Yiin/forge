@@ -87,6 +87,7 @@ export class AcpInteractions {
         options: params.options.map((option) => ({
           id: option.optionId,
           label: option.name,
+          kind: option.kind,
         })),
       })
       return {

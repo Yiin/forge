@@ -276,8 +276,54 @@ export function nativeHarness(
       Extract<HarnessEvent, { type: 'question_requested' }>['request']
     >()
     let generation: string | undefined
-    const processEvent = (event: HarnessEvent) => {
+    // Harnesses without their own permission mode get this one.
+    let permissionMode: 'manual' | 'yolo' = 'yolo'
+    const ownPermissionMode = () =>
+      adapter.capabilities.permissions &&
+      !nativeHandle
+        ?.configOptions?.()
+        .some((option) => option.id === 'permissionMode')
+    const effectivePermissionMode = () =>
+      ownPermissionMode()
+        ? permissionMode
+        : nativeHandle
+            ?.configOptions?.()
+            .find((option) => option.id === 'permissionMode')?.currentValue
+    // In yolo mode a permission request that still arrives is approved here.
+    // If the approval fails, the request reaches the user instead.
+    const approve = (
+      event: Extract<HarnessEvent, { type: 'permission_requested' }>,
+    ) => {
+      const { request } = event
+      const option =
+        request.options.find((option) => option.kind === 'allow_once') ??
+        request.options.find((option) => option.kind === 'allow_always')
+      if (
+        !option ||
+        !nativeHandle?.replyPermission ||
+        effectivePermissionMode() !== 'yolo'
+      )
+        return false
+      const handle = nativeHandle
+      void Promise.resolve()
+        .then(() =>
+          handle.replyPermission!({
+            type: 'selected',
+            requestId: request.requestId,
+            optionId: option.id,
+          }),
+        )
+        .catch(() => processEvent(event, false))
+      return true
+    }
+    const processEvent = (event: HarnessEvent, autoApprove = true) => {
       generation ??= event.runtimeGeneration
+      if (
+        autoApprove &&
+        event.type === 'permission_requested' &&
+        approve(event)
+      )
+        return
       if (
         interactions &&
         (event.type === 'permission_requested' ||
@@ -394,8 +440,38 @@ export function nativeHarness(
         }
       },
       setModel: handle.setModel,
-      configOptions: handle.configOptions,
-      setConfigOption: handle.setConfigOption,
+      configOptions: adapter.capabilities.permissions
+        ? () => {
+            const options = handle.configOptions?.() ?? []
+            return ownPermissionMode()
+              ? [
+                  ...options,
+                  {
+                    id: 'permissionMode',
+                    name: 'Permission mode',
+                    type: 'select' as const,
+                    currentValue: permissionMode,
+                    options: ['manual', 'yolo'].map((value) => ({
+                      value,
+                      name: value,
+                    })),
+                  },
+                ]
+              : options
+          }
+        : handle.configOptions,
+      setConfigOption: adapter.capabilities.permissions
+        ? async (id, value) => {
+            if (id !== 'permissionMode' || !ownPermissionMode()) {
+              if (!handle.setConfigOption)
+                throw new Error('Unsupported config option')
+              return handle.setConfigOption(id, value)
+            }
+            if (value !== 'manual' && value !== 'yolo')
+              throw new Error('Invalid permission mode')
+            permissionMode = value
+          }
+        : handle.setConfigOption,
       answerQuestion: (id, answer) => {
         const permission = permissionRequests.get(id)
         if (handle.replyPermission && permission)

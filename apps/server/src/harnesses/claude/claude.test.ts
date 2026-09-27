@@ -1202,7 +1202,7 @@ describe('Claude interactions and controls', () => {
     await t.start()
     await t.finished()
   })
-  it.each(['auto', 'yolo'] as const)(
+  it.each(['auto', 'manual'] as const)(
     'keeps rejected %s policy changes from delivering input',
     async (mode) => {
       const t = await setup([
@@ -1211,7 +1211,7 @@ describe('Claude interactions and controls', () => {
             type: 'control_request',
             request: {
               subtype: 'set_permission_mode',
-              mode: mode === 'auto' ? 'auto' : 'bypassPermissions',
+              mode: mode === 'auto' ? 'auto' : 'default',
             },
           },
           capture: 'policy',
@@ -1238,7 +1238,7 @@ describe('Claude interactions and controls', () => {
         h.prompt('no send', { permissionMode: mode }),
       ).rejects.toThrow('Managed policy')
       expect((await t.wire()).filter((f) => f.type === 'user')).toHaveLength(0)
-      const receipt = await h.prompt('manual', { permissionMode: 'manual' })
+      const receipt = await h.prompt('yolo', { permissionMode: 'yolo' })
       await t.until((events) =>
         events.some((e) => e.type === 'permission_requested'),
       )
@@ -1255,9 +1255,9 @@ describe('Claude interactions and controls', () => {
     'still requests residual native permission in %s mode',
     async (mode) => {
       const t = await setup([
-        control('set_permission_mode', 'policy', {
-          mode: mode === 'auto' ? 'auto' : 'bypassPermissions',
-        }),
+        ...(mode === 'auto'
+          ? [control('set_permission_mode', 'policy', { mode: 'auto' })]
+          : []),
         user(),
         init(),
         started(),
@@ -1282,6 +1282,28 @@ describe('Claude interactions and controls', () => {
       await receipt.completion
     },
   )
+  it('starts in yolo and drops to manual through the permission picker', async () => {
+    const t = await setup([
+      control('set_permission_mode', 'policy', { mode: 'default' }),
+    ])
+    const h = await t.start()
+    const picker = () =>
+      h.configOptions?.().find((option) => option.id === 'permissionMode')
+    expect(picker()).toMatchObject({
+      currentValue: 'yolo',
+      options: [{ value: 'manual' }, { value: 'auto' }, { value: 'yolo' }],
+    })
+    await h.setConfigOption?.('permissionMode', 'manual')
+    expect(picker()?.currentValue).toBe('manual')
+    await expect(h.setConfigOption?.('permissionMode', 'ask')).rejects.toThrow(
+      'Unsupported',
+    )
+    expect(
+      (await t.wire()).filter(
+        (f) => f.request?.subtype === 'set_permission_mode',
+      ),
+    ).toHaveLength(1)
+  })
   it('sets models and session effort through verified controls, including clearing overrides', async () => {
     const t = await setup([
       control('set_model'),
@@ -1303,19 +1325,21 @@ describe('Claude interactions and controls', () => {
     await h.setModel?.('sonnet')
     await h.setConfigOption?.('effort', 'xhigh')
     const first = await h.prompt('go', {
-      permissionMode: 'manual',
+      permissionMode: 'yolo',
       reasoning: 'max',
     })
     await first.completion
     await (
       await h.prompt('clear', {
-        permissionMode: 'manual',
+        permissionMode: 'yolo',
         model: null,
         reasoning: null,
       })
     ).completion
     await h.setModel?.('haiku')
-    expect(h.configOptions?.()).toEqual([])
+    expect(h.configOptions?.().map((option) => option.id)).toEqual([
+      'permissionMode',
+    ])
     await expect(h.setConfigOption?.('effort', 'high')).rejects.toThrow(
       'does not support',
     )
@@ -1363,7 +1387,7 @@ describe('Claude interactions and controls', () => {
     ])
     const h = await t.start()
     await expect(h.setModel?.('haiku')).rejects.toThrow('Model access denied')
-    expect(h.configOptions?.().length).toBe(1)
+    expect(h.configOptions?.().length).toBe(2)
   })
   it('fails an unanswered control at its original deadline', async () => {
     const t = await setup(
@@ -1815,7 +1839,7 @@ describe('Claude input and preparation', () => {
       await expect(
         h.prompt(
           [{ type: 'attachment', attachmentId: 'image', mime: 'image/png' }],
-          { permissionMode: 'manual', ...patch } as DispatchOptions,
+          { permissionMode: 'yolo', ...patch } as DispatchOptions,
         ),
       ).rejects.toThrow()
       expect(reads).toBe(0)
@@ -1926,7 +1950,7 @@ describe('Claude steering, cancellation, and process ownership', () => {
       h.steer?.('wrong', undefined, { runId: 'run', turnId: 'wrong' }),
     ).rejects.toThrow('identity')
     await expect(
-      h.steer?.('wrong', { permissionMode: 'manual', reasoning: 'high' }),
+      h.steer?.('wrong', { permissionMode: 'yolo', reasoning: 'high' }),
     ).rejects.toThrow('settings')
     const [one, two] = await Promise.all([h.steer!('one'), h.steer!('two')])
     expect(one.completion).toBe(first.completion)
@@ -2715,7 +2739,7 @@ describe('Claude final send checks', () => {
     ])
     const h = await t.start()
     const pending = h.prompt('old', {
-      permissionMode: 'manual',
+      permissionMode: 'yolo',
       model: 'sonnet',
     })
     const rejected = expect(pending).rejects.toThrow('cancelled')
@@ -2724,7 +2748,7 @@ describe('Claude final send checks', () => {
     await rejected
     expect(t.events.filter((e) => e.type === 'prompt_accepted')).toHaveLength(0)
     await (
-      await h.prompt('new', { permissionMode: 'manual', model: 'sonnet' })
+      await h.prompt('new', { permissionMode: 'yolo', model: 'sonnet' })
     ).completion
     expect((await t.wire()).filter((f) => f.type === 'user')).toHaveLength(1)
   })

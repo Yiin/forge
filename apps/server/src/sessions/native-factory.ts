@@ -480,18 +480,6 @@ export function createProductionNativeAdapter(
             await handle.setConfigOption!('thinking', account.config.thinking)
           store.assertActivation(activation)
         }
-        if (provider === 'cursor') {
-          const prompt = handle.prompt.bind(handle)
-          handle.prompt = (input, dispatch, identity) =>
-            prompt(
-              input,
-              {
-                ...dispatch,
-                permissionMode: dispatch?.permissionMode ?? 'auto',
-              },
-              identity,
-            )
-        }
         startup.assertOpen()
         if (handle.binding) store.put('binding', handle.binding)
         return handle

@@ -164,7 +164,7 @@ function launchArgs(args: string[]) {
     'stdio',
     '--forward-subagent-text',
     '--permission-mode',
-    'manual',
+    'bypassPermissions',
     '--allow-dangerously-skip-permissions',
   ]
 }
@@ -389,7 +389,7 @@ class ClaudeSession implements ClaudeHandle {
   private settings: Settings = {
     model: null,
     effort: null,
-    permissionMode: 'manual',
+    permissionMode: 'yolo',
   }
   private buffered: { frame: ObjectValue; bytes: number }[] = []
   private bufferedBytes = 0
@@ -834,6 +834,16 @@ class ClaudeSession implements ClaudeHandle {
   }
   configOptions(): SessionConfigOption[] {
     const descriptor = this.model(this.settings.model)
+    const permissionMode: SessionConfigOption = {
+      id: 'permissionMode',
+      name: 'Permission mode',
+      type: 'select',
+      currentValue: this.settings.permissionMode,
+      options: ['manual', 'auto', 'yolo'].map((value) => ({
+        value,
+        name: value,
+      })),
+    }
     return descriptor?.supportsEffort
       ? [
           {
@@ -846,8 +856,9 @@ class ClaudeSession implements ClaudeHandle {
               name: value,
             })),
           },
+          permissionMode,
         ]
-      : []
+      : [permissionMode]
   }
   setConfigOption(configId: string, value: string | boolean) {
     return this.operation(async (check) => {
@@ -857,6 +868,11 @@ class ClaudeSession implements ClaudeHandle {
         const target = { ...this.settings, effort: value }
         this.validateEffort(target.model, target.effort)
         await this.apply(target, check)
+      } else if (
+        configId === 'permissionMode' &&
+        (value === 'manual' || value === 'auto' || value === 'yolo')
+      ) {
+        await this.apply({ ...this.settings, permissionMode: value }, check)
       } else if (
         configId === 'fast' &&
         typeof value === 'boolean' &&
@@ -1287,8 +1303,8 @@ class ClaudeSession implements ClaudeHandle {
           title: name,
           ...(detail ? { detail: this.safe(new Error(detail)).message } : {}),
           options: [
-            { id: 'allow_once', label: 'Allow once' },
-            { id: 'deny', label: 'Deny' },
+            { id: 'allow_once', label: 'Allow once', kind: 'allow_once' },
+            { id: 'deny', label: 'Deny', kind: 'reject_once' },
           ],
         },
       })

@@ -302,7 +302,7 @@ export class KimiRuntime implements KimiHandle {
       this.defaults = {
         model: authority.selected.account.config?.model,
         thinking: authority.selected.account.config?.thinking,
-        permission_mode: 'manual',
+        permission_mode: 'yolo',
       }
       this.records = records = new KimiRecords(
         { sessionId: session.id, binding, runtimeGeneration: this.generation },

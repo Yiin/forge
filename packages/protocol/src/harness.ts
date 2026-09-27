@@ -85,7 +85,7 @@ export const sandboxPolicySchema = z.discriminatedUnion('type', [
   }),
 ])
 export const dispatchOptionsSchema = modelOptionsSchema.extend({
-  permissionMode: z.enum(['manual', 'auto', 'yolo']).default('manual'),
+  permissionMode: z.enum(['manual', 'auto', 'yolo']).default('yolo'),
   approvalPolicy: approvalPolicySchema.nullish(),
   sandboxPolicy: sandboxPolicySchema.nullish(),
   serviceTier: z.string().nullish(),
@@ -151,7 +151,15 @@ export const permissionRequestSchema = z.object({
   toolCallId: id.nullable(),
   title: z.string(),
   detail: z.string().optional(),
-  options: z.array(z.object({ id, label: z.string() })),
+  options: z.array(
+    z.object({
+      id,
+      label: z.string(),
+      kind: z
+        .enum(['allow_once', 'allow_always', 'reject_once', 'reject_always'])
+        .optional(),
+    }),
+  ),
   permissions: permissionProfileSchema.optional(),
   scope: permissionGrantScopeSchema.optional(),
   approvalId: id.optional(),

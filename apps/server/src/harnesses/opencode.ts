@@ -2089,7 +2089,7 @@ class OpenCodeRuntime {
     if (this.physicalWork.has(key)) return
     this.inputs.delete(key)
     ticket.input = []
-    ticket.options = { permissionMode: 'manual' }
+    ticket.options = { permissionMode: 'yolo' }
     ticket.command = undefined
     clearTimeout(ticket.activityTimer)
     clearTimeout(ticket.commandTimer)
@@ -3157,9 +3157,13 @@ class OpenCodeRuntime {
         title: permission,
         detail: JSON.stringify({ permission, patterns, always }),
         options: [
-          { id: 'once', label: 'Allow once' },
-          { id: 'always', label: 'Allow matching requests' },
-          { id: 'reject', label: 'Deny' },
+          { id: 'once', label: 'Allow once', kind: 'allow_once' },
+          {
+            id: 'always',
+            label: 'Allow matching requests',
+            kind: 'allow_always',
+          },
+          { id: 'reject', label: 'Deny', kind: 'reject_once' },
         ],
       }
     }

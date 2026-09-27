@@ -3192,6 +3192,15 @@ describe('8. Questions and approvals', () => {
   }, 30000)
 })
 describe('9. Attachments and options', () => {
+  test('a new session starts in yolo permission mode', async () => {
+    const fixture = await setup()
+    expect(
+      fixture.handle
+        .configOptions?.()
+        .find((option) => option.id === 'permissionMode')?.currentValue,
+    ).toBe('yolo')
+    await fixture.handle.kill()
+  })
   test('absent, null, and explicit model settings leave global config unchanged', async () => {
     const fixture = await setup()
     const settings: (DispatchOptions | undefined)[] = [

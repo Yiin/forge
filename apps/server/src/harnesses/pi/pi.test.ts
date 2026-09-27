@@ -867,7 +867,7 @@ describe('Pi raw process contract', () => {
       },
     ]
     const identity = { runId: 'original-run', turnId: 'original-turn' }
-    const receipt = handle.prompt(input, { permissionMode: 'manual' }, identity)
+    const receipt = handle.prompt(input, { permissionMode: 'yolo' }, identity)
     identity.runId = 'mutated'
     expect(await reentered!.acceptance).toMatchObject({ status: 'rejected' })
     expect(await receipt.completion).toMatchObject({
@@ -894,7 +894,7 @@ describe('Pi raw process contract', () => {
                 : handle.setConfigOption!('thinking', 'high'),
             )
             void reentry.catch(() => {})
-            return 'manual' as const
+            return 'yolo' as const
           },
         },
         { runId: 'captured-run', turnId: 'captured-turn' },
@@ -986,13 +986,13 @@ describe('Pi raw process contract', () => {
     const f = await peer({ behavior: 'handled' })
     const { handle } = await f.start()
     const first = handle.prompt('one', {
-      permissionMode: 'manual',
+      permissionMode: 'yolo',
       model: '["fake","model/two"]',
       reasoning: 'high',
     })
     expect(await first.completion).toMatchObject({ status: 'completed' })
     const second = handle.prompt('two', {
-      permissionMode: 'manual',
+      permissionMode: 'yolo',
       model: null,
       reasoning: null,
     })
@@ -1026,7 +1026,7 @@ describe('Pi raw process contract', () => {
       })
       const { handle } = await f.start()
       const receipt = handle.prompt('settings', {
-        permissionMode: 'manual',
+        permissionMode: 'yolo',
         ...(kind === 'no-baseline' ? { model: null } : { reasoning: 'high' }),
       })
       expect(await receipt.completion).toMatchObject({ status: 'failed' })
@@ -1053,7 +1053,7 @@ describe('Pi raw process contract', () => {
       { type: 'attachment' as const, attachmentId: 'owned', mime: 'image/png' },
     ]
     const changed = handle.steer(input, {
-      permissionMode: 'manual',
+      permissionMode: 'yolo',
       reasoning: 'high',
     })
     expect(await changed.acceptance).toMatchObject({
@@ -1074,7 +1074,7 @@ describe('Pi raw process contract', () => {
       const f = await peer({ behavior: 'manual', hold: [command] })
       const { handle } = await f.start({ limits: { commandMs: 200 } })
       const root = handle.prompt('root', {
-        permissionMode: 'manual',
+        permissionMode: 'yolo',
         ...(command === 'set_thinking_level' ? { reasoning: 'high' } : {}),
       })
       let queued: ReturnType<typeof handle.followUp> | undefined
