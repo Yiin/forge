@@ -56,7 +56,15 @@ export type ChatRenderItem =
       id: string
       card: Extract<Message['content'], { type: 'epic_triage' }>
     }
-  | { kind: 'system'; id: string; text: string; code?: string; alert?: boolean }
+  | {
+      kind: 'system'
+      id: string
+      text: string
+      code?: string
+      alert?: boolean
+      title?: string
+      recovery?: 'login' | 'retry'
+    }
   | {
       kind: 'native'
       id: string
@@ -144,6 +152,13 @@ export function toRenderModel(
     string,
     Extract<ChatRenderItem, { kind: 'message' }>
   >()
+  // Only the latest failed turn, with no prompt after it, offers recovery.
+  let failure:
+    | {
+        item: Extract<ChatRenderItem, { kind: 'system' }>
+        recovery: 'login' | 'retry'
+      }
+    | undefined
   for (const message of messages) {
     const owner =
       'childId' in message.content ? message.content.childId : undefined
@@ -181,6 +196,8 @@ export function toRenderModel(
       )
     }
     const content = message.content
+    if (message.role === 'user' && content.type === 'turn_start')
+      failure = undefined
     if (content.type === 'content_snapshot' && content.contentType === 'plan') {
       const key = JSON.stringify([
         message.turnId,
@@ -326,11 +343,30 @@ export function toRenderModel(
         steps: content.steps,
       })
     } else if (content.type === 'turn_interrupted') {
-      result.push({
-        kind: 'system',
-        id: renderId,
-        text: interruptReasonText(content.reason, content.version),
-      })
+      if (content.message || content.reason === 'failed') {
+        const item: Extract<ChatRenderItem, { kind: 'system' }> = {
+          kind: 'system',
+          id: renderId,
+          ...(content.message
+            ? {
+                title: interruptReasonText(content.reason, content.version),
+                text: content.message,
+              }
+            : { text: interruptReasonText('failed') }),
+          alert: true,
+        }
+        result.push(item)
+        failure = {
+          item,
+          recovery: content.code === 'auth_required' ? 'login' : 'retry',
+        }
+      } else {
+        result.push({
+          kind: 'system',
+          id: renderId,
+          text: interruptReasonText(content.reason, content.version),
+        })
+      }
     } else if (content.type === 'error') {
       result.push({
         kind: 'system',
@@ -351,6 +387,7 @@ export function toRenderModel(
       result.push({ kind: 'native', id: renderId, content })
     }
   }
+  if (failure && pending.length === 0) failure.item.recovery = failure.recovery
   const placed = placeSubagents(result, children, anchors) as ChatRenderItem[]
   return groupTools(
     [

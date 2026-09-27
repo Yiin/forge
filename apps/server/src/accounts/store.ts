@@ -14,6 +14,8 @@ import type {
   PatchHarnessAccount,
 } from '@forge/protocol/accounts'
 import type { HarnessConfig } from '@forge/protocol/config'
+import { claudeCredentialsUsable } from './identity.js'
+import { clearAuthLimit } from './limits.js'
 
 type Db = { prepare(sql: string): any }
 type AccountRow = {
@@ -169,6 +171,10 @@ export class HarnessAccountStore {
       )
       .run(identity ? JSON.stringify(identity) : null, Date.now(), id)
     return this.get(id)
+  }
+
+  clearAuthLimit(id: string) {
+    clearAuthLimit(this.db, id)
   }
 
   identityCheckedAt(id: string) {
@@ -377,7 +383,7 @@ export function accountAuthenticated(kind: string, homePath: string) {
       const credentials = JSON.parse(
         readFileSync(join(homePath, '.credentials.json'), 'utf8'),
       )
-      return typeof credentials.claudeAiOauth?.accessToken === 'string'
+      return claudeCredentialsUsable(credentials.claudeAiOauth, Date.now())
     } catch {
       return false
     }

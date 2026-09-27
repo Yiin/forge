@@ -454,6 +454,120 @@ describe('chat render model', () => {
       },
     ])
   })
+  it('shows a failed turn with its message and a retry action', () => {
+    expect(
+      toRenderModel([
+        message({
+          type: 'turn_interrupted',
+          reason: 'failed',
+          code: 'claude_result_error',
+          message: 'Internal error: boom',
+        }),
+      ]),
+    ).toEqual([
+      {
+        kind: 'system',
+        id: JSON.stringify(['s', 't', null, 'turn_interrupted', 'i']),
+        title: 'The turn failed.',
+        text: 'Internal error: boom',
+        alert: true,
+        recovery: 'retry',
+      },
+    ])
+  })
+  it('offers login when the turn failed for auth', () => {
+    const [item] = toRenderModel([
+      message({
+        type: 'turn_interrupted',
+        reason: 'failed',
+        code: 'auth_required',
+        message: 'Failed to authenticate',
+      }),
+    ])
+    expect(item).toMatchObject({ kind: 'system', recovery: 'login' })
+  })
+  it('drops recovery once a later prompt arrives', () => {
+    const items = toRenderModel([
+      message(
+        {
+          type: 'turn_interrupted',
+          reason: 'failed',
+          code: 'auth_required',
+          message: 'Failed to authenticate',
+        },
+        { seq: 1 },
+      ),
+      message(
+        { type: 'turn_start' },
+        { seq: 2, role: 'user', turnId: 't2', itemId: 'p0' },
+      ),
+      message(
+        { type: 'text_delta', text: 'again' },
+        { seq: 3, role: 'user', turnId: 't2', itemId: 'p' },
+      ),
+    ])
+    expect(items[0]).toMatchObject({ kind: 'system', alert: true })
+    expect(items[0]).not.toHaveProperty('recovery')
+  })
+  it('drops recovery once a later attachment-only prompt arrives', () => {
+    const items = toRenderModel([
+      message(
+        { type: 'turn_interrupted', reason: 'failed', message: 'boom' },
+        { seq: 1 },
+      ),
+      message(
+        { type: 'turn_start' },
+        { seq: 2, role: 'user', turnId: 't2', itemId: 'p0' },
+      ),
+      message(
+        {
+          type: 'attachment_ref',
+          attachmentId: 'a1',
+          path: '/tmp/a1',
+          filename: 'a1.png',
+        },
+        { seq: 3, role: 'user', turnId: 't2', itemId: 'p1' },
+      ),
+    ])
+    expect(items[0]).toMatchObject({ kind: 'system', alert: true })
+    expect(items[0]).not.toHaveProperty('recovery')
+  })
+  it('drops recovery while a prompt is pending', () => {
+    const items = toRenderModel(
+      [
+        message({
+          type: 'turn_interrupted',
+          reason: 'failed',
+          message: 'boom',
+        }),
+      ],
+      false,
+      [],
+      [
+        {
+          sessionId: 's',
+          itemId: 'retry',
+          text: 'again',
+          createdAt: 'now',
+        },
+      ],
+    )
+    expect(items[0]).toMatchObject({ kind: 'system', alert: true })
+    expect(items[0]).not.toHaveProperty('recovery')
+  })
+  it('shows a plain failed alert when the turn gave no message', () => {
+    expect(
+      toRenderModel([message({ type: 'turn_interrupted', reason: 'failed' })]),
+    ).toEqual([
+      {
+        kind: 'system',
+        id: JSON.stringify(['s', 't', null, 'turn_interrupted', 'i']),
+        text: 'The turn failed.',
+        alert: true,
+        recovery: 'retry',
+      },
+    ])
+  })
   it('keeps process details available without crowding the error row', () => {
     expect(
       toRenderModel([

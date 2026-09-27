@@ -47,7 +47,7 @@ function fixture(body: string) {
     () => script,
   )
   resources.push({ db, root, script })
-  return { login, account, accounts, events }
+  return { db, login, account, accounts, events }
 }
 async function waitFor(login: LoginManager, id: string, status: string) {
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -104,6 +104,22 @@ describe('LoginManager', () => {
       label: 'Claude 1 - person@example.com',
       identity: { email: 'person@example.com', plan: 'max' },
     })
+  })
+
+  it('clears an auth limit after a successful login', async () => {
+    const { db, login, account } = fixture('exit 0')
+    db.prepare(
+      `INSERT INTO harness_account_limits
+      (account_id, kind, harness_key, detected_at, resets_at, resets_at_estimated, source, detail)
+      VALUES (?, 'auth', 'claude', 100, NULL, 0, 'session.turn', 'Failed to authenticate')`,
+    ).run(account.id)
+    const id = login.start(account.id)
+    await waitFor(login, id, 'succeeded')
+    expect(
+      db
+        .prepare('SELECT * FROM harness_account_limits WHERE account_id = ?')
+        .all(account.id),
+    ).toEqual([])
   })
 
   it('reports non-zero exits and forwards responses without persistence', async () => {

@@ -6,6 +6,8 @@ const INTERRUPT_REASON_COPY: Record<string, string> = {
   pty_process_died: 'The terminal process stopped.',
   max_turn_time: 'The turn hit its time limit.',
   error: 'The turn failed.',
+  failed: 'The turn failed.',
+  interrupted: 'The turn stopped.',
 }
 
 export function interruptReasonText(reason?: string, version?: string): string {
@@ -16,5 +18,8 @@ export function interruptReasonText(reason?: string, version?: string): string {
   }
 
   if (reason === undefined) return 'Turn stopped.'
-  return INTERRUPT_REASON_COPY[reason] ?? `Turn stopped (${reason}).`
+  return (
+    INTERRUPT_REASON_COPY[reason] ??
+    'The turn stopped. The agent gave no reason.'
+  )
 }

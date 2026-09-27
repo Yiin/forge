@@ -58,6 +58,7 @@ export function Timeline({
   running = false,
   offline = false,
   onRetry,
+  onRecover,
   sentPrompt,
 }: {
   resumedWithRecap?: boolean
@@ -70,6 +71,8 @@ export function Timeline({
   offline?: boolean
   /** Sends the prompts that never reached the server again. */
   onRetry?: () => void
+  /** Recovers from the latest failed turn: sign in again or resend. */
+  onRecover?: (action: 'login' | 'retry') => void
   /**
    * A prompt sent before this transcript mounted, from the new-session
    * screen. It takes the send runway as if it were sent here.
@@ -382,6 +385,7 @@ export function Timeline({
                 phase={phase}
                 turnStartedAt={turnStartedAt}
                 onRetry={onRetry}
+                onRecover={onRecover}
               />
             )}
           </Virtualizer>
@@ -433,6 +437,7 @@ function RenderItem({
   phase,
   turnStartedAt,
   onRetry,
+  onRecover,
 }: {
   index: number
   item: ChatRenderItem
@@ -446,6 +451,7 @@ function RenderItem({
   phase: WorkingPhase
   turnStartedAt?: string
   onRetry?: () => void
+  onRecover?: (action: 'login' | 'retry') => void
 }) {
   return (
     <div
@@ -475,6 +481,7 @@ function RenderItem({
             skills={skills}
             live={live}
             arrivals={arrivals}
+            onRecover={onRecover}
           />
         )}
       </div>
@@ -489,6 +496,7 @@ function RenderItemContent({
   skills,
   live,
   arrivals,
+  onRecover,
 }: {
   item: ChatRenderItem
   meta: RowMeta
@@ -496,6 +504,7 @@ function RenderItemContent({
   skills: string[]
   live: boolean
   arrivals: Arrivals
+  onRecover?: (action: 'login' | 'retry') => void
 }) {
   if (item.kind === 'message')
     return (
@@ -525,7 +534,8 @@ function RenderItemContent({
   if (item.kind === 'epic-triage') return <EpicTriageCard card={item.card} />
   if (item.kind === 'plan') return <PlanCard item={item} />
   if (item.kind === 'attachment') return <AttachmentItem item={item} />
-  if (item.kind === 'system') return <SystemItem item={item} />
+  if (item.kind === 'system')
+    return <SystemItem item={item} onRecover={onRecover} />
   if (item.kind === 'native')
     return <NativeContentRow item={item} sessionId={sessionId} />
   return null

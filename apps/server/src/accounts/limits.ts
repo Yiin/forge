@@ -102,6 +102,12 @@ export function clearAccountLimits(db: Db, accountId: string) {
   )
 }
 
+export function clearAuthLimit(db: Db, accountId: string) {
+  db.prepare(
+    "DELETE FROM harness_account_limits WHERE account_id = ? AND kind = 'auth'",
+  ).run(accountId)
+}
+
 export function blockedAccounts(
   db: Db,
   now: number,

@@ -47,6 +47,20 @@ describe('account credentials', () => {
     expect(accountAuthenticated('pi', home)).toBe(true)
   })
 
+  it.each([
+    { accessToken: 'a', expiresAt: 1 },
+    { accessToken: 'a', refreshToken: 'r', refreshTokenExpiresAt: 1 },
+    { accessToken: '', refreshToken: '', expiresAt: 0 },
+  ])('rejects unusable Claude credentials %#', (oauth) => {
+    const home = mkdtempSync(join(tmpdir(), 'forge-claude-'))
+    roots.push(home)
+    writeFileSync(
+      join(home, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: oauth }),
+    )
+    expect(accountAuthenticated('claude', home)).toBe(false)
+  })
+
   it('recognizes the OpenCode auth file under its XDG data home', () => {
     const home = mkdtempSync(join(tmpdir(), 'forge-opencode-'))
     roots.push(home)

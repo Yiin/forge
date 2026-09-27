@@ -15,6 +15,7 @@ const scenarios = new Set([
   'questions',
   'hang-prompt',
   'error-prompt',
+  'error-prompt-internal',
   'grok-duplicate-completion',
   'grok-unknown-completion',
 ])
@@ -253,6 +254,8 @@ function receive(frame) {
     if (active) return error(frame.id, -32000, 'Fixture prompt already active')
     if (scenario === 'error-prompt')
       return error(frame.id, -32000, 'Fixture prompt failed')
+    if (scenario === 'error-prompt-internal')
+      return error(frame.id, -32603, 'Internal error: boom')
     if (
       scenario.startsWith('grok-') &&
       (typeof p._meta?.promptId !== 'string' || !p._meta.promptId.length)

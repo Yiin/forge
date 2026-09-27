@@ -154,6 +154,37 @@ async function fixture(
   }
 }
 describe('typed ACP root runtime', () => {
+  it.each([
+    {
+      scenario: 'error-prompt',
+      code: 'auth_required',
+      message: 'Fixture prompt failed (code -32000)',
+    },
+    {
+      scenario: 'error-prompt-internal',
+      code: 'acp_prompt_failed',
+      message: 'Internal error: boom (code -32603)',
+    },
+  ])(
+    'keeps the adapter text of a failed prompt: $scenario',
+    async ({ scenario, code, message }) => {
+      const f = await fixture(scenario)
+      let handle: HarnessHandle | undefined
+      try {
+        handle = await createTypedAcpAdapter(f.deps).spawn(session, (event) =>
+          f.events.push(event),
+        )
+        const receipt = await handle.prompt('go')
+        expect(await receipt.completion).toMatchObject({
+          status: 'failed',
+          code,
+          message,
+        })
+      } finally {
+        await f.cleanup(handle)
+      }
+    },
+  )
   it('settles every accepted receipt when original process cleanup refuses', async () => {
     const f = await fixture('error-prompt'),
       entered = deferred<void>(),

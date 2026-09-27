@@ -142,6 +142,9 @@ export function nativeItem(
         : make({
             type: 'turn_interrupted',
             reason: event.outcome.status,
+            ...(event.outcome.status === 'failed'
+              ? { code: event.outcome.code, message: event.outcome.message }
+              : {}),
             turnId: event.turnId,
           })
     case 'run_failed':

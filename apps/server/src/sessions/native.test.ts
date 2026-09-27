@@ -157,6 +157,34 @@ describe('native session interaction bridge', () => {
     expect(exits).toEqual([])
   })
 
+  it('keeps the code and message of a failed turn', async () => {
+    const fake = interactiveAdapter()
+    const received: any[] = []
+    await nativeHarness(fake.adapter).spawn(
+      { id: 'session-1', cwd: process.cwd(), harness: 'fake' },
+      (value) => received.push(value),
+      () => {},
+    )
+    fake.emit({
+      type: 'turn_completed',
+      turnId: 'turn-1',
+      outcome: {
+        status: 'failed',
+        code: 'auth_required',
+        message: 'Failed to authenticate: OAuth session expired',
+      },
+    })
+    expect(received).toEqual([
+      {
+        type: 'turn_interrupted',
+        reason: 'failed',
+        code: 'auth_required',
+        message: 'Failed to authenticate: OAuth session expired',
+        turnId: 'turn-1',
+      },
+    ])
+  })
+
   it('rejects a foreign typed option before durable reply admission', async () => {
     const db = new DatabaseSync(':memory:')
     migrate(db)

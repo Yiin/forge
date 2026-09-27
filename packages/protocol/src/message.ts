@@ -30,6 +30,8 @@ export const MessageContent = z.discriminatedUnion('type', [
     type: z.literal('text_delta'),
     text: z.string(),
     reviewReferences: reviewNotesSchema.optional(),
+    // Set on a steer written into a running turn, so a retry can skip it.
+    steeringRequestId: id.optional(),
     childId: id.optional(),
   }),
   z.object({
@@ -120,6 +122,8 @@ export const MessageContent = z.discriminatedUnion('type', [
     type: z.literal('turn_interrupted'),
     reason: z.string().optional(),
     version: z.string().optional(),
+    message: z.string().optional(),
+    code: z.string().optional(),
   }),
   z.object({
     type: z.literal('error'),

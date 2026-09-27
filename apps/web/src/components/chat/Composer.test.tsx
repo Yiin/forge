@@ -886,6 +886,57 @@ describe('Composer', () => {
     })
     expect(screen.getByRole('button', { name: /Remove/ })).toBeTruthy()
   })
+
+  const snapshot = (status: 'authenticated' | 'unauthenticated') => ({
+    accountId: 'main',
+    harnessKind: 'claude',
+    harnessKey: 'claude',
+    enabled: true,
+    installed: true,
+    version: '1.0.0',
+    status: 'ready' as const,
+    auth: { status },
+    checkedAt: new Date().toISOString(),
+  })
+
+  it('warns that the selected account is signed out without blocking send', async () => {
+    vi.spyOn(accountsApi, 'listHarnessStatus').mockResolvedValue([
+      snapshot('unauthenticated'),
+    ])
+    const onSignIn = vi.fn()
+    vi.spyOn(accountsApi, 'listAccounts').mockResolvedValue([])
+    render(
+      <Composer
+        sessionId="session-1"
+        harness="claude"
+        accountId="main"
+        onSend={vi.fn().mockResolvedValue(undefined)}
+        onSignIn={onSignIn}
+      />,
+    )
+    expect(
+      await screen.findByText(
+        'This account is signed out. Sign in before you send.',
+      ),
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(onSignIn).toHaveBeenCalledExactlyOnceWith('main')
+    fireEvent.change(screen.getByLabelText('Message composer'), {
+      target: { value: 'hello' },
+    })
+    expect(
+      screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled'),
+    ).toBe(false)
+  })
+
+  it('shows no sign-in warning for a signed-in account', async () => {
+    const status = vi
+      .spyOn(accountsApi, 'listHarnessStatus')
+      .mockResolvedValue([snapshot('authenticated')])
+    renderComposer()
+    await waitFor(() => expect(status).toHaveBeenCalled())
+    expect(screen.queryByText(/This account is signed out/)).toBeNull()
+  })
 })
 
 it('keeps an accountless session selection while provider metadata loads', async () => {

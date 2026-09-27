@@ -928,6 +928,44 @@ describe('Claude content and root ownership', () => {
     })
     expect(text(t.events)).toBe('')
   })
+  it('marks an expired OAuth login as auth_required', async () => {
+    const message =
+      'Failed to authenticate: OAuth session expired and could not be refreshed'
+    const t = await setup([
+      user(),
+      init(),
+      started(),
+      full(message, {
+        error: 'authentication_failed',
+        message: {
+          id: 'error',
+          model: '<synthetic>',
+          content: [{ type: 'text', text: message }],
+        },
+      }),
+      result({ is_error: true, result: message }),
+    ])
+    const h = await t.start()
+    expect(await (await h.prompt('go')).completion).toMatchObject({
+      status: 'failed',
+      code: 'auth_required',
+      message,
+    })
+  })
+  it('uses the result text when a failed result has no other error', async () => {
+    const t = await setup([
+      user(),
+      init(),
+      started(),
+      result({ is_error: true, result: 'Prompt is too long' }),
+    ])
+    const h = await t.start()
+    expect(await (await h.prompt('go')).completion).toMatchObject({
+      status: 'failed',
+      code: 'claude_result_error',
+      message: 'Prompt is too long',
+    })
+  })
   it('keeps informational rate-limit notices nonterminal and supports result-only text', async () => {
     const t = await setup([
       user(),

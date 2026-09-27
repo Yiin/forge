@@ -77,6 +77,13 @@ export function createHarnessHealthReader(options: {
                   detail: string | null
                 }
               | undefined
+            const hasAuthLimit = Boolean(
+              options.db
+                .prepare(
+                  "SELECT 1 FROM harness_account_limits WHERE account_id = ? AND kind = 'auth' AND source = 'session.turn'",
+                )
+                .get(account.id),
+            )
             const usageRows = readUsage(options.db, account.id)
             const visibleUsage = usageRows.filter(
               (row) => row.windowKey !== '__status',
@@ -88,7 +95,8 @@ export function createHarnessHealthReader(options: {
               homePath: current.homePath,
               order: current.orderIndex,
               disabled: current.disabledAt !== null,
-              authenticated: current.identity?.status === 'authenticated',
+              authenticated:
+                current.identity?.status === 'authenticated' && !hasAuthLimit,
               identity: current.identity,
               cooldown: cooldown
                 ? {

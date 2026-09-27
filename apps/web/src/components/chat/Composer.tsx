@@ -5,6 +5,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -172,6 +173,8 @@ export function Composer({
   destination,
   connectionNotice,
   glide,
+  onSignIn,
+  accountsVersion,
 }: {
   sessionId: string
   harness?: string
@@ -204,6 +207,10 @@ export function Composer({
   connectionNotice?: { text: string; offline: boolean }
   /** The new-session composer this one takes over from; see composer-glide. */
   glide?: ComposerGlide
+  /** Starts sign-in for the given account; without it, links to settings. */
+  onSignIn?: (accountId: string) => void
+  /** Bumped after a sign-in, so the account status loads again. */
+  accountsVersion?: number
 }) {
   const [text, setText] = useState(initialText)
   /** The caret's offset, so its line shows the Markdown delimiters. */
@@ -410,7 +417,7 @@ export function Composer({
       .listHarnessStatus()
       .then(setAccountSnapshots)
       .catch(() => undefined)
-  }, [])
+  }, [running, accountsVersion])
   // Mod+/ opens the model picker, as in zeron.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1120,6 +1127,31 @@ export function Composer({
             </div>
           </div>
         </div>
+        {accountSnapshot?.auth.status === 'unauthenticated' && (
+          <p
+            role="status"
+            className="mx-2.5 mt-1 flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-warning"
+          >
+            <span>This account is signed out. Sign in before you send.</span>
+            {onSignIn ? (
+              <Button
+                variant="link"
+                size="xs"
+                onClick={() => onSignIn(accountSnapshot.accountId)}
+              >
+                Sign in
+              </Button>
+            ) : (
+              <Button
+                variant="link"
+                size="xs"
+                render={<a href="/settings/accounts" />}
+              >
+                Sign in
+              </Button>
+            )}
+          </p>
+        )}
         <div
           ref={footerRef}
           data-glide-ghost

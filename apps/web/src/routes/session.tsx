@@ -42,6 +42,13 @@ import {
   sendFailure,
 } from '../lib/delivery'
 import { toast } from 'sonner'
+import { lastPrompt } from '../components/chat/retry-prompt'
+import {
+  AccountLoginDialog,
+  type AccountLoginStart,
+} from '../components/settings/AccountLoginDialog'
+import { needsLoginOptions } from '../components/settings/accounts-settings-logic'
+import { accountsApi, loginStart } from '../lib/accounts-api'
 
 const newClientItemId = () =>
   `client_${crypto.randomUUID().replaceAll('-', '')}`
@@ -72,6 +79,11 @@ export function SessionRoute() {
   const [harness, setHarness] = useState<string>()
   const [accountId, setAccountId] = useState<string>()
   const [model, setModel] = useState<string>()
+  const [login, setLogin] = useState<{
+    start: AccountLoginStart
+    label: string
+  } | null>(null)
+  const [accountsVersion, setAccountsVersion] = useState(0)
   const [protocol, setProtocol] = useState<'acp' | 'pty'>()
   const [loadedStatus, setLoadedStatus] = useState<string>()
   const [loading, setLoading] = useState(true)
@@ -400,6 +412,83 @@ export function SessionRoute() {
     }
   }
   redeliverRef.current = redeliver
+  // Sends one prompt with a pending bubble. Returns false when the request got
+  // no answer and the prompt waits as unsent; throws when the server refused.
+  const deliver = async (
+    prompt: Prompt & { clientItemId: string },
+    displayText: string,
+  ) => {
+    const { clientItemId } = prompt
+    const messages = useMessagesStore.getState()
+    messages.addPending({
+      sessionId,
+      itemId: clientItemId,
+      text: displayText,
+      createdAt: new Date().toISOString(),
+      status: 'sending',
+      prompt,
+    })
+    try {
+      await api.prompt(prompt, clientItemId)
+    } catch (error) {
+      if (sendFailure(error) === 'unsent') {
+        messages.setPendingStatus(sessionId, clientItemId, 'unsent')
+        return false
+      }
+      messages.removePending(sessionId, clientItemId)
+      throw error
+    }
+    messages.setPendingStatus(sessionId, clientItemId, 'accepted')
+    return true
+  }
+  // Sends the last prompt again as a new turn, after a failed one.
+  const retryLastPrompt = async () => {
+    const last = lastPrompt(
+      useMessagesStore.getState().bySession[sessionId] ?? [],
+    )
+    if (!last) {
+      toast.error('No prompt to retry')
+      return
+    }
+    const prompt = {
+      sessionId,
+      ...last,
+      harness,
+      accountId,
+      model,
+      delivery: 'turn-boundary' as const,
+      clientItemId: newClientItemId(),
+    }
+    try {
+      await deliver(
+        prompt,
+        last.text + serializeReviewNotes(last.reviewReferences),
+      )
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Message not delivered',
+      )
+    }
+  }
+  const startSignIn = async (id?: string) => {
+    if (!id) return void navigate({ to: '/settings/accounts' })
+    try {
+      const account = (await accountsApi.listAccounts()).find(
+        (item) => item.id === id,
+      )
+      if (!account || needsLoginOptions(account.kind))
+        return void navigate({ to: '/settings/accounts' })
+      const start = await loginStart({ accountId: id })
+      setLogin({
+        start: { terminalId: start.loginId, state: start.state },
+        label: account.label,
+      })
+    } catch (error) {
+      toast.error(
+        `Could not start sign-in: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
   const send = async (
     text: string,
     attachmentIds: string[],
@@ -443,8 +532,7 @@ export function SessionRoute() {
           params: { sessionId: result.sessionId },
         })
       } else {
-        const clientItemId = newClientItemId()
-        const prompt: Prompt = {
+        const prompt = {
           sessionId,
           text: value,
           reviewReferences: submittedNotes,
@@ -453,29 +541,10 @@ export function SessionRoute() {
           accountId: selection.accountId,
           model: selection.model,
           configOptions: selection.configOptions,
-          clientItemId,
+          clientItemId: newClientItemId(),
         }
-        const messages = useMessagesStore.getState()
-        messages.addPending({
-          sessionId,
-          itemId: clientItemId,
-          text: value + reviewText,
-          createdAt: new Date().toISOString(),
-          status: 'sending',
-          prompt,
-        })
-        try {
-          await api.prompt(prompt, clientItemId)
-        } catch (error) {
-          if (sendFailure(error) === 'unsent') {
-            messages.setPendingStatus(sessionId, clientItemId, 'unsent')
-            return
-          }
-          // The server refused it, so the composer gets the text back.
-          messages.removePending(sessionId, clientItemId)
-          throw error
-        }
-        messages.setPendingStatus(sessionId, clientItemId, 'accepted')
+        // A refusal throws, so the composer gets the text back.
+        if (!(await deliver(prompt, value + reviewText))) return
         acknowledgeReviewNotes(submittedNotes)
         setHarness(selection.harness || harness)
         setAccountId(selection.accountId)
@@ -558,6 +627,11 @@ export function SessionRoute() {
             running={(sessionStatus ?? loadedStatus) === 'running'}
             offline={isOffline(connection)}
             onRetry={() => void redeliver()}
+            onRecover={(action) =>
+              void (action === 'login'
+                ? startSignIn(accountId)
+                : retryLastPrompt())
+            }
             sentPrompt={glide?.itemId}
           />
         )}
@@ -676,6 +750,8 @@ export function SessionRoute() {
                 onQueue={queue}
                 sending={sending}
                 connectionNotice={connectionNotice(connection, online)}
+                onSignIn={(id) => void startSignIn(id)}
+                accountsVersion={accountsVersion}
                 footer={
                   <WorkspaceBar
                     projectId={
@@ -706,6 +782,19 @@ export function SessionRoute() {
           onReviewRevision={onReviewRevision}
           reanchorNote={reanchorNote}
           overlayBottomInset={composerHeight}
+        />
+      )}
+      {login && (
+        <AccountLoginDialog
+          key={login.start.terminalId}
+          title={`Sign in to ${login.label}`}
+          description="Finish signing in with the provider. Only this account changes."
+          start={login.start}
+          onClose={(status) => {
+            setLogin(null)
+            if (status === 'succeeded')
+              setAccountsVersion((version) => version + 1)
+          }}
         />
       )}
     </div>

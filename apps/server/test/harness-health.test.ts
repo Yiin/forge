@@ -103,6 +103,51 @@ describe('harness health', () => {
     ).toEqual([])
   })
 
+  it('reports an account with an auth limit as signed out', async () => {
+    const { db, homes, configState } = setup()
+    writeFileSync(
+      join(homes.claude, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'token' } }),
+    )
+    db.prepare(
+      `INSERT INTO harness_account_limits
+      (account_id, kind, harness_key, detected_at, resets_at, resets_at_estimated, source, detail)
+      VALUES ('claude', 'auth', 'claude', 100, NULL, 0, 'session.turn', 'Failed to authenticate')`,
+    ).run()
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: () => ({ prompt() {}, cancel() {}, kill() {} }),
+    }))
+    const app = harnessHealthRoutes({ db, configState, manager })
+    const body = await (await app.request('/api/harnesses/health')).json()
+    expect(body[0].accounts[0]).toMatchObject({
+      identity: { status: 'authenticated' },
+      authenticated: false,
+      cooldown: { kind: 'auth' },
+    })
+  })
+
+  it('keeps an account signed in when the auth limit came from message text', async () => {
+    const { db, homes, configState } = setup()
+    writeFileSync(
+      join(homes.claude, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'token' } }),
+    )
+    db.prepare(
+      `INSERT INTO harness_account_limits
+      (account_id, kind, harness_key, detected_at, resets_at, resets_at_estimated, source, detail)
+      VALUES ('claude', 'auth', 'claude', 100, NULL, 0, 'session.prompt', 'credit balance is too low')`,
+    ).run()
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: () => ({ prompt() {}, cancel() {}, kill() {} }),
+    }))
+    const app = harnessHealthRoutes({ db, configState, manager })
+    const body = await (await app.request('/api/harnesses/health')).json()
+    expect(body[0].accounts[0]).toMatchObject({
+      identity: { status: 'authenticated' },
+      authenticated: true,
+    })
+  })
+
   it('reports CLI detection apart from enabled and caches it briefly', () => {
     vi.useFakeTimers()
     try {

@@ -30,7 +30,11 @@ import type {
 import { isDefaultTitle, titleFromPrompt } from './titles.js'
 import { appendForkContext, createFork } from './fork.js'
 import type { UploadStore } from '../uploads/store.js'
-import { detectProviderError, recordLimit } from '../accounts/limits.js'
+import {
+  clearAuthLimit,
+  detectProviderError,
+  recordLimit,
+} from '../accounts/limits.js'
 import { errorMessage } from '../error-message.js'
 import { gitStatus } from '../git/repo.js'
 import {
@@ -345,6 +349,26 @@ export class SessionManager {
         content: normalized,
         eventBus: this.bus,
       })
+      if (row.account_id) {
+        try {
+          if (
+            normalized.type === 'turn_interrupted' &&
+            normalized.code === 'auth_required'
+          )
+            recordLimit(this.db, {
+              accountId: row.account_id,
+              kind: 'auth',
+              harnessKey: row.harness,
+              detectedAt: Date.now(),
+              source: 'session.turn',
+              detail: normalized.message,
+            })
+          else if (normalized.type === 'turn_end')
+            clearAuthLimit(this.db, row.account_id)
+        } catch {
+          /* A limit write must not block the turn row or finishTurn. */
+        }
+      }
       if (
         normalized.type === 'turn_end' ||
         normalized.type === 'turn_interrupted'

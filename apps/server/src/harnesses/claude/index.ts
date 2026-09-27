@@ -72,6 +72,7 @@ type Turn = Owner & {
   interrupted: boolean
   text: boolean
   error?: string
+  errorKind?: string
   settings: Settings
 }
 type Settings = {
@@ -1088,6 +1089,7 @@ class ClaudeSession implements ClaudeHandle {
       turn.error = this.safe(
         new Error(details || `Claude assistant error: ${string(frame.error)}`),
       ).message
+      turn.errorKind = string(frame.error)
     }
     if (frame.type === 'rate_limit_event') {
       if (maybeObject(frame.rate_limit_info).status === 'rejected')
@@ -1139,10 +1141,16 @@ class ClaudeSession implements ClaudeHandle {
         : failed
           ? {
               status: 'failed',
-              code: 'claude_result_error',
+              code:
+                turn.errorKind === 'authentication_failed'
+                  ? 'auth_required'
+                  : 'claude_result_error',
               message: this.safe(
                 new Error(
-                  errors.join('\n') || turn.error || 'Claude turn failed',
+                  errors.join('\n') ||
+                    turn.error ||
+                    (typeof frame.result === 'string' && frame.result) ||
+                    'Claude turn failed',
                 ),
               ).message,
             }

@@ -339,6 +339,47 @@ describe('Timeline', () => {
     ).toContain('Sending…')
   })
 
+  const failedTurn = (code: string, text: string) => [
+    message('do it', 1, { role: 'user' }),
+    message('', 2, {
+      type: 'turn_interrupted',
+      itemId: 'item-2',
+      content: {
+        type: 'turn_interrupted',
+        reason: 'failed',
+        code,
+        message: text,
+      },
+    }),
+  ]
+
+  it('offers login and retry after a turn failed for auth', () => {
+    state.messages = failedTurn(
+      'auth_required',
+      'Failed to authenticate: OAuth session expired',
+    )
+    const onRecover = vi.fn()
+    render(<Timeline onRecover={onRecover} />)
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('The turn failed.')
+    expect(alert.textContent).toContain(
+      'Failed to authenticate: OAuth session expired',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Log in again' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRecover.mock.calls).toEqual([['login'], ['retry']])
+  })
+
+  it('offers only retry after a generic failure', () => {
+    state.messages = failedTurn('claude_result_error', 'Internal error: boom')
+    render(<Timeline onRecover={vi.fn()} />)
+    expect(screen.getByRole('alert').textContent).toContain(
+      'Internal error: boom',
+    )
+    expect(screen.queryByRole('button', { name: 'Log in again' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
+  })
+
   it('renders a subagent card without an update loop', () => {
     state.messages = [message('hello', 1)]
     useSessionsStore.setState({

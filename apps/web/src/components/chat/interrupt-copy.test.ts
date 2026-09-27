@@ -10,6 +10,8 @@ describe('interruptReasonText', () => {
     ['pty_process_died', 'The terminal process stopped.'],
     ['max_turn_time', 'The turn hit its time limit.'],
     ['error', 'The turn failed.'],
+    ['failed', 'The turn failed.'],
+    ['interrupted', 'The turn stopped.'],
   ])('maps %s to human copy', (reason, expected) => {
     expect(interruptReasonText(reason)).toBe(expected)
   })
@@ -26,8 +28,10 @@ describe('interruptReasonText', () => {
     )
   })
 
-  it('keeps unknown reason codes visible', () => {
-    expect(interruptReasonText('foo')).toBe('Turn stopped (foo).')
+  it('uses plain copy for unknown reason codes', () => {
+    expect(interruptReasonText('foo')).toBe(
+      'The turn stopped. The agent gave no reason.',
+    )
   })
 
   it('uses stopped copy when the reason is absent', () => {

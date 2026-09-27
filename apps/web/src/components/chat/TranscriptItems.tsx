@@ -4,6 +4,8 @@ import {
   Copy,
   File,
   FileImage,
+  LogIn,
+  RefreshCw,
   TriangleAlert,
   X,
 } from 'lucide-react'
@@ -13,6 +15,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { GradientSpinner } from './WorkingLine'
 import { useCopied } from './useCopied'
 import { cn } from '../../lib/utils'
+import { Button } from '../ui/button'
 
 /**
  * A sent file above its prompt, right-aligned like the bubble. Images show
@@ -106,8 +109,10 @@ function formatBytes(bytes: number) {
  */
 export function SystemItem({
   item,
+  onRecover,
 }: {
   item: Extract<ChatRenderItem, { kind: 'system' }>
+  onRecover?: (action: 'login' | 'retry') => void
 }) {
   if (!item.alert)
     return (
@@ -115,10 +120,30 @@ export function SystemItem({
         {item.text}
       </p>
     )
-  return <ErrorCard text={item.text} code={item.code} />
+  return (
+    <ErrorCard
+      text={item.text}
+      code={item.code}
+      title={item.title}
+      recovery={item.recovery}
+      onRecover={onRecover}
+    />
+  )
 }
 
-function ErrorCard({ text, code }: { text: string; code?: string }) {
+function ErrorCard({
+  text,
+  code,
+  title,
+  recovery,
+  onRecover,
+}: {
+  text: string
+  code?: string
+  title?: string
+  recovery?: 'login' | 'retry'
+  onRecover?: (action: 'login' | 'retry') => void
+}) {
   const [copied, copy] = useCopied()
   const message = text.replace(/\s+/g, ' ').trim()
   return (
@@ -135,7 +160,7 @@ function ErrorCard({ text, code }: { text: string; code?: string }) {
             />
           </span>
           <span className="font-medium text-destructive-foreground/80">
-            Error
+            {title ?? 'Error'}
           </span>
           <button
             type="button"
@@ -152,6 +177,26 @@ function ErrorCard({ text, code }: { text: string; code?: string }) {
           </button>
         </div>
         <p className="break-words text-foreground/80">{message}</p>
+        {recovery && onRecover && (
+          <div className="flex flex-wrap gap-1">
+            {recovery === 'login' && (
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => onRecover('login')}
+              >
+                <LogIn aria-hidden="true" /> Log in again
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => onRecover('retry')}
+            >
+              <RefreshCw aria-hidden="true" /> Retry
+            </Button>
+          </div>
+        )}
         {code && (
           <details className="chat-system-details">
             <summary className="cursor-pointer text-muted-foreground hover:text-foreground">

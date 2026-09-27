@@ -117,6 +117,17 @@ const stop = (reason: string): TerminalOutcome =>
           code: `acp_${reason}`,
           message: 'ACP prompt did not complete',
         }
+const promptFailure = (error: unknown): TerminalOutcome => ({
+  status: 'failed',
+  code:
+    (error as { code?: unknown })?.code === -32000
+      ? 'auth_required'
+      : 'acp_prompt_failed',
+  message:
+    error instanceof Error && error.message
+      ? error.message
+      : 'ACP prompt failed',
+})
 
 export function createTypedAcpAdapter(
   deps: AcpRuntimeDependencies,
@@ -866,11 +877,7 @@ export function createTypedAcpAdapter(
               }
             : root.cancelled
               ? { status: 'interrupted' }
-              : {
-                  status: 'failed',
-                  code: 'acp_prompt_failed',
-                  message: 'ACP prompt failed',
-                },
+              : promptFailure(error),
         )
         if (root.submitted) fail(error)
       } finally {

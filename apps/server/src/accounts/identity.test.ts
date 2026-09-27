@@ -47,6 +47,41 @@ describe('readAccountIdentity', () => {
     })
   })
 
+  it.each([
+    {
+      name: 'an expired access token with a refresh token',
+      oauth: { accessToken: 'a', refreshToken: 'r', expiresAt: 1 },
+      status: 'authenticated',
+    },
+    {
+      name: 'an expired access token without a refresh token',
+      oauth: { accessToken: 'a', expiresAt: 1 },
+      status: 'unauthenticated',
+    },
+    {
+      name: 'an expired refresh token',
+      oauth: {
+        accessToken: 'a',
+        refreshToken: 'r',
+        expiresAt: Date.now() + 60_000,
+        refreshTokenExpiresAt: 1,
+      },
+      status: 'unauthenticated',
+    },
+    {
+      name: 'credentials the CLI cleared after a failed refresh',
+      oauth: { accessToken: '', refreshToken: '', expiresAt: 0 },
+      status: 'unauthenticated',
+    },
+  ])('reads Claude login state for $name', ({ oauth, status }) => {
+    const root = home()
+    writeFileSync(
+      join(root, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: oauth }),
+    )
+    expect(readAccountIdentity('claude', root).status).toBe(status)
+  })
+
   it('decodes Codex JWT claims locally and reads provider sets', () => {
     const root = home()
     const payload = Buffer.from(

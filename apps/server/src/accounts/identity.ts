@@ -26,12 +26,28 @@ const readJson = (path: string): Record<string, any> | null => {
 const string = (value: unknown) =>
   typeof value === 'string' && value ? value : undefined
 
+/** False when the CLI cannot use or refresh the stored Claude OAuth login. */
+export function claudeCredentialsUsable(oauth: unknown, now: number) {
+  const value = object(oauth)
+  if (!value?.accessToken || typeof value.accessToken !== 'string') return false
+  if (
+    typeof value.refreshTokenExpiresAt === 'number' &&
+    value.refreshTokenExpiresAt <= now
+  )
+    return false
+  return !(
+    typeof value.expiresAt === 'number' &&
+    value.expiresAt <= now &&
+    !string(value.refreshToken)
+  )
+}
+
 function claude(home: string): AccountIdentity {
   const credentials = readJson(join(home, '.credentials.json'))
   const oauth = object(credentials?.claudeAiOauth)
   const profile = readJson(join(home, '.claude.json'))
   const account = object(profile?.oauthAccount)
-  if (!oauth?.accessToken || typeof oauth.accessToken !== 'string')
+  if (!oauth || !claudeCredentialsUsable(oauth, Date.now()))
     return { status: 'unauthenticated' }
   return {
     status: 'authenticated',
