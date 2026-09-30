@@ -118,7 +118,7 @@ test('settings routes expose stable navigation, focus, and accessible controls',
   }
 })
 
-test('general settings save, theme, and Select keyboard behavior persist', async ({
+test('theme Select keyboard behavior and the titles switch persist', async ({
   page,
 }) => {
   const forge = await launchForge()
@@ -141,16 +141,15 @@ test('general settings save, theme, and Select keyboard behavior persist', async
     await page.keyboard.press('Enter')
     await expect(theme).toContainText(/dark/i)
     await expect(theme).toBeFocused()
-    const toggle = page.getByRole('switch', {
-      name: 'Generate plain-word session titles',
-    })
+    await page.goto('/settings/titles')
+    const toggle = page.getByRole('switch', { name: 'Generate session titles' })
     await toggle.click()
     await expect(
       page.getByRole('status').filter({ hasText: 'Saved.' }).first(),
     ).toBeVisible()
     await page.reload()
     await expect(
-      page.getByRole('switch', { name: 'Generate plain-word session titles' }),
+      page.getByRole('switch', { name: 'Generate session titles' }),
     ).not.toBeChecked()
     await expectAccessible(page)
   } finally {

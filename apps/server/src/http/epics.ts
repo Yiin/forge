@@ -71,7 +71,7 @@ export function epicRoutes(options: EpicRouteOptions) {
       .prepare(
         `SELECT epic_iterations.*, sessions.title AS session_title
          FROM epic_iterations LEFT JOIN sessions ON sessions.id = epic_iterations.session_id
-         WHERE epic_run_id = ? ORDER BY started_at`,
+         WHERE epic_iterations.epic_run_id = ? ORDER BY epic_iterations.started_at`,
       )
       .all(row.id)
     const projectPath = options.projectPath(row.project_id)
