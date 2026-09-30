@@ -85,6 +85,60 @@ describe('native session bridge', () => {
     await delivered
     expect(settled).toBe(true)
   })
+  it('calls forwarded handle methods on the provider handle', async () => {
+    class Provider {
+      private model = 'default'
+      private options = new Map<string, string | boolean>()
+      async setModel(model: string) {
+        this.model = model
+      }
+      configOptions() {
+        return [...this.options].map(([id, value]) => ({
+          id,
+          name: id,
+          type: 'select' as const,
+          currentValue: String(value),
+          options: [],
+        }))
+      }
+      async setConfigOption(id: string, value: string | boolean) {
+        this.options.set(id, value)
+      }
+      currentModel() {
+        return this.model
+      }
+      prompt() {
+        throw new Error('unused')
+      }
+      cancel() {}
+      kill() {}
+    }
+    const provider = new Provider()
+    const adapter = {
+      kind: 'native',
+      capabilities: {
+        loadSession: false,
+        steer: false,
+        queue: false,
+        cancel: true,
+        permissions: false,
+        questions: false,
+        models: true,
+      },
+      spawn: async () => provider,
+    } as unknown as HarnessAdapter
+    const handle = await nativeHarness(adapter).spawn(
+      { id: 'session-1', cwd: process.cwd(), harness: 'fake' },
+      () => undefined,
+      () => undefined,
+    )
+    await handle.setModel!('opus')
+    await handle.setConfigOption!('effort', 'high')
+    expect(provider.currentModel()).toBe('opus')
+    expect(handle.configOptions!()).toMatchObject([
+      { id: 'effort', currentValue: 'high' },
+    ])
+  })
 })
 
 describe('native session interaction bridge', () => {

@@ -439,7 +439,7 @@ export function nativeHarness(
           if (generation) interactions?.retire(generation)
         }
       },
-      setModel: handle.setModel,
+      setModel: handle.setModel?.bind(handle),
       configOptions: adapter.capabilities.permissions
         ? () => {
             const options = handle.configOptions?.() ?? []
@@ -459,7 +459,7 @@ export function nativeHarness(
                 ]
               : options
           }
-        : handle.configOptions,
+        : handle.configOptions?.bind(handle),
       setConfigOption: adapter.capabilities.permissions
         ? async (id, value) => {
             if (id !== 'permissionMode' || !ownPermissionMode()) {
@@ -471,7 +471,7 @@ export function nativeHarness(
               throw new Error('Invalid permission mode')
             permissionMode = value
           }
-        : handle.setConfigOption,
+        : handle.setConfigOption?.bind(handle),
       answerQuestion: (id, answer) => {
         const permission = permissionRequests.get(id)
         if (handle.replyPermission && permission)
