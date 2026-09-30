@@ -81,6 +81,7 @@ import {
   accountKindForHarness,
   deriveAccountHarness,
 } from './accounts/store.js'
+import { linkClaudeSharedConfig } from './accounts/claude-home.js'
 import { clearExpiredLimits } from './accounts/limits.js'
 import { createTitleGenerator } from './text-generation/titles.js'
 import { LoginManager } from './accounts/login.js'
@@ -411,6 +412,7 @@ export function startServer(port?: number): ServerType {
     const account = accountId ? accountStore.get(accountId) : undefined
     if (account && account.harnessKey !== key)
       throw new Error('Account does not belong to harness')
+    if (account?.kind === 'claude') linkClaudeSharedConfig(account.homePath)
     const transport = harnessTransport(key, entry)
     const derived =
       account && transport === 'pty'
