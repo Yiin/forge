@@ -16,6 +16,7 @@ import type {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../../lib/api'
+import { useComposerDraftsStore } from '../../stores/composer-drafts'
 import { useMessagesStore } from '../../stores/messages'
 import { AttachmentChips } from '../composer/AttachmentChips'
 import { QueuedPrompts } from '../composer/QueuedPrompts'
@@ -30,6 +31,7 @@ import {
   canSendUploads,
   completedAttachmentIds,
   initialAttachmentUploads,
+  type AttachmentUploads,
 } from '../composer/attachmentUploads'
 import {
   CommandMenu,
@@ -212,13 +214,25 @@ export function Composer({
   /** Bumped after a sign-in, so the account status loads again. */
   accountsVersion?: number
 }) {
-  const [text, setText] = useState(initialText)
+  const cached = useComposerDraftsStore((state) => state.entries[sessionId])
+  const text = cached?.text ?? initialText
+  const uploads = cached?.uploads ?? initialAttachmentUploads
+  const setText = (value: string) =>
+    useComposerDraftsStore.getState().setText(sessionId, value)
+  const dispatchUploads = (
+    update:
+      AttachmentUploads | ((uploads: AttachmentUploads) => AttachmentUploads),
+  ) =>
+    useComposerDraftsStore
+      .getState()
+      .updateUploads(sessionId, (current) =>
+        typeof update === 'function' ? update(current) : update,
+      )
   /** The caret's offset, so its line shows the Markdown delimiters. */
-  const [caret, setCaret] = useState(initialText.length)
+  const [caret, setCaret] = useState(text.length)
   /** IME composition shows the textarea's own text, underline and all. */
   const [composing, setComposing] = useState(false)
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null)
-  const [uploads, dispatchUploads] = useState(initialAttachmentUploads)
   const [dragging, setDragging] = useState(false)
   const [commands, setCommands] = useState(commandDefaults)
   const [selection, setSelection] = useState<HarnessSelection>({

@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Composer } from './Composer'
 import { accountsApi } from '../../lib/accounts-api'
 import { api } from '../../lib/api'
+import { useComposerDraftsStore } from '../../stores/composer-drafts'
 import { useMessagesStore } from '../../stores/messages'
 import type { HarnessSelection } from './harness-picker-logic'
 
@@ -36,6 +37,7 @@ describe('Composer', () => {
   afterEach(() => {
     cleanup()
     useMessagesStore.setState({ volatile: [] })
+    useComposerDraftsStore.setState({ entries: {} })
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
@@ -936,6 +938,30 @@ describe('Composer', () => {
     renderComposer()
     await waitFor(() => expect(status).toHaveBeenCalled())
     expect(screen.queryByText(/This account is signed out/)).toBeNull()
+  })
+  it('keeps unsent text and attachments after it unmounts', async () => {
+    vi.spyOn(api, 'upload').mockResolvedValue({
+      attachmentId: 'attachment-cached',
+    } as never)
+    const first = render(
+      <Composer sessionId="session-cache" harness="codex" onSend={vi.fn()} />,
+    )
+    const box = screen.getByRole('textbox')
+    fireEvent.change(box, { target: { value: 'half-written thought' } })
+    fireEvent.paste(box, {
+      clipboardData: {
+        files: [new File(['x'], 'shot.png', { type: 'image/png' })],
+      },
+    })
+    await waitFor(() => expect(screen.getByText('shot.png')).toBeTruthy())
+    first.unmount()
+    render(
+      <Composer sessionId="session-cache" harness="codex" onSend={vi.fn()} />,
+    )
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(
+      'half-written thought',
+    )
+    expect(screen.getByText('shot.png')).toBeTruthy()
   })
 })
 
