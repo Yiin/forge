@@ -114,3 +114,16 @@ export function relativeTime(
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`
   return `${Math.floor(seconds / 86400)}d`
 }
+
+export type SessionState = {
+  label: 'Working' | 'Done' | 'Failed' | 'Settled'
+  tone: 'working' | 'done' | 'unread' | 'failed' | 'settled'
+}
+
+export function sessionState(session: SidebarSession): SessionState {
+  if (session.status === 'running') return { label: 'Working', tone: 'working' }
+  if (session.status === 'errored') return { label: 'Failed', tone: 'failed' }
+  if (session.status === 'archived')
+    return { label: 'Settled', tone: 'settled' }
+  return { label: 'Done', tone: session.unread ? 'unread' : 'done' }
+}

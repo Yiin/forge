@@ -40,7 +40,9 @@ import {
   partitionSessions,
   relativeTime,
   searchSessions,
+  sessionState,
   sortSessions,
+  type SessionState,
   settledPage,
 } from './sidebar-logic'
 import {
@@ -55,14 +57,29 @@ const navLinkClass =
 const navLinkActiveClass =
   'bg-sidebar-accent font-medium text-sidebar-foreground'
 
-function statusLabel(status?: string) {
-  return status === 'running' ? 'running' : status === 'errored' ? 'error' : ''
-}
-
 function statusDotClass(status?: string) {
   if (status === 'running') return 'bg-primary'
   if (status === 'errored') return 'bg-destructive'
   return 'bg-muted-foreground/50'
+}
+
+const stateDotClass: Record<SessionState['tone'], string> = {
+  working: 'bg-info animate-pulse',
+  done: 'bg-muted-foreground/40',
+  unread: 'bg-success',
+  failed: 'bg-destructive',
+  settled: 'bg-muted-foreground/30',
+}
+const stateTextClass: Record<SessionState['tone'], string> = {
+  working: 'text-info-foreground',
+  done: 'text-muted-foreground',
+  unread: 'text-success-foreground',
+  failed: 'text-destructive-foreground',
+  settled: 'text-muted-foreground',
+}
+
+function folderName(path?: string) {
+  return path?.split('/').filter(Boolean).at(-1)
 }
 
 export function SessionSidebar() {
@@ -141,6 +158,18 @@ export function SessionSidebar() {
     scoped.filter((session) => session.kind !== 'subagent'),
   )
   const visibleSettled = settledPage(settled, settledPageNumber)
+  const projectNames = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.name])),
+    [projects],
+  )
+  const projectLabel = (session: SessionSummary) => {
+    const projectId = session.projectId ?? session.project_id
+    return (
+      (projectId && projectNames.get(projectId)) ||
+      folderName(session.cwd) ||
+      'No project'
+    )
+  }
 
   async function openSession(id: string) {
     setDrawerOpen(false)
@@ -383,6 +412,7 @@ export function SessionSidebar() {
           <SessionRow
             key={session.id}
             session={session}
+            project={projectLabel(session)}
             index={index}
             editing={editing === session.id}
             onOpen={openSession}
@@ -401,6 +431,7 @@ export function SessionSidebar() {
           <SessionRow
             key={session.id}
             session={session}
+            project={projectLabel(session)}
             onOpen={openSession}
             onEdit={() => setEditing(session.id)}
             onRename={rename}
@@ -451,6 +482,7 @@ export function SessionSidebar() {
 
 function SessionRow({
   session,
+  project,
   index,
   settled,
   editing,
@@ -461,6 +493,7 @@ function SessionRow({
   onDelete,
 }: {
   session: SessionSummary
+  project: string
   index?: number
   settled?: boolean
   editing?: boolean
@@ -474,6 +507,7 @@ function SessionRow({
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
   const isCurrent = location.pathname === `/s/${encodeURIComponent(session.id)}`
+  const state = sessionState(session)
   const toggleUnread = () => {
     const next = !session.unread
     useSessionsStore.getState().upsertSession({ ...session, unread: next })
@@ -504,36 +538,51 @@ function SessionRow({
       ) : (
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-2 pr-10 pl-2 text-left hover:bg-sidebar-accent"
+          className={cn(
+            'flex min-w-0 flex-1 flex-col gap-0.5 rounded-md py-1.5 pr-2 pl-2 text-left pointer-coarse:pr-12 hover:bg-sidebar-accent',
+            isCurrent && 'bg-sidebar-accent',
+          )}
           aria-current={isCurrent ? 'page' : undefined}
           onClick={() => onOpen(session.id)}
         >
-          <span
-            className={cn(
-              'size-1.5 shrink-0 rounded-full',
-              statusDotClass(session.status),
+          <span className="flex min-w-0 items-center gap-1.5 text-sm">
+            {index !== undefined && index < 9 && (
+              <Kbd className="h-4 min-w-4">{index + 1}</Kbd>
             )}
-          />
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="flex items-center gap-1.5 truncate text-sm">
-              {index !== undefined && index < 9 && (
-                <Kbd className="h-4 min-w-4">{index + 1}</Kbd>
+            <span
+              className={cn(
+                'truncate',
+                (session.unread || isCurrent) && 'font-medium',
               )}
-              <span className="truncate">
-                {session.title || 'Untitled session'}
-              </span>
+            >
+              {session.title || 'Untitled session'}
             </span>
-            {!settled && session.snippet && (
-              <span className="truncate text-xs text-muted-foreground">
-                {session.snippet}
+          </span>
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <span
+              className={cn(
+                'flex shrink-0 items-center gap-1',
+                stateTextClass[state.tone],
+              )}
+            >
+              <span
+                className={cn(
+                  'size-1.5 rounded-full',
+                  stateDotClass[state.tone],
+                )}
+              />
+              {state.label}
+            </span>
+            <span aria-hidden>·</span>
+            <span className="min-w-0 truncate">{project}</span>
+            {session.branch && (
+              <span className="hidden max-w-20 shrink truncate text-[11px] sm:inline">
+                {session.branch}
               </span>
             )}
-          </span>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {relativeTime(session.lastActivityAt)}
-          </span>
-          <span className="hidden max-w-20 truncate text-[11px] text-muted-foreground sm:inline">
-            {session.branch || session.harness || ''}
+            <span className="ml-auto shrink-0 tabular-nums group-focus-within:invisible group-hover:invisible">
+              {relativeTime(session.lastActivityAt)}
+            </span>
           </span>
         </button>
       )}
@@ -572,9 +621,6 @@ function SessionRow({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {session.status === 'running' && (
-        <span className="sr-only">{statusLabel(session.status)}</span>
-      )}
     </li>
   )
 }

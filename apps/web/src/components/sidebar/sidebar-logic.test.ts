@@ -5,6 +5,7 @@ import {
   navigationSessions,
   partitionSessions,
   searchSessions,
+  sessionState,
   sortSessions,
   settledPage,
   visibleSessions,
@@ -89,5 +90,27 @@ describe('sidebar logic', () => {
         { scope: 'all', query: '', sort: 'updated' },
       ).map((session) => session.id),
     ).toEqual(['first', 'second'])
+  })
+})
+
+describe('sessionState', () => {
+  it('maps session status to a sidebar label', () => {
+    expect(sessionState({ id: 'a', title: 'A', status: 'running' })).toEqual({
+      label: 'Working',
+      tone: 'working',
+    })
+    expect(sessionState({ id: 'a', title: 'A', status: 'errored' }).label).toBe(
+      'Failed',
+    )
+    expect(
+      sessionState({ id: 'a', title: 'A', status: 'archived' }).label,
+    ).toBe('Settled')
+    expect(sessionState({ id: 'a', title: 'A', status: 'idle' })).toEqual({
+      label: 'Done',
+      tone: 'done',
+    })
+    expect(
+      sessionState({ id: 'a', title: 'A', status: 'idle', unread: true }).tone,
+    ).toBe('unread')
   })
 })
