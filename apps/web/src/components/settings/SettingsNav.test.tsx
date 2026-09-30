@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import {
   createMemoryHistory,
   createRootRoute,
@@ -7,6 +13,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { trackSettingsExit } from '../../lib/settings-exit'
 import { useShellStore } from '../../stores/shell'
 import { SettingsNav } from './SettingsNav'
 
@@ -47,11 +54,17 @@ it('marks only the current page as active', async () => {
   ).toBe('/settings/agents')
 })
 
-it('closes the drawer and goes back from the Back row', async () => {
-  const back = vi.spyOn(window.history, 'back').mockImplementation(() => {})
+it('closes the drawer and leaves settings from the Back row', async () => {
   useShellStore.setState({ drawerOpen: true })
-  await renderNav('/settings/general')
-  fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-  expect(back).toHaveBeenCalledOnce()
+  const root = createRootRoute({ component: SettingsNav })
+  const history = createMemoryHistory({ initialEntries: ['/s/abc'] })
+  const router = createRouter({ routeTree: root, history })
+  const stop = trackSettingsExit(history)
+  history.push('/settings/general')
+  history.push('/settings/agents')
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Back' }))
+  await waitFor(() => expect(history.location.pathname).toBe('/s/abc'))
   expect(useShellStore.getState().drawerOpen).toBe(false)
+  stop()
 })

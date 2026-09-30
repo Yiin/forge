@@ -31,6 +31,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { useRouter } from '@tanstack/react-router'
+import { leaveSettings } from '../../lib/settings-exit'
 import { useShellStore } from '../../stores/shell'
 import {
   clampPercent,
@@ -232,6 +234,7 @@ export function SettingsPage({
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null)
   const sidebarOpen = useShellStore((state) => state.sidebarOpen)
+  const router = useRouter()
   useEffect(() => headingRef.current?.focus(), [title])
   return (
     <section className="mx-auto w-full max-w-3xl px-4 pt-8 pb-16 sm:px-6">
@@ -239,7 +242,7 @@ export function SettingsPage({
         variant="ghost"
         size="sm"
         className={cn('-ml-2 mb-3', sidebarOpen && 'md:hidden')}
-        onClick={() => window.history.back()}
+        onClick={() => leaveSettings(router.history)}
         aria-label="Back to workspace"
       >
         <ArrowLeft className="size-4" />

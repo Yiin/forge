@@ -224,6 +224,7 @@ function AgentRowView({
           {row.accountCount !== null && (
             <Link
               to="/settings/accounts"
+              replace
               className="rounded-sm whitespace-nowrap underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
             >
               {accountCountLabel(row.accountCount)}

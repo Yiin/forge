@@ -1,4 +1,4 @@
-import { Link } from '@tanstack/react-router'
+import { Link, useRouter } from '@tanstack/react-router'
 import {
   Bell,
   ChevronLeft,
@@ -11,6 +11,7 @@ import {
   SlidersHorizontal,
   Workflow,
 } from 'lucide-react'
+import { leaveSettings } from '../../lib/settings-exit'
 import { useShellStore } from '../../stores/shell'
 
 const items = [
@@ -30,6 +31,7 @@ const rowClass =
 
 export function SettingsNav() {
   const setDrawerOpen = useShellStore((state) => state.setDrawerOpen)
+  const router = useRouter()
   return (
     <nav aria-label="Settings" className="flex min-h-full flex-col">
       <p className="px-2 pt-3 pb-1 text-[11px] font-medium text-muted-foreground">
@@ -40,6 +42,7 @@ export function SettingsNav() {
           <li key={to}>
             <Link
               to={to}
+              replace
               activeOptions={{ exact: true }}
               activeProps={{
                 className: 'bg-sidebar-accent font-medium text-foreground',
@@ -60,7 +63,7 @@ export function SettingsNav() {
           type="button"
           onClick={() => {
             setDrawerOpen(false)
-            window.history.back()
+            leaveSettings(router.history)
           }}
           className={`${rowClass} w-full gap-1.5 text-muted-foreground`}
         >

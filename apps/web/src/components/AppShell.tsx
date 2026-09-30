@@ -28,6 +28,7 @@ import { navigationSessions } from './sidebar/sidebar-logic'
 import { readSidebarView } from '../lib/shell-storage'
 import { ProjectCreationDialog } from './ProjectCreationDialog'
 import { openNewDraft } from '../lib/draft-entry'
+import { trackSettingsExit } from '../lib/settings-exit'
 import { Button } from './ui/button'
 import { SessionHeader } from './chat/SessionHeader'
 export function AppShell() {
@@ -99,6 +100,7 @@ export function AppShell() {
     update({ location: history.location, action: { type: 'REPLACE' } })
     return history.subscribe(update)
   }, [router.history])
+  useEffect(() => trackSettingsExit(router.history), [router.history])
   useEffect(() => {
     void loadSettings()
       .then(() => {
