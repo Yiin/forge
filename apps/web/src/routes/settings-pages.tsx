@@ -1,6 +1,7 @@
 export { GeneralSettings } from './settings/general'
 export { ProjectSettings } from './settings/projects'
 export { EpicSettings } from './settings/epics'
+export { TitleSettings } from './settings/titles'
 export { KeybindingsSettings } from './settings/keybindings'
 export {
   AppearanceSettings,

@@ -43,6 +43,8 @@ type Iteration = {
   title: string
   beadId: string
   sessionId: string
+  /** The worker session's generated title: what this attempt worked on. */
+  sessionTitle: string | null
   harness: string | null
   model: string | null
   attempt: number
@@ -394,6 +396,11 @@ function IterationRow({
           <ChevronRight className="size-4 text-muted-foreground" />
         )}
       </CollapsibleTrigger>
+      {item.sessionTitle && item.sessionTitle !== item.title && (
+        <p className="mt-1 truncate text-sm text-muted-foreground">
+          {item.sessionTitle}
+        </p>
+      )}
       <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
         <code title="Worker session id" className="font-mono">
           {item.sessionId}

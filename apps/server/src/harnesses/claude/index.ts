@@ -94,7 +94,7 @@ type Interaction = {
   controller: AbortController
   replying: boolean
 }
-const inheritedCredentials = [
+export const inheritedCredentials = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'CLAUDE_CODE_OAUTH_TOKEN',

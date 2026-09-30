@@ -16,6 +16,7 @@ import {
   GeneralSettings,
   ProjectSettings,
   EpicSettings,
+  TitleSettings,
   KeybindingsSettings,
   AppearanceSettings,
   FileSettings,
@@ -131,6 +132,11 @@ const settingsProjects = createRoute({
   path: '/projects',
   component: ProjectSettings,
 })
+const settingsTitles = createRoute({
+  getParentRoute: () => settings,
+  path: '/titles',
+  component: TitleSettings,
+})
 const settingsEpics = createRoute({
   getParentRoute: () => settings,
   path: '/epics',
@@ -156,6 +162,7 @@ const tree = root.addChildren([
     settingsNotifications,
     settingsShortcuts,
     settingsProjects,
+    settingsTitles,
     settingsEpics,
   ]),
 ])

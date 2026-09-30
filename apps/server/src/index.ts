@@ -82,6 +82,7 @@ import {
   deriveAccountHarness,
 } from './accounts/store.js'
 import { clearExpiredLimits } from './accounts/limits.js'
+import { createTitleGenerator } from './text-generation/titles.js'
 import { LoginManager } from './accounts/login.js'
 import { unsupportedUsageProbe, UsagePoller } from './accounts/usagePoller.js'
 import { codexUsageProbe } from './accounts/probes/codex.js'
@@ -461,6 +462,12 @@ export function startServer(port?: number): ServerType {
         null,
     dataDir,
     workspaceFiles.targets,
+  )
+  manager.setTitleGenerator(
+    createTitleGenerator({
+      config: () => configState.current,
+      accounts: accountStore,
+    }),
   )
   const terminals = new TerminalManager(db, workspaceFiles.targets)
   uploadStore.setTerminalManager(terminals)

@@ -23,7 +23,6 @@ import { SettingsPage } from '../components/settings/settings-layout'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { Spinner } from '@/components/ui/spinner'
-import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -100,15 +99,11 @@ function RequestState({
   )
 }
 
-const defaultGeneralSettings = { titleGeneration: true }
-
 export function GeneralSettings() {
   const shellTheme = useShellStore((state) => state.theme)
   const setShellTheme = useShellStore((state) => state.setTheme)
-  const settings = useSettingsStore((state) => state.settings)
   const settingsState = useSettingsStore((state) => state.scopes.general)
   const load = useSettingsStore((state) => state.load)
-  const save = useSettingsStore((state) => state.save)
   const retry = useSettingsStore((state) => state.retry)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -148,13 +143,8 @@ export function GeneralSettings() {
       })
   }
   useEffect(loadAbout, [])
-  const commit = (patch: { titleGeneration: boolean }) => {
-    void save('general', patch).catch(() => undefined)
-  }
-  const resetTitleGeneration = () => commit(defaultGeneralSettings)
   const restoreDefaults = async () => {
     setShellTheme('system')
-    resetTitleGeneration()
   }
   return (
     <SettingsPage
@@ -221,24 +211,6 @@ export function GeneralSettings() {
               <SelectItem value="dark">Dark</SelectItem>
             </SelectContent>
           </Select>
-        </SettingsRow>
-        <SettingsRow
-          label="Plain-word titles"
-          description="Generate simple words for new session titles."
-          reset={
-            settings.titleGeneration !==
-              defaultGeneralSettings.titleGeneration && (
-              <Button variant="ghost" size="sm" onClick={resetTitleGeneration}>
-                Reset
-              </Button>
-            )
-          }
-        >
-          <Switch
-            checked={settings.titleGeneration}
-            aria-label="Generate plain-word session titles"
-            onCheckedChange={(checked) => commit({ titleGeneration: checked })}
-          />
         </SettingsRow>
       </SettingsSection>
       <SettingsSection title="About" description="Forge runtime information.">

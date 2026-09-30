@@ -8,6 +8,7 @@ import {
   Keyboard,
   LayoutGrid,
   Settings2,
+  Type,
   SlidersHorizontal,
   Workflow,
 } from 'lucide-react'
@@ -22,6 +23,7 @@ const items = [
   ['/settings/files', 'Files', Folder],
   ['/settings/notifications', 'Notifications', Bell],
   ['/settings/shortcuts', 'Shortcuts', Keyboard],
+  ['/settings/titles', 'Titles', Type],
   ['/settings/projects', 'Projects', FolderGit2],
   ['/settings/epics', 'Epics', Workflow],
 ] as const

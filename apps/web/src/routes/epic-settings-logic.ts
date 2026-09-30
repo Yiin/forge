@@ -22,7 +22,8 @@ export const EPIC_ROLE_DETAILS = {
   },
   'title-generation': {
     label: 'Title generation',
-    description: 'Creates a short title for a new session.',
+    description:
+      'Renames epic worker sessions after each turn. Uses the first Claude or Codex agent in its tier.',
   },
 } as const
 

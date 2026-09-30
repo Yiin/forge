@@ -7,7 +7,7 @@ import {
 import { api } from '../lib/api'
 
 export type SettingsStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
-type Scope = 'general' | 'epics'
+type Scope = 'general' | 'epics' | 'titles'
 type ScopeState = { status: SettingsStatus; error: string | null }
 
 type SettingsState = {
@@ -34,7 +34,7 @@ const failedPatch = new Map<Scope, ForgeSettingsPatch>()
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: initial,
-  scopes: { general: emptyScope(), epics: emptyScope() },
+  scopes: { general: emptyScope(), epics: emptyScope(), titles: emptyScope() },
   load: async () => {
     const value = await api.getSettings()
     const parsed = settingsSchema.safeParse({ ...initial, ...value })
@@ -104,6 +104,10 @@ export const resetSettingsStore = () => {
   failedPatch.clear()
   useSettingsStore.setState({
     settings: initial,
-    scopes: { general: emptyScope(), epics: emptyScope() },
+    scopes: {
+      general: emptyScope(),
+      epics: emptyScope(),
+      titles: emptyScope(),
+    },
   })
 }

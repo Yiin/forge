@@ -69,7 +69,9 @@ export function epicRoutes(options: EpicRouteOptions) {
     if (!row) return c.json({ error: 'run not found' }, 404)
     const iterations = options.db
       .prepare(
-        'SELECT * FROM epic_iterations WHERE epic_run_id = ? ORDER BY started_at',
+        `SELECT epic_iterations.*, sessions.title AS session_title
+         FROM epic_iterations LEFT JOIN sessions ON sessions.id = epic_iterations.session_id
+         WHERE epic_run_id = ? ORDER BY started_at`,
       )
       .all(row.id)
     const projectPath = options.projectPath(row.project_id)
@@ -94,6 +96,7 @@ export function epicRoutes(options: EpicRouteOptions) {
               ).title || 'Untitled iteration'
             : 'Untitled iteration',
           sessionId: item.session_id,
+          sessionTitle: item.session_title ?? null,
           harness: item.harness ?? null,
           model: item.model ?? null,
           attempt: item.attempt,

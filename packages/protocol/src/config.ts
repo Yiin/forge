@@ -18,8 +18,32 @@ export const harnessConfigSchema = z
   })
   .strict()
 
+/**
+ * Harnesses whose CLI can answer one prompt with no tools and no saved
+ * conversation, and the small model each uses when none is chosen.
+ */
+export const textGenerationHarnesses = {
+  'claude-code-acp': { defaultModel: 'haiku' },
+  'codex-acp': { defaultModel: undefined },
+} as const satisfies Record<string, { defaultModel: string | undefined }>
+
+export const canGenerateText = (
+  harness: string,
+): harness is keyof typeof textGenerationHarnesses =>
+  Object.hasOwn(textGenerationHarnesses, harness)
+
+/** A harness, account, and model for one-shot text such as titles. */
+export const textModelSchema = z
+  .object({
+    harness: z.string().trim().min(1),
+    accountId: z.string().trim().min(1).optional(),
+    model: z.string().trim().min(1).optional(),
+  })
+  .strict()
+
 export const settingsSchema = z.object({
   titleGeneration: z.boolean().default(true),
+  titleModel: textModelSchema.optional(),
   keybindings: z.record(z.string().min(1), z.string().min(1)).default({}),
   epicDefaults: z
     .object({
@@ -56,6 +80,7 @@ export const forgeConfigSchema = z.object({
 })
 
 export type HarnessConfig = z.infer<typeof harnessConfigSchema>
+export type TextModel = z.infer<typeof textModelSchema>
 export type ForgeSettings = z.infer<typeof settingsSchema>
 export type ForgeSettingsPatch = z.infer<typeof settingsPatchSchema>
 export type ForgeConfig = z.infer<typeof forgeConfigSchema>

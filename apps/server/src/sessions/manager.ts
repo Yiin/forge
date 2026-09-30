@@ -28,6 +28,7 @@ import type {
   HarnessModel,
 } from './harness.js'
 import { isDefaultTitle, titleFromPrompt } from './titles.js'
+import { SessionTitler, type TitleGenerator } from './generated-titles.js'
 import { appendForkContext, createFork } from './fork.js'
 import type { UploadStore } from '../uploads/store.js'
 import {
@@ -107,6 +108,10 @@ export class SessionManager {
     manager: import('../terminals/manager.js').TerminalManager,
   ) {
     this.terminals = manager
+  }
+  private titler?: SessionTitler
+  setTitleGenerator(generate: TitleGenerator) {
+    this.titler = new SessionTitler(this.db, this.bus, generate)
   }
   private readonly handles = new Map<string, HarnessHandle>()
   private readonly generations = new Map<string, number>()
@@ -546,6 +551,7 @@ export class SessionManager {
     if (!error) {
       this.status(row.id, 'idle')
       this.maybeTitle(row.id, row.title, this.firstPrompt.get(row.id) ?? '')
+      this.titler?.request(row.id)
       this.scheduleReap(row.id)
       void this.drainQueue(row.id)
     } else this.status(row.id, 'errored')
