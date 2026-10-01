@@ -347,7 +347,12 @@ export class SessionManager {
       if (this.closeWork || this.generations.get(row.id) !== generation) return
       const turnId = item.turnId ?? this.turns.get(row.id) ?? makeId('turn_')
       const itemId = item.itemId ?? makeId('item_')
-      const { itemId: _itemId, turnId: _turnId, ...normalized } = item
+      const {
+        itemId: _itemId,
+        turnId: _turnId,
+        automatic,
+        ...normalized
+      } = item
       this.trackHarnessTurn(row.id, turnId, normalized.type)
       appendMessage(this.db, {
         sessionId: row.id,
@@ -382,8 +387,9 @@ export class SessionManager {
         }
       }
       if (
-        normalized.type === 'turn_end' ||
-        normalized.type === 'turn_interrupted'
+        !automatic &&
+        (normalized.type === 'turn_end' ||
+          normalized.type === 'turn_interrupted')
       ) {
         this.finishTurn(
           row,
@@ -456,7 +462,12 @@ export class SessionManager {
     const fallbackTurnId = makeId('turn_')
     const onItem = (item: HarnessItem) => {
       if (this.closeWork || this.generations.get(row.id) !== generation) return
-      const { itemId: _itemId, turnId: _turnId, ...content } = item
+      const {
+        itemId: _itemId,
+        turnId: _turnId,
+        automatic: _automatic,
+        ...content
+      } = item
       this.trackHarnessTurn(row.id, item.turnId ?? fallbackTurnId, item.type)
       appendMessage(this.db, {
         sessionId: row.id,

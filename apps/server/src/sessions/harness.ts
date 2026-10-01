@@ -18,6 +18,9 @@ export type HarnessModel = {
 export type HarnessItem = MessageContent & {
   itemId?: string
   turnId?: string
+  // Set on the end of a turn the harness started on its own, not from a
+  // prompt. Such an end must not finish the session's prompt turn.
+  automatic?: boolean
 }
 
 export type PromptContent =

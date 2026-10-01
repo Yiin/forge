@@ -85,6 +85,69 @@ describe('native session bridge', () => {
     await delivered
     expect(settled).toBe(true)
   })
+  it('marks the end of a turn the harness started on its own', async () => {
+    let emit!: (event: any) => void
+    const completion = createCompletionHandle({
+      completionId: 'completion-1',
+      runId: 'run-1',
+      turnId: 'turn-1',
+    })
+    const adapter = {
+      kind: 'native',
+      capabilities: {
+        loadSession: false,
+        steer: false,
+        queue: false,
+        cancel: true,
+        permissions: false,
+        questions: false,
+        models: false,
+      },
+      spawn: async (_session: any, callback: any) => {
+        emit = callback
+        return {
+          requiresResume: false,
+          prompt: async () => ({
+            receiptId: 'receipt-1',
+            runId: 'run-1',
+            turnId: 'turn-1',
+            completion,
+          }),
+          cancel() {},
+          kill() {},
+        }
+      },
+    } as unknown as HarnessAdapter
+    const received: any[] = []
+    const handle = await nativeHarness(adapter).spawn(
+      { id: 'session-1', cwd: process.cwd(), harness: 'fake' },
+      (value) => received.push(value),
+      () => undefined,
+    )
+    const delivered = Promise.resolve(handle.prompt('hello'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Claude reports a background task that died with the old process.
+    emit({ type: 'turn_started', turnId: 'auto-1' })
+    emit({
+      type: 'turn_completed',
+      turnId: 'auto-1',
+      outcome: { status: 'completed' },
+    })
+    emit({ type: 'turn_started', turnId: 'turn-1' })
+    emit({
+      type: 'turn_completed',
+      turnId: 'turn-1',
+      outcome: { status: 'completed' },
+    })
+    completion.settle({ status: 'completed', runId: 'run-1', turnId: 'turn-1' })
+    await delivered
+    expect(received).toEqual([
+      { type: 'turn_start', turnId: 'auto-1' },
+      { type: 'turn_end', turnId: 'auto-1', automatic: true },
+      { type: 'turn_start', turnId: 'turn-1' },
+      { type: 'turn_end', turnId: 'turn-1' },
+    ])
+  })
   it('calls forwarded handle methods on the provider handle', async () => {
     class Provider {
       private model = 'default'
@@ -206,7 +269,12 @@ describe('native session interaction bridge', () => {
       outcome: { status: 'interrupted', reason: 'cancelled' },
     })
     expect(received).toEqual([
-      { type: 'turn_interrupted', reason: 'interrupted', turnId: 'turn-1' },
+      {
+        type: 'turn_interrupted',
+        reason: 'interrupted',
+        turnId: 'turn-1',
+        automatic: true,
+      },
     ])
     expect(exits).toEqual([])
   })
@@ -235,6 +303,7 @@ describe('native session interaction bridge', () => {
         code: 'auth_required',
         message: 'Failed to authenticate: OAuth session expired',
         turnId: 'turn-1',
+        automatic: true,
       },
     ])
   })

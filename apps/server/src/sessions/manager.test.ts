@@ -2046,3 +2046,57 @@ describe('idle reaper', () => {
     }
   })
 })
+
+describe('automatic harness turns', () => {
+  it('keeps the prompt turn open when a harness-started turn ends', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    let emit: (item: import('./harness.js').HarnessItem) => void = () => {}
+    let finish: () => void = () => {}
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: async (_session, onItem) => {
+        emit = onItem
+        return {
+          prompt: () =>
+            new Promise<void>((resolve) => {
+              finish = resolve
+            }),
+          cancel: () => undefined,
+          kill: () => undefined,
+        }
+      },
+    }))
+    const status = () =>
+      (
+        db
+          .prepare('SELECT status FROM sessions WHERE id = ?')
+          .get(session.id) as {
+          status: string
+        }
+      ).status
+    await manager.prompt(session.id, 'hello')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    emit({ type: 'turn_start', turnId: 'auto-1' } as any)
+    emit({ type: 'turn_end', turnId: 'auto-1', automatic: true } as any)
+    expect(status()).toBe('running')
+    await expect(manager.prompt(session.id, 'again')).rejects.toThrow()
+    finish()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(status()).toBe('idle')
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM messages WHERE session_id = ? AND content LIKE '%automatic%'",
+        )
+        .get(session.id),
+    ).toEqual({ n: 0 })
+    manager.close()
+  })
+})

@@ -316,6 +316,9 @@ export function nativeHarness(
         .catch(() => processEvent(event, false))
       return true
     }
+    // Turns started by our prompts. Any other turn the harness started itself,
+    // for example to report a background task that died with the old process.
+    const promptTurns = new Set<string>()
     const processEvent = (event: HarnessEvent, autoApprove = true) => {
       generation ??= event.runtimeGeneration
       if (
@@ -373,6 +376,9 @@ export function nativeHarness(
       }
       if (event.type === 'run_failed') onExit(new Error(event.message))
       const normalized = nativeItem(event)
+      if (normalized && event.type === 'turn_completed') {
+        if (!promptTurns.delete(event.turnId)) normalized.automatic = true
+      }
       if (normalized) onItem(normalized)
     }
     const handle = await (resume ? adapter.load : adapter.spawn)!(
@@ -411,7 +417,10 @@ export function nativeHarness(
               )
         const receipt = handle.prompt(input)
         return Promise.resolve(receipt)
-          .then((value) => value.completion)
+          .then((value) => {
+            promptTurns.add(value.turnId)
+            return value.completion
+          })
           .then(() => undefined)
       },
       steer: handle.steer
