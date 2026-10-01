@@ -1088,6 +1088,14 @@ export class SessionManager {
                 "UPDATE native_provider_state SET value = json_set(value, '$.accountId', ?) WHERE session_id = ? AND provider = ? AND name = 'binding'",
               )
               .run(nextAccount, id, nextHarness)
+          // A stale binding would fail the next resume with a saved binding
+          // mismatch once the fresh native session is confirmed.
+          else
+            this.db
+              .prepare(
+                "DELETE FROM native_provider_state WHERE session_id = ? AND provider = ? AND name = 'binding'",
+              )
+              .run(id, row.harness)
           this.db.exec('COMMIT')
         } catch (error) {
           this.db.exec('ROLLBACK')

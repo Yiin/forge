@@ -2179,15 +2179,14 @@ describe('account switch', () => {
           'SELECT harness, account_id, provider_session_id FROM sessions WHERE id=?',
         )
         .get(session.id),
-      binding: JSON.parse(
-        (
-          db
-            .prepare(
-              "SELECT value FROM native_provider_state WHERE session_id=? AND name='binding'",
-            )
-            .get(session.id) as { value: string }
-        ).value,
-      ),
+      binding: (() => {
+        const saved = db
+          .prepare(
+            "SELECT value FROM native_provider_state WHERE session_id=? AND name='binding'",
+          )
+          .get(session.id) as { value: string } | undefined
+        return saved && JSON.parse(saved.value)
+      })(),
     }
     manager.close()
     db.close()
@@ -2214,7 +2213,7 @@ describe('account switch', () => {
     const result = await switched({ shares: false })
     expect(result.calls).toEqual([{ kind: 'spawn', accountId: 'acct-b' }])
     expect(result.row).toMatchObject({ provider_session_id: null })
-    expect(result.binding.accountId).toBe('acct-a')
+    expect(result.binding).toBeUndefined()
   })
 
   it('starts fresh on a harness change', async () => {
@@ -2225,5 +2224,6 @@ describe('account switch', () => {
       account_id: 'acct-c',
       provider_session_id: null,
     })
+    expect(result.binding).toBeUndefined()
   })
 })
