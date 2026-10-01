@@ -33,7 +33,6 @@ import {
 } from './input.js'
 import { ClaudeNormalizer } from './normalize.js'
 import {
-  Identities,
   LIMITS,
   MiB,
   answerQuestions,
@@ -369,7 +368,6 @@ class ClaudeSession implements ClaudeHandle {
   private confirmed: ConfirmedNativeBinding | null = null
   private discovery: ClaudeCatalog = { models: [], commands: [] }
   private readonly generation = randomUUID()
-  private readonly ids = new Identities()
   private readonly normalizer: ClaudeNormalizer
   private readonly transport: JsonlTransport
   private readonly controls = new Map<string, Control>()
@@ -414,9 +412,8 @@ class ClaudeSession implements ClaudeHandle {
     private readonly options: ClaudeAdapterOptions,
     private readonly emitCallback: (event: HarnessEvent) => void,
   ) {
-    this.normalizer = new ClaudeNormalizer(
-      (owner, body) => this.emit(owner, body),
-      this.ids,
+    this.normalizer = new ClaudeNormalizer((owner, body) =>
+      this.emit(owner, body),
     )
     this.transport = new JsonlTransport({
       stdin: process.child.stdin,
@@ -738,7 +735,6 @@ class ClaudeSession implements ClaudeHandle {
     steer: boolean,
   ): Promise<HarnessReceipt> {
     const uuid = randomUUID()
-    this.ids.add(`trigger:${uuid}`)
     this.deliveries.set(uuid, { turn, started: false, cancelled: false })
     const receipt = {
       receiptId: randomUUID(),
@@ -782,7 +778,6 @@ class ClaudeSession implements ClaudeHandle {
     const turnId = identity ? requiredString(identity.turnId) : randomUUID()
     if (this.turns.has(turnId))
       throw new Error('Claude turn identity was already used')
-    this.ids.add(`turn:${turnId}`, `run:${runId}`)
     const turn: Turn = {
       runId,
       turnId,
@@ -1123,7 +1118,6 @@ class ClaudeSession implements ClaudeHandle {
       this.confirm(frame)
       const uuid = string(frame.uuid)
       if (uuid) {
-        this.ids.add(`result:${uuid}`)
         this.results.add(uuid)
       }
       const usage = maybeObject(frame.usage)
@@ -1272,7 +1266,6 @@ class ClaudeSession implements ClaudeHandle {
     const engineId = `${this.generation}:${randomUUID()}`
     const question =
       name === 'AskUserQuestion' ? questionRequest(engineId, input) : undefined
-    this.ids.add(`interaction:${providerId}`)
     const interaction: Interaction = {
       engineId,
       providerId,
@@ -1583,7 +1576,6 @@ class ClaudeSession implements ClaudeHandle {
     this.providerInteractions.clear()
     this.finishedInteractions.clear()
     this.capabilities.clear()
-    this.ids.clear()
     this.foreground = undefined
     this.observed = undefined
     return this.closing

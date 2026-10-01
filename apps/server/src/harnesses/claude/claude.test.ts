@@ -19,7 +19,7 @@ import {
   type ClaudeAdapterOptions,
   type ClaudeHandle,
 } from './index.js'
-import { LIMITS, MiB, type Identities } from './wire.js'
+import { LIMITS, MiB } from './wire.js'
 import { deferred } from '../transport-test-helpers.js'
 import type { NativeProcess } from '../process.js'
 import type { JsonlTransport } from '../jsonl.js'
@@ -2393,7 +2393,7 @@ describe('Claude retained-state admission', () => {
       message: expect.stringContaining('block limit'),
     })
   })
-  it('bounds active children and retained tool identities', async () => {
+  it('bounds active children', async () => {
     const a = await setup([
       user(),
       init(),
@@ -2417,12 +2417,14 @@ describe('Claude retained-state admission', () => {
       status: 'failed',
       message: expect.stringContaining('task limit'),
     })
-    const b = await setup([
+  })
+  it('completes a turn with more than 4096 distinct tool calls', async () => {
+    const t = await setup([
       user(),
       init(),
       started(),
       {
-        repeat: 1100,
+        repeat: 4200,
         actions: [
           full('', {
             message: {
@@ -2434,12 +2436,15 @@ describe('Claude retained-state admission', () => {
           }),
         ],
       },
+      result(),
     ])
-    const hb = await b.start()
-    expect(await (await hb.prompt('go')).completion).toMatchObject({
-      status: 'failed',
-      message: expect.stringContaining('identity limit'),
+    const h = await t.start()
+    expect(await (await h.prompt('go')).completion).toMatchObject({
+      status: 'completed',
     })
+    expect(
+      t.events.filter((event) => event.type === 'tool_started'),
+    ).toHaveLength(4200)
   })
   it('bounds unresolved root frames while leaving pending output unassigned', async () => {
     const t = await setup([
@@ -3126,94 +3131,6 @@ describe('Claude review regressions', () => {
       }
     },
   )
-
-  it.each(['runId', 'turnId'] as const)(
-    'rejects repeated oversized %s without retaining ownership',
-    async (field) => {
-      const t = await setup([user(), init(), started(), result()])
-      const h = await t.start()
-      const runtime = h as unknown as {
-        ids: Identities
-        turns: Map<string, unknown>
-      }
-      for (let i = 0; i < 64; i++) {
-        await expect(
-          h.prompt('oversized owner', undefined, {
-            runId: String(i).padEnd(LIMITS.stringBytes - 4, 'r'),
-            turnId: String(i).padEnd(LIMITS.stringBytes - 5, 't'),
-            [field]: 'x'.repeat(LIMITS.stringBytes),
-          }),
-        ).rejects.toThrow('identity byte limit')
-        expect(runtime.ids.size).toBe(0)
-        expect(runtime.ids.retainedBytes).toBe(0)
-        expect(runtime.turns.size).toBe(0)
-      }
-      expect(t.events).toHaveLength(0)
-      expect(
-        (await t.wire()).filter((frame) => frame.type === 'user'),
-      ).toHaveLength(0)
-      expect(await (await h.prompt('valid owner')).completion).toMatchObject({
-        status: 'completed',
-      })
-      expect(
-        (await t.wire()).filter((frame) => frame.type === 'user'),
-      ).toHaveLength(1)
-      await h.kill()
-      expect(runtime.ids.size).toBe(0)
-      expect(runtime.ids.retainedBytes).toBe(0)
-    },
-  )
-
-  it('rejects colliding native tool names before retained names exceed their byte budget', async () => {
-    const combined = 'a:'.repeat(128) + 'n'.repeat(62 * 1024)
-    const frames = Array.from({ length: 128 }, (_, i) => {
-      const cut = 2 * i + 1
-      return {
-        send: {
-          type: 'assistant',
-          uuid: `frame${i}`,
-          message: {
-            id: `message${i}`,
-            content: [
-              {
-                type: 'tool_use',
-                id: combined.slice(0, cut),
-                name: combined.slice(cut + 1),
-                input: {},
-              },
-            ],
-          },
-        },
-      }
-    })
-    const t = await setup([user(), init(), started(), ...frames, result()])
-    const h = await t.start()
-    const root = await h.prompt('colliding names')
-    expect(await root.completion).toMatchObject({
-      status: 'failed',
-      message: expect.stringContaining('identity byte limit'),
-    })
-    const tools = t.events.filter((event) => event.type === 'tool_started')
-    expect(tools.length).toBeGreaterThan(0)
-    expect(tools.length).toBeLessThan(128)
-    expect(
-      tools.reduce((bytes, tool) => bytes + Buffer.byteLength(tool.name), 0),
-    ).toBeLessThanOrEqual(LIMITS.identityBytes)
-    for (const [i, tool] of tools.entries()) {
-      const cut = 2 * i + 1
-      expect(tool.toolCallId).toBe(combined.slice(0, cut))
-      expect(tool.name).toBe(combined.slice(cut + 1))
-    }
-    await expect(h.prompt('after overflow')).rejects.toThrow('closed')
-    await h.kill()
-    const runtime = h as unknown as {
-      ids: Identities
-      normalizer: { state: { tools: number } }
-    }
-    expect(runtime.ids.size).toBe(0)
-    expect(runtime.ids.retainedBytes).toBe(0)
-    expect(runtime.normalizer.state.tools).toBe(0)
-  })
 
   it('bounds and evicts native frame bytes through the real transport', async () => {
     const frames = Array.from({ length: 40 }, (_, i) => ({

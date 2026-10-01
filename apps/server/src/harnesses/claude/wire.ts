@@ -16,10 +16,8 @@ export const LIMITS = Object.freeze({
   blockBytes: 2 * MiB,
   messageBytes: 4 * MiB,
   tasks: 256,
-  identities: 4096,
   frames: 8192,
   stringBytes: 64 * 1024,
-  identityBytes: 4 * MiB,
   frameBytes: 2 * MiB,
   attributionFrames: 256,
   attributionBytes: 4 * MiB,
@@ -50,41 +48,6 @@ type WithoutEnvelope<T> = T extends unknown
   : never
 export type EventBody = WithoutEnvelope<HarnessEvent>
 export type EmitItem = (owner: Owner, body: EventBody) => void
-
-/** Required ownership identities never evict. Recent wire UUIDs use a separate cache. */
-export class Identities {
-  private readonly values = new Set<string>()
-  private bytes = 0
-  add(...keys: string[]) {
-    const added = new Set<string>()
-    let bytes = 0
-    for (const key of keys) {
-      if (this.values.has(key) || added.has(key)) continue
-      if (this.values.size + added.size >= LIMITS.identities)
-        throw new Error('Claude identity limit exceeded')
-      const keyBytes = Buffer.byteLength(key)
-      if (
-        keyBytes > LIMITS.stringBytes ||
-        this.bytes + bytes + keyBytes > LIMITS.identityBytes
-      )
-        throw new Error('Claude identity byte limit exceeded')
-      added.add(key)
-      bytes += keyBytes
-    }
-    for (const key of added) this.values.add(key)
-    this.bytes += bytes
-  }
-  clear() {
-    this.values.clear()
-    this.bytes = 0
-  }
-  get retainedBytes() {
-    return this.bytes
-  }
-  get size() {
-    return this.values.size
-  }
-}
 
 const modelSchema = z.object({
   value: z.string().min(1),

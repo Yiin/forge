@@ -1,17 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { ClaudeNormalizer } from './normalize.js'
-import { Identities, LIMITS, MiB, type EventBody } from './wire.js'
+import { MiB, type EventBody } from './wire.js'
 
 const owner = { runId: 'run', turnId: 'turn' }
 function setup() {
   const events: EventBody[] = []
-  const ids = new Identities()
-  const normalizer = new ClaudeNormalizer((_, event) => events.push(event), ids)
-  return { normalizer, events, ids }
+  const normalizer = new ClaudeNormalizer((_, event) => events.push(event))
+  return { normalizer, events }
 }
 describe('Claude content retention', () => {
   it('releases partial text after full reconciliation and keeps only duplicate identities', () => {
-    const { normalizer, events, ids } = setup()
+    const { normalizer, events } = setup()
     normalizer.content(
       {
         type: 'stream_event',
@@ -44,16 +43,13 @@ describe('Claude content retention', () => {
     expect(events).toHaveLength(1)
     normalizer.finishOwner(owner)
     expect(normalizer.knownMessage(full)?.settled).toBe(true)
-    expect(ids.size).toBeGreaterThan(0)
     normalizer.close({ status: 'interrupted' })
-    ids.clear()
     expect(normalizer.state).toEqual({
       messages: 0,
       textBytes: 0,
       tools: 0,
       activeTasks: 0,
     })
-    expect(ids.size).toBe(0)
   })
   it('releases partial blocks on terminal cleanup and preserves a settled stream identity', () => {
     const { normalizer } = setup()
@@ -125,62 +121,10 @@ describe('Claude content retention', () => {
 })
 
 describe('Claude review regressions', () => {
-  it.each(['count', 'bytes'] as const)(
-    'preserves identity batches on %s overflow and admits an exact later batch',
-    (limit) => {
-      const ids = new Identities()
-      const existing = 'existing'
-      ids.add(existing)
-      const count = limit === 'count' ? LIMITS.identities - 2 : 63
-      for (let i = 0; i < count; i++)
-        ids.add(
-          String(i).padEnd(limit === 'count' ? 4 : LIMITS.stringBytes, 'x'),
-        )
-      const before = { size: ids.size, bytes: ids.retainedBytes }
-      const last =
-        limit === 'count'
-          ? 'last'
-          : 'y'.repeat(LIMITS.identityBytes - ids.retainedBytes)
-      expect(() => ids.add(existing, last, last, 'overflow')).toThrow(
-        limit === 'count' ? 'identity limit' : 'identity byte limit',
-      )
-      expect({ size: ids.size, bytes: ids.retainedBytes }).toEqual(before)
-      ids.add(existing, existing)
-      expect({ size: ids.size, bytes: ids.retainedBytes }).toEqual(before)
-      ids.add(existing, last, last)
-      expect(ids.size).toBe(before.size + 1)
-      expect(ids.retainedBytes).toBe(before.bytes + Buffer.byteLength(last))
-      if (limit === 'count') expect(ids.size).toBe(LIMITS.identities)
-      else expect(ids.retainedBytes).toBe(LIMITS.identityBytes)
-      ids.add(last, existing)
-      expect(ids.size).toBe(before.size + 1)
-      expect(ids.retainedBytes).toBe(before.bytes + Buffer.byteLength(last))
-      ids.clear()
-      expect(ids.size).toBe(0)
-      expect(ids.retainedBytes).toBe(0)
-    },
-  )
-
-  it.each([0, 1])(
-    'rejects an oversized batch key at position %s atomically',
-    (position) => {
-      const ids = new Identities()
-      ids.add('existing')
-      const keys = ['first', 'last']
-      keys[position] = 'é'.repeat(LIMITS.stringBytes / 2 + 1)
-      expect(() => ids.add('existing', ...keys)).toThrow('identity byte limit')
-      expect(ids.size).toBe(1)
-      expect(ids.retainedBytes).toBe(Buffer.byteLength('existing'))
-      ids.add('first', 'last', 'existing', 'first')
-      expect(ids.size).toBe(3)
-      expect(ids.retainedBytes).toBe(Buffer.byteLength('existingfirstlast'))
-    },
-  )
-
   it.each([false, true])(
     'charges colon-containing tool names per record, streamed=%s',
     (streamed) => {
-      const { normalizer, events, ids } = setup()
+      const { normalizer, events } = setup()
       const records = [
         { message: 'a', id: 'a', name: 'b:0:c' },
         { message: 'a:0:b', id: 'a:b:0', name: 'c' },
@@ -215,9 +159,7 @@ describe('Claude review regressions', () => {
             },
           }
           normalizer.content(start, owner)
-          const before = { size: ids.size, bytes: ids.retainedBytes }
           normalizer.content(start, owner)
-          expect({ size: ids.size, bytes: ids.retainedBytes }).toEqual(before)
           normalizer.content(
             {
               type: 'stream_event',
@@ -227,87 +169,18 @@ describe('Claude review regressions', () => {
           )
         }
         normalizer.content(frame, owner)
-        const before = { size: ids.size, bytes: ids.retainedBytes }
         normalizer.content(frame, owner)
-        expect({ size: ids.size, bytes: ids.retainedBytes }).toEqual(before)
       }
       expect(
         events
           .filter((event) => event.type === 'tool_started')
           .map((event) => ({ id: event.toolCallId, name: event.name })),
       ).toEqual(records.map(({ id, name }) => ({ id, name })))
-      const keys = [...(ids as unknown as { values: Set<string> }).values]
-      expect(keys.filter((key) => key.startsWith('tool-name:'))).toHaveLength(3)
-      expect(
-        keys.filter((key) => key.startsWith('block-tool-name:')),
-      ).toHaveLength(streamed ? 3 : 0)
       normalizer.finishOwner(owner)
       expect(normalizer.state.tools).toBe(3)
       expect(normalizer.retainedInputBytes).toBe(0)
       normalizer.close({ status: 'interrupted' })
-      ids.clear()
       expect(normalizer.state.tools).toBe(0)
-      expect(ids.retainedBytes).toBe(0)
-    },
-  )
-
-  it.each([false, true])(
-    'admits exact tool-name key bytes and rejects one extra byte, streamed=%s',
-    (streamed) => {
-      for (const overflow of [0, 1]) {
-        const { normalizer, ids } = setup()
-        const prefix = streamed
-          ? 'block-tool-name:3:a:b:0:'
-          : 'tool-name:3:a:b:'
-        const name = 'n'.repeat(
-          LIMITS.stringBytes - Buffer.byteLength(prefix) + overflow,
-        )
-        const input = { type: 'tool_use', id: 'a:b', name, input: {} }
-        normalizer.content(
-          {
-            type: 'stream_event',
-            event: { type: 'message_start', message: { id: 'a:b' } },
-          },
-          owner,
-        )
-        const admit = () =>
-          normalizer.content(
-            streamed
-              ? {
-                  type: 'stream_event',
-                  event: {
-                    type: 'content_block_start',
-                    index: 0,
-                    content_block: input,
-                  },
-                }
-              : { type: 'assistant', message: { id: 'a:b', content: [input] } },
-            owner,
-          )
-        if (overflow) {
-          expect(admit).toThrow('identity byte limit')
-          expect(normalizer.state.tools).toBe(0)
-          expect(normalizer.retainedInputBytes).toBe(0)
-        } else {
-          expect(admit).not.toThrow()
-          expect([
-            ...(ids as unknown as { values: Set<string> }).values,
-          ]).toContain(prefix + name)
-          if (streamed)
-            normalizer.content(
-              {
-                type: 'stream_event',
-                event: { type: 'content_block_stop', index: 0 },
-              },
-              owner,
-            )
-          expect(normalizer.state.tools).toBe(1)
-        }
-        normalizer.close({ status: 'interrupted' })
-        ids.clear()
-        expect(normalizer.state.tools).toBe(0)
-        expect(ids.retainedBytes).toBe(0)
-      }
     },
   )
 
@@ -387,104 +260,6 @@ describe('Claude review regressions', () => {
     ).toBe('samesame')
     expect(normalizer.state.textBytes).toBe(0)
   })
-
-  it('bounds required identity bytes without silently evicting ownership', () => {
-    const { ids } = setup()
-    expect(() => ids.add('x'.repeat(64 * 1024 + 1))).toThrow(
-      'identity byte limit',
-    )
-    expect(ids.size).toBe(0)
-    for (let i = 0; i < 64; i++) ids.add(String(i).padEnd(64 * 1024, 'x'))
-    expect(ids.retainedBytes).toBe(4 * MiB)
-    expect(() => ids.add('overflow')).toThrow('identity byte limit')
-    ids.add('0'.padEnd(64 * 1024, 'x'))
-    expect(ids.size).toBe(64)
-    expect(ids.retainedBytes).toBe(4 * MiB)
-    ids.clear()
-    expect(ids.retainedBytes).toBe(0)
-    ids.add('after-clear')
-    expect(ids.size).toBe(1)
-  })
-
-  it.each([false, true])(
-    'bounds streamed and full tool names, streamed=%s',
-    (streamed) => {
-      const { normalizer, ids } = setup()
-      const name = 'x'.repeat(64 * 1024)
-      const input = { type: 'tool_use', id: 'tool', name, input: {} }
-      normalizer.content(
-        {
-          type: 'stream_event',
-          event: { type: 'message_start', message: { id: 'message' } },
-        },
-        owner,
-      )
-      expect(() =>
-        normalizer.content(
-          streamed
-            ? {
-                type: 'stream_event',
-                event: {
-                  type: 'content_block_start',
-                  index: 0,
-                  content_block: input,
-                },
-              }
-            : {
-                type: 'assistant',
-                message: { id: 'message', content: [input] },
-              },
-          owner,
-        ),
-      ).toThrow('identity byte limit')
-      expect(normalizer.state.tools).toBe(0)
-      expect(normalizer.retainedInputBytes).toBe(0)
-      normalizer.close({ status: 'interrupted' })
-      ids.clear()
-      expect(ids.retainedBytes).toBe(0)
-    },
-  )
-
-  it.each([false, true])(
-    'charges each retained tool name through terminal ownership, repeated=%s',
-    (repeated) => {
-      const { normalizer, ids } = setup()
-      let admitted = 0
-      expect(() => {
-        for (let i = 0; i < 128; i++) {
-          normalizer.content(
-            {
-              type: 'assistant',
-              message: {
-                id: `message-${i}`,
-                content: [
-                  {
-                    type: 'tool_use',
-                    id: `tool-${i}`,
-                    name: String(repeated ? 0 : i).padEnd(63 * 1024, 'n'),
-                    input: {},
-                  },
-                ],
-              },
-            },
-            owner,
-          )
-          normalizer.finishOwner(owner)
-          admitted++
-        }
-      }).toThrow('identity byte limit')
-      expect(admitted).toBeGreaterThan(1)
-      expect(admitted).toBeLessThan(128)
-      expect(ids.retainedBytes).toBeLessThanOrEqual(4 * MiB)
-      const before = ids.retainedBytes
-      normalizer.finishOwner(owner)
-      expect(ids.retainedBytes).toBe(before)
-      normalizer.close({ status: 'interrupted' })
-      ids.clear()
-      expect(normalizer.state.tools).toBe(0)
-      expect(ids.retainedBytes).toBe(0)
-    },
-  )
 
   it('charges streamed initial input against block, message, and aggregate content limits', () => {
     const { normalizer } = setup()

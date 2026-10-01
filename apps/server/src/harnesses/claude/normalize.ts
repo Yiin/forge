@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { TerminalOutcome } from '@forge/protocol/harness'
 import {
-  Identities,
   LIMITS,
   maybeObject,
   object,
@@ -67,10 +66,7 @@ export class ClaudeNormalizer {
   private textBytes = 0
   private inputBytes = 0
   private rootStream?: string
-  constructor(
-    private readonly emit: EmitItem,
-    private readonly ids: Identities,
-  ) {}
+  constructor(private readonly emit: EmitItem) {}
 
   get retainedInputBytes() {
     return this.inputBytes
@@ -146,7 +142,6 @@ export class ClaudeNormalizer {
         if (child.providerId && child.providerId !== taskId)
           throw new Error('Claude changed a child identity')
         if (!child.providerId) {
-          this.ids.add(`agent:${taskId}`)
           child.providerId = taskId
           this.agents.set(taskId, child)
           this.emit(child.owner, {
@@ -161,7 +156,6 @@ export class ClaudeNormalizer {
         if (tool && taskId && !this.tasks.has(taskId)) {
           if (this.activeTasks() >= LIMITS.tasks)
             throw new Error('Claude task limit exceeded')
-          this.ids.add(`task:${taskId}`)
           this.tasks.set(taskId, tool)
         }
       }
@@ -249,7 +243,6 @@ export class ClaudeNormalizer {
     }
     if (this.state.messages >= LIMITS.messages)
       throw new Error('Claude incomplete message limit exceeded')
-    this.ids.add(`message:${id}`)
     const message: Message = {
       id,
       owner,
@@ -273,7 +266,6 @@ export class ClaudeNormalizer {
     }
     if (message.blocks.length >= LIMITS.blocks)
       throw new Error('Claude block limit exceeded')
-    this.ids.add(`block:${message.id}:${index}`)
     const block: Block = {
       index,
       kind,
@@ -371,10 +363,6 @@ export class ClaudeNormalizer {
       if (block.kind === 'tool_use') {
         const toolId = requiredString(content.id)
         const name = requiredString(content.name)
-        this.ids.add(`tool:${toolId}`)
-        this.ids.add(
-          `block-tool-name:${message.id.length}:${message.id}:${block.index}:${name}`,
-        )
         this.retainInput(message, block, content.input)
         block.toolId = toolId
         block.name = name
@@ -447,7 +435,6 @@ export class ClaudeNormalizer {
         }))
     )
       return
-    this.ids.add(`full:${message.id}:${fingerprint}`)
     message.fullFrames.add(fingerprint)
     for (const value of blocks) {
       const content = object(value)
@@ -527,8 +514,6 @@ export class ClaudeNormalizer {
     const childTool = name === 'Agent' || name === 'Task'
     if (childTool && this.activeTasks() >= LIMITS.tasks)
       throw new Error('Claude task limit exceeded')
-    this.ids.add(`tool:${id}`)
-    this.ids.add(`tool-name:${id.length}:${id}:${name}`)
     this.tools.set(id, {
       id,
       itemId,
