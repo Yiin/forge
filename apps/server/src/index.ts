@@ -27,6 +27,7 @@ import { projectFileRoutes } from './http/projectFiles.js'
 import { skillRoutes } from './http/skills.js'
 import { gitRoutes } from './http/git.js'
 import { statusRoutes } from './http/status.js'
+import { configureConnection } from './db/connection.js'
 import { migrate } from './db/migrate.js'
 import { EventBus } from './events/bus.js'
 import { searchRoutes } from './http/search.js'
@@ -372,6 +373,7 @@ export function startServer(port?: number): ServerType {
   const dataDir = resolve(process.env.FORGE_DATA_DIR ?? 'data')
   mkdirSync(dataDir, { recursive: true })
   const db = new DatabaseSync(process.env.FORGE_DB ?? join(dataDir, 'forge.db'))
+  configureConnection(db)
   migrate(db)
   const workspaceFiles = new WorkspaceFiles(db)
   const currentVersion = process.env.FORGE_VERSION ?? version
