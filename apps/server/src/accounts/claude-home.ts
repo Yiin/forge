@@ -107,7 +107,7 @@ function mergeInto(source: string, target: string, owner: string) {
       mergeInto(from, to, owner)
       removeEmptyDir(from)
     } else {
-      // ponytail: a collision keeps the account's copy beside the shared one,
+      // A collision keeps the account's copy beside the shared one,
       // named with the account id. Claude ignores it; a human can merge it.
       let kept = `${to}.${owner}`
       while (lstatSync(kept, { throwIfNoEntry: false }))
