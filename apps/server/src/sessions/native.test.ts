@@ -204,6 +204,156 @@ describe('native session bridge', () => {
   })
 })
 
+describe('native session event persistence', () => {
+  const sqliteError = (errcode: number, message: string) =>
+    Object.assign(new Error(message), { code: 'ERR_SQLITE_ERROR', errcode })
+  // fail(item, attempt) returns the error the sink throws, or undefined.
+  async function bridge(fail: (item: any, attempt: number) => unknown) {
+    let emit!: (event: any) => void
+    const completion = createCompletionHandle({
+      completionId: 'completion-1',
+      runId: 'run-1',
+      turnId: 'turn-1',
+    })
+    const cancel = vi.fn()
+    const adapter = {
+      kind: 'native',
+      capabilities: {
+        loadSession: false,
+        steer: false,
+        queue: false,
+        cancel: true,
+        permissions: false,
+        questions: false,
+        models: false,
+      },
+      spawn: async (_session: any, callback: any) => {
+        emit = callback
+        return {
+          requiresResume: false,
+          prompt: () => ({
+            receiptId: 'receipt-1',
+            runId: 'run-1',
+            turnId: 'turn-1',
+            completion: completion.handle,
+          }),
+          cancel,
+          kill() {},
+        }
+      },
+    } as unknown as HarnessAdapter
+    const saved: any[] = []
+    const attempts = new Map<any, number>()
+    const handle = await nativeHarness(adapter).spawn(
+      { id: 'session-1', cwd: process.cwd(), harness: 'fake' },
+      (item) => {
+        const attempt = (attempts.get(item) ?? 0) + 1
+        attempts.set(item, attempt)
+        const error = fail(item, attempt)
+        if (error) throw error
+        saved.push(item)
+      },
+      () => undefined,
+    )
+    const delivered = Promise.resolve(handle.prompt('hello'))
+    delivered.catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(0)
+    const runTurn = () => {
+      emit({ type: 'turn_started', turnId: 'turn-1' })
+      for (const text of ['a', 'b'])
+        emit({ type: 'text_delta', turnId: 'turn-1', itemId: text, text })
+      emit({
+        type: 'turn_completed',
+        turnId: 'turn-1',
+        outcome: { status: 'completed' },
+      })
+      completion.settle({
+        status: 'completed',
+        runId: 'run-1',
+        turnId: 'turn-1',
+      })
+    }
+    return { saved, delivered, runTurn, cancel }
+  }
+
+  it('retries a transient write error in order and finishes the turn', async () => {
+    vi.useFakeTimers()
+    try {
+      const { saved, delivered, runTurn, cancel } = await bridge(
+        (item, attempt) =>
+          item.text === 'a' && attempt === 1
+            ? sqliteError(5, 'database is locked')
+            : undefined,
+      )
+      let settled = false
+      void delivered.then(() => (settled = true))
+      runTurn()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(saved).toEqual([{ type: 'turn_start', turnId: 'turn-1' }])
+      expect(settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(50)
+      await delivered
+      expect(saved.map((item) => item.text ?? item.type)).toEqual([
+        'turn_start',
+        'a',
+        'b',
+        'turn_end',
+      ])
+      expect(cancel).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fails the turn as persistence_failed when a write keeps failing', async () => {
+    vi.useFakeTimers()
+    try {
+      const { saved, delivered, runTurn, cancel } = await bridge((item) =>
+        item.text === 'a' ? sqliteError(5, 'database is locked') : undefined,
+      )
+      runTurn()
+      await vi.advanceTimersByTimeAsync(5_000)
+      await expect(delivered).rejects.toThrow(
+        'Forge could not save a session event: database is locked',
+      )
+      expect(saved).toEqual([
+        { type: 'turn_start', turnId: 'turn-1' },
+        {
+          type: 'turn_interrupted',
+          reason: 'failed',
+          code: 'persistence_failed',
+          message: expect.stringContaining('3 unsaved event(s)'),
+          turnId: 'turn-1',
+        },
+      ])
+      expect(cancel).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fails the turn at once on a write error that cannot clear', async () => {
+    vi.useFakeTimers()
+    try {
+      const { saved, delivered, runTurn, cancel } = await bridge((item) =>
+        item.text === 'a'
+          ? sqliteError(2067, 'UNIQUE constraint failed: messages.id')
+          : undefined,
+      )
+      runTurn()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(saved.at(-1)).toMatchObject({
+        type: 'turn_interrupted',
+        code: 'persistence_failed',
+      })
+      expect(cancel).toHaveBeenCalledOnce()
+      await expect(delivered).rejects.toThrow('UNIQUE constraint failed')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('native session interaction bridge', () => {
   const interactiveAdapter = () => {
     const permissionReplies: any[] = []

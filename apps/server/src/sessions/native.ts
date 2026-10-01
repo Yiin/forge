@@ -239,6 +239,16 @@ function questionAnswers(
   )
 }
 
+// Waits before each retry of a failed event write.
+const PERSIST_RETRY_MS = [50, 250, 1000]
+
+// SQLITE_BUSY, SQLITE_LOCKED and SQLITE_IOERR can clear on their own. A
+// constraint or programming error will fail the same way every time.
+function transientWriteError(error: unknown) {
+  const code = (error as { errcode?: unknown } | null)?.errcode
+  return typeof code === 'number' && [5, 6, 10].includes(code & 0xff)
+}
+
 export function nativeHarness(
   adapter: HarnessAdapter,
   onBinding?: (sessionId: string, providerSessionId: string) => void,
@@ -319,6 +329,64 @@ export function nativeHarness(
     // Turns started by our prompts. Any other turn the harness started itself,
     // for example to report a background task that died with the old process.
     const promptTurns = new Set<string>()
+    // onItem saves each item. A failed save parks that item and every later
+    // one, so order holds while a transient error retries with backoff. Any
+    // other error, or one that outlasts the retries, stops the turn as
+    // persistence_failed and reports the unsaved items.
+    const parked: HarnessItem[] = []
+    const persistFailures = new Map<string | undefined, Error>()
+    const flushWaiters: Array<() => void> = []
+    let retry = 0
+    const flushed = () =>
+      parked.length
+        ? new Promise<void>((resolve) => flushWaiters.push(resolve))
+        : Promise.resolve()
+    const failPersistence = (error: unknown) => {
+      const { turnId } = parked[0]!
+      const failure = new Error(
+        `Forge could not save a session event: ${error instanceof Error ? error.message : String(error)}. The turn stopped, and ${parked.length} unsaved event(s) were discarded.`,
+      )
+      parked.length = 0
+      persistFailures.set(turnId, failure)
+      try {
+        onItem({
+          type: 'turn_interrupted',
+          reason: 'failed',
+          code: 'persistence_failed',
+          message: failure.message,
+          turnId,
+        })
+      } catch (reportError) {
+        console.error(failure.message, reportError)
+      }
+      void Promise.resolve()
+        .then(() => nativeHandle?.cancel())
+        .catch(() => undefined)
+    }
+    const drain = () => {
+      while (parked.length) {
+        try {
+          onItem(parked[0]!)
+        } catch (error) {
+          if (transientWriteError(error) && retry < PERSIST_RETRY_MS.length) {
+            setTimeout(drain, PERSIST_RETRY_MS[retry++])
+            return
+          }
+          failPersistence(error)
+          break
+        }
+        parked.shift()
+        retry = 0
+      }
+      retry = 0
+      for (const resolve of flushWaiters.splice(0)) resolve()
+    }
+    const persist = (item: HarnessItem) => {
+      // The turn already stopped and its failure is on record.
+      if (item.turnId !== undefined && persistFailures.has(item.turnId)) return
+      parked.push(item)
+      if (parked.length === 1) drain()
+    }
     const processEvent = (event: HarnessEvent, autoApprove = true) => {
       generation ??= event.runtimeGeneration
       if (
@@ -379,7 +447,7 @@ export function nativeHarness(
       if (normalized && event.type === 'turn_completed') {
         if (!promptTurns.delete(event.turnId)) normalized.automatic = true
       }
-      if (normalized) onItem(normalized)
+      if (normalized) persist(normalized)
     }
     const handle = await (resume ? adapter.load : adapter.spawn)!(
       nativeSession,
@@ -416,12 +484,22 @@ export function nativeHarness(
                     },
               )
         const receipt = handle.prompt(input)
-        return Promise.resolve(receipt)
-          .then((value) => {
-            promptTurns.add(value.turnId)
-            return value.completion
-          })
-          .then(() => undefined)
+        return Promise.resolve(receipt).then((value) => {
+          promptTurns.add(value.turnId)
+          // Settle only after the turn's items are saved, so the manager's
+          // own turn_end cannot land before them.
+          return Promise.resolve(value.completion)
+            .finally(flushed)
+            .then(
+              () => {
+                const failure = persistFailures.get(value.turnId)
+                if (failure) throw failure
+              },
+              (error: unknown) => {
+                throw persistFailures.get(value.turnId) ?? error
+              },
+            )
+        })
       },
       steer: handle.steer
         ? async (content) => {
