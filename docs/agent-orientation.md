@@ -1,9 +1,7 @@
 # Forge agent orientation
 
-Read the epic and assigned child before editing. The epic controls migration scope.
-Use [comet-ui-contract.md](comet-ui-contract.md) for target appearance, interactions, and web differences.
-Comet source: `/var/tmp/forge-comet-reference` at `a1adfde23448a0e04256931d64a7c72a95b11db7`.
-Keep Forge branding and the upstream MIT notice.
+Read the epic and assigned child before editing.
+UI target: [comet-ui-contract.md](comet-ui-contract.md). Keep Forge branding and the upstream MIT notice.
 
 ## Repository map
 
@@ -16,49 +14,39 @@ Keep Forge branding and the upstream MIT notice.
 - `packages/protocol`: shared Zod wire schemas and transcript contracts.
 - `apps/web/src/{components,stores,lib}`: UI, state, and replay.
 - `e2e` and `scripts/epic-gate.sh`: browser fixtures and the integration gate.
-
-Keep the Node production server, Bun packages, React, shadcn/ui Base UI, and Tailwind.
+- `ops/forge-update`: systemd timer updater; it defers on `/api/status`. Release tarballs do not ship `ops/` yet.
 
 ## Runtime and data rules
 
 Keep provider instance IDs stable and adapter kind explicit.
 Scope native bindings to provider, account, and canonical effective cwd.
 Never fall back from native to ACP or replace failed resume with a fresh session.
-Confine ACP types to dedicated ACP modules, including `harnesses/acp` and `sessions/acp-*`. Preserve intentional custom ACP and PTY harness configurations.
-Native providers use direct adapters; Grok, Gemini, Devin, and Hermes use dedicated ACP profiles.
-Read [providers.md](providers.md) for discovery limits, supported boundaries, and synthetic validation.
+Confine ACP types to `harnesses/acp` and `sessions/acp-*`. Read [providers.md](providers.md) for provider limits.
 Request routes use `NativeInteractions`; do not restore the removed universal ACP question manager.
 
 Separate prompt acceptance, provider delivery, turn completion, cancellation, and process exit.
-Use one projection for history and live events, with stable display identities and explicit replay cursors.
 Keep session, provider-history, and terminal cursors separate.
 
-Preserve account homes, IDs, sequences, messages, attachments, worktrees, forks, and epic records.
 Do not rename shipped migrations. Check the highest migration number before adding one; some numbers repeat on purpose.
 A table rebuild drops that table's triggers. Recreate them in the same migration.
 Every message append writes `sessions.last_activity_at`.
 Preserve legacy history and expose unavailable resume.
+Boot recovery (`sessions/recovery.ts`) marks running turns `turn_interrupted`; only `auto_resume = 1` chat rows resume.
 Draft promotion needs an idempotency key. Upload bytes stay on HTTP.
 
-Do not auto-grant native requests. Reject stale-generation replies.
-Browser reload can recover a live request; runtime death expires that generation's requests.
-Keep expired requests visible with disabled replies. Plans remain progress state unless the provider separately requests approval.
-Workspace operations use the effective session target. Review anchors retain workspace and immutable revision identity.
-Conditional saves preserve dirty text on conflicts. Preview content uses a separate origin.
+Do not auto-grant native requests. Reject stale-generation replies. Runtime death and boot expire pending requests.
 
 ## UI rules
 
 Use Base UI `render`, not `asChild`. Dialog bodies use `DialogPanel` or `AlertDialogPanel`.
 Scope dark CSS to `html[data-theme='dark']`.
-Preserve drafts after failed send. Keep conversation `path` separate from Git `branch`.
-Use at least 44px coarse-pointer targets and 16px phone input text.
-Keep dock surface tabs separate from session navigation.
+Preserve drafts after failed send. Use 44px coarse-pointer targets and 16px phone input text.
 
 ## Checks before every commit
 
 From the assigned checkout root:
 
-1. Isolate dependencies before setup. The helper preserves borrowed dependencies under `.native-build/` without changing their external targets.
+1. Isolate dependencies before setup:
 
    ```bash
    node scripts/isolate-gate-dependencies.mjs
@@ -75,6 +63,8 @@ From the assigned checkout root:
 
 The coordinator runs `bash scripts/epic-gate.sh` on integrated code.
 Read `.agents/skills/test-forge-app/SKILL.md` before browser QA.
-Use isolated data/accounts and the real server path. UI fixtures alone do not prove native-provider behavior.
+Use isolated data and accounts.
 Follow the active epic's checkout and commit rules.
+Never restart `forge.service` or run `forge-update` on the host that runs the live server.
+Release: `bash scripts/release.sh X.Y.Z` from clean `main`. `apps/server/package.json` stays `0.1.0`.
 CI runs `bun run check` only. Build and e2e run only in `scripts/epic-gate.sh`. Nothing typechecks `e2e/` specs.
