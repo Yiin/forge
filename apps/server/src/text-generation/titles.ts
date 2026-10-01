@@ -30,7 +30,9 @@ export function titleModelFor(
   const hop = (tier ? policy.tiers[tier] : undefined)?.find((item) =>
     canGenerateText(item.harness),
   )
-  return hop ? { harness: hop.harness, model: hop.model } : undefined
+  return hop
+    ? { harness: hop.harness, accountId: hop.accountId, model: hop.model }
+    : undefined
 }
 
 export function createTitleGenerator(options: {

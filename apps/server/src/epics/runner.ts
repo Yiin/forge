@@ -100,6 +100,7 @@ type IterationResult = {
 }
 export type ProviderHop = {
   harness: string
+  accountId?: string
   model?: string
   configOptions?: Record<string, string | boolean>
 }
@@ -122,6 +123,7 @@ export function planAttempts(
       .filter(
         (account) =>
           account.harnessKey === hop.harness &&
+          (!hop.accountId || account.id === hop.accountId) &&
           !account.disabledAt &&
           !blocked.has(account.id),
       )
@@ -129,7 +131,7 @@ export function planAttempts(
     if (candidates.length)
       return candidates.map((account) => ({ ...hop, accountId: account.id }))
     // A harness with no managed-account kind runs on ambient credentials.
-    if (!requiresAccount(hop.harness)) return [{ ...hop }]
+    if (!hop.accountId && !requiresAccount(hop.harness)) return [{ ...hop }]
     return []
   })
 }
@@ -159,7 +161,7 @@ function providerHops(config: unknown): ProviderHop[] {
   const value = config as {
     rolePolicy?: {
       roles?: Record<string, string>
-      tiers?: Record<string, Array<{ harness: string; model?: string }>>
+      tiers?: Record<string, ProviderHop[]>
     }
   }
   const tier = value.rolePolicy?.roles?.['iteration-worker']

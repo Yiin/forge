@@ -13,8 +13,17 @@ import { api } from '../lib/api'
 vi.mock('../lib/api', () => ({
   api: {
     listProjects: vi.fn(),
-    listHarnesses: vi.fn(),
     startRun: vi.fn(),
+  },
+}))
+
+vi.mock('../lib/accounts-api', () => ({
+  accountsApi: {
+    listHarnesses: vi.fn(async () => [
+      { key: 'fake-acp-agent', name: 'Fake', enabled: true, protocol: 'acp' },
+    ]),
+    listAccounts: vi.fn(async () => []),
+    getModels: vi.fn(async () => ({ models: [] })),
   },
 }))
 
@@ -28,9 +37,6 @@ describe('EpicLaunchDialog', () => {
     mockedApi.listProjects.mockResolvedValue([
       { id: 'project-1', name: 'Forge' },
     ])
-    mockedApi.listHarnesses.mockResolvedValue({
-      'fake-acp-agent': { name: 'Fake' },
-    })
   })
 
   it('reports loading failures and retries', async () => {

@@ -6,7 +6,8 @@ import {
   deleteTier,
   moveTierHop,
   renameTier,
-  setTierHopSkipAboveUtilization,
+  setTierHopAccount,
+  setTierHopHarness,
   validateEpicDefaults,
   type EpicDefaults,
 } from './epic-settings-logic'
@@ -56,6 +57,21 @@ describe('epic defaults validation', () => {
     expect(errors['rolePolicy.tiers.default.0.harness']).toBeDefined()
   })
 
+  it('rejects a pinned account from another harness', () => {
+    const errors = validateEpicDefaults(
+      {
+        ...defaults,
+        rolePolicy: {
+          ...defaults.rolePolicy,
+          tiers: { default: [{ harness: 'mock', accountId: 'other' }] },
+        },
+      },
+      ['mock'],
+      [{ id: 'other', harnessKey: 'codex' }],
+    )
+    expect(errors['rolePolicy.tiers.default.0.accountId']).toBeDefined()
+  })
+
   it('rejects an empty tier after its last hop is removed', () => {
     expect(
       validateEpicDefaults(
@@ -95,20 +111,23 @@ describe('role policy operations', () => {
       'title-generation': 'slow',
     })
   })
-  it('keeps hop order at both ends and rejects invalid thresholds', () => {
+  it('keeps hop order at both ends', () => {
     expect(moveTierHop(policy, 'fast', 0, 'up').tiers.fast).toEqual(
       policy.tiers.fast,
     )
     expect(moveTierHop(policy, 'fast', 1, 'down').tiers.fast).toEqual(
       policy.tiers.fast,
     )
+  })
+  it('pins and unpins a hop account, and drops it with the harness', () => {
+    const pinned = setTierHopAccount(policy, 'fast', 0, 'acct-1')
+    expect(pinned.tiers.fast[0]).toEqual({ harness: 'a', accountId: 'acct-1' })
     expect(
-      setTierHopSkipAboveUtilization(policy, 'fast', 0, 101).tiers.fast[0],
-    ).toEqual(policy.tiers.fast[0])
-    expect(
-      setTierHopSkipAboveUtilization(policy, 'fast', 0, 50).tiers.fast[0]
-        ?.skipAboveUtilization,
-    ).toBe(50)
+      setTierHopAccount(pinned, 'fast', 0, undefined).tiers.fast[0],
+    ).toEqual({ harness: 'a' })
+    expect(setTierHopHarness(pinned, 'fast', 0, 'b').tiers.fast[0]).toEqual({
+      harness: 'b',
+    })
   })
   it('creates and assigns a tier without mutating the input', () => {
     const created = createTier(policy, 'backup')

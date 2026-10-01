@@ -5,6 +5,18 @@ import {
   type RolePolicy,
 } from '@forge/protocol/rolePolicy'
 
+export const defaultRolePolicy: RolePolicy = {
+  roles: {
+    'iteration-worker': 'default',
+    'triage-control': 'default',
+    'title-generation': 'default',
+  },
+  tiers: { default: [{ harness: 'claude-code-acp' }] },
+}
+
+/** The account fields hop validation needs. */
+export type HopAccount = { id: string; harnessKey: string }
+
 export type EpicDefaults = EpicRunConfig & {
   workerCount: number
   mode: 'pool' | 'serial' | 'auto'
@@ -23,7 +35,7 @@ export const EPIC_ROLE_DETAILS = {
   'title-generation': {
     label: 'Title generation',
     description:
-      'Renames epic worker sessions after each turn. Uses the first Claude or Codex agent in its tier.',
+      'Renames epic worker sessions after each turn. Uses the first Claude Code or Codex hop in its tier.',
   },
 } as const
 
@@ -152,8 +164,28 @@ export function setTierHopHarness(
   index: number,
   harness: string,
 ): RolePolicy {
+  // Account and model belong to the old harness, so a new harness drops them.
   return updateTier(policy, tierId, (hops) =>
-    hops.map((hop, i) => (i === index ? { ...hop, harness } : hop)),
+    hops.map((hop, i) => {
+      if (i !== index) return hop
+      return hop.configOptions
+        ? { harness, configOptions: hop.configOptions }
+        : { harness }
+    }),
+  )
+}
+export function setTierHopAccount(
+  policy: RolePolicy,
+  tierId: string,
+  index: number,
+  accountId: string | undefined,
+): RolePolicy {
+  return updateTier(policy, tierId, (hops) =>
+    hops.map((hop, i) => {
+      if (i !== index) return hop
+      const { accountId: _, ...rest } = hop
+      return accountId ? { ...rest, accountId } : rest
+    }),
   )
 }
 export function setTierHopModel(
@@ -166,28 +198,6 @@ export function setTierHopModel(
     hops.map((hop, i) =>
       i === index ? { ...hop, model: model.trim() || undefined } : hop,
     ),
-  )
-}
-export function setTierHopSkipAboveUtilization(
-  policy: RolePolicy,
-  tierId: string,
-  index: number,
-  value: number | undefined,
-): RolePolicy {
-  if (
-    value !== undefined &&
-    (!Number.isInteger(value) || value < 0 || value > 100)
-  )
-    return copyPolicy(policy)
-  return updateTier(policy, tierId, (hops) =>
-    hops.map((hop, i) => {
-      if (i !== index) return hop
-      if (value === undefined) {
-        const { skipAboveUtilization: _, ...rest } = hop
-        return rest
-      }
-      return { ...hop, skipAboveUtilization: value }
-    }),
   )
 }
 export function buildEpicRoleRows(
@@ -209,22 +219,40 @@ export function buildEpicRoleRows(
   })
 }
 export function isRolePolicyDirty(policy: RolePolicy): boolean {
-  return (
-    JSON.stringify(policy) !==
-    JSON.stringify({
-      roles: {
-        'iteration-worker': 'default',
-        'triage-control': 'default',
-        'title-generation': 'default',
-      },
-      tiers: { default: [{ harness: 'claude-code-acp' }] },
+  return JSON.stringify(policy) !== JSON.stringify(defaultRolePolicy)
+}
+
+/** Checks that every hop names a configured harness and, if pinned, a matching account. */
+export function hopErrors(
+  policy: RolePolicy,
+  harnessKeys: Iterable<string>,
+  accounts: readonly HopAccount[] = [],
+): Record<string, string> {
+  const errors: Record<string, string> = {}
+  const harnesses = new Set(harnessKeys)
+  for (const [tier, hops] of Object.entries(policy.tiers)) {
+    hops.forEach((hop, index) => {
+      if (!harnesses.has(hop.harness))
+        errors[`rolePolicy.tiers.${tier}.${index}.harness`] =
+          `Harness “${hop.harness}” does not exist. Choose one from Providers.`
+      else if (
+        hop.accountId &&
+        !accounts.some(
+          (account) =>
+            account.id === hop.accountId && account.harnessKey === hop.harness,
+        )
+      )
+        errors[`rolePolicy.tiers.${tier}.${index}.accountId`] =
+          `Account “${hop.accountId}” does not exist for this harness.`
     })
-  )
+  }
+  return errors
 }
 
 export function validateEpicDefaults(
   value: EpicDefaults,
   harnessNames: Iterable<string>,
+  accounts: readonly HopAccount[] = [],
 ): Record<string, string> {
   const errors: Record<string, string> = {}
   const parsed = epicRunConfig.safeParse(value)
@@ -235,7 +263,6 @@ export function validateEpicDefaults(
     return errors
   }
 
-  const harnesses = new Set(harnessNames)
   const policy = value.rolePolicy
   for (const [role, tier] of Object.entries(policy.roles)) {
     if (!(tier in policy.tiers)) {
@@ -246,12 +273,6 @@ export function validateEpicDefaults(
     if (hops.length === 0) {
       errors[`rolePolicy.tiers.${tier}`] = 'Add at least one fallback hop.'
     }
-    hops.forEach((hop, index) => {
-      if (!harnesses.has(hop.harness)) {
-        errors[`rolePolicy.tiers.${tier}.${index}.harness`] =
-          `Harness “${hop.harness}” does not exist.`
-      }
-    })
   }
-  return errors
+  return { ...errors, ...hopErrors(policy, harnessNames, accounts) }
 }

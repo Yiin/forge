@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../../lib/api'
 import { useSettingsStore } from '../../stores/settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,33 +10,29 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { RolePolicyEditor } from '../../components/settings/RolePolicyEditor'
+import { useProviders } from '../../components/settings/use-providers'
 import {
   ErrorRow,
   SettingsPage,
   SettingsRow,
   SettingsSection,
 } from '../settings-pages-implementation'
-import { validateEpicDefaults, type EpicDefaults } from '../epic-settings-logic'
+import {
+  defaultRolePolicy,
+  validateEpicDefaults,
+  type EpicDefaults,
+} from '../epic-settings-logic'
 
 const initialDefaults: EpicDefaults = {
   workerCount: 3,
   mode: 'pool',
-  rolePolicy: {
-    roles: {
-      'iteration-worker': 'default',
-      'triage-control': 'default',
-      'title-generation': 'default',
-    },
-    tiers: { default: [{ harness: 'claude-code-acp' }] },
-  },
+  rolePolicy: defaultRolePolicy,
 }
 
 export function EpicSettings() {
   const [defaults, setDefaults] = useState(initialDefaults)
   const [saved, setSaved] = useState(initialDefaults)
-  const [harnesses, setHarnesses] = useState<Record<string, { name: string }>>(
-    {},
-  )
+  const providers = useProviders()
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [loadError, setLoadError] = useState<string | null>(null)
   const invalidRefs = useRef<Record<string, HTMLElement | null>>({})
@@ -47,8 +42,8 @@ export function EpicSettings() {
   const retry = useSettingsStore((state) => state.retry)
   const dirty = JSON.stringify(defaults) !== JSON.stringify(saved)
   useEffect(() => {
-    void Promise.all([load(), api.listHarnesses()])
-      .then(([, available]) => {
+    void load()
+      .then(() => {
         const value = useSettingsStore.getState().settings as {
           epicDefaults?: Partial<EpicDefaults>
         }
@@ -60,7 +55,6 @@ export function EpicSettings() {
         }
         setDefaults(next)
         setSaved(next)
-        setHarnesses(available as Record<string, { name: string }>)
       })
       .catch((cause: unknown) =>
         setLoadError(cause instanceof Error ? cause.message : String(cause)),
@@ -71,7 +65,11 @@ export function EpicSettings() {
     setErrors({})
   }
   const saveChanges = () => {
-    const nextErrors = validateEpicDefaults(defaults, Object.keys(harnesses))
+    const nextErrors = validateEpicDefaults(
+      defaults,
+      providers.providers.harnesses.map((harness) => harness.key),
+      providers.providers.accounts,
+    )
     setErrors(nextErrors)
     const first = Object.keys(nextErrors)[0]
     if (first) {
@@ -97,6 +95,11 @@ export function EpicSettings() {
       {loadError && (
         <ErrorRow onRetry={() => window.location.reload()}>
           Could not load epic defaults: {loadError}
+        </ErrorRow>
+      )}
+      {providers.error && (
+        <ErrorRow onRetry={providers.retry}>
+          Could not load providers: {providers.error}
         </ErrorRow>
       )}
       {scope.status === 'error' && (
@@ -193,7 +196,7 @@ export function EpicSettings() {
       </SettingsSection>
       <RolePolicyEditor
         policy={defaults.rolePolicy}
-        harnessKeys={Object.keys(harnesses)}
+        providers={providers.providers}
         errors={errors}
         onChange={(rolePolicy) => update({ ...defaults, rolePolicy })}
         onReset={() =>

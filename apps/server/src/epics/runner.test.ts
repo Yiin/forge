@@ -46,6 +46,27 @@ describe('epic runner account attempts', () => {
     ])
   })
 
+  it('limits a pinned hop to its account', () => {
+    expect(
+      planAttempts(
+        [{ harness: 'claude', accountId: 'claude-b' }, { harness: 'codex' }],
+        accounts,
+        new Set(),
+      ),
+    ).toEqual([
+      { harness: 'claude', accountId: 'claude-b' },
+      { harness: 'codex', accountId: 'codex-a' },
+    ])
+    expect(
+      planAttempts(
+        [{ harness: 'claude', accountId: 'claude-b' }],
+        accounts,
+        new Set(['claude-b']),
+        () => false,
+      ),
+    ).toEqual([])
+  })
+
   it('skips blocked accounts and fully blocked harnesses', () => {
     expect(planAttempts(hops, accounts, new Set(['claude-a']))).toEqual([
       { harness: 'claude', accountId: 'claude-b' },

@@ -5,6 +5,8 @@ import {
   type LaunchErrors,
 } from '../../routes/epic-launch-logic'
 import { RolePolicyEditor } from '../settings/RolePolicyEditor'
+import { emptyProviders, loadProviders } from '../settings/use-providers'
+import { defaultRolePolicy } from '../../routes/epic-settings-logic'
 import type { RolePolicy } from '@forge/protocol/rolePolicy'
 import { Button } from '@/components/ui/button'
 import {
@@ -32,15 +34,6 @@ import {
 } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 
-export const defaultEpicLaunchRolePolicy: RolePolicy = {
-  roles: {
-    'iteration-worker': 'default',
-    'triage-control': 'default',
-    'title-generation': 'default',
-  },
-  tiers: { default: [{ harness: 'claude-code-acp' }] },
-}
-
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
 export function EpicLaunchDialog({
@@ -55,9 +48,7 @@ export function EpicLaunchDialog({
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>(
     [],
   )
-  const [harnesses, setHarnesses] = useState<Record<string, { name?: string }>>(
-    {},
-  )
+  const [providers, setProviders] = useState(emptyProviders)
   const [projectId, setProjectId] = useState('')
   const [epicBeadId, setEpicBeadId] = useState('')
   const [mode, setMode] = useState<'pool' | 'serial' | 'auto'>('pool')
@@ -65,10 +56,8 @@ export function EpicLaunchDialog({
   const [baseBranch, setBaseBranch] = useState('main')
   const [gateCommand, setGateCommand] = useState('')
   const [installCommand, setInstallCommand] = useState('')
-  const [rolePolicy, setRolePolicy] = useState(defaultEpicLaunchRolePolicy)
-  const [savedRolePolicy, setSavedRolePolicy] = useState(
-    defaultEpicLaunchRolePolicy,
-  )
+  const [rolePolicy, setRolePolicy] = useState(defaultRolePolicy)
+  const [savedRolePolicy, setSavedRolePolicy] = useState(defaultRolePolicy)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [errors, setErrors] = useState<LaunchErrors>({})
   const formId = useId()
@@ -81,8 +70,8 @@ export function EpicLaunchDialog({
     setLoadState('loading')
     setLoadError('')
     const settings = api.getSettings?.() ?? Promise.resolve({})
-    void Promise.all([api.listProjects(), api.listHarnesses(), settings])
-      .then(([projectData, harnessData, settingsData]) => {
+    void Promise.all([api.listProjects(), loadProviders(), settings])
+      .then(([projectData, providerData, settingsData]) => {
         const nextProjects = projectData as Array<{ id: string; name: string }>
         const epicDefaults = (
           settingsData as {
@@ -93,10 +82,10 @@ export function EpicLaunchDialog({
             }
           }
         ).epicDefaults
-        const saved = epicDefaults?.rolePolicy ?? defaultEpicLaunchRolePolicy
+        const saved = epicDefaults?.rolePolicy ?? defaultRolePolicy
         setProjects(nextProjects)
         setProjectId((current) => current || nextProjects[0]?.id || '')
-        setHarnesses(harnessData as Record<string, { name?: string }>)
+        setProviders(providerData)
         setRolePolicy(saved)
         setSavedRolePolicy(saved)
         setGateCommand(
@@ -140,7 +129,8 @@ export function EpicLaunchDialog({
         rolePolicy,
         rolePolicyChanged: !same(rolePolicy, savedRolePolicy),
       },
-      Object.keys(harnesses),
+      providers.harnesses.map((harness) => harness.key),
+      providers.accounts,
     )
     Object.assign(nextErrors, parsed.errors)
     setErrors(nextErrors)
@@ -342,7 +332,7 @@ export function EpicLaunchDialog({
                     </div>
                     <RolePolicyEditor
                       policy={rolePolicy}
-                      harnessKeys={Object.keys(harnesses)}
+                      providers={providers}
                       errors={errors}
                       onChange={setRolePolicy}
                       onReset={() => setRolePolicy(savedRolePolicy)}

@@ -23,7 +23,7 @@ describe('epic launch overrides', () => {
       ['mock'],
     )
     expect(result.errors['rolePolicy.tiers.fast.0.harness']).toContain(
-      'Unknown harness',
+      'does not exist',
     )
   })
 

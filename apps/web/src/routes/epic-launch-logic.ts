@@ -3,6 +3,7 @@ import {
   type EpicRunConfig,
   type RolePolicy,
 } from '@forge/protocol/rolePolicy'
+import { hopErrors, type HopAccount } from './epic-settings-logic'
 
 export type LaunchErrors = Record<string, string>
 
@@ -18,6 +19,7 @@ export type EpicLaunchForm = {
 export function buildEpicLaunchConfig(
   form: EpicLaunchForm,
   knownHarnesses: string[],
+  accounts: readonly HopAccount[] = [],
 ): { value?: EpicRunConfig; errors: LaunchErrors } {
   const input: Record<string, unknown> = {}
   if (form.workerCount !== undefined)
@@ -40,16 +42,9 @@ export function buildEpicLaunchConfig(
     }
     return { errors }
   }
-  const errors: LaunchErrors = {}
-  for (const [tier, hops] of Object.entries(
-    checked.data.rolePolicy?.tiers ?? {},
-  )) {
-    hops.forEach((hop, index) => {
-      if (!knownHarnesses.includes(hop.harness))
-        errors[`rolePolicy.tiers.${tier}.${index}.harness`] =
-          `Unknown harness “${hop.harness}”. Choose a configured harness.`
-    })
-  }
+  const errors: LaunchErrors = checked.data.rolePolicy
+    ? hopErrors(checked.data.rolePolicy, knownHarnesses, accounts)
+    : {}
   return Object.keys(errors).length
     ? { errors }
     : { value: checked.data, errors }
