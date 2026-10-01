@@ -143,6 +143,13 @@ const ownedFlags = new Set([
   '--model',
   '--effort',
 ])
+// Claude Code updates itself, so any release from the inspected 2.1.258 on counts as checked.
+function checkedVersion(value: unknown) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(string(value))
+  if (!match) return false
+  const [major, minor, patch] = match.slice(1).map(Number)
+  return major !== 2 ? major > 2 : minor !== 1 ? minor > 1 : patch >= 258
+}
 function launchArgs(args: string[]) {
   for (const arg of args) {
     const flag = arg.split('=')[0]!
@@ -907,7 +914,7 @@ class ClaudeSession implements ClaudeHandle {
         for (const capability of frame.capabilities)
           if (typeof capability === 'string') this.capabilities.add(capability)
       this.checkedProfile =
-        frame.claude_code_version === '2.1.258' &&
+        checkedVersion(frame.claude_code_version) &&
         this.capabilities.has('msg_lifecycle_v1')
       if (this.checkedProfile && this.buffered.length)
         this.drain(this.observed ?? this.newTurn(undefined, true))

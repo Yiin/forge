@@ -787,7 +787,9 @@ describe('Claude content and root ownership', () => {
   })
   it.each([
     {},
-    { claude_code_version: '2.1.999', capabilities: ['msg_lifecycle_v1'] },
+    { claude_code_version: '2.1.257', capabilities: ['msg_lifecycle_v1'] },
+    { claude_code_version: '2.1.285', capabilities: [] },
+    { claude_code_version: '2.1.285-beta', capabilities: ['msg_lifecycle_v1'] },
   ])(
     'uses bounded attribution for an unchecked profile %j',
     async (profile) => {
@@ -811,6 +813,64 @@ describe('Claude content and root ownership', () => {
       })
       expect(text(t.events)).toBe('')
       expect(t.events.filter((e) => e.type === 'turn_started')).toHaveLength(0)
+    },
+  )
+  it.each(['2.1.285', '2.2.0', '3.0.0'])(
+    'attributes a tool-using wake turn on newer Claude %s',
+    async (version) => {
+      const t = await setup([
+        user(),
+        init({ claude_code_version: version }),
+        started(),
+        full('A'),
+        result({ user_message_uuid: '$user.uuid' }),
+        {
+          send: {
+            type: 'assistant',
+            message: {
+              id: 'wake',
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'wake-bash',
+                  name: 'Bash',
+                  input: { command: 'pwd' },
+                },
+              ],
+            },
+            uuid: '$new',
+          },
+        },
+        {
+          send: {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'wake-bash',
+                  content: 'wake output',
+                },
+              ],
+            },
+            uuid: '$new',
+          },
+        },
+        result({ origin: { kind: 'task-notification' } }),
+      ])
+      const h = await t.start()
+      expect(await (await h.prompt('A')).completion).toMatchObject({
+        status: 'completed',
+      })
+      await t.until(
+        (events) =>
+          events.filter((e) => e.type === 'turn_completed').length === 2,
+      )
+      expect(t.events.find((e) => e.type === 'tool_update')).toMatchObject({
+        status: 'completed',
+        output: 'wake output',
+      })
+      expect(t.events.filter((e) => e.type === 'run_failed')).toHaveLength(0)
     },
   )
   it('fails an explicit unknown trigger without consuming pending foreground work', async () => {
