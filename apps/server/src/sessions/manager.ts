@@ -1089,13 +1089,26 @@ export class SessionManager {
               )
               .run(nextAccount, id, nextHarness)
           // A stale binding would fail the next resume with a saved binding
-          // mismatch once the fresh native session is confirmed.
-          else
+          // mismatch once the fresh native session is confirmed. An ACP
+          // journal is bound to its account, so a fresh start drops it.
+          else {
             this.db
               .prepare(
                 "DELETE FROM native_provider_state WHERE session_id = ? AND provider = ? AND name = 'binding'",
               )
               .run(id, row.harness)
+            for (const table of [
+              'acp_journals',
+              'acp_transactions',
+              'acp_records',
+              'acp_artifacts',
+              'acp_replay_snapshots',
+              'acp_replay_native_items',
+            ])
+              this.db
+                .prepare(`DELETE FROM ${table} WHERE session_id = ?`)
+                .run(id)
+          }
           this.db.exec('COMMIT')
         } catch (error) {
           this.db.exec('ROLLBACK')

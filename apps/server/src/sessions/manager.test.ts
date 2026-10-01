@@ -8,6 +8,7 @@ import { migrate } from '../db/migrate.js'
 import { createProject, createSession } from '../db/queries.js'
 import { EventBus } from '../events/bus.js'
 import { SessionManager } from './manager.js'
+import { createAcpStorage } from './acp-storage.js'
 import type { HarnessFactory, HarnessHandle } from './harness.js'
 
 describe('session harness selection', () => {
@@ -2223,6 +2224,69 @@ describe('account switch', () => {
     expect(result.calls).toEqual([{ kind: 'spawn', accountId: 'acct-b' }])
     expect(result.row).toMatchObject({ provider_session_id: null })
     expect(result.binding).toBeUndefined()
+  })
+
+  it('drops the ACP journal so the new account opens a fresh one', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'Switch', path: '/tmp' })
+    for (const id of ['acct-a', 'acct-b'])
+      db.prepare(
+        "INSERT INTO harness_accounts (id, harness_key, label, kind, home_path, created_at) VALUES (?, 'gemini', 'Test', 'profile', '/tmp/acct', 1)",
+      ).run(id)
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'gemini',
+      title: 'Switch',
+      cwd: '/tmp',
+      accountId: 'acct-a',
+    })
+    const open = (accountId: string) =>
+      createAcpStorage(db, {
+        id: session.id,
+        provider: 'gemini',
+        accountId,
+        cwd: '/tmp',
+      }).ingestion.open(
+        {
+          sessionId: session.id,
+          providerInstanceId: 'gemini',
+          account: { kind: 'selected-account', accountId },
+          expectedBinding: null,
+        },
+        new AbortController().signal,
+      )
+    const old = await open('acct-a')
+    await old.close()
+    db.prepare("INSERT INTO acp_records VALUES ('record', ?, 1, 0, '{}')").run(
+      session.id,
+    )
+    const handle: HarnessHandle = {
+      prompt: async () => {},
+      cancel: () => {},
+      kill: () => {},
+    }
+    const manager = new SessionManager(db, new EventBus(), () => ({
+      spawn: () => handle,
+    }))
+    await manager.prompt(
+      session.id,
+      'next',
+      undefined,
+      undefined,
+      'gemini',
+      'acct-b',
+    )
+    expect(
+      db
+        .prepare('SELECT 1 FROM acp_records WHERE session_id=?')
+        .get(session.id),
+    ).toBeUndefined()
+    const next = await open('acct-b')
+    expect(next.journalId).not.toBe(old.journalId)
+    await next.close()
+    manager.close()
+    db.close()
   })
 
   it.each([
