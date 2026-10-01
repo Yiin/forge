@@ -102,7 +102,7 @@ try {
       'read value; printf "SYNTHETIC_HARNESS:%s\\n" "$value"; exit 0',
     ],
     env: { HOME: home },
-    maxTurnMs: 1000,
+    turnIdleMs: 1000,
     quietPeriodMs: 20,
   })
   const handle = await harness.spawn(

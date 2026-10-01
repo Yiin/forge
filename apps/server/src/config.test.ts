@@ -77,6 +77,28 @@ describe('default harness configuration', () => {
     }
   })
 
+  test('drops a retired maxTurnMs key from stored harness entries', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-config-retired-'))
+    try {
+      const file = join(root, 'forge.toml')
+      const config = defaultConfig(false)
+      saveConfigSync(file, config)
+      const stored = readFileSync(file, 'utf8').replace(
+        /\[harness\.cursor\]\n/,
+        '[harness.cursor]\nmaxTurnMs = 1800000\n',
+      )
+      expect(stored).toContain('maxTurnMs')
+      await writeFile(file, stored)
+      expect(loadConfigSync(file).harness.cursor).not.toHaveProperty(
+        'maxTurnMs',
+      )
+      convertConfigFileSync(file)
+      expect(readFileSync(file, 'utf8')).not.toContain('maxTurnMs')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('keeps explicit disabled native providers disabled after reload', async () => {
     const root = await mkdtemp(join(tmpdir(), 'forge-config-disabled-'))
     try {
@@ -223,7 +245,7 @@ describe('default harness configuration', () => {
           args: ['--keep'],
           env: { KEEP: 'yes' },
           quietPeriodMs: 17,
-          maxTurnMs: 19,
+          turnIdleMs: 19,
         },
       },
     }
@@ -236,7 +258,7 @@ describe('default harness configuration', () => {
       args: ['--keep'],
       env: { KEEP: 'yes' },
       quietPeriodMs: 17,
-      maxTurnMs: 19,
+      turnIdleMs: 19,
     })
     expect(Object.keys(reconciled.harness)).toEqual([
       'custom',

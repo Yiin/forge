@@ -8,7 +8,7 @@ afterEach(async () => {
   for (const handle of handles.splice(0)) await handle.kill()
 })
 
-async function fixture(quietPeriodMs = 300) {
+async function fixture(quietPeriodMs = 300, turnIdleMs = 5_000) {
   const items: Array<{
     type: string
     text?: string
@@ -21,7 +21,7 @@ async function fixture(quietPeriodMs = 300) {
     args: ['-i'],
     env: { PS1: '' },
     quietPeriodMs,
-    maxTurnMs: 5_000,
+    turnIdleMs,
   })
   const handle = await harness.spawn(
     { id: 'session', cwd: globalThis.process.cwd(), harness: 'bash' },
@@ -48,7 +48,7 @@ async function processFixture(command: string, args: string[]) {
     args,
     env: { TERM: 'xterm-256color' },
     quietPeriodMs: 200,
-    maxTurnMs: 5_000,
+    turnIdleMs: 5_000,
   })
   const handle = await harness.spawn(
     { id: 'session', cwd: globalThis.process.cwd(), harness: command },
@@ -135,6 +135,26 @@ describe('PTY harness', () => {
         .map((item) => item.text)
         .join(''),
     ).toContain('done')
+  })
+
+  it('keeps a turn alive past turnIdleMs while output keeps arriving', async () => {
+    const { handle, items } = await fixture(300, 500)
+    handle.prompt('for i in 1 2 3 4 5 6 7 8; do echo tick$i; sleep 0.1; done')
+    await waitFor(items, 'turn_end')
+    expect(items.some((item) => item.reason === 'idle_timeout')).toBe(false)
+    expect(
+      items
+        .filter((item) => item.type === 'text_delta')
+        .map((item) => item.text)
+        .join(''),
+    ).toContain('tick8')
+  })
+
+  it('ends a turn with idle_timeout after turnIdleMs of silence', async () => {
+    const { handle, items } = await fixture(300, 400)
+    handle.prompt('echo start; sleep 30')
+    await waitFor(items, 'turn_interrupted')
+    expect(items.at(-1)?.reason).toBe('idle_timeout')
   })
 
   it('keeps one item id across large output chunks', async () => {

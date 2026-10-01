@@ -8,7 +8,7 @@ describe('interruptReasonText', () => {
     ['server_crashed', 'Forge crashed and restarted. This turn stopped.'],
     ['agent_process_died', 'The agent process stopped.'],
     ['pty_process_died', 'The terminal process stopped.'],
-    ['max_turn_time', 'The turn hit its time limit.'],
+    ['idle_timeout', 'The turn stopped after a long silence.'],
     ['error', 'The turn failed.'],
     ['failed', 'The turn failed.'],
     ['interrupted', 'The turn stopped.'],

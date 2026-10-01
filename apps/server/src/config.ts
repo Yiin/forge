@@ -70,7 +70,6 @@ const defaultEntry = (
   env: {},
   protocol,
   quietPeriodMs: 2000,
-  maxTurnMs: 30 * 60 * 1000,
   enabled: commandAvailable(command),
 })
 
@@ -264,6 +263,14 @@ export function getHarness(
   return value
 }
 
+/** Drops harness keys that older configs stored and the strict schema rejects. */
+function withoutRetiredHarnessKeys(entry: unknown) {
+  if (!entry || typeof entry !== 'object' || !('maxTurnMs' in entry))
+    return entry
+  const { maxTurnMs: _retired, ...rest } = entry as Record<string, unknown>
+  return rest
+}
+
 export function loadConfigSync(path?: string): ForgeConfig {
   const file = resolve(
     path ?? process.env.FORGE_CONFIG ?? resolve(homedir(), '.forge/forge.toml'),
@@ -301,7 +308,9 @@ export function loadConfigSync(path?: string): ForgeConfig {
     throw new Error(`${file}: missing harness table`)
   const result: Record<string, HarnessConfig> = {}
   for (const [key, value] of Object.entries(entries)) {
-    const checked = harnessConfigSchema.safeParse(value)
+    const checked = harnessConfigSchema.safeParse(
+      withoutRetiredHarnessKeys(value),
+    )
     if (!checked.success) {
       const issue = checked.error.issues[0]
       const field = issue?.path[0]
@@ -456,8 +465,19 @@ export function convertConfigFileSync(
   const file = resolve(path)
   const original = operations.readFileSync(file, 'utf8')
   const source = parse(original) as Record<string, unknown>
+  const harness = source.harness
   const parsed = forgeConfigSchema.parse({
     ...source,
+    ...(harness && typeof harness === 'object'
+      ? {
+          harness: Object.fromEntries(
+            Object.entries(harness).map(([key, entry]) => [
+              key,
+              withoutRetiredHarnessKeys(entry),
+            ]),
+          ),
+        }
+      : {}),
     dataDir: source.dataDir ?? resolve(dirname(file), 'data'),
   })
   const converted = convertConfig(parsed)

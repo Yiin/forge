@@ -13,7 +13,7 @@ export const harnessConfigSchema = z
     protocol: z.enum(['acp', 'pty']),
     adapterKind: adapterKindSchema.optional(),
     quietPeriodMs: z.number().int().positive().optional(),
-    maxTurnMs: z.number().int().positive().optional(),
+    turnIdleMs: z.number().int().positive().optional(),
     enabled: z.boolean().default(true),
   })
   .strict()

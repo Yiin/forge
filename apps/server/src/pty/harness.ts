@@ -10,7 +10,7 @@ import type {
 } from '../sessions/harness.js'
 
 type PtyOptions = Pick<HarnessConfig, 'command' | 'args' | 'env'> &
-  Partial<Pick<HarnessConfig, 'quietPeriodMs' | 'maxTurnMs'>>
+  Partial<Pick<HarnessConfig, 'quietPeriodMs' | 'turnIdleMs'>>
 
 // PTYs use OSC and CSI sequences for prompts, colours, and cursor movement.
 // strip-ansi handles standard sequences. This catches incomplete OSC frames.
@@ -50,7 +50,7 @@ function removeEchoLine(text: string, prompt: string) {
 
 export function createPtyHarness(options: PtyOptions): HarnessProcess {
   const quietPeriodMs = options.quietPeriodMs ?? 2000
-  const maxTurnMs = options.maxTurnMs ?? 30 * 60 * 1000
+  const turnIdleMs = options.turnIdleMs ?? 30 * 60 * 1000
 
   return {
     capabilities: { loadSession: false },
@@ -81,13 +81,13 @@ export function createPtyHarness(options: PtyOptions): HarnessProcess {
       let turnStart = 0
       let turnItemId: string | undefined
       let quietTimer: ReturnType<typeof setTimeout> | undefined
-      let maxTimer: ReturnType<typeof setTimeout> | undefined
+      let idleTimer: ReturnType<typeof setTimeout> | undefined
 
       const clearTimers = () => {
         if (quietTimer) clearTimeout(quietTimer)
-        if (maxTimer) clearTimeout(maxTimer)
+        if (idleTimer) clearTimeout(idleTimer)
         quietTimer = undefined
-        maxTimer = undefined
+        idleTimer = undefined
       }
       const emit = (item: HarnessItem) => onItem(item)
       const flush = () => {
@@ -125,10 +125,18 @@ export function createPtyHarness(options: PtyOptions): HarnessProcess {
         if (quietTimer) clearTimeout(quietTimer)
         quietTimer = setTimeout(quietFinish, quietPeriodMs)
       }
+      const armIdleTimer = () => {
+        if (idleTimer) clearTimeout(idleTimer)
+        idleTimer = setTimeout(
+          () => finish('turn_interrupted', 'idle_timeout'),
+          turnIdleMs,
+        )
+      }
       const onData = (chunk: string) => {
         if (!active) return
         const clean = cleanPtyText(chunk)
         if (!clean) return
+        armIdleTimer()
         received = true
         output += clean
         const turnOutput = output.slice(turnStart)
@@ -184,10 +192,7 @@ export function createPtyHarness(options: PtyOptions): HarnessProcess {
           turnItemId = `${Date.now().toString(36)}${crypto.randomUUID().replaceAll('-', '')}`
           emit({ type: 'turn_start' })
           pty.write(`${text}\r`)
-          maxTimer = setTimeout(
-            () => finish('turn_interrupted', 'max_turn_time'),
-            maxTurnMs,
-          )
+          armIdleTimer()
         },
         cancel() {
           if (!active) return
