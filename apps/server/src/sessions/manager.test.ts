@@ -1942,3 +1942,107 @@ describe('intentional native lifetime retirement', () => {
     },
   )
 })
+
+describe('idle reaper', () => {
+  const idleMs = 60 * 60 * 1000
+  async function setup() {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'test', path: '/tmp' })
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'mock',
+      title: 'Chat',
+      cwd: '/tmp',
+    })
+    const kill = vi.fn()
+    let emit: (item: import('./harness.js').HarnessItem) => void = () => {}
+    let finish: () => void = () => {}
+    const manager = new SessionManager(
+      db,
+      new EventBus(),
+      () => ({
+        spawn: async (_session, onItem) => {
+          emit = onItem
+          return {
+            prompt: () =>
+              new Promise<void>((resolve) => {
+                finish = resolve
+              }),
+            cancel: () => undefined,
+            kill,
+          }
+        },
+      }),
+      idleMs,
+    )
+    const prompt = async (text: string) => {
+      await manager.prompt(session.id, text)
+      await vi.advanceTimersByTimeAsync(0)
+    }
+    return {
+      manager,
+      kill,
+      prompt,
+      emit: (item: any) => emit(item),
+      finish: () => finish(),
+    }
+  }
+
+  it('does not kill a turn that started after the previous turn ended', async () => {
+    vi.useFakeTimers()
+    try {
+      const { manager, kill, prompt, finish } = await setup()
+      await prompt('first')
+      finish()
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000)
+      await prompt('second')
+      await vi.advanceTimersByTimeAsync(2 * idleMs)
+      expect(kill).not.toHaveBeenCalled()
+      finish()
+      await vi.advanceTimersByTimeAsync(idleMs - 1000)
+      expect(kill).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(kill).toHaveBeenCalledTimes(1)
+      manager.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not kill a harness turn that outlives the prompt turn', async () => {
+    vi.useFakeTimers()
+    try {
+      const { manager, kill, prompt, emit, finish } = await setup()
+      await prompt('first')
+      emit({ type: 'turn_start', turnId: 'harness_turn' } as any)
+      finish()
+      await vi.advanceTimersByTimeAsync(2 * idleMs)
+      expect(kill).not.toHaveBeenCalled()
+      emit({ type: 'turn_end', turnId: 'harness_turn' } as any)
+      await vi.advanceTimersByTimeAsync(idleMs)
+      expect(kill).toHaveBeenCalledTimes(1)
+      manager.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('counts idle time from the last harness activity', async () => {
+    vi.useFakeTimers()
+    try {
+      const { manager, kill, prompt, emit, finish } = await setup()
+      await prompt('first')
+      finish()
+      await vi.advanceTimersByTimeAsync(idleMs / 2)
+      emit({ type: 'text_delta', text: 'late output' } as any)
+      await vi.advanceTimersByTimeAsync(idleMs / 2)
+      expect(kill).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(idleMs / 2)
+      expect(kill).toHaveBeenCalledTimes(1)
+      manager.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

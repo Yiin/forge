@@ -118,6 +118,10 @@ export class SessionManager {
   private readonly availableModels = new Map<string, HarnessModel[]>()
   private readonly handleHarnesses = new Map<string, string>()
   private readonly reapTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  // The reaper measures idle time from here and spares sessions with an open
+  // harness turn, including turns the harness started on its own.
+  private readonly lastActivity = new Map<string, number>()
+  private readonly openHarnessTurns = new Map<string, Set<string>>()
   private readonly turnWaiters = new Map<
     string,
     { resolve: () => void; reject: (error: unknown) => void }
@@ -126,7 +130,7 @@ export class SessionManager {
     private readonly db: Db,
     private readonly bus: EventBus,
     private readonly factory: HarnessFactory,
-    private readonly idleMs = 15 * 60 * 1000,
+    private readonly idleMs = 60 * 60 * 1000,
     private readonly requiresAccount: (harness: string) => boolean = () => true,
     private readonly dataDir = process.env.FORGE_DATA_DIR ?? 'data',
     private readonly reviewTargets = new WorkspaceTargets(db),
@@ -142,6 +146,8 @@ export class SessionManager {
   }
   private forgetHandle(id: string) {
     this.handles.delete(id)
+    this.openHarnessTurns.delete(id)
+    this.lastActivity.delete(id)
     this.availableModels.delete(id)
     this.handleHarnesses.delete(id)
   }
@@ -342,6 +348,7 @@ export class SessionManager {
       const turnId = item.turnId ?? this.turns.get(row.id) ?? makeId('turn_')
       const itemId = item.itemId ?? makeId('item_')
       const { itemId: _itemId, turnId: _turnId, ...normalized } = item
+      this.trackHarnessTurn(row.id, turnId, normalized.type)
       appendMessage(this.db, {
         sessionId: row.id,
         turnId,
@@ -450,6 +457,7 @@ export class SessionManager {
     const onItem = (item: HarnessItem) => {
       if (this.closeWork || this.generations.get(row.id) !== generation) return
       const { itemId: _itemId, turnId: _turnId, ...content } = item
+      this.trackHarnessTurn(row.id, item.turnId ?? fallbackTurnId, item.type)
       appendMessage(this.db, {
         sessionId: row.id,
         turnId: item.turnId ?? fallbackTurnId,
@@ -548,6 +556,7 @@ export class SessionManager {
       else waiter.resolve()
     }
     if (this.closeWork) return
+    this.lastActivity.set(row.id, Date.now())
     if (!error) {
       this.status(row.id, 'idle')
       this.maybeTitle(row.id, row.title, this.firstPrompt.get(row.id) ?? '')
@@ -905,19 +914,37 @@ export class SessionManager {
       title,
     })
   }
-  private scheduleReap(id: string) {
+  private scheduleReap(id: string, delay = this.idleMs) {
     if (this.closeWork) return
     const old = this.reapTimers.get(id)
     if (old) clearTimeout(old)
     const timer = setTimeout(() => {
       void this.reap(id)
-    }, this.idleMs)
+    }, delay)
     timer.unref?.()
     this.reapTimers.set(id, timer)
+  }
+  private trackHarnessTurn(id: string, turnId: string, type: string) {
+    this.lastActivity.set(id, Date.now())
+    if (type === 'turn_start') {
+      const open = this.openHarnessTurns.get(id) ?? new Set<string>()
+      open.add(turnId)
+      this.openHarnessTurns.set(id, open)
+    } else if (type === 'turn_end' || type === 'turn_interrupted')
+      this.openHarnessTurns.get(id)?.delete(turnId)
   }
   private async reap(id: string) {
     const handle = this.handles.get(id)
     if (!handle) return
+    if (this.turns.has(id) || this.openHarnessTurns.get(id)?.size) {
+      this.scheduleReap(id)
+      return
+    }
+    const idleFor = Date.now() - (this.lastActivity.get(id) ?? 0)
+    if (idleFor < this.idleMs) {
+      this.scheduleReap(id, this.idleMs - idleFor)
+      return
+    }
     await handle.kill()
     this.forgetHandle(id)
     this.reapTimers.delete(id)
@@ -1041,6 +1068,7 @@ export class SessionManager {
       const attachments: import('./harness.js').PromptContent[] = []
       if (!this.firstPrompt.has(id)) this.firstPrompt.set(id, text)
       this.turns.set(id, turnId)
+      this.lastActivity.set(id, Date.now())
       appendMessage(this.db, {
         sessionId: id,
         turnId,
