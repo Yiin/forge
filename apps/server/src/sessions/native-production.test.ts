@@ -551,3 +551,61 @@ it('retains the original typed startup cleanup owner until backend shutdown', as
   await f.options.resources.close()
   expect(cleanup).toHaveBeenCalledTimes(1)
 })
+
+it('Claude resumes a saved binding only when it names the selected account', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'forge-native-claude-switch-'))
+  cleanups.unshift(() => rm(cwd, { recursive: true, force: true }))
+  await writeFile(join(cwd, 'scenario.json'), JSON.stringify({ actions: [] }))
+  const account = {
+    id: 'acct-b',
+    harnessKey: 'claude',
+    label: 'B',
+    kind: 'claude',
+    adapterKind: 'native' as const,
+    homePath: join(cwd, 'home'),
+    orderIndex: 0,
+    disabledAt: null,
+    createdAt: 0,
+    lastUsedAt: null,
+    identity: null,
+    config: null,
+  }
+  const f = await context(
+    'claude',
+    cwd,
+    entry(
+      process.execPath,
+      [
+        fileURLToPath(
+          new URL(
+            '../harnesses/claude/fixtures/fake-claude.mjs',
+            import.meta.url,
+          ),
+        ),
+      ],
+      { FORGE_CLAUDE_FIXTURE: cwd },
+    ),
+    account,
+  )
+  const binding = (accountId: string) => ({
+    provider: 'claude',
+    accountId,
+    cwd,
+    providerSessionId: 'native-1',
+  })
+  const save = (accountId: string) =>
+    f.db
+      .prepare(
+        "INSERT INTO native_provider_state VALUES ('session', 'claude', 'binding', ?) ON CONFLICT DO UPDATE SET value = excluded.value",
+      )
+      .run(JSON.stringify(binding(accountId)))
+  save('acct-a')
+  await expect(f.open(true, binding('acct-b'))).rejects.toThrow(
+    'Claude resume binding scope does not match this session',
+  )
+  save('acct-b')
+  await f.open(true, binding('acct-b'))
+  expect(
+    JSON.parse(readFileSync(join(cwd, 'launch.json'), 'utf8')).resume,
+  ).toBe('native-1')
+})

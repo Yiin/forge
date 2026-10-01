@@ -2100,3 +2100,130 @@ describe('automatic harness turns', () => {
     manager.close()
   })
 })
+
+describe('account switch', () => {
+  async function switched(input: { harness?: string; shares: boolean }) {
+    const db = new DatabaseSync(':memory:')
+    migrate(db)
+    const project = createProject(db, { name: 'Switch', path: '/tmp' })
+    for (const [id, harness] of [
+      ['acct-a', 'claude'],
+      ['acct-b', 'claude'],
+      ['acct-c', 'codex'],
+    ] as const)
+      db.prepare(
+        "INSERT INTO harness_accounts (id, harness_key, label, kind, home_path, created_at) VALUES (?, ?, 'Test', ?, '/tmp/acct', 1)",
+      ).run(id, harness, harness)
+    const session = createSession(db, {
+      projectId: project.id,
+      harness: 'claude',
+      title: 'Switch',
+      cwd: '/tmp',
+      accountId: 'acct-a',
+    })
+    db.prepare('UPDATE sessions SET provider_session_id=? WHERE id=?').run(
+      'native-1',
+      session.id,
+    )
+    db.prepare('INSERT INTO native_provider_state VALUES (?, ?, ?, ?)').run(
+      session.id,
+      'claude',
+      'binding',
+      JSON.stringify({
+        provider: 'claude',
+        accountId: 'acct-a',
+        cwd: '/tmp',
+        providerSessionId: 'native-1',
+      }),
+    )
+    const calls: Array<{ kind: string; accountId?: string | null }> = []
+    const handle: HarnessHandle = {
+      prompt: async () => {},
+      cancel: () => {},
+      kill: () => {},
+    }
+    const manager = new SessionManager(
+      db,
+      new EventBus(),
+      () => ({
+        capabilities: { loadSession: true },
+        spawn: (saved) => {
+          calls.push({ kind: 'spawn', accountId: saved.accountId })
+          return handle
+        },
+        loadSession: async (saved) => {
+          calls.push({ kind: 'load', accountId: saved.accountId })
+          return { handle, proven: true }
+        },
+      }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => input.shares,
+    )
+    const harness = input.harness ?? 'claude'
+    await manager.prompt(
+      session.id,
+      'next',
+      undefined,
+      undefined,
+      harness,
+      harness === 'claude' ? 'acct-b' : 'acct-c',
+    )
+    await vi.waitFor(() => expect(calls).toHaveLength(1))
+    const result = {
+      calls,
+      row: db
+        .prepare(
+          'SELECT harness, account_id, provider_session_id FROM sessions WHERE id=?',
+        )
+        .get(session.id),
+      binding: JSON.parse(
+        (
+          db
+            .prepare(
+              "SELECT value FROM native_provider_state WHERE session_id=? AND name='binding'",
+            )
+            .get(session.id) as { value: string }
+        ).value,
+      ),
+    }
+    manager.close()
+    db.close()
+    return result
+  }
+
+  it('keeps and rebinds the native session on a same-harness switch', async () => {
+    const result = await switched({ shares: true })
+    expect(result.calls).toEqual([{ kind: 'load', accountId: 'acct-b' }])
+    expect(result.row).toEqual({
+      harness: 'claude',
+      account_id: 'acct-b',
+      provider_session_id: 'native-1',
+    })
+    expect(result.binding).toEqual({
+      provider: 'claude',
+      accountId: 'acct-b',
+      cwd: '/tmp',
+      providerSessionId: 'native-1',
+    })
+  })
+
+  it('starts fresh when the harness does not share account sessions', async () => {
+    const result = await switched({ shares: false })
+    expect(result.calls).toEqual([{ kind: 'spawn', accountId: 'acct-b' }])
+    expect(result.row).toMatchObject({ provider_session_id: null })
+    expect(result.binding.accountId).toBe('acct-a')
+  })
+
+  it('starts fresh on a harness change', async () => {
+    const result = await switched({ harness: 'codex', shares: true })
+    expect(result.calls).toEqual([{ kind: 'spawn', accountId: 'acct-c' }])
+    expect(result.row).toEqual({
+      harness: 'codex',
+      account_id: 'acct-c',
+      provider_session_id: null,
+    })
+  })
+})

@@ -134,6 +134,8 @@ export class SessionManager {
     private readonly requiresAccount: (harness: string) => boolean = () => true,
     private readonly dataDir = process.env.FORGE_DATA_DIR ?? 'data',
     private readonly reviewTargets = new WorkspaceTargets(db),
+    private readonly sharesAccountSessions: (harness: string) => boolean = () =>
+      false,
   ) {}
   get database() {
     return this.db
@@ -1063,16 +1065,39 @@ export class SessionManager {
         const timer = this.reapTimers.get(id)
         if (timer) clearTimeout(timer)
         this.reapTimers.delete(id)
-        this.db
-          .prepare(
-            "UPDATE sessions SET harness = ?, account_id = ?, provider_session_id = NULL, status = 'idle', last_activity_at = ? WHERE id = ?",
-          )
-          .run(nextHarness, nextAccount, Date.now(), id)
+        // A switch between accounts of a harness whose accounts share
+        // transcripts keeps the native session and rebinds it, so the next
+        // turn resumes. The default (no account) home shares nothing.
+        const providerSessionId =
+          nextHarness === row.harness &&
+          row.account_id &&
+          nextAccount &&
+          this.sharesAccountSessions(nextHarness)
+            ? row.provider_session_id
+            : null
+        this.db.exec('BEGIN')
+        try {
+          this.db
+            .prepare(
+              "UPDATE sessions SET harness = ?, account_id = ?, provider_session_id = ?, status = 'idle', last_activity_at = ? WHERE id = ?",
+            )
+            .run(nextHarness, nextAccount, providerSessionId, Date.now(), id)
+          if (providerSessionId)
+            this.db
+              .prepare(
+                "UPDATE native_provider_state SET value = json_set(value, '$.accountId', ?) WHERE session_id = ? AND provider = ? AND name = 'binding'",
+              )
+              .run(nextAccount, id, nextHarness)
+          this.db.exec('COMMIT')
+        } catch (error) {
+          this.db.exec('ROLLBACK')
+          throw error
+        }
         row = {
           ...row,
           harness: nextHarness,
           account_id: nextAccount,
-          provider_session_id: null,
+          provider_session_id: providerSessionId,
         }
       }
       const turnId = makeId('turn_')

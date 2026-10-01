@@ -76,6 +76,7 @@ import {
   createProductionNativeAdapter,
   createNativeResources,
   harnessTransport,
+  nativeProviders,
 } from './sessions/native-factory.js'
 import {
   HarnessAccountStore,
@@ -466,6 +467,12 @@ export function startServer(port?: number): ServerType {
         null,
     dataDir,
     workspaceFiles.targets,
+    // Native Claude account homes share one projects/ dir (claude-home.ts),
+    // so a session can switch account and still resume its transcript.
+    (harness) =>
+      harnessTransport(harness, configState.current.harness[harness]) ===
+        'native' &&
+      nativeProviders[harness as keyof typeof nativeProviders] === 'claude',
   )
   manager.setTitleGenerator(
     createTitleGenerator({
