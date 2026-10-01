@@ -19,7 +19,11 @@ async function fixture(
     | 'active'
     | 'tarball'
     | 'explicit-host'
-    | 'rejected',
+    | 'rejected'
+    | 'sessions-new'
+    | 'sessions-old'
+    | 'sessions-young'
+    | 'sessions-current',
 ) {
   const root = await mkdtemp(join(tmpdir(), 'forge-update-'))
   dirs.push(root)
@@ -60,7 +64,7 @@ async function fixture(
   await writeFile(join(root, 'checksums.txt'), checksums)
   await writeFile(
     join(state, 'installed-version'),
-    mode === 'same' ? release : 'v1.0.0',
+    mode === 'same' || mode === 'sessions-current' ? release : 'v1.0.0',
   )
   await writeFile(bin, '#!/bin/sh\necho old\n')
   await chmod(bin, 0o755)
@@ -85,13 +89,17 @@ if [ "$FORGE_MODE" = explicit-host ] || [ "$FORGE_MODE" = rejected ]; then
   case "$*" in *"Host: forge.example.test"*) ;; *) exit 22;; esac
 fi
 case "$*" in *api/status*)
-  [ "$FORGE_MODE" = active ] && echo '{"epicRuns":{"running":1}}' || echo '{"epicRuns":{"running":0}}'
+  case "$FORGE_MODE" in
+    active) echo '{"epicRuns":{"running":1}}';;
+    sessions-*) echo '{"epicRuns":{"running":0},"sessions":{"running":2}}';;
+    *) echo '{"epicRuns":{"running":0},"sessions":{"running":0}}';;
+  esac
 ;; *)
   if [ "$FORGE_MODE" = rollback ]; then echo '{"ok":false,"version":"v1.0.0"}'
   elif [ "$FORGE_MODE" = tagged-build ]; then
     if [ ! -e "$FORGE_FIXTURE/health-seen" ]; then touch "$FORGE_FIXTURE/health-seen"; echo '{"ok":true,"version":"v1.0.0"}'
     else echo '{"ok":true,"version":"v2.0.0-abc1234"}'; fi
-  elif { [ "$FORGE_MODE" = update ] || [ "$FORGE_MODE" = tarball ] || [ "$FORGE_MODE" = explicit-host ]; } && [ ! -e "$FORGE_FIXTURE/health-seen" ]; then touch "$FORGE_FIXTURE/health-seen"; echo '{"ok":true,"version":"v1.0.0"}'
+  elif { [ "$FORGE_MODE" = update ] || [ "$FORGE_MODE" = tarball ] || [ "$FORGE_MODE" = explicit-host ] || [ "$FORGE_MODE" = sessions-new ] || [ "$FORGE_MODE" = sessions-old ] || [ "$FORGE_MODE" = sessions-young ]; } && [ ! -e "$FORGE_FIXTURE/health-seen" ]; then touch "$FORGE_FIXTURE/health-seen"; echo '{"ok":true,"version":"v1.0.0"}'
   else echo '{"ok":true,"version":"v2.0.0"}'; fi
 ;; esac
 `,
@@ -102,6 +110,14 @@ case "$*" in *api/status*)
   )
   for (const name of ['gh', 'curl', 'systemctl'])
     await chmod(join(tools, name), 0o755)
+  const deferredFile = join(state, 'update-deferred-since')
+  const nowSec = Math.floor(Date.now() / 1000)
+  // The cap is 7200s by default: 3 hours is past it, 10 minutes is inside it.
+  if (mode === 'sessions-old')
+    await writeFile(deferredFile, `${nowSec - 3 * 3600}\n`)
+  if (mode === 'sessions-young')
+    await writeFile(deferredFile, `${nowSec - 600}\n`)
+  if (mode === 'sessions-current') await writeFile(deferredFile, `${nowSec}\n`)
   const env = {
     ...process.env,
     PATH: `${tools}:${process.env.PATH}`,
@@ -124,7 +140,7 @@ case "$*" in *api/status*)
     join(root, 'forge.toml'),
     '[terminalAccess]\nmode = "explicit"\nallowedOrigins = ["https://forge.example.test"]\nallowedHostAuthorities = ["forge.example.test"]\n',
   )
-  return { env, bin, state, root, lib }
+  return { env, bin, state, root, lib, deferredFile }
 }
 
 afterEach(async () => {
@@ -141,6 +157,10 @@ describe('forge updater', () => {
     ['tarball', 'tree swap from release archive'],
     ['explicit-host', 'Host header from the explicit-mode config'],
     ['rejected', 'status refused by the host guard'],
+    ['sessions-new', 'chat session running, first deferral writes the file'],
+    ['sessions-old', 'chat session running, deferral past the cap installs'],
+    ['sessions-young', 'chat session running, deferral inside the cap waits'],
+    ['sessions-current', 'chat session running, no update clears the file'],
   ] as const)('%s path: %s', async (mode) => {
     const f = await fixture(mode)
     const result = await exec(script, [], { env: f.env }).catch(
@@ -151,7 +171,15 @@ describe('forge updater', () => {
     else expect(result.code ?? 0).toBe(0)
     const installed = await readFile(join(f.state, 'installed-version'), 'utf8')
     const binary = await readFile(f.bin, 'utf8')
-    if (mode === 'update' || mode === 'explicit-host') {
+    const deferred = await readFile(f.deferredFile, 'utf8').catch(() => null)
+    if (mode === 'sessions-new') expect(Number(deferred)).toBeGreaterThan(0)
+    else if (mode === 'sessions-young') expect(deferred).not.toBeNull()
+    else expect(deferred).toBeNull()
+    if (
+      mode === 'update' ||
+      mode === 'explicit-host' ||
+      mode === 'sessions-old'
+    ) {
       expect(installed).toBe('v2.0.0\n')
       expect(binary).toContain('new')
     } else if (mode === 'tarball') {

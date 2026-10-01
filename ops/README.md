@@ -7,6 +7,15 @@ The release tree lives in `~/.local/lib/forge`; `~/.local/bin/forge` is a wrappe
 that execs node on the server bundle (the bundle loads `pty.node`, migrations,
 and web assets relative to itself, so the tree must stay intact).
 The 15-minute user timer checks GitHub releases and skips active epic runs.
+It also defers while `/api/status` reports `sessions.running > 0`. The first
+deferral writes epoch seconds to `~/.local/state/forge/update-deferred-since`.
+After `FORGE_UPDATE_MAX_DEFER_SEC` seconds (default `7200`) it updates anyway,
+which also covers a session stuck in `running`. The file is removed after an
+install, when the host runs the latest version, and when no session runs.
+Epic runs defer with no cap. Turns that die in the restart auto-resume.
+`scripts/release.sh` starts `forge-update.service` at once. A release cut from
+inside a Forge session defers on that session. The next timer tick installs it
+after the turn ends.
 It verifies checksums and restores the previous tree if health does not recover.
 
 `ops/forge.service` sets no PATH, so Forge uses the PATH of the systemd user
