@@ -10,7 +10,7 @@ Keep Forge branding and the upstream MIT notice.
 - `apps/server/src/harnesses`: provider adapters and native contracts.
 - `apps/server/src/sessions`: delivery, lifecycle, recovery, forks, and workspace targets.
 - `apps/server/src/accounts`: account homes, login, discovery, usage, and limits.
-- `apps/server/src/db` and `apps/server/drizzle`: SQLite and migrations.
+- `apps/server/src/db` and `apps/server/drizzle`: one synchronous `node:sqlite` handle (`src/index.ts`) and plain SQL migrations. `db/client.ts` and `db/schema.ts` are dead.
 - `apps/server/src/{git,workspace,terminals,previews}`: Git, descriptor-backed files, owned terminals, and isolated previews.
 - `apps/server/src/epics`: Beads workers, worktrees, completion, and gates.
 - `packages/protocol`: shared Zod wire schemas and transcript contracts.
@@ -18,7 +18,6 @@ Keep Forge branding and the upstream MIT notice.
 - `e2e` and `scripts/epic-gate.sh`: browser fixtures and the integration gate.
 
 Keep the Node production server, Bun packages, React, shadcn/ui Base UI, and Tailwind.
-Geist assets and complete theme-role mappings belong to `forge-kcj.17`; font-family declarations alone do not deliver them.
 
 ## Runtime and data rules
 
@@ -35,7 +34,9 @@ Use one projection for history and live events, with stable display identities a
 Keep session, provider-history, and terminal cursors separate.
 
 Preserve account homes, IDs, sequences, messages, attachments, worktrees, forks, and epic records.
-Do not rename shipped migrations. Check the highest migration number before adding one.
+Do not rename shipped migrations. Check the highest migration number before adding one; some numbers repeat on purpose.
+A table rebuild drops that table's triggers. Recreate them in the same migration.
+Every message append writes `sessions.last_activity_at`.
 Preserve legacy history and expose unavailable resume.
 Draft promotion needs an idempotency key. Upload bytes stay on HTTP.
 
@@ -75,4 +76,5 @@ From the assigned checkout root:
 The coordinator runs `bash scripts/epic-gate.sh` on integrated code.
 Read `.agents/skills/test-forge-app/SKILL.md` before browser QA.
 Use isolated data/accounts and the real server path. UI fixtures alone do not prove native-provider behavior.
-Follow the active epic's checkout and commit rules. This run permits local commits and no pushes.
+Follow the active epic's checkout and commit rules.
+CI runs `bun run check` only. Build and e2e run only in `scripts/epic-gate.sh`. Nothing typechecks `e2e/` specs.
