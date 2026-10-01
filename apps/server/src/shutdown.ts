@@ -60,8 +60,15 @@ export class ServerShutdown {
       this.stopAdmission()
     }
     const attempt = (async () => {
+      let hookError: unknown
       while (this.completedHooks < this.hooks.length) {
-        await this.hooks[this.completedHooks]!()
+        try {
+          await this.hooks[this.completedHooks]!()
+        } catch (error) {
+          console.error('Shutdown cleanup hook failed', error)
+          hookError = error
+          break
+        }
         this.completedHooks++
       }
       // HTTP close is irreversible. A later bookkeeping failure retries only
@@ -70,7 +77,10 @@ export class ServerShutdown {
         this.closeHttp((error) => (error ? reject(error) : resolve())),
       )
       await this.httpClose
+      // Record the stop even after a failed hook, so recovery reads a restart
+      // and not a crash. The failure still reaches callers and a retry.
       this.markStopped()
+      if (hookError) throw hookError
       this.stopped = true
     })()
     this.attempt = attempt

@@ -35,6 +35,21 @@ describe('shared server shutdown ownership', () => {
     expect(markStopped).toHaveBeenCalledTimes(2)
   })
 
+  it('logs a failed hook and still records the stop after HTTP closes', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const markStopped = vi.fn()
+    const { shutdown, close, closeHttp } = fixture(markStopped)
+    const failure = new Error('terminal cleanup unknown')
+    shutdown.addCleanupHook(() => {
+      throw failure
+    })
+    expect((await close())?.message).toBe('Server cleanup is unknown')
+    expect(log).toHaveBeenCalledWith('Shutdown cleanup hook failed', failure)
+    expect(closeHttp).toHaveBeenCalledTimes(1)
+    expect(markStopped).toHaveBeenCalledTimes(1)
+    log.mockRestore()
+  })
+
   it('joins one pending physical hook through deadline and refuses overlapping retries', async () => {
     let release!: () => void
     const pending = new Promise<void>((resolve) => {
