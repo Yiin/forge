@@ -76,7 +76,7 @@ import {
   createProductionNativeAdapter,
   createNativeResources,
   harnessTransport,
-  nativeProviders,
+  sharesAccountSessions,
 } from './sessions/native-factory.js'
 import {
   HarnessAccountStore,
@@ -84,6 +84,7 @@ import {
   deriveAccountHarness,
 } from './accounts/store.js'
 import { linkClaudeSharedConfig } from './accounts/claude-home.js'
+import { linkCodexSessions } from './accounts/codex-home.js'
 import { clearExpiredLimits } from './accounts/limits.js'
 import { createTitleGenerator } from './text-generation/titles.js'
 import { LoginManager } from './accounts/login.js'
@@ -416,6 +417,7 @@ export function startServer(port?: number): ServerType {
     if (account && account.harnessKey !== key)
       throw new Error('Account does not belong to harness')
     if (account?.kind === 'claude') linkClaudeSharedConfig(account.homePath)
+    if (account?.kind === 'codex') linkCodexSessions(account.homePath)
     const transport = harnessTransport(key, entry)
     const derived =
       account && transport === 'pty'
@@ -467,12 +469,8 @@ export function startServer(port?: number): ServerType {
         null,
     dataDir,
     workspaceFiles.targets,
-    // Native Claude account homes share one projects/ dir (claude-home.ts),
-    // so a session can switch account and still resume its transcript.
     (harness) =>
-      harnessTransport(harness, configState.current.harness[harness]) ===
-        'native' &&
-      nativeProviders[harness as keyof typeof nativeProviders] === 'claude',
+      sharesAccountSessions(harness, configState.current.harness[harness]),
   )
   manager.setTitleGenerator(
     createTitleGenerator({

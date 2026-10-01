@@ -7,6 +7,7 @@ import {
   hasProductionNativeAdapter,
   createNativeResources,
   createProductionNativeAdapter,
+  sharesAccountSessions,
 } from './native-factory.js'
 
 describe('production native harness routing', () => {
@@ -30,6 +31,19 @@ describe('production native harness routing', () => {
       } as never),
     ).toBe('native')
     expect(hasProductionNativeAdapter('unknown')).toBe(false)
+  })
+  it('shares account sessions only for native Claude and Codex', () => {
+    const config = convertConfig(defaultConfig(false))
+    for (const key of ['claude-code-acp', 'codex-acp'])
+      expect(sharesAccountSessions(key, config.harness[key])).toBe(true)
+    for (const key of ['kimi', 'opencode', 'pi', 'cursor'])
+      expect(sharesAccountSessions(key, config.harness[key])).toBe(false)
+    expect(
+      sharesAccountSessions('codex-acp', {
+        adapterKind: 'acp',
+        protocol: 'acp',
+      } as never),
+    ).toBe(false)
   })
   it('preserves intentional dedicated ACP and PTY', () => {
     expect(

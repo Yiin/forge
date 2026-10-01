@@ -609,3 +609,56 @@ it('Claude resumes a saved binding only when it names the selected account', asy
     JSON.parse(readFileSync(join(cwd, 'launch.json'), 'utf8')).resume,
   ).toBe('native-1')
 })
+
+it('Codex resumes a saved binding only when it names the selected account', async () => {
+  const peer = await codexPeer([], {
+    selected: true,
+    load: true,
+    threadResponse: {
+      approvalPolicy: 'never',
+      sandbox: { type: 'dangerFullAccess' },
+    },
+  })
+  const account = {
+    id: 'acct-b',
+    harnessKey: 'codex',
+    label: 'B',
+    kind: 'codex',
+    adapterKind: 'native' as const,
+    homePath: peer.root,
+    orderIndex: 0,
+    disabledAt: null,
+    createdAt: 0,
+    lastUsedAt: null,
+    identity: null,
+    config: null,
+  }
+  const f = await context(
+    'codex',
+    peer.root,
+    entry(
+      process.execPath,
+      (peer.options as { nativeLaunch: { harness: { args: string[] } } })
+        .nativeLaunch.harness.args,
+      { FORGE_CODEX_SCRIPT: peer.options.env!.FORGE_CODEX_SCRIPT! },
+    ),
+    account,
+  )
+  const binding = (accountId: string) => ({
+    provider: 'codex',
+    accountId,
+    cwd: peer.root,
+    providerSessionId: 'root',
+  })
+  const save = (accountId: string) =>
+    f.db
+      .prepare(
+        "INSERT INTO native_provider_state VALUES ('session', 'codex', 'binding', ?) ON CONFLICT DO UPDATE SET value = excluded.value",
+      )
+      .run(JSON.stringify(binding(accountId)))
+  save('acct-a')
+  await expect(f.open(true, binding('acct-b'))).rejects.toThrow('BINDING_SCOPE')
+  save('acct-b')
+  const resumed = await f.open(true, binding('acct-b'))
+  expect(resumed.binding).toEqual(binding('acct-b'))
+}, 30000)

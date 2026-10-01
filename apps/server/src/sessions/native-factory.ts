@@ -61,6 +61,21 @@ export function harnessTransport(
   if (entry.protocol === 'acp') return 'acp'
   return 'unconfigured'
 }
+/**
+ * Native Claude and Codex account homes share their transcript dirs
+ * (claude-home.ts, codex-home.ts), so a session can switch account and still
+ * resume its conversation.
+ */
+export function sharesAccountSessions(
+  key: string,
+  entry: HarnessConfig | undefined,
+): boolean {
+  const provider = nativeProviders[key as keyof typeof nativeProviders]
+  return (
+    harnessTransport(key, entry) === 'native' &&
+    (provider === 'claude' || provider === 'codex')
+  )
+}
 export function createNativeResources() {
   const kimi = createKimiHost(),
     cursor = createCursorResources()
