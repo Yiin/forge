@@ -49,23 +49,20 @@ describe('linkClaudeSharedConfig', () => {
     linkClaudeSharedConfig(home, shared, projects)
     linkClaudeSharedConfig(home, shared, projects)
     expect(readlinkSync(join(home, 'skills'))).toBe(join(shared, 'skills'))
-    expect(existsSync(join(home, '.forge-displaced'))).toBe(false)
   })
 
-  it('moves a real entry aside instead of deleting it', () => {
+  it('replaces real entries with links', () => {
     const { shared, home, projects } = fixture()
-    mkdirSync(join(home, 'skills', 'synced'), { recursive: true })
-    writeFileSync(join(home, 'skills', 'synced', 'keep.md'), 'keep')
+    mkdirSync(join(home, 'skills', 'old'), { recursive: true })
+    writeFileSync(join(home, 'settings.json'), 'old')
+    mkdirSync(join(home, 'projects', '-repo'), { recursive: true })
     linkClaudeSharedConfig(home, shared, projects)
     expect(readlinkSync(join(home, 'skills'))).toBe(join(shared, 'skills'))
-    const [moved] = readdirSync(join(home, '.forge-displaced'))
-    expect(moved).toMatch(/^skills\.\d+$/)
-    expect(
-      readFileSync(
-        join(home, '.forge-displaced', moved!, 'synced', 'keep.md'),
-        'utf8',
-      ),
-    ).toBe('keep')
+    expect(readlinkSync(join(home, 'settings.json'))).toBe(
+      join(shared, 'settings.json'),
+    )
+    expect(readlinkSync(join(home, 'projects'))).toBe(projects)
+    expect(readdirSync(join(home, 'skills'))).toEqual(['lavish'])
   })
 
   it('leaves private account state untouched', () => {
@@ -91,30 +88,5 @@ describe('linkClaudeSharedConfig', () => {
     expect(
       readFileSync(join(other, 'projects', '-repo', 'a.jsonl'), 'utf8'),
     ).toBe('a')
-  })
-
-  it('merges a real projects dir into the shared one without data loss', () => {
-    const { shared, home, projects } = fixture()
-    mkdirSync(join(projects, '-repo'), { recursive: true })
-    writeFileSync(join(projects, '-repo', 'same.jsonl'), 'shared')
-    mkdirSync(join(home, 'projects', '-repo', 'sub'), { recursive: true })
-    writeFileSync(join(home, 'projects', '-repo', 'same.jsonl'), 'private')
-    writeFileSync(join(home, 'projects', '-repo', 'own.jsonl'), 'own')
-    writeFileSync(join(home, 'projects', '-repo', 'sub', 'agent.jsonl'), 'sub')
-    linkClaudeSharedConfig(home, shared, projects)
-    linkClaudeSharedConfig(home, shared, projects)
-    expect(readlinkSync(join(home, 'projects'))).toBe(projects)
-    const repo = join(projects, '-repo')
-    expect(readdirSync(repo).sort()).toEqual([
-      'own.jsonl',
-      'same.jsonl',
-      'same.jsonl.home',
-      'sub',
-    ])
-    expect(readFileSync(join(repo, 'same.jsonl'), 'utf8')).toBe('shared')
-    expect(readFileSync(join(repo, 'same.jsonl.home'), 'utf8')).toBe('private')
-    expect(readFileSync(join(repo, 'own.jsonl'), 'utf8')).toBe('own')
-    expect(readFileSync(join(repo, 'sub', 'agent.jsonl'), 'utf8')).toBe('sub')
-    expect(existsSync(join(home, '.forge-displaced'))).toBe(false)
   })
 })

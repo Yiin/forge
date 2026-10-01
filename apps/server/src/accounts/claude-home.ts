@@ -1,15 +1,7 @@
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readlinkSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
-} from 'node:fs'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { DISPLACED_DIR, linkSharedDir } from './shared-dir.js'
+import { linkSharedDir, replaceWithLink } from './shared-dir.js'
 import { accountRoot } from './store.js'
 
 /**
@@ -43,7 +35,7 @@ export const claudeSharedProjects = () =>
 /**
  * Links each shared entry of `sharedRoot` into the account home. An entry
  * missing from `sharedRoot` is left alone. A real file or directory in the
- * account home is moved to `.forge-displaced/` before it is linked.
+ * account home is replaced by the link.
  */
 export function linkClaudeSharedConfig(
   homePath: string,
@@ -53,17 +45,6 @@ export function linkClaudeSharedConfig(
   linkSharedDir(homePath, 'projects', projectsRoot)
   for (const name of CLAUDE_SHARED_ENTRIES) {
     const target = join(sharedRoot, name)
-    if (!existsSync(target)) continue
-    const link = join(homePath, name)
-    const current = lstatSync(link, { throwIfNoEntry: false })
-    if (current?.isSymbolicLink()) {
-      if (readlinkSync(link) === target) continue
-      rmSync(link)
-    } else if (current) {
-      const displaced = join(homePath, DISPLACED_DIR)
-      mkdirSync(displaced, { recursive: true })
-      renameSync(link, join(displaced, `${name}.${Date.now()}`))
-    }
-    symlinkSync(target, link)
+    if (existsSync(target)) replaceWithLink(join(homePath, name), target)
   }
 }
